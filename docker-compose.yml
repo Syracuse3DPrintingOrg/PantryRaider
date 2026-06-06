@@ -1,0 +1,40 @@
+services:
+  grocy:
+    image: linuxserver/grocy:latest
+    container_name: foodassistant-grocy
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=America/New_York
+    volumes:
+      - ./grocy/data:/config
+    ports:
+      - "9283:80"
+    restart: unless-stopped
+
+  service:
+    build: ./service
+    container_name: foodassistant-service
+    env_file: .env
+    volumes:
+      - ./service/data:/app/data
+    ports:
+      - "9284:8000"
+    depends_on:
+      - grocy
+    restart: unless-stopped
+
+  # Uncomment when switching to local vision
+  # ollama:
+  #   image: ollama/ollama:latest
+  #   container_name: foodassistant-ollama
+  #   volumes:
+  #     - ./ollama/models:/root/.ollama
+  #   ports:
+  #     - "11434:11434"
+  #   restart: unless-stopped
+  #   # For Intel Arc GPU passthrough:
+  #   # devices:
+  #   #   - /dev/dri:/dev/dri
+  #   # environment:
+  #   #   - OLLAMA_GPU=intel

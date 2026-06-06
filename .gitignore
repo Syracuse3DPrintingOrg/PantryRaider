@@ -1,0 +1,11 @@
+.env
+*.pyc
+__pycache__/
+*.egg-info/
+.pytest_cache/
+grocy/data/
+ollama/models/
+service/data/
+*.db
+*.sqlite
+.DS_Store

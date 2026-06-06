@@ -1,0 +1,61 @@
+from pydantic import BaseModel, Field
+from typing import Optional
+from datetime import date
+from enum import Enum
+
+
+class StorageType(str, Enum):
+    refrigerated = "refrigerated"
+    frozen = "frozen"
+    room_temp = "room_temp"
+    dry = "dry"
+
+
+class FoodCategory(str, Enum):
+    poultry = "Poultry"
+    meat = "Meat"
+    seafood = "Seafood"
+    dairy = "Dairy"
+    produce = "Produce"
+    grains = "Grains"
+    condiments = "Condiments"
+    beverages = "Beverages"
+    snacks = "Snacks"
+    frozen = "Frozen"
+    canned = "Canned"
+    other = "Other"
+
+
+class FoodItem(BaseModel):
+    name: str
+    quantity: float = 1.0
+    unit: str = "item"
+    best_by_date: Optional[date] = None
+    storage_type: StorageType = StorageType.refrigerated
+    category: FoodCategory = FoodCategory.other
+    brand: Optional[str] = None
+    notes: Optional[str] = None
+    confidence: float = Field(default=1.0, ge=0.0, le=1.0)
+
+
+class FoodItemOverride(BaseModel):
+    """All fields optional — only provided fields are applied."""
+    name: Optional[str] = None
+    quantity: Optional[float] = None
+    unit: Optional[str] = None
+    best_by_date: Optional[date] = None
+    storage_type: Optional[StorageType] = None
+    category: Optional[FoodCategory] = None
+    brand: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class AnalysisResult(BaseModel):
+    items: list[FoodItem]
+    image_type: str  # "food" or "receipt"
+    raw_response: Optional[str] = None
+
+
+class ImportRequest(BaseModel):
+    items: list[FoodItem]
+    overrides: Optional[dict[int, FoodItemOverride]] = None  # index -> override
