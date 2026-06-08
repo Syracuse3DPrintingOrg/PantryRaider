@@ -9,7 +9,7 @@ services:
     volumes:
       - ./grocy/data:/config
     ports:
-      - "9285:80"
+      - "9383:80"
     restart: unless-stopped
 
   service:
