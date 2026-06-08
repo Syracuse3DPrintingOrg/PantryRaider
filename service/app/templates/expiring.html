@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+{% block title %}Expiring — FoodAssistant{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center my-3">
+  <h4 class="mb-0"><i class="bi bi-clock-history me-2"></i>Expiring Items</h4>
+  <div class="d-flex gap-2 align-items-center">
+    <label class="mb-0 text-muted small">Show items expiring within</label>
+    <select class="form-select form-select-sm w-auto" onchange="location='?days='+this.value">
+      {% for d in [3, 7, 14, 30] %}
+      <option value="{{ d }}" {% if d == days %}selected{% endif %}>{{ d }} days</option>
+      {% endfor %}
+    </select>
+  </div>
+</div>
+
+<!-- Summary badges -->
+<div class="row g-3 mb-4">
+  {% set expired  = items | selectattr('days_remaining', 'lt', 0) | list %}
+  {% set today    = items | selectattr('days_remaining', 'eq', 0) | list %}
+  {% set soon     = items | selectattr('days_remaining', 'gt', 0) | selectattr('days_remaining', 'le', 3) | list %}
+  {% set later    = items | selectattr('days_remaining', 'gt', 3) | list %}
+  <div class="col-6 col-md-3">
+    <div class="card text-center border-danger">
+      <div class="card-body py-2">
+        <div class="fs-3 fw-bold urgency-expired">{{ expired | length }}</div>
+        <div class="text-muted small">Expired</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card text-center border-warning">
+      <div class="card-body py-2">
+        <div class="fs-3 fw-bold urgency-today">{{ today | length }}</div>
+        <div class="text-muted small">Today</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card text-center">
+      <div class="card-body py-2">
+        <div class="fs-3 fw-bold urgency-3d">{{ soon | length }}</div>
+        <div class="text-muted small">Within 3 Days</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card text-center">
+      <div class="card-body py-2">
+        <div class="fs-3 fw-bold urgency-ok">{{ later | length }}</div>
+        <div class="text-muted small">Later</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% if items %}
+<div class="table-responsive">
+  <table class="table table-hover align-middle">
+    <thead>
+      <tr>
+        <th>Item</th>
+        <th>Amount</th>
+        <th>Location</th>
+        <th>Best By</th>
+        <th>Status</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for item in items %}
+      {% set d = item.days_remaining %}
+      <tr>
+        <td><strong>{{ item.product.name if item.product else 'Unknown' }}</strong></td>
+        <td>{{ item.amount | int }} {{ item.product.qu_unit_stock.name if item.product and item.product.qu_unit_stock else '' }}</td>
+        <td><span class="badge bg-secondary">{{ item.product.location.name if item.product and item.product.location else '—' }}</span></td>
+        <td>{{ item.best_before_date or '—' }}</td>
+        <td>
+          {% if d < 0 %}
+            <span class="badge bg-danger">EXPIRED ({{ d | abs }}d ago)</span>
+          {% elif d == 0 %}
+            <span class="badge bg-warning text-dark">Today</span>
+          {% elif d <= 3 %}
+            <span class="badge bg-warning text-dark">{{ d }}d left</span>
+          {% else %}
+            <span class="badge bg-success">{{ d }}d left</span>
+          {% endif %}
+        </td>
+        <td>
+          <form method="post" action="/ui/consume/{{ item.product_id }}" class="d-inline">
+            <button type="submit" class="btn btn-sm btn-outline-success btn-icon" title="Mark consumed">
+              <i class="bi bi-check-lg"></i>
+            </button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="text-center py-5 text-muted">
+  <i class="bi bi-check-circle fs-1 d-block mb-2 text-success"></i>
+  Nothing expiring within {{ days }} days.
+</div>
+{% endif %}
+{% endblock %}

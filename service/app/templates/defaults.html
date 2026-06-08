@@ -1,0 +1,149 @@
+{% extends "base.html" %}
+{% block title %}Expiry Defaults — FoodAssistant{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center my-3">
+  <h4 class="mb-0"><i class="bi bi-table me-2"></i>Expiry Defaults</h4>
+  <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#addModal">
+    <i class="bi bi-plus-lg me-1"></i>Add Rule
+  </button>
+</div>
+
+<!-- Filters -->
+<div class="row g-2 mb-3">
+  <div class="col-auto">
+    <select class="form-select form-select-sm" id="filterCategory" onchange="filterTable()">
+      <option value="">All Categories</option>
+      {% for cat in categories %}
+      <option value="{{ cat }}">{{ cat }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-auto">
+    <select class="form-select form-select-sm" id="filterStorage" onchange="filterTable()">
+      <option value="">All Storage Types</option>
+      <option value="refrigerated">Refrigerated</option>
+      <option value="frozen">Frozen</option>
+      <option value="room_temp">Room Temp</option>
+      <option value="dry">Dry</option>
+    </select>
+  </div>
+  <div class="col">
+    <input type="text" class="form-control form-control-sm" id="filterSearch"
+           placeholder="Search name..." oninput="filterTable()">
+  </div>
+</div>
+
+<div class="table-responsive">
+  <table class="table table-hover align-middle" id="defaultsTable">
+    <thead>
+      <tr>
+        <th>Category</th>
+        <th>Name Pattern</th>
+        <th>Storage</th>
+        <th>Days</th>
+        <th>Notes</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in defaults %}
+      <tr data-category="{{ row.category }}" data-storage="{{ row.storage_type }}" data-name="{{ row.name_pattern }}">
+        <td><span class="badge bg-secondary">{{ row.category }}</span></td>
+        <td>{{ row.name_pattern }}</td>
+        <td>
+          {% if row.storage_type == 'refrigerated' %}<span class="badge bg-info text-dark">Refrigerated</span>
+          {% elif row.storage_type == 'frozen' %}<span class="badge bg-primary">Frozen</span>
+          {% elif row.storage_type == 'room_temp' %}<span class="badge bg-warning text-dark">Room Temp</span>
+          {% else %}<span class="badge bg-dark">Dry</span>{% endif %}
+        </td>
+        <td><strong>{{ row.default_days }}</strong> days</td>
+        <td class="text-muted small">{{ row.notes or '—' }}</td>
+        <td class="text-end">
+          <button class="btn btn-sm btn-outline-secondary btn-icon me-1"
+                  onclick="openEdit({{ row.id }}, '{{ row.category }}', '{{ row.name_pattern }}', '{{ row.storage_type }}', {{ row.default_days }}, '{{ row.notes or '' }}')"
+                  title="Edit">
+            <i class="bi bi-pencil"></i>
+          </button>
+          <form method="post" action="/ui/defaults/{{ row.id }}/delete" class="d-inline"
+                onsubmit="return confirm('Delete this rule?')">
+            <button type="submit" class="btn btn-sm btn-outline-danger btn-icon" title="Delete">
+              <i class="bi bi-trash"></i>
+            </button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<!-- Add Modal -->
+<div class="modal fade" id="addModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <form method="post" action="/ui/defaults/create">
+        <div class="modal-header">
+          <h5 class="modal-title">Add Expiry Rule</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          {% include "_default_fields.html" %}
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save Rule</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- Edit Modal -->
+<div class="modal fade" id="editModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <form method="post" id="editForm" action="">
+        <div class="modal-header">
+          <h5 class="modal-title">Edit Expiry Rule</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          {% include "_default_fields.html" %}
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save Changes</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+function filterTable() {
+  const cat = document.getElementById('filterCategory').value.toLowerCase();
+  const stor = document.getElementById('filterStorage').value.toLowerCase();
+  const search = document.getElementById('filterSearch').value.toLowerCase();
+  document.querySelectorAll('#defaultsTable tbody tr').forEach(row => {
+    const matchCat  = !cat  || row.dataset.category.toLowerCase() === cat;
+    const matchStor = !stor || row.dataset.storage.toLowerCase() === stor;
+    const matchName = !search || row.dataset.name.toLowerCase().includes(search);
+    row.style.display = (matchCat && matchStor && matchName) ? '' : 'none';
+  });
+}
+
+function openEdit(id, category, name, storage, days, notes) {
+  const form = document.getElementById('editForm');
+  form.action = `/ui/defaults/${id}/update`;
+  form.querySelector('[name=category]').value = category;
+  form.querySelector('[name=name_pattern]').value = name;
+  form.querySelector('[name=storage_type]').value = storage;
+  form.querySelector('[name=default_days]').value = days;
+  form.querySelector('[name=notes]').value = notes;
+  new bootstrap.Modal(document.getElementById('editModal')).show();
+}
+</script>
+{% endblock %}

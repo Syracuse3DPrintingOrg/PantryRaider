@@ -1,0 +1,30 @@
+<div class="mb-3">
+  <label class="form-label">Category</label>
+  <select class="form-select" name="category" required>
+    {% for cat in ['Poultry','Meat','Seafood','Dairy','Produce','Grains','Condiments','Beverages','Snacks','Frozen','Canned','Other'] %}
+    <option value="{{ cat }}">{{ cat }}</option>
+    {% endfor %}
+  </select>
+</div>
+<div class="mb-3">
+  <label class="form-label">Name Pattern</label>
+  <input type="text" class="form-control" name="name_pattern" placeholder="e.g. chicken, ground beef" required>
+  <div class="form-text">Substring match — "chicken" matches "chicken breast", "rotisserie chicken", etc.</div>
+</div>
+<div class="mb-3">
+  <label class="form-label">Storage Type</label>
+  <select class="form-select" name="storage_type" required>
+    <option value="refrigerated">Refrigerated</option>
+    <option value="frozen">Frozen</option>
+    <option value="room_temp">Room Temp</option>
+    <option value="dry">Dry Storage</option>
+  </select>
+</div>
+<div class="mb-3">
+  <label class="form-label">Default Days</label>
+  <input type="number" class="form-control" name="default_days" min="1" max="3650" required>
+</div>
+<div class="mb-3">
+  <label class="form-label">Notes <span class="text-muted">(optional)</span></label>
+  <input type="text" class="form-control" name="notes" placeholder="e.g. raw, unopened, whole head">
+</div>
