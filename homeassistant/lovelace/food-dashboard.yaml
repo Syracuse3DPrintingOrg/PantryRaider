@@ -1,0 +1,95 @@
+# FoodAssistant — Lovelace Dashboard
+#
+# Option A: Add as a new Dashboard in HA → Settings → Dashboards → Add Dashboard
+#           then Edit → Raw config editor → paste this file's content
+#
+# Option B: Add individual cards to an existing view
+#
+# Requires: custom:button-card (HACS) for the food item cards
+#           OR use the fallback markdown card version below
+
+title: Food Tracker
+views:
+  - title: Food
+    path: food
+    icon: mdi:fridge-outline
+    cards:
+
+      # ── Summary Row ──────────────────────────────────────────────────────────
+      - type: horizontal-stack
+        cards:
+          - type: stat
+            entity: sensor.food_expired
+            name: Expired
+            icon: mdi:food-off
+            card_mod:
+              style: |
+                ha-card {
+                  background: {% if states('sensor.food_expired') | int > 0 %}#5c1010{% else %}var(--card-background-color){% endif %};
+                }
+
+          - type: stat
+            entity: sensor.food_expiring_today
+            name: Today
+            icon: mdi:food-variant-off
+            card_mod:
+              style: |
+                ha-card {
+                  background: {% if states('sensor.food_expiring_today') | int > 0 %}#5c3010{% else %}var(--card-background-color){% endif %};
+                }
+
+          - type: stat
+            entity: sensor.food_expiring_3d
+            name: 3 Days
+            icon: mdi:food-drumstick
+
+          - type: stat
+            entity: sensor.food_expiring_7d
+            name: 7 Days
+            icon: mdi:food-apple
+
+      # ── Expiring Soon List ───────────────────────────────────────────────────
+      - type: markdown
+        title: Expiring Soon
+        content: >
+          {% set items = state_attr('sensor.food_expiring_soon_list', 'value_json') %}
+          {% if items %}
+          | Item | Location | Expires |
+          |------|----------|---------|
+          {% for item in items %}
+          {% set days = item.days_remaining %}
+          {% set name = item.product.name if item.product else 'Unknown' %}
+          {% set location = item.location.name if item.location else '' %}
+          {% set date = item.best_before_date %}
+          {% if days < 0 %}
+          | ❌ **{{ name }}** | {{ location }} | **EXPIRED** |
+          {% elif days == 0 %}
+          | 🔴 **{{ name }}** | {{ location }} | **Today** |
+          {% elif days <= 3 %}
+          | 🟠 **{{ name }}** | {{ location }} | {{ days }}d ({{ date }}) |
+          {% else %}
+          | 🟡 {{ name }} | {{ location }} | {{ days }}d ({{ date }}) |
+          {% endif %}
+          {% endfor %}
+          {% else %}
+          *No items expiring within 7 days* ✅
+          {% endif %}
+
+      # ── Quick Actions ────────────────────────────────────────────────────────
+      - type: entities
+        title: Quick Links
+        entities:
+          - type: weblink
+            name: Open Grocy
+            url: http://192.168.1.170:9383
+            icon: mdi:fridge
+
+          - type: weblink
+            name: FoodAssistant API
+            url: http://192.168.1.170:9284/docs
+            icon: mdi:api
+
+          - type: weblink
+            name: Add Food (API)
+            url: http://192.168.1.170:9284/docs#/analyze/analyze_food_analyze_food_post
+            icon: mdi:camera-plus

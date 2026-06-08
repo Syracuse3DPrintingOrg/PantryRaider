@@ -1,0 +1,43 @@
+# FoodAssistant — Home Assistant Integration
+#
+# Add the contents of this file to your HA configuration.yaml
+# Replace 192.168.1.170:9284 with your Unraid IP if different.
+
+# ─── REST Sensors ─────────────────────────────────────────────────────────────
+rest:
+  - resource: http://192.168.1.170:9284/expiring/summary
+    scan_interval: 300  # refresh every 5 minutes
+    sensor:
+      - name: "Food Expired"
+        unique_id: food_expired
+        value_template: "{{ value_json.expired }}"
+        unit_of_measurement: "items"
+        icon: mdi:food-off
+
+      - name: "Food Expiring Today"
+        unique_id: food_expiring_today
+        value_template: "{{ value_json.today }}"
+        unit_of_measurement: "items"
+        icon: mdi:food-variant-off
+
+      - name: "Food Expiring 3 Days"
+        unique_id: food_expiring_3d
+        value_template: "{{ value_json.within_3_days }}"
+        unit_of_measurement: "items"
+        icon: mdi:food-drumstick
+
+      - name: "Food Expiring 7 Days"
+        unique_id: food_expiring_7d
+        value_template: "{{ value_json.within_7_days }}"
+        unit_of_measurement: "items"
+        icon: mdi:food-apple
+
+  - resource: http://192.168.1.170:9284/expiring/?days=7
+    scan_interval: 300
+    sensor:
+      - name: "Food Expiring Soon List"
+        unique_id: food_expiring_soon_list
+        value_template: "{{ value_json | length }}"
+        unit_of_measurement: "items"
+        json_attributes_template: "{{ value_json | tojson }}"
+        icon: mdi:fridge-outline
