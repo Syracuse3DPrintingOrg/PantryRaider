@@ -39,6 +39,14 @@ def logout(request: Request):
     return RedirectResponse("/ui/login", status_code=303)
 
 
+@router.get("/inventory", response_class=HTMLResponse)
+async def inventory_page(request: Request):
+    return templates.TemplateResponse("inventory.html", {
+        "request": request,
+        "active": "inventory",
+    })
+
+
 @router.get("/add", response_class=HTMLResponse)
 async def add_page(request: Request):
     return templates.TemplateResponse("add.html", {

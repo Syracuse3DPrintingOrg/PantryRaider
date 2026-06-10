@@ -1,0 +1,255 @@
+{% extends "base.html" %}
+{% block title %}Inventory — FoodAssistant{% endblock %}
+{% block content %}
+<style>
+  .panel-header {
+    font-size: 0.95rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    padding: 0.6rem 1rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    border-radius: 0.5rem 0.5rem 0 0;
+  }
+  .panel-count {
+    font-size: 0.75rem;
+    font-weight: 500;
+    margin-left: auto;
+    padding: 0.15rem 0.5rem;
+    border-radius: 999px;
+    background: rgba(255,255,255,0.15);
+  }
+  .panel-body {
+    max-height: 60vh;
+    overflow-y: auto;
+  }
+  .item-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.45rem 0.75rem;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+    font-size: 0.875rem;
+  }
+  .item-row:last-child { border-bottom: none; }
+  .item-name { flex: 1; min-width: 0; }
+  .item-name-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .item-qty {
+    font-size: 0.78rem;
+    color: var(--bs-secondary-color);
+    white-space: nowrap;
+  }
+  .expiry-badge {
+    font-size: 0.72rem;
+    padding: 0.15rem 0.45rem;
+    border-radius: 999px;
+    white-space: nowrap;
+    font-weight: 500;
+  }
+  .badge-expired  { background:#4d1010; color:#ff6b6b; }
+  .badge-today    { background:#4d2a0a; color:#ffa94d; }
+  .badge-3d       { background:#3d3000; color:#ffd43b; }
+  .badge-7d       { background:#1a2e10; color:#69db7c; }
+  .badge-ok       { background:#0f2010; color:#69db7c; }
+  .badge-unknown  { background:#1e1e2e; color:#888; }
+  .panel-empty {
+    text-align: center;
+    color: var(--bs-secondary-color);
+    font-size: 0.85rem;
+    padding: 2rem 1rem;
+  }
+  .panel-refrigerated .panel-header { background: #0d3b5e; color: #74c0fc; }
+  .panel-frozen       .panel-header { background: #1a1a4d; color: #a5b4fc; }
+  .panel-room_temp    .panel-header { background: #3b2100; color: #ffa94d; }
+  .panel-pantry       .panel-header { background: #1a2e10; color: #69db7c; }
+  .panel-refrigerated { border-color: #0d3b5e !important; }
+  .panel-frozen       { border-color: #1a1a4d !important; }
+  .panel-room_temp    { border-color: #3b2100 !important; }
+  .panel-pantry       { border-color: #1a2e10 !important; }
+  #loading-spinner { display: none; }
+</style>
+
+<!-- Top bar: sort + refresh -->
+<div class="d-flex justify-content-between align-items-center my-3 flex-wrap gap-2">
+  <h4 class="mb-0"><i class="bi bi-grid me-2"></i>Inventory</h4>
+  <div class="d-flex align-items-center gap-2">
+    <label class="form-label mb-0 me-1 text-nowrap" for="sortSelect">Sort by:</label>
+    <select class="form-select form-select-sm" id="sortSelect" style="width:auto" onchange="loadDashboard()">
+      <option value="expiry_asc">Expiring soonest</option>
+      <option value="expiry_desc">Expiring latest</option>
+      <option value="name_asc">Name A → Z</option>
+      <option value="name_desc">Name Z → A</option>
+      <option value="qty_desc">Quantity (most first)</option>
+      <option value="qty_asc">Quantity (least first)</option>
+    </select>
+    <button class="btn btn-outline-secondary btn-sm" onclick="loadDashboard()" title="Refresh">
+      <i class="bi bi-arrow-clockwise"></i>
+    </button>
+    <span id="loading-spinner" class="spinner-border spinner-border-sm text-secondary"></span>
+  </div>
+</div>
+
+<div class="row g-3" id="panels">
+  <!-- Refrigerated -->
+  <div class="col-md-6">
+    <div class="border rounded panel-refrigerated" style="border-width:1px !important">
+      <div class="panel-header">
+        <i class="bi bi-thermometer-low"></i> Refrigerated
+        <span class="panel-count" id="count-refrigerated">—</span>
+      </div>
+      <div class="panel-body" id="panel-refrigerated"><div class="panel-empty">Loading…</div></div>
+    </div>
+  </div>
+  <!-- Frozen -->
+  <div class="col-md-6">
+    <div class="border rounded panel-frozen" style="border-width:1px !important">
+      <div class="panel-header">
+        <i class="bi bi-snow"></i> Frozen
+        <span class="panel-count" id="count-frozen">—</span>
+      </div>
+      <div class="panel-body" id="panel-frozen"><div class="panel-empty">Loading…</div></div>
+    </div>
+  </div>
+  <!-- Room Temp -->
+  <div class="col-md-6">
+    <div class="border rounded panel-room_temp" style="border-width:1px !important">
+      <div class="panel-header">
+        <i class="bi bi-sun"></i> Room Temp / Counter
+        <span class="panel-count" id="count-room_temp">—</span>
+      </div>
+      <div class="panel-body" id="panel-room_temp"><div class="panel-empty">Loading…</div></div>
+    </div>
+  </div>
+  <!-- Pantry -->
+  <div class="col-md-6">
+    <div class="border rounded panel-pantry" style="border-width:1px !important">
+      <div class="panel-header">
+        <i class="bi bi-box-seam"></i> Pantry / Dry Storage
+        <span class="panel-count" id="count-pantry">—</span>
+      </div>
+      <div class="panel-body" id="panel-pantry"><div class="panel-empty">Loading…</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- Consume confirmation toast -->
+<div class="position-fixed bottom-0 end-0 p-3" style="z-index:9999">
+  <div id="consumeToast" class="toast align-items-center text-bg-success border-0" role="alert">
+    <div class="d-flex">
+      <div class="toast-body" id="toastMsg">Consumed.</div>
+      <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+const URGENCY_BADGE = {
+  expired: ['badge-expired', '⚠ Expired'],
+  today:   ['badge-today',   'Expires today'],
+  '3d':    ['badge-3d',      null],  // filled dynamically
+  '7d':    ['badge-7d',      null],
+  ok:      ['badge-ok',      null],
+  unknown: ['badge-unknown', 'No date'],
+};
+
+function expiryBadge(item) {
+  const u = item.urgency;
+  const cls = (URGENCY_BADGE[u] || URGENCY_BADGE.unknown)[0];
+  let label;
+  if (u === 'expired') {
+    label = `⚠ ${Math.abs(item.days_remaining)}d ago`;
+  } else if (u === 'today') {
+    label = 'Today';
+  } else if (item.days_remaining != null) {
+    label = `${item.days_remaining}d`;
+  } else {
+    label = 'No date';
+  }
+  return `<span class="expiry-badge ${cls}">${label}</span>`;
+}
+
+function esc(s) {
+  return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
+}
+
+function renderPanel(panelId, countId, items) {
+  const el = document.getElementById(panelId);
+  const cnt = document.getElementById(countId);
+  cnt.textContent = items.length;
+  if (items.length === 0) {
+    el.innerHTML = '<div class="panel-empty"><i class="bi bi-check-circle text-success me-1"></i>Empty</div>';
+    return;
+  }
+  el.innerHTML = items.map(item => `
+    <div class="item-row" id="row-${item.product_id}">
+      <div class="item-name">
+        <div class="item-name-text" title="${esc(item.name)}">${esc(item.name)}</div>
+      </div>
+      <span class="item-qty">${item.amount % 1 === 0 ? item.amount : item.amount.toFixed(1)}${item.unit ? ' ' + esc(item.unit) : ''}</span>
+      ${expiryBadge(item)}
+      <button class="btn btn-outline-secondary btn-icon ms-1" title="Mark consumed"
+              onclick="consume(${item.product_id}, ${item.amount}, '${esc(item.name)}')">
+        <i class="bi bi-check2"></i>
+      </button>
+    </div>
+  `).join('');
+}
+
+async function loadDashboard() {
+  const sort = document.getElementById('sortSelect').value;
+  document.getElementById('loading-spinner').style.display = '';
+  try {
+    const r = await fetch(`/inventory/dashboard?sort=${sort}`);
+    if (!r.ok) throw new Error(await r.text());
+    const data = await r.json();
+    renderPanel('panel-refrigerated', 'count-refrigerated', data.refrigerated || []);
+    renderPanel('panel-frozen',       'count-frozen',       data.frozen       || []);
+    renderPanel('panel-room_temp',    'count-room_temp',    data.room_temp    || []);
+    renderPanel('panel-pantry',       'count-pantry',       data.pantry       || []);
+  } catch(e) {
+    ['refrigerated','frozen','room_temp','pantry'].forEach(b => {
+      document.getElementById(`panel-${b}`).innerHTML =
+        `<div class="panel-empty text-danger">Failed to load: ${e.message}</div>`;
+    });
+  } finally {
+    document.getElementById('loading-spinner').style.display = 'none';
+  }
+}
+
+async function consume(productId, amount, name) {
+  const fd = new FormData();
+  fd.append('amount', amount);
+  try {
+    const r = await fetch(`/ui/consume/${productId}`, { method: 'POST', body: fd,
+      redirect: 'manual' });
+    // 303 redirect is expected on success
+    const row = document.getElementById(`row-${productId}`);
+    if (row) row.remove();
+    showToast(`✓ Consumed: ${name}`);
+    // Update panel count
+    ['refrigerated','frozen','room_temp','pantry'].forEach(b => {
+      const panel = document.getElementById(`panel-${b}`);
+      const rows = panel.querySelectorAll('.item-row').length;
+      if (rows === 0) renderPanel(`panel-${b}`, `count-${b}`, []);
+      else document.getElementById(`count-${b}`).textContent = rows;
+    });
+  } catch(e) {
+    showToast(`Error: ${e.message}`, true);
+  }
+}
+
+function showToast(msg, isError = false) {
+  const toast = document.getElementById('consumeToast');
+  toast.className = `toast align-items-center border-0 text-bg-${isError ? 'danger' : 'success'}`;
+  document.getElementById('toastMsg').textContent = msg;
+  new bootstrap.Toast(toast, { delay: 3000 }).show();
+}
+
+// Initial load
+loadDashboard();
+</script>
+{% endblock %}

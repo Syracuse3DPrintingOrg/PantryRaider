@@ -52,7 +52,7 @@ views:
             {% endif %}
             {% if today > 0 %}🔴 **{{ today }} expiring today** — use them up!{% endif %}
 
-      # ── Action Buttons ───────────────────────────────────────────────────────
+      # ── Action Buttons ────────────────────────────────────────────────────────
       - type: grid
         columns: 2
         square: false
@@ -60,28 +60,35 @@ views:
           - type: button
             name: Add Food
             icon: mdi:barcode-scan
-            icon_height: 48px
+            icon_height: 44px
             tap_action:
               action: url
               url_path: https://fass.korolev.link/ui/add
           - type: button
+            name: Inventory
+            icon: mdi:view-grid-outline
+            icon_height: 44px
+            tap_action:
+              action: url
+              url_path: https://fass.korolev.link/ui/inventory
+          - type: button
             name: Expiring Items
             icon: mdi:clock-alert-outline
-            icon_height: 48px
+            icon_height: 44px
             tap_action:
               action: url
               url_path: https://fass.korolev.link/ui/
           - type: button
             name: Expiry Defaults
             icon: mdi:table-edit
-            icon_height: 48px
+            icon_height: 44px
             tap_action:
               action: url
               url_path: https://fass.korolev.link/ui/defaults
           - type: button
             name: Grocy Stock
             icon: mdi:fridge
-            icon_height: 48px
+            icon_height: 44px
             tap_action:
               action: url
               url_path: http://192.168.1.170:9383/stockoverview

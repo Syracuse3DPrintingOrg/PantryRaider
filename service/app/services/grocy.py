@@ -131,6 +131,65 @@ class GrocyClient:
         expiring.sort(key=lambda x: x["days_remaining"])
         return expiring
 
+    async def get_full_stock(self) -> list[dict]:
+        """Return all stock entries enriched with name, location, days_remaining, urgency, and storage bucket."""
+        raw = await self._get("/stock")
+        locations = {
+            str(loc["id"]): loc["name"]
+            for loc in await self._cached_list("/objects/locations")
+        }
+        today = date.today()
+        result = []
+        for entry in raw:
+            product = entry.get("product") or {}
+            name = product.get("name") or f"Product {entry.get('product_id', '?')}"
+            # Prefer the per-entry location_id; fall back to the product's default
+            loc_id = str(entry.get("location_id") or product.get("location_id") or "")
+            loc_name = locations.get(loc_id, "")
+
+            loc_lower = loc_name.lower()
+            if "freezer" in loc_lower or "frozen" in loc_lower:
+                bucket = "frozen"
+            elif "refriger" in loc_lower or "fridge" in loc_lower:
+                bucket = "refrigerated"
+            elif "pantry" in loc_lower or "dry" in loc_lower:
+                bucket = "pantry"
+            elif "counter" in loc_lower or "room" in loc_lower:
+                bucket = "room_temp"
+            else:
+                bucket = "other"
+
+            bbd = entry.get("best_before_date")
+            if bbd:
+                d = date.fromisoformat(bbd)
+                days_remaining = (d - today).days
+                if days_remaining < 0:
+                    urgency = "expired"
+                elif days_remaining == 0:
+                    urgency = "today"
+                elif days_remaining <= 3:
+                    urgency = "3d"
+                elif days_remaining <= 7:
+                    urgency = "7d"
+                else:
+                    urgency = "ok"
+            else:
+                days_remaining = None
+                urgency = "unknown"
+
+            result.append({
+                "product_id": int(entry.get("product_id", 0)),
+                "name": name,
+                "amount": float(entry.get("amount") or 0),
+                "unit": product.get("qu_unit_stock", {}).get("name") if product.get("qu_unit_stock") else None,
+                "best_before_date": bbd,
+                "days_remaining": days_remaining,
+                "urgency": urgency,
+                "location_name": loc_name,
+                "storage_bucket": bucket,
+            })
+        return result
+
     async def import_item(self, item: FoodItem) -> dict:
         storage_name = _STORAGE_LABEL[item.storage_type.value]
         location_id = await self.ensure_location(storage_name)

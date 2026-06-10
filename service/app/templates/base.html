@@ -29,6 +29,11 @@
       <div class="collapse navbar-collapse" id="nav">
         <ul class="navbar-nav me-auto">
           <li class="nav-item">
+            <a class="nav-link {% if active == 'inventory' %}active{% endif %}" href="/ui/inventory">
+              <i class="bi bi-grid me-1"></i>Inventory
+            </a>
+          </li>
+          <li class="nav-item">
             <a class="nav-link {% if active == 'expiring' %}active{% endif %}" href="/ui/">
               <i class="bi bi-clock-history me-1"></i>Expiring
             </a>

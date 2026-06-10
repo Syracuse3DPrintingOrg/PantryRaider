@@ -47,3 +47,31 @@ async def get_stock():
     """Return full stock list from Grocy."""
     grocy = GrocyClient()
     return await grocy.get_stock()
+
+
+_SORT_KEYS = {
+    "expiry_asc":  lambda i: (i["days_remaining"] is None,  i["days_remaining"] or 9999, i["name"].lower()),
+    "expiry_desc": lambda i: (i["days_remaining"] is None, -(i["days_remaining"] or -9999), i["name"].lower()),
+    "name_asc":    lambda i: i["name"].lower(),
+    "name_desc":   lambda i: i["name"].lower(),
+    "qty_desc":    lambda i: -i["amount"],
+    "qty_asc":     lambda i:  i["amount"],
+}
+
+_BUCKETS = ["refrigerated", "frozen", "room_temp", "pantry", "other"]
+
+
+@router.get("/dashboard")
+async def get_dashboard(sort: str = "expiry_asc"):
+    """Return stock grouped by storage bucket, sorted by the requested key."""
+    grocy = GrocyClient()
+    items = await grocy.get_full_stock()
+
+    key_fn = _SORT_KEYS.get(sort, _SORT_KEYS["expiry_asc"])
+    reverse = sort == "name_desc"
+    items.sort(key=key_fn, reverse=reverse)
+
+    return {
+        bucket: [i for i in items if i["storage_bucket"] == bucket]
+        for bucket in _BUCKETS
+    }
