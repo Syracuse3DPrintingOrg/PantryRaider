@@ -72,6 +72,22 @@ class MoveRequest(BaseModel):
     bucket: str  # refrigerated | frozen | room_temp | pantry
 
 
+class EditRequest(BaseModel):
+    category: str | None = None
+    best_before_date: str | None = None  # YYYY-MM-DD or empty string to clear
+
+
+@router.patch("/edit/{product_id}")
+async def edit_item(product_id: int, body: EditRequest):
+    """Update category and/or best-by date for a product's stock entries."""
+    grocy = GrocyClient()
+    try:
+        bbd = body.best_before_date if body.best_before_date else None
+        return await grocy.edit_product(product_id, body.category, bbd)
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
 @router.post("/move/{product_id}")
 async def move_item(product_id: int, body: MoveRequest):
     """Move all stock of a product to a different storage location."""

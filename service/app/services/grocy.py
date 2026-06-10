@@ -138,6 +138,10 @@ class GrocyClient:
             str(loc["id"]): loc["name"]
             for loc in await self._cached_list("/objects/locations")
         }
+        groups = {
+            str(g["id"]): g["name"]
+            for g in await self._cached_list("/objects/product_groups")
+        }
 
         # /stock aggregates per product and drops timestamps; the raw stock
         # table has row_created_timestamp per entry — take the newest per
@@ -188,6 +192,7 @@ class GrocyClient:
                 urgency = "unknown"
 
             pid = int(entry.get("product_id", 0))
+            group_id = str(product.get("product_group_id") or "")
             result.append({
                 "product_id": pid,
                 "name": name,
@@ -198,9 +203,30 @@ class GrocyClient:
                 "urgency": urgency,
                 "location_name": loc_name,
                 "storage_bucket": bucket,
+                "category": groups.get(group_id, ""),
                 "added_date": added.get(pid),
             })
         return result
+
+    async def edit_product(self, product_id: int,
+                           category: str | None = None,
+                           best_before_date: str | None = None) -> dict:
+        """Update category (product group) and/or best-by date for every open stock entry."""
+        if category is not None:
+            group_id = await self.ensure_product_group(category)
+            await self._request("PUT", f"/objects/products/{product_id}",
+                                {"product_group_id": group_id})
+
+        if best_before_date is not None:
+            entries = await self._get(f"/stock/products/{product_id}/entries")
+            for entry in entries:
+                entry_id = entry.get("id") or entry.get("stock_id")
+                if not entry_id:
+                    continue
+                await self._request("PUT", f"/objects/stock/{entry_id}",
+                                    {**entry, "best_before_date": best_before_date})
+
+        return {"product_id": product_id}
 
     async def move_product(self, product_id: int, bucket: str) -> dict:
         """Transfer all stock of a product to the location for `bucket` and

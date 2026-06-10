@@ -176,6 +176,41 @@
   </div>
 </div>
 
+<!-- Edit-item modal -->
+<div class="modal fade" id="editModal" tabindex="-1">
+  <div class="modal-dialog modal-sm modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h6 class="modal-title"><i class="bi bi-pencil me-1"></i><span id="editModalName"></span></h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Category</label>
+          <select class="form-select" id="editCategory">
+            <option value="">— unchanged —</option>
+            <option>Poultry</option><option>Meat</option><option>Seafood</option>
+            <option>Dairy</option><option>Produce</option><option>Grains</option>
+            <option>Condiments</option><option>Beverages</option><option>Snacks</option>
+            <option>Frozen</option><option>Canned</option><option>Other</option>
+          </select>
+        </div>
+        <div class="mb-1">
+          <label class="form-label fw-semibold">Best By Date</label>
+          <input type="date" class="form-control" id="editBestBy">
+          <div class="form-text">Applies to all open stock entries for this product.</div>
+        </div>
+      </div>
+      <div class="modal-footer py-2">
+        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-primary btn-sm" id="editSaveBtn" onclick="saveEdit()">
+          <i class="bi bi-check2 me-1"></i>Save
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- Consume confirmation toast -->
 <div class="position-fixed bottom-0 end-0 p-3" style="z-index:9999">
   <div id="consumeToast" class="toast align-items-center text-bg-success border-0" role="alert">
@@ -238,7 +273,11 @@ function renderPanel(panelId, countId, items, bucket) {
       ${showAdded && item.added_date ? `<span class="item-qty">${item.added_date.slice(0,10)}</span>` : ''}
       <span class="item-qty">${item.amount % 1 === 0 ? item.amount : item.amount.toFixed(1)}${item.unit ? ' ' + esc(item.unit) : ''}</span>
       ${expiryBadge(item)}
-      <button class="btn btn-outline-secondary btn-icon ms-1" title="Move to another location"
+      <button class="btn btn-outline-secondary btn-icon ms-1" title="Edit category / expiry"
+              onclick="openEditModal(${item.product_id})">
+        <i class="bi bi-pencil"></i>
+      </button>
+      <button class="btn btn-outline-secondary btn-icon" title="Move to another location"
               onclick="openMoveModal(${item.product_id}, '${esc(item.name)}')">
         <i class="bi bi-arrow-left-right"></i>
       </button>
@@ -248,6 +287,62 @@ function renderPanel(panelId, countId, items, bucket) {
       </button>
     </div>
   `).join('');
+}
+
+// ── Item lookup map (keyed by product_id) for pre-filling modals ─────────────
+const itemsById = {};
+
+function storeItems(items) {
+  items.forEach(i => { itemsById[i.product_id] = i; });
+}
+
+// ── Edit modal ────────────────────────────────────────────────────────────────
+let editTarget = null;  // product_id
+
+function openEditModal(productId) {
+  const item = itemsById[productId];
+  if (!item) return;
+  editTarget = productId;
+  document.getElementById('editModalName').textContent = item.name;
+
+  const catSel = document.getElementById('editCategory');
+  catSel.value = item.category || '';
+  if (!catSel.value && item.category) {
+    // category exists but wasn't in the list — add a temporary option
+    const opt = new Option(item.category, item.category, true, true);
+    catSel.add(opt);
+  }
+
+  document.getElementById('editBestBy').value = item.best_before_date || '';
+  new bootstrap.Modal(document.getElementById('editModal')).show();
+}
+
+async function saveEdit() {
+  if (editTarget == null) return;
+  const btn = document.getElementById('editSaveBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Saving…';
+
+  const category = document.getElementById('editCategory').value || null;
+  const bestBy   = document.getElementById('editBestBy').value || null;
+
+  try {
+    const r = await fetch(`/inventory/edit/${editTarget}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ category, best_before_date: bestBy }),
+    });
+    if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
+    bootstrap.Modal.getInstance(document.getElementById('editModal')).hide();
+    showToast('✓ Item updated');
+    await loadDashboard();
+  } catch(e) {
+    showToast(`Save failed: ${e.message}`, true);
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="bi bi-check2 me-1"></i>Save';
+    editTarget = null;
+  }
 }
 
 // ── Drag & Drop ──────────────────────────────────────────────────────────────
@@ -338,6 +433,11 @@ async function loadDashboard() {
     const r = await fetch(`/inventory/dashboard?sort=${sort}`);
     if (!r.ok) throw new Error(await r.text());
     const data = await r.json();
+    const allItems = [
+      ...(data.refrigerated || []), ...(data.frozen || []),
+      ...(data.room_temp || []),    ...(data.pantry  || []),
+    ];
+    storeItems(allItems);
     renderPanel('panel-refrigerated', 'count-refrigerated', data.refrigerated || [], 'refrigerated');
     renderPanel('panel-frozen',       'count-frozen',       data.frozen       || [], 'frozen');
     renderPanel('panel-room_temp',    'count-room_temp',    data.room_temp    || [], 'room_temp');
