@@ -66,13 +66,23 @@ async def pending_page(request: Request):
     })
 
 
+@router.get("/recipes", response_class=HTMLResponse)
+async def recipes_page(request: Request):
+    return templates.TemplateResponse("recipes.html", {
+        "request": request,
+        "active": "recipes",
+        "mealie_configured": settings.mealie_configured(),
+        "mealie_url": settings.mealie_link_url(),
+    })
+
+
 @router.get("/mealplan", response_class=HTMLResponse)
 async def mealplan_page(request: Request):
     return templates.TemplateResponse("mealplan.html", {
         "request": request,
         "active": "mealplan",
         "mealie_configured": settings.mealie_configured(),
-        "mealie_url": settings.mealie_base_url.rstrip("/"),
+        "mealie_url": settings.mealie_link_url(),
     })
 
 
@@ -82,7 +92,7 @@ async def shopping_page(request: Request):
         "request": request,
         "active": "shopping",
         "mealie_configured": settings.mealie_configured(),
-        "mealie_url": settings.mealie_base_url.rstrip("/"),
+        "mealie_url": settings.mealie_link_url(),
     })
 
 

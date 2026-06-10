@@ -3,7 +3,7 @@ import httpx
 import base64
 from .base import VisionProvider
 from ..models.food import AnalysisResult
-from .gemini import _parse_item, _FOOD_PROMPT, _RECEIPT_PROMPT, _ENRICH_PROMPT
+from .gemini import _parse_item, _FOOD_PROMPT, _RECEIPT_PROMPT, _ENRICH_PROMPT, _RECIPE_PROMPT
 
 # Reuses the same prompts as Gemini — structured JSON output works with llava/llama3.2-vision
 
@@ -51,6 +51,31 @@ class OllamaProvider(VisionProvider):
             "format": "json",
         }
         async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.post(f"{self.base_url}/api/generate", json=payload)
+            response.raise_for_status()
+            return json.loads(response.json()["response"])
+
+    async def extract_recipe(self, image_data: bytes | None = None,
+                             mime_type: str | None = None,
+                             page_text: str | None = None) -> dict | None:
+        if image_data is not None:
+            prompt = _RECIPE_PROMPT.format(source="photo (recipe card, cookbook page, or handwritten note)")
+            payload = {
+                "model": self.model,
+                "prompt": prompt,
+                "images": [base64.b64encode(image_data).decode()],
+                "stream": False,
+                "format": "json",
+            }
+        else:
+            prompt = _RECIPE_PROMPT.format(source="webpage text below")
+            payload = {
+                "model": self.model,
+                "prompt": f"{prompt}\n\n--- PAGE TEXT ---\n{page_text}",
+                "stream": False,
+                "format": "json",
+            }
+        async with httpx.AsyncClient(timeout=180.0) as client:
             response = await client.post(f"{self.base_url}/api/generate", json=payload)
             response.raise_for_status()
             return json.loads(response.json()["response"])

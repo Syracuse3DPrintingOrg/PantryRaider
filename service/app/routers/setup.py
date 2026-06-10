@@ -28,6 +28,7 @@ class SetupPayload(BaseModel):
     grocy_api_key: str = ""
     mealie_base_url: str = ""
     mealie_api_key: str = ""
+    mealie_public_url: str = ""
     auth_password: str = ""
     api_key: str = ""
 

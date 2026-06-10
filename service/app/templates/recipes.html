@@ -1,0 +1,273 @@
+{% extends "base.html" %}
+{% block title %}Recipes — FoodAssistant{% endblock %}
+{% block content %}
+
+{% if not mealie_configured %}
+<div class="alert alert-info mt-3">
+  <i class="bi bi-journal-richtext me-2"></i>
+  Recipes are stored in <a href="https://mealie.io" target="_blank">Mealie</a>.
+  Add your Mealie URL and API token in <a href="/setup">Settings</a> to enable this page.
+</div>
+{% else %}
+
+<div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mt-3 mb-3">
+  <h4 class="mb-0"><i class="bi bi-journal-richtext me-2"></i>Recipes</h4>
+  <div class="d-flex gap-2">
+    <a class="btn btn-sm btn-outline-secondary" href="{{ mealie_url }}" target="_blank">
+      <i class="bi bi-box-arrow-up-right me-1"></i>Open Mealie
+    </a>
+    <div class="btn-group">
+      <button class="btn btn-sm btn-primary" data-bs-toggle="modal" data-bs-target="#importUrlModal">
+        <i class="bi bi-link-45deg me-1"></i>From URL
+      </button>
+      <button class="btn btn-sm btn-primary" onclick="document.getElementById('photo-input').click()">
+        <i class="bi bi-camera me-1"></i>From Photo
+      </button>
+      <button class="btn btn-sm btn-outline-primary" onclick="openEditor()">
+        <i class="bi bi-pencil me-1"></i>Manual
+      </button>
+    </div>
+  </div>
+</div>
+
+<input type="file" id="photo-input" accept="image/*" capture="environment" class="d-none"
+       onchange="extractPhoto(this)">
+
+<!-- Photo extraction progress -->
+<div class="alert alert-info d-none" id="photo-progress">
+  <span class="spinner-border spinner-border-sm me-2"></span>Reading recipe from photo…
+</div>
+
+<!-- Browse -->
+<div class="row g-3" id="browse-section">
+  <div class="col-lg-8 col-xl-6">
+    <input type="search" class="form-control mb-3" id="recipe-filter"
+           placeholder="Search recipes…" autocomplete="off">
+    <div id="recipe-list" class="vstack gap-2">
+      <div class="text-secondary"><span class="spinner-border spinner-border-sm me-2"></span>Loading recipes…</div>
+    </div>
+  </div>
+</div>
+
+<!-- Import-from-URL modal -->
+<div class="modal fade" id="importUrlModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Import recipe from a webpage</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="url" class="form-control" id="import-url" placeholder="https://example.com/best-lasagna">
+        <div class="form-text">Tries Mealie's importer first; falls back to AI extraction for sites it can't read.</div>
+        <div class="mt-2 small d-none" id="import-url-status"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button class="btn btn-primary" id="import-url-btn" onclick="importUrl()">
+          <i class="bi bi-download me-1"></i>Import
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Review/edit + manual-add modal -->
+<div class="modal fade" id="editorModal" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="editor-title">New Recipe</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body vstack gap-3">
+        <div class="alert alert-warning py-2 small d-none" id="editor-note"></div>
+        <div>
+          <label class="form-label">Name</label>
+          <input type="text" class="form-control" id="ed-name">
+        </div>
+        <div>
+          <label class="form-label">Description</label>
+          <input type="text" class="form-control" id="ed-description">
+        </div>
+        <div class="row g-2">
+          <div class="col-6">
+            <label class="form-label">Servings</label>
+            <input type="text" class="form-control" id="ed-servings" placeholder="4 servings">
+          </div>
+          <div class="col-6">
+            <label class="form-label">Total Time</label>
+            <input type="text" class="form-control" id="ed-time" placeholder="45 minutes">
+          </div>
+        </div>
+        <div>
+          <label class="form-label">Ingredients <span class="text-secondary small">(one per line)</span></label>
+          <textarea class="form-control font-monospace" id="ed-ingredients" rows="7"></textarea>
+        </div>
+        <div>
+          <label class="form-label">Instructions <span class="text-secondary small">(one step per line)</span></label>
+          <textarea class="form-control" id="ed-instructions" rows="7"></textarea>
+        </div>
+        <div class="text-danger small d-none" id="editor-error"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button class="btn btn-success" id="editor-save" onclick="saveRecipe()">
+          <i class="bi bi-check-lg me-1"></i>Save to Mealie
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{% if mealie_configured %}
+<script>
+const MEALIE_URL = {{ mealie_url | tojson }};
+
+// ── Browse ──────────────────────────────────────────────────────────────────
+
+let filterTimer = null;
+document.getElementById('recipe-filter').addEventListener('input', e => {
+  clearTimeout(filterTimer);
+  filterTimer = setTimeout(() => loadRecipes(e.target.value.trim()), 300);
+});
+
+async function loadRecipes(search = '') {
+  const el = document.getElementById('recipe-list');
+  try {
+    const r = await fetch('/mealie/recipes?per_page=100&search=' + encodeURIComponent(search));
+    if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
+    const items = await r.json();
+    if (!items.length) {
+      el.innerHTML = '<div class="text-secondary small p-2">No recipes' +
+        (search ? ' matching that search.' : ' yet — import one above!') + '</div>';
+      return;
+    }
+    el.innerHTML = items.map(r => `
+      <div class="card">
+        <div class="card-body py-2 d-flex align-items-center justify-content-between gap-2">
+          <div class="min-width-0">
+            <a href="${MEALIE_URL}/g/home/r/${r.slug}" target="_blank" class="fw-semibold">${r.name}</a>
+            ${r.description ? `<div class="small text-secondary text-truncate">${r.description}</div>` : ''}
+          </div>
+          ${r.total_time ? `<span class="badge bg-secondary flex-shrink-0"><i class="bi bi-clock me-1"></i>${r.total_time}</span>` : ''}
+        </div>
+      </div>`).join('');
+  } catch (e) {
+    el.innerHTML = `<div class="alert alert-danger">Could not load recipes: ${e.message}</div>`;
+  }
+}
+
+// ── URL import ───────────────────────────────────────────────────────────────
+
+async function importUrl() {
+  const btn = document.getElementById('import-url-btn');
+  const status = document.getElementById('import-url-status');
+  const url = document.getElementById('import-url').value.trim();
+  if (!url) return;
+  btn.disabled = true;
+  status.classList.remove('d-none', 'text-danger');
+  status.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Importing — this can take ~30s if AI extraction kicks in…';
+  try {
+    const r = await fetch('/mealie/recipes/import-url', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({url}),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || r.statusText);
+    if (d.saved) {
+      status.innerHTML = `<span class="text-success"><i class="bi bi-check-circle me-1"></i>${d.message}
+        <a href="${d.mealie_url}/g/home/r/${d.slug}" target="_blank">View recipe</a></span>`;
+      document.getElementById('import-url').value = '';
+      loadRecipes();
+    } else {
+      bootstrap.Modal.getInstance(document.getElementById('importUrlModal')).hide();
+      openEditor(d.recipe, d.message);
+    }
+  } catch (e) {
+    status.classList.add('text-danger');
+    status.textContent = e.message;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// ── Photo import ─────────────────────────────────────────────────────────────
+
+async function extractPhoto(input) {
+  const file = input.files[0];
+  input.value = '';
+  if (!file) return;
+  const progress = document.getElementById('photo-progress');
+  progress.classList.remove('d-none');
+  try {
+    const fd = new FormData();
+    fd.append('file', file);
+    const r = await fetch('/mealie/recipes/extract-photo', {method: 'POST', body: fd});
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || r.statusText);
+    openEditor(d.recipe, 'Extracted from your photo — check it over, then save.');
+  } catch (e) {
+    progress.classList.add('d-none');
+    alert('Photo extraction failed: ' + e.message);
+    return;
+  }
+  progress.classList.add('d-none');
+}
+
+// ── Editor (shared by photo / URL-fallback / manual) ─────────────────────────
+
+function openEditor(recipe = null, note = '') {
+  document.getElementById('editor-title').textContent = recipe ? 'Review Recipe' : 'New Recipe';
+  const noteEl = document.getElementById('editor-note');
+  noteEl.classList.toggle('d-none', !note);
+  noteEl.textContent = note;
+  document.getElementById('ed-name').value = recipe?.name || '';
+  document.getElementById('ed-description').value = recipe?.description || '';
+  document.getElementById('ed-servings').value = recipe?.servings || '';
+  document.getElementById('ed-time').value = recipe?.total_time || '';
+  document.getElementById('ed-ingredients').value = (recipe?.ingredients || []).join('\n');
+  document.getElementById('ed-instructions').value = (recipe?.instructions || []).join('\n');
+  document.getElementById('editor-error').classList.add('d-none');
+  new bootstrap.Modal(document.getElementById('editorModal')).show();
+}
+
+async function saveRecipe() {
+  const err = document.getElementById('editor-error');
+  const btn = document.getElementById('editor-save');
+  err.classList.add('d-none');
+  const body = {
+    name: document.getElementById('ed-name').value.trim(),
+    description: document.getElementById('ed-description').value.trim(),
+    servings: document.getElementById('ed-servings').value.trim(),
+    total_time: document.getElementById('ed-time').value.trim(),
+    ingredients: document.getElementById('ed-ingredients').value.split('\n').map(s => s.trim()).filter(Boolean),
+    instructions: document.getElementById('ed-instructions').value.split('\n').map(s => s.trim()).filter(Boolean),
+  };
+  if (!body.name) { err.textContent = 'Name is required.'; err.classList.remove('d-none'); return; }
+  btn.disabled = true;
+  try {
+    const r = await fetch('/mealie/recipes/create', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || r.statusText);
+    bootstrap.Modal.getInstance(document.getElementById('editorModal')).hide();
+    loadRecipes();
+  } catch (e) {
+    err.textContent = e.message;
+    err.classList.remove('d-none');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+loadRecipes();
+</script>
+{% endif %}
+{% endblock %}

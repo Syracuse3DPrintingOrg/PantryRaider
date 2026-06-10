@@ -29,8 +29,13 @@ _RECIPE_CACHE_TTL = 600  # seconds
 
 
 def reset_cache() -> None:
-    global _scope, _recipe_cache, _recipe_cache_at
+    global _scope
     _scope = None
+    _invalidate_recipe_cache()
+
+
+def _invalidate_recipe_cache() -> None:
+    global _recipe_cache, _recipe_cache_at
     _recipe_cache = {}
     _recipe_cache_at = 0.0
 
@@ -123,6 +128,40 @@ class MealieClient:
         _recipe_cache = {d["slug"]: d for d in details if d}
         _recipe_cache_at = time.time()
         return list(_recipe_cache.values())
+
+    async def create_recipe_from_url(self, url: str) -> str:
+        """Use Mealie's built-in scraper (recipe-scrapers) to import a URL.
+
+        Returns the new recipe slug. Path moved between Mealie versions.
+        """
+        body = {"url": url, "includeTags": False}
+        try:
+            result = await self._request("POST", "/recipes/create/url", body=body)
+        except MealieError as e:
+            if not str(e).startswith("Mealie 404 "):
+                raise
+            result = await self._request("POST", "/recipes/create-url", body=body)
+        _invalidate_recipe_cache()
+        return result if isinstance(result, str) else result.get("slug", "")
+
+    async def create_recipe(self, data: dict) -> str:
+        """Create a recipe from structured fields and return its slug.
+
+        Mealie's POST only takes a name; everything else goes in a PATCH.
+        """
+        slug = await self._request("POST", "/recipes", body={"name": data["name"]})
+        if not isinstance(slug, str):
+            slug = slug.get("slug", "")
+        patch = {
+            "description": data.get("description") or "",
+            "recipeYield": data.get("servings") or "",
+            "totalTime": data.get("total_time") or "",
+            "recipeIngredient": [{"note": i} for i in data.get("ingredients") or [] if i.strip()],
+            "recipeInstructions": [{"text": s} for s in data.get("instructions") or [] if s.strip()],
+        }
+        await self._request("PATCH", f"/recipes/{slug}", body=patch)
+        _invalidate_recipe_cache()
+        return slug
 
     # ── Meal plan ───────────────────────────────────────────────────────────
 

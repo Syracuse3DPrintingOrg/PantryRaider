@@ -12,6 +12,7 @@ barcode lookup, and Home Assistant integration. Uses
 - **Barcode lookup** — camera scanner, headless wireless scanner, or manual entry, backed by Open Food Facts; the LLM cleans up messy product names and picks the right category/storage/shelf-life (`BARCODE_ENRICHMENT=llm`, works fully local with Ollama)
 - **Expiry defaults** — editable rules table fills in best-by dates automatically; everything is overridable before import
 - **Recipes, meal planning & shopping lists** — optional [Mealie](https://mealie.io) integration: week meal-plan view, shopping list with check-off, and "What can I cook?" recipe suggestions ranked by what's in your inventory (recipes that use soon-to-expire items float to the top)
+- **Recipe import** — browse/search your Mealie recipes from FoodAssistant, import from any webpage (Mealie's scraper with AI fallback), photograph a recipe card or handwritten note and the vision LLM transcribes it, or add manually — all with review before saving
 - **Web UI** — inventory dashboard, expiring-items view, add-food page, defaults editor
 - **Home Assistant** — REST sensors, notification automations, Lovelace dashboard with inventory panels
 - **Web setup wizard** — configure everything at `/setup` with connection testers; no file editing required
@@ -112,6 +113,7 @@ and the Lovelace dashboard (includes a read-only inventory panel grid).
 | `/ui/expiring` | Expiring items view |
 | `/ui/add` | Add food (barcode / photo / manual) |
 | `/ui/defaults` | Expiry defaults editor |
+| `/ui/recipes` | Browse + import recipes (URL / photo / manual) |
 | `/ui/mealplan` | Week meal plan + recipe suggestions (Mealie) |
 | `/ui/shopping` | Shopping list with check-off (Mealie) |
 | `GET /mealie/suggest` | Recipes ranked by inventory coverage |

@@ -1,6 +1,9 @@
+import html as html_lib
+import re
 from datetime import date, timedelta
 
-from fastapi import APIRouter, Body, HTTPException, Query
+import httpx
+from fastapi import APIRouter, Body, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel
 
 from ..config import settings
@@ -49,7 +52,7 @@ async def get_mealplan(days: int = Query(7, ge=1, le=31)):
             "recipe_slug": (e.get("recipe") or {}).get("slug"),
         })
     return {"start": start.isoformat(), "end": end.isoformat(), "days": by_date,
-            "mealie_url": settings.mealie_base_url.rstrip("/")}
+            "mealie_url": settings.mealie_link_url()}
 
 
 class MealplanEntryPayload(BaseModel):
@@ -86,13 +89,116 @@ async def delete_mealplan_entry(entry_id: int):
 # ── Recipes ──────────────────────────────────────────────────────────────────
 
 @router.get("/recipes")
-async def search_recipes(search: str = ""):
+async def search_recipes(search: str = "", per_page: int = Query(50, ge=1, le=200)):
     try:
-        items = await _client().search_recipes(search)
+        items = await _client().search_recipes(search, per_page=per_page)
     except MealieError as e:
         raise HTTPException(502, str(e))
-    return [{"id": r.get("id"), "name": r.get("name"), "slug": r.get("slug")}
-            for r in items]
+    return [{
+        "id": r.get("id"),
+        "name": r.get("name"),
+        "slug": r.get("slug"),
+        "description": (r.get("description") or "")[:160],
+        "total_time": r.get("totalTime"),
+        "rating": r.get("rating"),
+    } for r in items]
+
+
+def _strip_html(html: str, limit: int = 18000) -> str:
+    """Reduce a page to readable text for LLM recipe extraction."""
+    text = re.sub(r"(?is)<(script|style|nav|header|footer|svg|noscript|form)[^>]*>.*?</\1>", " ", html)
+    text = re.sub(r"(?s)<[^>]+>", " ", text)
+    text = html_lib.unescape(text)
+    text = re.sub(r"[ \t]+", " ", text)
+    text = re.sub(r"\n\s*\n+", "\n", text)
+    return text.strip()[:limit]
+
+
+class ImportUrlPayload(BaseModel):
+    url: str
+
+
+@router.post("/recipes/import-url")
+async def import_recipe_url(payload: ImportUrlPayload):
+    """Import a recipe from a webpage.
+
+    Tries Mealie's built-in scraper first (handles most recipe sites via
+    structured data). If that fails, fetches the page and has the LLM
+    extract a draft for the user to review before saving.
+    """
+    m = _client()
+    url = payload.url.strip()
+    if not url.startswith(("http://", "https://")):
+        raise HTTPException(400, "Enter a full URL starting with http:// or https://")
+
+    try:
+        slug = await m.create_recipe_from_url(url)
+        if slug:
+            return {"ok": True, "saved": True, "slug": slug,
+                    "mealie_url": settings.mealie_link_url(),
+                    "message": "Imported via Mealie's scraper."}
+    except Exception:
+        pass  # fall through to LLM extraction
+
+    try:
+        async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
+            r = await client.get(url, headers={"User-Agent": "Mozilla/5.0 (FoodAssistant)"})
+            r.raise_for_status()
+            page_text = _strip_html(r.text)
+    except Exception as e:
+        raise HTTPException(502, f"Could not fetch the page: {e}")
+    if len(page_text) < 200:
+        raise HTTPException(422, "The page had no readable text to extract a recipe from.")
+
+    from ..dependencies import get_enrich_provider
+    try:
+        recipe = await get_enrich_provider().extract_recipe(page_text=page_text)
+    except Exception as e:
+        raise HTTPException(502, f"LLM extraction failed: {e}")
+    if not recipe or not recipe.get("name"):
+        raise HTTPException(422, "Could not find a recipe on that page.")
+    return {"ok": True, "saved": False, "recipe": recipe,
+            "message": "Mealie's scraper couldn't read this site — review the AI extraction below, then save."}
+
+
+@router.post("/recipes/extract-photo")
+async def extract_recipe_photo(file: UploadFile = File(...)):
+    """Vision-LLM extraction of a photographed recipe (card, cookbook page,
+    handwritten note). Returns a draft for review — nothing is saved yet."""
+    _client()  # 400 early if Mealie isn't configured — there'd be nowhere to save
+    image_data = await file.read()
+    if not image_data:
+        raise HTTPException(400, "Empty upload.")
+
+    from ..dependencies import get_vision_provider
+    try:
+        recipe = await get_vision_provider().extract_recipe(
+            image_data=image_data, mime_type=file.content_type or "image/jpeg")
+    except Exception as e:
+        raise HTTPException(502, f"Vision extraction failed: {e}")
+    if not recipe or not recipe.get("name"):
+        raise HTTPException(422, "Could not read a recipe from that photo — try a clearer shot.")
+    return {"ok": True, "recipe": recipe}
+
+
+class CreateRecipePayload(BaseModel):
+    name: str
+    description: str = ""
+    servings: str = ""
+    total_time: str = ""
+    ingredients: list[str] = []
+    instructions: list[str] = []
+
+
+@router.post("/recipes/create")
+async def create_recipe(payload: CreateRecipePayload):
+    if not payload.name.strip():
+        raise HTTPException(400, "Recipe name is required.")
+    try:
+        slug = await _client().create_recipe(payload.model_dump())
+    except MealieError as e:
+        raise HTTPException(502, str(e))
+    return {"ok": True, "slug": slug, "mealie_url": settings.mealie_link_url()}
 
 
 @router.get("/suggest")
@@ -112,7 +218,7 @@ async def suggest(top: int = Query(10, ge=1, le=30)):
         "suggestions": suggest_recipes(recipes, stock, top=top),
         "recipes_considered": len(recipes),
         "inventory_items": len(stock),
-        "mealie_url": settings.mealie_base_url.rstrip("/"),
+        "mealie_url": settings.mealie_link_url(),
     }
 
 

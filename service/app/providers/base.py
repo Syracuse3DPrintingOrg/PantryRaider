@@ -34,3 +34,14 @@ class VisionProvider(ABC):
         the provider doesn't support text enrichment.
         """
         return None
+
+    async def extract_recipe(self, image_data: bytes | None = None,
+                             mime_type: str | None = None,
+                             page_text: str | None = None) -> dict | None:
+        """Extract a structured recipe from a photo OR from webpage text.
+
+        Returns a dict with name, description, servings, total_time,
+        ingredients (list[str]), instructions (list[str]) — or None if
+        the provider doesn't support recipe extraction.
+        """
+        return None

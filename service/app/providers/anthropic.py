@@ -5,7 +5,7 @@ import time
 from anthropic import AsyncAnthropic
 
 from .base import VisionProvider, parse_json_response
-from .gemini import _parse_item, _FOOD_PROMPT, _RECEIPT_PROMPT, _ENRICH_PROMPT
+from .gemini import _parse_item, _FOOD_PROMPT, _RECEIPT_PROMPT, _ENRICH_PROMPT, _RECIPE_PROMPT
 from ..models.food import AnalysisResult
 
 _HEALTH_CACHE_TTL = 3600  # seconds — avoid hammering the API on every /health poll
@@ -55,6 +55,17 @@ class AnthropicProvider(VisionProvider):
     async def enrich_product(self, info: dict) -> dict | None:
         prompt = _ENRICH_PROMPT.format(info=json.dumps(info, ensure_ascii=False))
         raw = await self._generate(prompt, max_tokens=512)
+        return parse_json_response(raw)
+
+    async def extract_recipe(self, image_data: bytes | None = None,
+                             mime_type: str | None = None,
+                             page_text: str | None = None) -> dict | None:
+        if image_data is not None:
+            prompt = _RECIPE_PROMPT.format(source="photo (recipe card, cookbook page, or handwritten note)")
+            raw = await self._generate(prompt, image_data, mime_type, max_tokens=4096)
+        else:
+            prompt = _RECIPE_PROMPT.format(source="webpage text below")
+            raw = await self._generate(f"{prompt}\n\n--- PAGE TEXT ---\n{page_text}", max_tokens=4096)
         return parse_json_response(raw)
 
     async def health_check(self) -> bool:

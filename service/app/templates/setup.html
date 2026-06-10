@@ -209,11 +209,18 @@
       inventory. Start one with <code>docker compose --profile with-mealie up -d</code>.
     </p>
     <div class="mb-3">
-      <label class="form-label">Mealie URL</label>
+      <label class="form-label">Mealie URL <span class="text-secondary small">(internal — used for API calls)</span></label>
       <input type="url" class="form-control" id="mealie_base_url"
              placeholder="http://192.168.1.10:9285"
              value="{{ s.mealie_base_url }}">
-      <div class="form-text">Use an address your browser can also reach — recipe links open it directly.</div>
+      <div class="form-text">LAN or docker address FoodAssistant uses to talk to Mealie's API.</div>
+    </div>
+    <div class="mb-3">
+      <label class="form-label">Mealie Public URL <span class="text-secondary small">(optional — used for browser links)</span></label>
+      <input type="url" class="form-control" id="mealie_public_url"
+             placeholder="https://mealie.example.com"
+             value="{{ s.mealie_public_url }}">
+      <div class="form-text">External address used when the UI links you to Mealie (e.g. behind a reverse proxy). Leave empty to use the internal URL for links too.</div>
     </div>
     <div class="mb-3">
       <label class="form-label">Mealie API Token</label>
@@ -376,6 +383,7 @@ async function saveAll() {
     grocy_api_key:   val('grocy_api_key'),
     mealie_base_url: val('mealie_base_url'),
     mealie_api_key:  val('mealie_api_key'),
+    mealie_public_url: val('mealie_public_url'),
     auth_password:   val('auth_password'),
     api_key:         val('api_key'),
   };

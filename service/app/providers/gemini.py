@@ -61,6 +61,24 @@ integer estimate of days from purchase until best-by for that storage.
 Return ONLY valid JSON. No markdown, no explanation.
 """.strip()
 
+_RECIPE_PROMPT = """
+Extract the complete recipe from the provided {source}. Transcribe faithfully —
+do not invent ingredients or steps that are not present.
+Return a JSON object with these exact fields:
+{{
+  "name": "recipe title",
+  "description": "one or two sentence summary",
+  "servings": "e.g. '4 servings' or null if not stated",
+  "total_time": "e.g. '45 minutes' or null if not stated",
+  "ingredients": ["1 cup flour", "2 large eggs", "..."],
+  "instructions": ["First step text.", "Second step text.", "..."]
+}}
+Each ingredient is one string with quantity and name together. Each instruction
+is one numbered step's full text, in order. If handwriting is partly illegible,
+make your best guess and keep going.
+Return ONLY valid JSON. No markdown, no explanation.
+""".strip()
+
 _HEALTH_CACHE_TTL = 3600  # seconds — avoid hammering the API on every /health poll
 
 
@@ -96,6 +114,18 @@ class GeminiProvider(VisionProvider):
     async def enrich_product(self, info: dict) -> dict | None:
         prompt = _ENRICH_PROMPT.format(info=json.dumps(info, ensure_ascii=False))
         response = await self.model.generate_content_async([prompt])
+        return json.loads(response.text)
+
+    async def extract_recipe(self, image_data: bytes | None = None,
+                             mime_type: str | None = None,
+                             page_text: str | None = None) -> dict | None:
+        if image_data is not None:
+            parts = [_RECIPE_PROMPT.format(source="photo (recipe card, cookbook page, or handwritten note)"),
+                     {"mime_type": mime_type, "data": image_data}]
+        else:
+            prompt = _RECIPE_PROMPT.format(source="webpage text below")
+            parts = [f"{prompt}\n\n--- PAGE TEXT ---\n{page_text}"]
+        response = await self.model.generate_content_async(parts)
         return json.loads(response.text)
 
     async def health_check(self) -> bool:

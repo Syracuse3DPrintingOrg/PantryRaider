@@ -10,7 +10,7 @@ _SAVEABLE = [
     "anthropic_api_key", "anthropic_model",
     "barcode_enrichment", "enrich_provider", "enrich_model",
     "grocy_base_url", "grocy_api_key",
-    "mealie_base_url", "mealie_api_key",
+    "mealie_base_url", "mealie_api_key", "mealie_public_url",
     "secret_key", "auth_password", "api_key",
 ]
 
@@ -47,13 +47,19 @@ class Settings(BaseSettings):
     grocy_base_url: str = _DEFAULT_GROCY_URL
     grocy_api_key: str = ""
 
-    # Mealie recipe manager (optional) — enables the Meal Plan and Shopping
-    # List pages. Use a URL your browser can also reach (recipe links open it).
+    # Mealie recipe manager (optional) — enables the Recipes, Meal Plan and
+    # Shopping List pages. base_url is for API calls (LAN/docker address);
+    # public_url is only used for browser links and falls back to base_url.
     mealie_base_url: str = ""
     mealie_api_key: str = ""
+    mealie_public_url: str = ""
 
     def mealie_configured(self) -> bool:
         return bool(self.mealie_base_url and self.mealie_api_key)
+
+    def mealie_link_url(self) -> str:
+        """URL for browser-facing links (public address if set, else base)."""
+        return (self.mealie_public_url or self.mealie_base_url).rstrip("/")
 
     data_dir: str = "/app/data"
     secret_key: str = ""
