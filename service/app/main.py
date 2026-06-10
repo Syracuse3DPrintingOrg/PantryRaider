@@ -44,7 +44,8 @@ _SETUP_BYPASS = {
     "/setup/test/provider", "/setup/test/mealie", "/setup/test/recipes",
     "/health", "/docs", "/openapi.json", "/redoc",
 }
-_PUBLIC_PATHS = _SETUP_BYPASS | {"/ui/login"}
+# "/" only redirects to /ui/, so it can safely skip auth (the target enforces it)
+_PUBLIC_PATHS = _SETUP_BYPASS | {"/ui/login", "/"}
 
 
 @app.middleware("http")
@@ -86,6 +87,11 @@ app.include_router(defaults.router)
 app.include_router(inventory.router)
 app.include_router(expiring.router)
 app.include_router(ui.router)
+
+
+@app.get("/")
+async def root():
+    return RedirectResponse("/ui/", status_code=303)
 
 
 @app.get("/health")
