@@ -31,12 +31,51 @@ integration listens to that input device and fires an event per keypress.
 
 ## Setup
 
-### 1. Confirm the scanner appears as an input device
+### 1. Pair the scanner with the HA host
 
-Once the scanner is connected to the HA host, go to
-**Settings → System → Hardware → ⋮ → All Hardware** and confirm it appears
-as an input device. Note its exact name (e.g. `Barcode Scanner HID`) — you'll
-need it in the next step.
+HA's Bluetooth integration is for BLE sensors — it won't pair a classic
+Bluetooth HID device like a barcode scanner. Pairing happens at the OS
+level with `bluetoothctl`.
+
+**Get a shell on the host.** On HA OS, install the
+[Advanced SSH & Web Terminal](https://github.com/hassio-addons/addon-ssh)
+add-on and turn **Protection mode off** (required for host-level access),
+then open its terminal. On Supervised/Core installs, just SSH into the
+machine as usual.
+
+**Put the scanner in pairing mode.** Most scanners enter Bluetooth HID
+pairing by scanning a setup barcode printed in their manual (often labeled
+"Bluetooth HID mode" or "pairing"). The LED usually blinks blue while
+discoverable.
+
+**Pair, trust, and connect:**
+
+```
+$ bluetoothctl
+[bluetooth]# power on
+[bluetooth]# agent on
+[bluetooth]# default-agent
+[bluetooth]# scan on
+# wait for the scanner to show up, e.g.:
+#   [NEW] Device A1:B2:C3:D4:E5:F6 Barcode Scanner HID
+[bluetooth]# scan off
+[bluetooth]# pair A1:B2:C3:D4:E5:F6
+[bluetooth]# trust A1:B2:C3:D4:E5:F6     # auto-reconnect after reboots/sleep
+[bluetooth]# connect A1:B2:C3:D4:E5:F6
+[bluetooth]# exit
+```
+
+If `pair` asks for a PIN, try `0000` or `1234` (check the scanner manual).
+
+**Verify it registered as an input device:**
+
+```
+cat /proc/bus/input/devices | grep -A4 -i barcode
+```
+
+You can also check in the HA UI: **Settings → System → Hardware → ⋮ →
+All Hardware**. Note the exact device name (e.g. `Barcode Scanner HID`) —
+you'll need it in the next step.
 
 ### 2. Configure keyboard_remote
 
