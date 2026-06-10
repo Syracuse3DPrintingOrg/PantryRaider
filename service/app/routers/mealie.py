@@ -8,7 +8,8 @@ from pydantic import BaseModel
 
 from ..config import settings
 from ..services.grocy import GrocyClient
-from ..services.mealie import MealieClient, MealieError, suggest_recipes
+from ..services.mealie import MealieClient, MealieError, classify_recipes
+from ..services import recipes_external
 
 router = APIRouter(prefix="/mealie", tags=["mealie"])
 
@@ -202,9 +203,11 @@ async def create_recipe(payload: CreateRecipePayload):
 
 
 @router.get("/suggest")
-async def suggest(top: int = Query(10, ge=1, le=30)):
-    """Recipes ranked by current inventory coverage, boosted when they use
-    items that expire within 5 days."""
+async def suggest(top: int = Query(8, ge=1, le=20), external: bool = True):
+    """Recipes sorted into three cookability tiers against current inventory:
+    ready (stock only), staples (stock + pantry basics), shopping (uses
+    perishable stock but needs extra ingredients). Candidates come from
+    Mealie plus TheMealDB when external=true."""
     m = _client()
     try:
         recipes = await m.get_recipes_with_ingredients()
@@ -214,12 +217,60 @@ async def suggest(top: int = Query(10, ge=1, le=30)):
         stock = await GrocyClient().get_full_stock()
     except Exception:
         stock = []
+
+    external_count = 0
+    if external and stock:
+        # Search TheMealDB by stock item names, perishables first so the
+        # results lean toward using up what's expiring.
+        ordered = sorted(stock, key=lambda s: (s.get("days_remaining") is None,
+                                               s.get("days_remaining") or 999))
+        try:
+            ext = await recipes_external.find_recipes_for_ingredients(
+                [s["name"] for s in ordered])
+        except Exception:
+            ext = []
+        mealie_names = {(r.get("name") or "").lower() for r in recipes}
+        ext = [r for r in ext if (r.get("name") or "").lower() not in mealie_names]
+        external_count = len(ext)
+        recipes = recipes + ext
+
     return {
-        "suggestions": suggest_recipes(recipes, stock, top=top),
+        "tiers": classify_recipes(recipes, stock, top_per_tier=top),
         "recipes_considered": len(recipes),
+        "external_considered": external_count,
         "inventory_items": len(stock),
         "mealie_url": settings.mealie_link_url(),
     }
+
+
+class ImportExternalPayload(BaseModel):
+    external_id: str
+    add_missing_to_list: bool = False
+    list_id: str = ""
+
+
+@router.post("/recipes/import-external")
+async def import_external_recipe(payload: ImportExternalPayload):
+    """Save a TheMealDB recipe into Mealie; optionally also send its
+    missing ingredients to the shopping list in the same click."""
+    m = _client()
+    recipe = await recipes_external.get_external_recipe(payload.external_id)
+    if not recipe:
+        raise HTTPException(404, "Recipe not found in TheMealDB.")
+    try:
+        slug = await m.create_recipe(recipe)
+    except MealieError as e:
+        raise HTTPException(502, str(e))
+
+    result = {"ok": True, "slug": slug, "name": recipe["name"],
+              "mealie_url": settings.mealie_link_url(),
+              "message": f"\"{recipe['name']}\" saved to Mealie."}
+    if payload.add_missing_to_list:
+        listing = await add_missing_ingredients(
+            AddMissingPayload(slug=slug, list_id=payload.list_id))
+        result["added_to_list"] = listing.get("added", 0)
+        result["message"] += f" {listing.get('message', '')}"
+    return result
 
 
 class AddMissingPayload(BaseModel):
@@ -291,6 +342,30 @@ async def add_missing_ingredients(payload: AddMissingPayload):
 
 
 # ── Shopping lists ───────────────────────────────────────────────────────────
+
+@router.get("/shopping/summary")
+async def shopping_summary():
+    """Lean unchecked-items view for Home Assistant REST sensors."""
+    if not settings.mealie_configured():
+        return {"count": 0, "items": [], "list_name": ""}
+    m = MealieClient()
+    try:
+        lists = await m.get_shopping_lists()
+        if not lists:
+            return {"count": 0, "items": [], "list_name": ""}
+        detail = await m.get_shopping_list(lists[0]["id"])
+    except Exception:
+        return {"count": 0, "items": [], "list_name": "", "error": "unreachable"}
+
+    unchecked = [i for i in detail.get("listItems") or [] if not i.get("checked")]
+    names = []
+    for i in unchecked[:40]:
+        label = i.get("display") or i.get("note") or (i.get("food") or {}).get("name") or ""
+        if label.strip():
+            names.append(label.strip())
+    return {"count": len(unchecked), "items": names,
+            "list_name": lists[0].get("name", "Shopping List")}
+
 
 @router.get("/shopping")
 async def get_shopping(list_id: str = ""):

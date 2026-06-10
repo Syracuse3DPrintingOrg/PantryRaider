@@ -233,51 +233,114 @@ def _ingredient_text(ing: dict) -> str:
     return food.get("name") or ing.get("display") or ing.get("note") or ""
 
 
-def suggest_recipes(recipes: list[dict], stock: list[dict], top: int = 10) -> list[dict]:
-    """Rank recipes by how much of the current inventory they use, with a
-    strong boost for ingredients matching items that expire soon."""
+# Things assumed on hand even if not tracked in inventory.
+# Tier 2 ("with pantry staples") recipes may use these freely.
+_STAPLE_TOKENS = {
+    "egg", "butter", "flour", "sugar", "salt", "pepper", "oil", "olive",
+    "milk", "garlic", "onion", "vinegar", "baking", "soda", "vanilla",
+    "honey", "mustard", "ketchup", "mayonnaise", "mayo", "soy",
+    # common dried spices
+    "cumin", "paprika", "oregano", "cinnamon", "nutmeg", "thyme",
+    "rosemary", "cayenne", "turmeric", "curry",
+}
+
+# Descriptor words allowed alongside staples ("brown sugar", "ground pepper",
+# "vanilla extract") without making e.g. "coconut milk" count as milk: an
+# ingredient is a staple only if ALL its tokens are staples or descriptors.
+_STAPLE_GLUE_TOKENS = {
+    "sauce", "powder", "ground", "white", "brown", "black", "red", "dried",
+    "extract", "granulated", "unsalted", "salted", "vegetable", "canola",
+    "sunflower", "virgin", "extra", "light", "dark", "sea", "kosher", "whole",
+    "skim", "plain", "all", "purpose", "self", "raising", "clove", "cloves",
+}
+
+# Water (in any temperature) never counts against a recipe.
+_FREEBIE_TOKENS = {"water", "ice", "boiling", "warm", "cold", "hot", "tap"}
+
+
+def _is_perishable(stock_item: dict) -> bool:
+    """Refrigerated items and anything expiring within two weeks."""
+    if stock_item.get("storage_bucket") == "refrigerated":
+        return True
+    d = stock_item.get("days_remaining")
+    return d is not None and d <= 14
+
+
+def classify_recipes(recipes: list[dict], stock: list[dict],
+                     top_per_tier: int = 8) -> dict[str, list[dict]]:
+    """Sort recipes into three cookability tiers against current inventory.
+
+    ready    — every ingredient matches an item in stock
+    staples  — in stock + common pantry staples (eggs, butter, flour, ...)
+    shopping — uses at least one perishable stock item but needs a shop run
+
+    Recipes that need shopping without using any perishables are dropped:
+    they don't help eat down the inventory.
+    """
     inv = []
     for s in stock:
         toks = _tokens(s["name"])
         if toks:
             inv.append({"name": s["name"], "tokens": toks,
-                        "days_remaining": s.get("days_remaining")})
+                        "days_remaining": s.get("days_remaining"),
+                        "perishable": _is_perishable(s)})
 
-    results = []
+    tiers: dict[str, list[dict]] = {"ready": [], "staples": [], "shopping": []}
     for r in recipes:
         ingredients = r.get("recipeIngredient") or []
         if not ingredients:
             continue
-        matched, unmatched, expiring_used = [], [], []
+        matched, staples, unmatched, expiring_used = [], [], [], []
+        uses_perishable = False
         for ing in ingredients:
-            ing_toks = _tokens(_ingredient_text(ing))
             text = _ingredient_text(ing).strip()
-            if not ing_toks or not text:
+            ing_toks = _tokens(text)
+            if not text or not ing_toks or ing_toks <= _FREEBIE_TOKENS:
                 continue
             hit = next((s for s in inv if ing_toks & s["tokens"]), None)
             if hit:
                 matched.append(text)
+                if hit["perishable"]:
+                    uses_perishable = True
                 d = hit["days_remaining"]
                 if d is not None and d <= 5 and hit["name"] not in expiring_used:
                     expiring_used.append(hit["name"])
+            elif (ing_toks & _STAPLE_TOKENS
+                  and ing_toks <= (_STAPLE_TOKENS | _STAPLE_GLUE_TOKENS | _FREEBIE_TOKENS)):
+                staples.append(text)
             else:
                 unmatched.append(text)
+
         if not matched:
             continue
-        coverage = len(matched) / len(ingredients)
+        if not unmatched and not staples:
+            tier = "ready"
+        elif not unmatched:
+            tier = "staples"
+        elif uses_perishable:
+            tier = "shopping"
+        else:
+            continue
+
+        coverage = len(matched) / max(len(matched) + len(staples) + len(unmatched), 1)
         score = coverage + 0.35 * len(expiring_used)
-        results.append({
+        tiers[tier].append({
             "name": r.get("name"),
             "slug": r.get("slug"),
             "id": r.get("id"),
+            "source": r.get("source", "mealie"),
+            "external_id": r.get("external_id"),
+            "image": r.get("image"),
             "description": (r.get("description") or "")[:160],
             "total_ingredients": len(ingredients),
             "matched_ingredients": matched,
+            "staple_ingredients": staples,
             "unmatched_ingredients": unmatched,
             "expiring_items_used": expiring_used,
             "coverage": round(coverage, 2),
             "score": round(score, 3),
         })
 
-    results.sort(key=lambda x: x["score"], reverse=True)
-    return results[:top]
+    for tier in tiers.values():
+        tier.sort(key=lambda x: (len(x["expiring_items_used"]), x["score"]), reverse=True)
+    return {k: v[:top_per_tier] for k, v in tiers.items()}

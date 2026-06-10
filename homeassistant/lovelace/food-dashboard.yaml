@@ -38,6 +38,14 @@ views:
             tap_action:
               action: url
               url_path: https://fass.korolev.link/ui/pending
+          - type: tile
+            entity: sensor.shopping_list_items
+            name: Shopping List
+            icon: mdi:cart-outline
+            color: teal
+            tap_action:
+              action: url
+              url_path: https://fass.korolev.link/ui/shopping
 
       # ── Alerts (only shows when something needs attention) ──────────────────
       - type: conditional
@@ -115,6 +123,25 @@ views:
               {%- else %} {{ i.days_remaining }}d{% endif %}
 
               {% endfor %}{% else %}*Empty*{% endif %}
+
+      # ── Shopping List ─────────────────────────────────────────────────────────
+      # Unchecked items from the Mealie shopping list. Tap the tile above to
+      # open the FoodAssistant shopping page and check things off.
+      - type: conditional
+        conditions:
+          - condition: numeric_state
+            entity: sensor.shopping_list_items
+            above: 0
+        card:
+          type: markdown
+          content: >-
+            {% set items = state_attr('sensor.shopping_list_items', 'items') or [] %}
+            ### 🛒 {{ state_attr('sensor.shopping_list_items', 'list_name') or 'Shopping List' }}
+            ({{ items | length }})
+
+            {% for i in items %}- {{ i }}
+
+            {% endfor %}
 
       # ── Action Buttons ────────────────────────────────────────────────────────
       - type: grid

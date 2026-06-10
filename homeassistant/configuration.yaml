@@ -63,6 +63,23 @@ rest:
           - room_temp
           - pantry
 
+  # Mealie shopping list — unchecked item names land in the sensor's
+  # attributes so the Lovelace card can render them. Returns 0/empty when
+  # Mealie isn't configured.
+  - resource: http://192.168.1.170:9284/mealie/shopping/summary
+    scan_interval: 300
+    # headers:
+    #   X-API-Key: !secret foodassistant_api_key
+    sensor:
+      - name: "Shopping List Items"
+        unique_id: food_shopping_items
+        value_template: "{{ value_json.count }}"
+        unit_of_measurement: "items"
+        icon: mdi:cart-outline
+        json_attributes:
+          - items
+          - list_name
+
   # Pending scans waiting for review on the /ui/pending page
   - resource: http://192.168.1.170:9284/pending/count
     scan_interval: 60
