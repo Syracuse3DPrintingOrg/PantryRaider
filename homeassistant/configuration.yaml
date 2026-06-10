@@ -4,11 +4,17 @@
 # Replace 192.168.1.170:9284 with your Unraid IP if different.
 
 # ─── REST Sensors ─────────────────────────────────────────────────────────────
-# If you set API_KEY in the FoodAssistant .env, add it to HA's secrets.yaml as
+# Use the LOCAL address here, not the public reverse-proxy URL: HA polls these
+# endpoints headlessly, and an auth-enforcing proxy (Pangolin, Authelia, etc.)
+# will intercept the request and return its login page instead of JSON,
+# leaving every sensor "Unknown". The public URL is only for the Lovelace
+# buttons, which open in a browser where you have a proxy session.
+#
+# If you set API_KEY in FoodAssistant, add it to HA's secrets.yaml as
 #   foodassistant_api_key: "your_key_here"
 # and uncomment the headers blocks below.
 rest:
-  - resource: https://fass.korolev.link/expiring/summary
+  - resource: http://192.168.1.170:9284/expiring/summary
     scan_interval: 300  # refresh every 5 minutes
     # headers:
     #   X-API-Key: !secret foodassistant_api_key
@@ -39,7 +45,7 @@ rest:
 
   # Full inventory grouped by storage location — item lists land in the
   # sensor's attributes so the Lovelace markdown cards can render them.
-  - resource: https://fass.korolev.link/inventory/dashboard?sort=expiry_asc
+  - resource: http://192.168.1.170:9284/inventory/dashboard?sort=expiry_asc
     scan_interval: 300
     # headers:
     #   X-API-Key: !secret foodassistant_api_key
