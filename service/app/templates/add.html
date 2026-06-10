@@ -36,13 +36,21 @@
             <div id="scanner-container" style="width:100%; max-width:400px; margin:0 auto;">
               <div id="reader" style="width:100%"></div>
             </div>
-            <div class="mt-2 d-flex gap-2">
+            <div class="mt-2 d-flex gap-2 flex-wrap">
               <button class="btn btn-primary btn-sm" id="startScanBtn" onclick="startScanner()">
                 <i class="bi bi-camera-video me-1"></i>Start Camera
               </button>
               <button class="btn btn-secondary btn-sm d-none" id="stopScanBtn" onclick="stopScanner()">
                 <i class="bi bi-stop-circle me-1"></i>Stop
               </button>
+              <button class="btn btn-outline-primary btn-sm" onclick="document.getElementById('barcodePhotoInput').click()">
+                <i class="bi bi-camera me-1"></i>Snap Barcode Photo
+              </button>
+              <input type="file" id="barcodePhotoInput" accept="image/*" capture="environment"
+                     class="d-none" onchange="decodeBarcodePhoto(this)">
+            </div>
+            <div class="form-text mt-1">
+              Live scanning requires HTTPS — on HTTP use "Snap Barcode Photo" instead.
             </div>
           </div>
         </div>
@@ -192,6 +200,30 @@ let pendingFile = null;
 let queue = [];   // array of item objects
 
 // ── Barcode Scanner ─────────────────────────────────────────────────────────
+// Live camera streaming (getUserMedia) requires a secure context (HTTPS).
+// On HTTP, hide the live-scan button — the photo-snap fallback still works.
+if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+  document.addEventListener('DOMContentLoaded', () => {
+    document.getElementById('startScanBtn').classList.add('d-none');
+  });
+}
+
+async function decodeBarcodePhoto(input) {
+  const file = input.files[0];
+  if (!file) return;
+  input.value = '';
+  showStatus('barcode-status', '<span class="spinner-border spinner-border-sm me-1"></span>Decoding barcode...', 'info');
+  try {
+    const decoder = new Html5Qrcode("reader");
+    const result = await decoder.scanFileV2(file, /* showImage */ false);
+    document.getElementById('barcodeInput').value = result.decodedText;
+    await lookupBarcode();
+  } catch(e) {
+    showStatus('barcode-status',
+      'No barcode found in photo. Get closer, fill the frame with the barcode, and avoid glare.', 'warning');
+  }
+}
+
 function startScanner() {
   document.getElementById('startScanBtn').classList.add('d-none');
   document.getElementById('stopScanBtn').classList.remove('d-none');
