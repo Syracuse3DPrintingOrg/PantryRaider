@@ -31,11 +31,12 @@ integration listens to that input device and fires an event per keypress.
 
 ## Setup
 
-### 1. Pair the scanner with the HA host
+### 1. Confirm the scanner appears as an input device
 
-On HA OS: **Settings → System → Hardware → ⋮ → All Hardware** to confirm
-the scanner appears as an input device after pairing via the Bluetooth
-integration. Note its name (e.g. `Barcode Scanner HID`).
+Once the scanner is connected to the HA host, go to
+**Settings → System → Hardware → ⋮ → All Hardware** and confirm it appears
+as an input device. Note its exact name (e.g. `Barcode Scanner HID`) — you'll
+need it in the next step.
 
 ### 2. Configure keyboard_remote
 
