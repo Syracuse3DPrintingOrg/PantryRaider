@@ -4,61 +4,81 @@ from ..config import settings
 from ..models.food import FoodItem
 
 
+class GrocyError(Exception):
+    """Raised with Grocy's actual error message instead of a bare HTTP status."""
+
+
+# Shared connection pool for the life of the app
+_client = httpx.AsyncClient(timeout=15.0)
+
+
 class GrocyClient:
+    """One instance per request. Lookup tables (locations, groups, units,
+    products) are cached on the instance so multi-item imports don't re-fetch
+    them for every item."""
+
     def __init__(self):
         self.base = settings.grocy_base_url.rstrip("/") + "/api"
         self.headers = {
             "GROCY-API-KEY": settings.grocy_api_key,
             "Content-Type": "application/json",
         }
+        self._cache: dict[str, list[dict]] = {}
+
+    async def _request(self, method: str, path: str, body: dict | None = None) -> list | dict:
+        r = await _client.request(
+            method, f"{self.base}{path}", headers=self.headers, json=body
+        )
+        if r.status_code >= 400:
+            detail = r.text[:300].strip() or r.reason_phrase
+            raise GrocyError(f"Grocy {r.status_code} on {path}: {detail}")
+        return r.json() if r.content else {}
 
     async def _get(self, path: str) -> list | dict:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            r = await client.get(f"{self.base}{path}", headers=self.headers)
-            r.raise_for_status()
-            return r.json()
+        return await self._request("GET", path)
 
     async def _post(self, path: str, body: dict) -> dict:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            r = await client.post(f"{self.base}{path}", headers=self.headers, json=body)
-            r.raise_for_status()
-            return r.json() if r.content else {}
+        return await self._request("POST", path, body)
+
+    async def _cached_list(self, path: str) -> list[dict]:
+        if path not in self._cache:
+            self._cache[path] = await self._get(path)
+        return self._cache[path]
 
     async def get_products(self) -> list[dict]:
-        return await self._get("/objects/products")
-
-    async def get_product_groups(self) -> list[dict]:
-        return await self._get("/objects/product_groups")
-
-    async def get_locations(self) -> list[dict]:
-        return await self._get("/objects/locations")
+        return await self._cached_list("/objects/products")
 
     async def get_stock(self) -> list[dict]:
         return await self._get("/stock")
 
+    async def _ensure_object(self, path: str, name: str, extra: dict | None = None) -> int:
+        """Find an object by name (case-insensitive) or create it. Updates cache."""
+        rows = await self._cached_list(path)
+        for row in rows:
+            if row["name"].lower() == name.lower():
+                return int(row["id"])
+        result = await self._post(path, {"name": name, **(extra or {})})
+        new_id = int(result["created_object_id"])
+        rows.append({"id": new_id, "name": name})
+        return new_id
+
     async def ensure_location(self, name: str) -> int:
-        locations = await self.get_locations()
-        for loc in locations:
-            if loc["name"].lower() == name.lower():
-                return int(loc["id"])
-        result = await self._post("/objects/locations", {"name": name})
-        return int(result["created_object_id"])
+        return await self._ensure_object("/objects/locations", name)
 
     async def ensure_product_group(self, name: str) -> int:
-        groups = await self.get_product_groups()
-        for g in groups:
-            if g["name"].lower() == name.lower():
-                return int(g["id"])
-        result = await self._post("/objects/product_groups", {"name": name})
-        return int(result["created_object_id"])
+        return await self._ensure_object("/objects/product_groups", name)
 
     async def ensure_quantity_unit(self, name: str = "Piece") -> int:
-        units = await self._get("/objects/quantity_units")
-        for u in units:
-            if u["name"].lower() in (name.lower(), name.lower() + "s"):
-                return int(u["id"])
-        result = await self._post("/objects/quantity_units", {"name": name, "name_plural": name + "s"})
-        return int(result["created_object_id"])
+        rows = await self._cached_list("/objects/quantity_units")
+        for row in rows:
+            if row["name"].lower() in (name.lower(), name.lower() + "s"):
+                return int(row["id"])
+        result = await self._post(
+            "/objects/quantity_units", {"name": name, "name_plural": name + "s"}
+        )
+        new_id = int(result["created_object_id"])
+        rows.append({"id": new_id, "name": name})
+        return new_id
 
     async def ensure_product(self, item: FoodItem, location_id: int, group_id: int) -> int:
         products = await self.get_products()
@@ -76,7 +96,9 @@ class GrocyClient:
             "default_best_before_days": -1,
             "description": item.notes or "",
         })
-        return int(result["created_object_id"])
+        new_id = int(result["created_object_id"])
+        products.append({"id": new_id, "name": item.name})
+        return new_id
 
     async def add_stock(self, product_id: int, item: FoodItem) -> dict:
         best_before = (

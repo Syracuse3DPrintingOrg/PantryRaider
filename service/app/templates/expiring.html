@@ -87,7 +87,8 @@
         </td>
         <td>
           <form method="post" action="/ui/consume/{{ item.product_id }}" class="d-inline">
-            <button type="submit" class="btn btn-sm btn-outline-success btn-icon" title="Mark consumed">
+            <input type="hidden" name="amount" value="{{ item.amount }}">
+            <button type="submit" class="btn btn-sm btn-outline-success btn-icon" title="Mark all consumed">
               <i class="bi bi-check-lg"></i>
             </button>
           </form>

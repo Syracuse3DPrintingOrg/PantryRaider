@@ -38,10 +38,10 @@ async def expiring_page(request: Request, days: int = 7):
 
 
 @router.post("/consume/{product_id}")
-async def consume_item(product_id: int):
+async def consume_item(product_id: int, amount: float = Form(1.0)):
     grocy = GrocyClient()
     try:
-        await grocy.consume_stock(product_id)
+        await grocy.consume_stock(product_id, amount)
         msg = "Item marked as consumed."
         msg_type = "success"
     except Exception as e:

@@ -1,4 +1,6 @@
+import asyncio
 import json
+import time
 import google.generativeai as genai
 from .base import VisionProvider
 from ..models.food import AnalysisResult, FoodItem, StorageType, FoodCategory
@@ -39,6 +41,8 @@ Infer storage_type and category from your knowledge of the product.
 Return ONLY a valid JSON array. No markdown, no explanation.
 """.strip()
 
+_HEALTH_CACHE_TTL = 3600  # seconds — avoid hammering the API on every /health poll
+
 
 class GeminiProvider(VisionProvider):
     def __init__(self, api_key: str, model: str = "gemini-1.5-flash"):
@@ -48,55 +52,53 @@ class GeminiProvider(VisionProvider):
             model,
             generation_config={"response_mime_type": "application/json"},
         )
+        self._health_ok: bool | None = None
+        self._health_ts: float = 0.0
 
     async def analyze_food(self, image_data: bytes, mime_type: str) -> AnalysisResult:
         image_part = {"mime_type": mime_type, "data": image_data}
-        response = self.model.generate_content([_FOOD_PROMPT, image_part])
+        response = await self.model.generate_content_async([_FOOD_PROMPT, image_part])
         raw = response.text
         data = json.loads(raw)
-        item = FoodItem(
-            name=data.get("name", "Unknown"),
-            quantity=float(data.get("quantity", 1)),
-            unit=data.get("unit", "item"),
-            best_by_date=data.get("best_by_date"),
-            storage_type=_safe_storage(data.get("storage_type")),
-            category=_safe_category(data.get("category")),
-            brand=data.get("brand"),
-            notes=data.get("notes"),
-            confidence=float(data.get("confidence", 0.8)),
-        )
+        item = _parse_item(data, default_confidence=0.8)
         return AnalysisResult(items=[item], image_type="food", raw_response=raw)
 
     async def analyze_receipt(self, image_data: bytes, mime_type: str) -> AnalysisResult:
         image_part = {"mime_type": mime_type, "data": image_data}
-        response = self.model.generate_content([_RECEIPT_PROMPT, image_part])
+        response = await self.model.generate_content_async([_RECEIPT_PROMPT, image_part])
         raw = response.text
         data = json.loads(raw)
         if isinstance(data, dict):
             data = [data]
-        items = [
-            FoodItem(
-                name=d.get("name", "Unknown"),
-                quantity=float(d.get("quantity", 1)),
-                unit=d.get("unit", "item"),
-                best_by_date=d.get("best_by_date"),
-                storage_type=_safe_storage(d.get("storage_type")),
-                category=_safe_category(d.get("category")),
-                brand=d.get("brand"),
-                notes=d.get("notes"),
-                confidence=float(d.get("confidence", 0.8)),
-            )
-            for d in data
-        ]
+        items = [_parse_item(d, default_confidence=0.8) for d in data]
         return AnalysisResult(items=items, image_type="receipt", raw_response=raw)
 
     async def health_check(self) -> bool:
+        # Metadata lookup, not a billed generation; cached to keep /health cheap.
+        now = time.monotonic()
+        if self._health_ok is not None and now - self._health_ts < _HEALTH_CACHE_TTL:
+            return self._health_ok
         try:
-            m = genai.GenerativeModel(self.model_name)
-            m.generate_content("ping")
-            return True
+            await asyncio.to_thread(genai.get_model, f"models/{self.model_name}")
+            self._health_ok = True
         except Exception:
-            return False
+            self._health_ok = False
+        self._health_ts = now
+        return self._health_ok
+
+
+def _parse_item(data: dict, default_confidence: float) -> FoodItem:
+    return FoodItem(
+        name=data.get("name", "Unknown"),
+        quantity=float(data.get("quantity", 1) or 1),
+        unit=data.get("unit") or "item",
+        best_by_date=data.get("best_by_date"),
+        storage_type=_safe_storage(data.get("storage_type")),
+        category=_safe_category(data.get("category")),
+        brand=data.get("brand"),
+        notes=data.get("notes"),
+        confidence=float(data.get("confidence", default_confidence)),
+    )
 
 
 def _safe_storage(value: str | None) -> StorageType:

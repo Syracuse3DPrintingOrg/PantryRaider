@@ -114,23 +114,21 @@ def apply_defaults(item: FoodItem, db: Session) -> FoodItem:
     name_lower = item.name.lower()
     storage = item.storage_type.value
 
-    # Find all matching rules (name_pattern is a substring match)
     rows = (
         db.query(ExpiryDefault)
         .filter(ExpiryDefault.storage_type == storage)
-        .order_by(ExpiryDefault.priority.desc())
         .all()
     )
 
-    best_match: ExpiryDefault | None = None
-    best_pattern_len = 0
-    for row in rows:
-        if row.name_pattern.lower() in name_lower:
-            if len(row.name_pattern) > best_pattern_len:
-                best_match = row
-                best_pattern_len = len(row.name_pattern)
+    # name_pattern is a substring match; rules whose category matches the
+    # item's category win over name-only matches so e.g. "Chicken of the Sea"
+    # canned tuna doesn't inherit the fresh-chicken expiry.
+    matches = [r for r in rows if r.name_pattern.lower() in name_lower]
+    category_matches = [r for r in matches if r.category.lower() == item.category.value.lower()]
+    pool = category_matches or matches
 
-    if best_match:
+    if pool:
+        best_match = max(pool, key=lambda r: (len(r.name_pattern), r.priority))
         item.best_by_date = date.today() + timedelta(days=best_match.default_days)
     else:
         # Generic fallback by category

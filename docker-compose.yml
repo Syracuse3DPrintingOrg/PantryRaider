@@ -3,6 +3,8 @@ services:
     build: ./service
     container_name: foodassistant-service
     env_file: .env
+    environment:
+      - TZ=America/New_York
     volumes:
       - ./service/app:/app/app
       - ./service/data:/app/data

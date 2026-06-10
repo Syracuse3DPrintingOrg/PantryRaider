@@ -1,4 +1,6 @@
 import httpx
+from io import BytesIO
+from PIL import Image
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
 from sqlalchemy.orm import Session
 from ..database import get_db
@@ -78,6 +80,26 @@ def _off_storage(tags: list[str], category: FoodCategory) -> StorageType:
     return StorageType.room_temp
 
 
+# Phone photos are 4000px+; vision LLM cost scales with size. Receipts get a
+# higher cap so fine print stays legible on tall, narrow images.
+_MAX_DIM_FOOD = 1280
+_MAX_DIM_RECEIPT = 2048
+
+
+def _downscale(data: bytes, mime: str, max_dim: int = _MAX_DIM_FOOD) -> tuple[bytes, str]:
+    try:
+        img = Image.open(BytesIO(data))
+        if max(img.size) <= max_dim:
+            return data, mime
+        img.thumbnail((max_dim, max_dim))
+        buf = BytesIO()
+        img.convert("RGB").save(buf, format="JPEG", quality=85)
+        return buf.getvalue(), "image/jpeg"
+    except Exception:
+        # Unreadable by Pillow (e.g. HEIC without plugin) — send as-is
+        return data, mime
+
+
 @router.post("/food", response_model=AnalysisResult)
 async def analyze_food(
     file: UploadFile = File(...),
@@ -87,8 +109,8 @@ async def analyze_food(
     """Analyze a photo of one or more food items."""
     if file.content_type not in _ALLOWED_MIME:
         raise HTTPException(400, f"Unsupported image type: {file.content_type}")
-    data = await file.read()
-    result = await provider.analyze_food(data, file.content_type)
+    data, mime = _downscale(await file.read(), file.content_type)
+    result = await provider.analyze_food(data, mime)
     result.items = [apply_defaults(item, db) for item in result.items]
     return result
 
@@ -138,7 +160,7 @@ async def analyze_receipt(
     """Parse a receipt image and return all food items with defaults applied."""
     if file.content_type not in _ALLOWED_MIME:
         raise HTTPException(400, f"Unsupported image type: {file.content_type}")
-    data = await file.read()
-    result = await provider.analyze_receipt(data, file.content_type)
+    data, mime = _downscale(await file.read(), file.content_type, _MAX_DIM_RECEIPT)
+    result = await provider.analyze_receipt(data, mime)
     result.items = [apply_defaults(item, db) for item in result.items]
     return result
