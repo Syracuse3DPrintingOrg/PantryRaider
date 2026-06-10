@@ -197,6 +197,41 @@
     <div class="test-result" id="enrich-result"></div>
   </div>
 
+  <!-- ── Mealie ── -->
+  <div class="section-card">
+    <div class="section-title">
+      <i class="bi bi-journal-richtext text-primary"></i> Mealie (Recipes &amp; Meal Planning)
+      <span class="badge bg-secondary badge-req">Optional</span>
+    </div>
+    <p class="text-secondary small">
+      Connect a <a href="https://mealie.io" target="_blank">Mealie</a> instance to enable the
+      Meal Plan and Shopping List pages, plus recipe suggestions based on what's in your
+      inventory. Start one with <code>docker compose --profile with-mealie up -d</code>.
+    </p>
+    <div class="mb-3">
+      <label class="form-label">Mealie URL</label>
+      <input type="url" class="form-control" id="mealie_base_url"
+             placeholder="http://192.168.1.10:9285"
+             value="{{ s.mealie_base_url }}">
+      <div class="form-text">Use an address your browser can also reach — recipe links open it directly.</div>
+    </div>
+    <div class="mb-3">
+      <label class="form-label">Mealie API Token</label>
+      <div class="input-group">
+        <input type="password" class="form-control font-monospace" id="mealie_api_key"
+               placeholder="Mealie → User Profile → API Tokens"
+               value="{{ s.mealie_api_key }}">
+        <button class="btn btn-outline-secondary" type="button" onclick="toggleVis('mealie_api_key')">
+          <i class="bi bi-eye"></i>
+        </button>
+      </div>
+    </div>
+    <button class="btn btn-outline-info btn-sm" onclick="testMealie()">
+      <i class="bi bi-plug me-1"></i>Test Connection
+    </button>
+    <div class="test-result" id="mealie-result"></div>
+  </div>
+
   <!-- ── Authentication ── -->
   <div class="section-card">
     <div class="section-title">
@@ -308,6 +343,17 @@ async function testEnrich() {
   setResult('enrich-result', d.ok, d.ok ? d.message : d.error);
 }
 
+async function testMealie() {
+  setResult('mealie-result', true, 'Testing…');
+  const r = await fetch('/setup/test/mealie', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ mealie_base_url: val('mealie_base_url'), mealie_api_key: val('mealie_api_key') }),
+  });
+  const d = await r.json();
+  setResult('mealie-result', d.ok, d.ok ? d.message : d.error);
+}
+
 async function saveAll() {
   const btn = document.getElementById('saveBtn');
   btn.disabled = true;
@@ -328,6 +374,8 @@ async function saveAll() {
     enrich_model:    val('enrich_model'),
     grocy_base_url:  val('grocy_base_url'),
     grocy_api_key:   val('grocy_api_key'),
+    mealie_base_url: val('mealie_base_url'),
+    mealie_api_key:  val('mealie_api_key'),
     auth_password:   val('auth_password'),
     api_key:         val('api_key'),
   };

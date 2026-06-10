@@ -10,6 +10,7 @@ _SAVEABLE = [
     "anthropic_api_key", "anthropic_model",
     "barcode_enrichment", "enrich_provider", "enrich_model",
     "grocy_base_url", "grocy_api_key",
+    "mealie_base_url", "mealie_api_key",
     "secret_key", "auth_password", "api_key",
 ]
 
@@ -45,6 +46,14 @@ class Settings(BaseSettings):
 
     grocy_base_url: str = _DEFAULT_GROCY_URL
     grocy_api_key: str = ""
+
+    # Mealie recipe manager (optional) — enables the Meal Plan and Shopping
+    # List pages. Use a URL your browser can also reach (recipe links open it).
+    mealie_base_url: str = ""
+    mealie_api_key: str = ""
+
+    def mealie_configured(self) -> bool:
+        return bool(self.mealie_base_url and self.mealie_api_key)
 
     data_dir: str = "/app/data"
     secret_key: str = ""

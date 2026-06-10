@@ -8,7 +8,7 @@ from .config import settings
 from .database import engine, get_db, Base
 from .models import db_models  # noqa: F401 — registers models with Base
 from .services.defaults import seed_defaults
-from .routers import analyze, defaults, inventory, expiring, ui, setup, pending
+from .routers import analyze, defaults, inventory, expiring, ui, setup, pending, mealie
 
 
 @asynccontextmanager
@@ -39,6 +39,7 @@ app.add_middleware(
 # Paths that bypass both setup-redirect and auth checks
 _SETUP_BYPASS = {
     "/setup", "/setup/save", "/setup/test/grocy", "/setup/test/vision",
+    "/setup/test/provider", "/setup/test/mealie",
     "/health", "/docs", "/openapi.json", "/redoc",
 }
 _PUBLIC_PATHS = _SETUP_BYPASS | {"/ui/login"}
@@ -76,6 +77,7 @@ app.add_middleware(SessionMiddleware, secret_key=settings.secret_key, max_age=60
 
 app.include_router(setup.router)
 app.include_router(pending.router)
+app.include_router(mealie.router)
 app.include_router(analyze.router)
 app.include_router(defaults.router)
 app.include_router(inventory.router)

@@ -66,6 +66,26 @@ async def pending_page(request: Request):
     })
 
 
+@router.get("/mealplan", response_class=HTMLResponse)
+async def mealplan_page(request: Request):
+    return templates.TemplateResponse("mealplan.html", {
+        "request": request,
+        "active": "mealplan",
+        "mealie_configured": settings.mealie_configured(),
+        "mealie_url": settings.mealie_base_url.rstrip("/"),
+    })
+
+
+@router.get("/shopping", response_class=HTMLResponse)
+async def shopping_page(request: Request):
+    return templates.TemplateResponse("shopping.html", {
+        "request": request,
+        "active": "shopping",
+        "mealie_configured": settings.mealie_configured(),
+        "mealie_url": settings.mealie_base_url.rstrip("/"),
+    })
+
+
 @router.get("/expiring", response_class=HTMLResponse)
 async def expiring_page(request: Request, days: int = 7):
     grocy = GrocyClient()

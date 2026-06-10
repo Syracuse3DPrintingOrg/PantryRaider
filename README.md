@@ -11,6 +11,7 @@ barcode lookup, and Home Assistant integration. Uses
 - **Receipt import** — photograph a grocery receipt; every food item is extracted and queued for import
 - **Barcode lookup** — camera scanner, headless wireless scanner, or manual entry, backed by Open Food Facts; the LLM cleans up messy product names and picks the right category/storage/shelf-life (`BARCODE_ENRICHMENT=llm`, works fully local with Ollama)
 - **Expiry defaults** — editable rules table fills in best-by dates automatically; everything is overridable before import
+- **Recipes, meal planning & shopping lists** — optional [Mealie](https://mealie.io) integration: week meal-plan view, shopping list with check-off, and "What can I cook?" recipe suggestions ranked by what's in your inventory (recipes that use soon-to-expire items float to the top)
 - **Web UI** — inventory dashboard, expiring-items view, add-food page, defaults editor
 - **Home Assistant** — REST sensors, notification automations, Lovelace dashboard with inventory panels
 - **Web setup wizard** — configure everything at `/setup` with connection testers; no file editing required
@@ -22,7 +23,8 @@ barcode lookup, and Home Assistant integration. Uses
 Browser/Phone ──► FoodAssistant service (FastAPI, :9284)
                     ├─► Gemini or Ollama (vision LLM)
                     ├─► Open Food Facts (barcode lookup)
-                    └─► Grocy (:9383) — inventory, stock, consumption log
+                    ├─► Grocy (:9383) — inventory, stock, consumption log
+                    └─► Mealie (:9285, optional) — recipes, meal plan, shopping lists
 Home Assistant ◄── REST sensors ◄── /expiring and /inventory endpoints
 ```
 
@@ -60,7 +62,20 @@ docker exec foodassistant-ollama ollama pull llava:7b
 In the setup wizard choose **Ollama** as the provider and set the URL to
 `http://ollama:11434`.
 
-You can combine profiles: `docker compose --profile with-grocy --profile with-ollama up -d`
+### Option D — Recipes & meal planning with Mealie
+
+```bash
+docker compose --profile with-mealie up -d --build
+```
+
+Mealie will be available at **http://localhost:9285** (first login:
+`changeme@example.com` / `MyPassword` — change it). Create an API token under
+**User Profile → API Tokens** and paste it into the setup wizard. The
+**Meal Plan** and **Shopping** tabs light up once configured. Already running
+Mealie elsewhere? Just point the setup wizard at it — use a URL your browser
+can also reach, since recipe links open Mealie directly.
+
+You can combine profiles: `docker compose --profile with-grocy --profile with-ollama --profile with-mealie up -d`
 
 ---
 
@@ -97,6 +112,9 @@ and the Lovelace dashboard (includes a read-only inventory panel grid).
 | `/ui/expiring` | Expiring items view |
 | `/ui/add` | Add food (barcode / photo / manual) |
 | `/ui/defaults` | Expiry defaults editor |
+| `/ui/mealplan` | Week meal plan + recipe suggestions (Mealie) |
+| `/ui/shopping` | Shopping list with check-off (Mealie) |
+| `GET /mealie/suggest` | Recipes ranked by inventory coverage |
 | `POST /analyze/food` | Photo → parsed item(s) |
 | `POST /analyze/receipt` | Receipt → parsed item list |
 | `GET /analyze/barcode/{code}` | Open Food Facts lookup |

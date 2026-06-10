@@ -34,6 +34,25 @@ services:
       - "9383:80"
     restart: unless-stopped
 
+  # Optional Mealie recipe manager / meal planner — only started with:
+  #   docker compose --profile with-mealie up -d
+  # First run: open http://localhost:9285, log in (changeme@example.com /
+  # MyPassword — change it!), then create an API token under
+  # User Profile → API Tokens and paste it into /setup.
+  mealie:
+    image: ghcr.io/mealie-recipes/mealie:latest
+    container_name: foodassistant-mealie
+    profiles: ["with-mealie"]
+    environment:
+      - TZ=America/New_York
+      - ALLOW_SIGNUP=false
+      - BASE_URL=http://localhost:9285
+    volumes:
+      - ./mealie/data:/app/data
+    ports:
+      - "9285:9000"
+    restart: unless-stopped
+
   # Ollama local vision — only started with:
   #   docker compose --profile with-ollama up -d
   # After starting, pull a vision model:

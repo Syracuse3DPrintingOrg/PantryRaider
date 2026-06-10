@@ -1,0 +1,236 @@
+{% extends "base.html" %}
+{% block title %}Meal Plan — FoodAssistant{% endblock %}
+{% block content %}
+
+{% if not mealie_configured %}
+<div class="alert alert-info mt-3">
+  <i class="bi bi-journal-richtext me-2"></i>
+  Meal planning is powered by <a href="https://mealie.io" target="_blank">Mealie</a>.
+  Add your Mealie URL and API token in <a href="/setup">Settings</a> to enable this page.
+</div>
+{% else %}
+
+<div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mt-3 mb-3">
+  <h4 class="mb-0"><i class="bi bi-calendar-week me-2"></i>Meal Plan</h4>
+  <div class="d-flex gap-2">
+    <a class="btn btn-sm btn-outline-secondary" href="{{ mealie_url }}" target="_blank">
+      <i class="bi bi-box-arrow-up-right me-1"></i>Open Mealie
+    </a>
+    <button class="btn btn-sm btn-primary" data-bs-toggle="modal" data-bs-target="#addEntryModal">
+      <i class="bi bi-plus-lg me-1"></i>Add Meal
+    </button>
+  </div>
+</div>
+
+<div class="row g-3">
+  <div class="col-lg-8">
+    <div id="plan" class="vstack gap-2">
+      <div class="text-secondary"><span class="spinner-border spinner-border-sm me-2"></span>Loading meal plan…</div>
+    </div>
+  </div>
+
+  <div class="col-lg-4">
+    <div class="card">
+      <div class="card-header d-flex align-items-center justify-content-between">
+        <span><i class="bi bi-lightbulb me-2"></i>What can I cook?</span>
+        <button class="btn btn-sm btn-outline-secondary" onclick="loadSuggestions()" title="Refresh">
+          <i class="bi bi-arrow-clockwise"></i>
+        </button>
+      </div>
+      <div class="card-body" id="suggestions">
+        <div class="text-secondary"><span class="spinner-border spinner-border-sm me-2"></span>Matching recipes to your inventory…</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Add entry modal -->
+<div class="modal fade" id="addEntryModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Add to meal plan</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body vstack gap-3">
+        <div class="row g-2">
+          <div class="col-7">
+            <label class="form-label">Date</label>
+            <input type="date" class="form-control" id="entry-date">
+          </div>
+          <div class="col-5">
+            <label class="form-label">Meal</label>
+            <select class="form-select" id="entry-type">
+              <option value="breakfast">Breakfast</option>
+              <option value="lunch">Lunch</option>
+              <option value="dinner" selected>Dinner</option>
+              <option value="side">Side</option>
+            </select>
+          </div>
+        </div>
+        <div>
+          <label class="form-label">Recipe (search Mealie)</label>
+          <input type="text" class="form-control" id="recipe-search" placeholder="Type to search…" autocomplete="off">
+          <div class="list-group mt-1" id="recipe-results"></div>
+          <input type="hidden" id="recipe-id">
+          <div class="form-text" id="recipe-picked"></div>
+        </div>
+        <div>
+          <label class="form-label">…or a free-text title</label>
+          <input type="text" class="form-control" id="entry-title" placeholder="e.g. Leftovers, Takeout">
+        </div>
+        <div class="text-danger small d-none" id="entry-error"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button class="btn btn-primary" onclick="saveEntry()">Add</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{% if mealie_configured %}
+<script>
+const MEALIE_URL = {{ mealie_url | tojson }};
+const TYPE_ORDER = {breakfast: 0, lunch: 1, dinner: 2, side: 3};
+const TYPE_BADGE = {breakfast: 'info', lunch: 'success', dinner: 'primary', side: 'secondary'};
+
+function dayLabel(iso) {
+  const d = new Date(iso + 'T00:00:00');
+  const today = new Date(); today.setHours(0,0,0,0);
+  const diff = Math.round((d - today) / 86400000);
+  const name = d.toLocaleDateString(undefined, {weekday: 'long', month: 'short', day: 'numeric'});
+  if (diff === 0) return 'Today — ' + name;
+  if (diff === 1) return 'Tomorrow — ' + name;
+  return name;
+}
+
+async function loadPlan() {
+  const el = document.getElementById('plan');
+  try {
+    const r = await fetch('/mealie/mealplan?days=7');
+    if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
+    const data = await r.json();
+    el.innerHTML = '';
+    for (const [day, entries] of Object.entries(data.days)) {
+      entries.sort((a, b) => (TYPE_ORDER[a.entry_type] ?? 9) - (TYPE_ORDER[b.entry_type] ?? 9));
+      const card = document.createElement('div');
+      card.className = 'card';
+      const rows = entries.length ? entries.map(e => `
+        <div class="d-flex align-items-center justify-content-between py-1">
+          <div>
+            <span class="badge bg-${TYPE_BADGE[e.entry_type] || 'secondary'} me-2">${e.entry_type}</span>
+            ${e.recipe_slug
+              ? `<a href="${MEALIE_URL}/g/home/r/${e.recipe_slug}" target="_blank">${e.title}</a>`
+              : e.title}
+          </div>
+          <button class="btn btn-sm btn-outline-danger btn-icon" onclick="removeEntry(${e.id})" title="Remove">
+            <i class="bi bi-x-lg"></i>
+          </button>
+        </div>`).join('') : '<div class="text-secondary small py-1">Nothing planned</div>';
+      card.innerHTML = `
+        <div class="card-body py-2">
+          <div class="fw-semibold mb-1">${dayLabel(day)}</div>
+          ${rows}
+        </div>`;
+      el.appendChild(card);
+    }
+  } catch (e) {
+    el.innerHTML = `<div class="alert alert-danger">Could not load meal plan: ${e.message}</div>`;
+  }
+}
+
+async function removeEntry(id) {
+  await fetch('/mealie/mealplan/' + id, {method: 'DELETE'});
+  loadPlan();
+}
+
+async function loadSuggestions() {
+  const el = document.getElementById('suggestions');
+  el.innerHTML = '<div class="text-secondary"><span class="spinner-border spinner-border-sm me-2"></span>Matching recipes to your inventory…</div>';
+  try {
+    const r = await fetch('/mealie/suggest?top=8');
+    if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
+    const data = await r.json();
+    if (!data.suggestions.length) {
+      el.innerHTML = `<div class="text-secondary small">No matches yet — add recipes in Mealie
+        (${data.recipes_considered} recipes checked against ${data.inventory_items} inventory items).</div>`;
+      return;
+    }
+    el.innerHTML = data.suggestions.map(s => `
+      <div class="border-bottom pb-2 mb-2">
+        <div class="d-flex justify-content-between align-items-start">
+          <a href="${MEALIE_URL}/g/home/r/${s.slug}" target="_blank" class="fw-semibold">${s.name}</a>
+          <span class="badge bg-secondary ms-2" title="Ingredients you already have">
+            ${s.matched_ingredients.length}/${s.total_ingredients}</span>
+        </div>
+        ${s.expiring_items_used.length ? `
+          <div class="small urgency-3d mt-1">
+            <i class="bi bi-clock-history me-1"></i>Uses expiring: ${s.expiring_items_used.join(', ')}
+          </div>` : ''}
+        <div class="small text-secondary mt-1">Have: ${s.matched_ingredients.slice(0, 6).join(', ')}${s.matched_ingredients.length > 6 ? '…' : ''}</div>
+      </div>`).join('');
+  } catch (e) {
+    el.innerHTML = `<div class="text-danger small">Could not load suggestions: ${e.message}</div>`;
+  }
+}
+
+// Recipe search in the add-entry modal (debounced)
+let searchTimer = null;
+document.getElementById('recipe-search').addEventListener('input', e => {
+  clearTimeout(searchTimer);
+  const q = e.target.value.trim();
+  document.getElementById('recipe-id').value = '';
+  document.getElementById('recipe-picked').textContent = '';
+  if (q.length < 2) { document.getElementById('recipe-results').innerHTML = ''; return; }
+  searchTimer = setTimeout(async () => {
+    const r = await fetch('/mealie/recipes?search=' + encodeURIComponent(q));
+    const items = r.ok ? await r.json() : [];
+    document.getElementById('recipe-results').innerHTML = items.slice(0, 6).map(it =>
+      `<button type="button" class="list-group-item list-group-item-action py-1"
+        onclick="pickRecipe('${it.id}', this.textContent)">${it.name}</button>`).join('');
+  }, 300);
+});
+
+function pickRecipe(id, name) {
+  document.getElementById('recipe-id').value = id;
+  document.getElementById('recipe-picked').textContent = 'Selected: ' + name.trim();
+  document.getElementById('recipe-results').innerHTML = '';
+}
+
+async function saveEntry() {
+  const err = document.getElementById('entry-error');
+  err.classList.add('d-none');
+  const body = {
+    date: document.getElementById('entry-date').value,
+    entry_type: document.getElementById('entry-type').value,
+    recipe_id: document.getElementById('recipe-id').value || null,
+    title: document.getElementById('entry-title').value.trim(),
+  };
+  if (!body.date) { err.textContent = 'Pick a date.'; err.classList.remove('d-none'); return; }
+  const r = await fetch('/mealie/mealplan', {
+    method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body),
+  });
+  if (!r.ok) {
+    err.textContent = (await r.json()).detail || 'Failed to add entry.';
+    err.classList.remove('d-none');
+    return;
+  }
+  bootstrap.Modal.getInstance(document.getElementById('addEntryModal')).hide();
+  document.getElementById('entry-title').value = '';
+  document.getElementById('recipe-search').value = '';
+  document.getElementById('recipe-id').value = '';
+  document.getElementById('recipe-picked').textContent = '';
+  loadPlan();
+}
+
+document.getElementById('entry-date').value = new Date().toISOString().slice(0, 10);
+loadPlan();
+loadSuggestions();
+</script>
+{% endif %}
+{% endblock %}

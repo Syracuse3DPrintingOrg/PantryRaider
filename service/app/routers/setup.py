@@ -26,6 +26,8 @@ class SetupPayload(BaseModel):
     enrich_model: str = ""
     grocy_base_url: str = ""
     grocy_api_key: str = ""
+    mealie_base_url: str = ""
+    mealie_api_key: str = ""
     auth_password: str = ""
     api_key: str = ""
 
@@ -33,6 +35,11 @@ class SetupPayload(BaseModel):
 class TestGrocyPayload(BaseModel):
     grocy_base_url: str
     grocy_api_key: str
+
+
+class TestMealiePayload(BaseModel):
+    mealie_base_url: str
+    mealie_api_key: str
 
 
 class TestProviderPayload(BaseModel):
@@ -55,6 +62,8 @@ async def setup_page(request: Request):
 async def save_setup(payload: SetupPayload):
     settings.save(payload.model_dump())
     reset_providers()   # apply new provider/model/key without a restart
+    from ..services.mealie import reset_cache as reset_mealie_cache
+    reset_mealie_cache()
     return {"ok": True}
 
 
@@ -72,6 +81,25 @@ async def test_grocy(payload: TestGrocyPayload):
         if r.status_code == 200:
             version = r.json().get("grocy_version", "?")
             return {"ok": True, "message": f"Connected — Grocy {version}"}
+        return {"ok": False, "error": f"HTTP {r.status_code}: {r.text[:200]}"}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+@router.post("/test/mealie")
+async def test_mealie(payload: TestMealiePayload):
+    url = payload.mealie_base_url.rstrip("/")
+    if not url or not payload.mealie_api_key:
+        return JSONResponse({"ok": False, "error": "URL and API token are both required."})
+    try:
+        async with httpx.AsyncClient(timeout=6.0) as client:
+            r = await client.get(
+                f"{url}/api/users/self",
+                headers={"Authorization": f"Bearer {payload.mealie_api_key}"},
+            )
+        if r.status_code == 200:
+            user = r.json().get("username") or r.json().get("email", "?")
+            return {"ok": True, "message": f"Connected — authenticated as {user}"}
         return {"ok": False, "error": f"HTTP {r.status_code}: {r.text[:200]}"}
     except Exception as e:
         return {"ok": False, "error": str(e)}
