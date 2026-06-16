@@ -28,7 +28,7 @@ services:
         required: false
 
   grocy:
-    image: lscr.io/linuxserver/grocy:latest
+    image: lscr.io/linuxserver/grocy:4.6.0   # pinned; see "Upgrading pinned images" in README
     container_name: foodassistant-grocy
     profiles: ["with-grocy"]
     environment:
@@ -42,7 +42,7 @@ services:
     restart: unless-stopped
 
   mealie:
-    image: ghcr.io/mealie-recipes/mealie:latest
+    image: ghcr.io/mealie-recipes/mealie:v3.19.2   # pinned; see "Upgrading pinned images" in README
     container_name: foodassistant-mealie
     profiles: ["with-mealie"]
     environment:
@@ -56,7 +56,7 @@ services:
     restart: unless-stopped
 
   ollama:
-    image: ollama/ollama:latest
+    image: ollama/ollama:0.30.8   # pinned; see "Upgrading pinned images" in README
     container_name: foodassistant-ollama
     profiles: ["with-ollama"]
     volumes:

@@ -138,6 +138,31 @@ git pull
 docker compose up -d --build service
 ```
 
+### Upgrading pinned images
+
+The bundled backends (Grocy, Mealie, Ollama) are pinned to specific versions in
+the compose files rather than `:latest`, so an unattended `docker compose pull`
+can't silently move you onto a breaking release. Current pins:
+
+| Service | Image | Tag |
+|---------|-------|-----|
+| Grocy   | `lscr.io/linuxserver/grocy` | `4.6.0` |
+| Mealie  | `ghcr.io/mealie-recipes/mealie` | `v3.19.2` |
+| Ollama  | `ollama/ollama` | `0.30.8` |
+
+To move a backend to a newer version, **back up first** (`./scripts/backup.sh`
+plus the relevant `./grocy` / `./mealie` data dir), then bump the tag in
+`docker-compose.yml` (or `docker-compose.prod.yml`) and recreate just that
+service:
+
+```bash
+docker compose up -d grocy   # or mealie / ollama
+```
+
+Check each project's release notes before a major bump - Mealie in particular
+has had breaking schema migrations between major versions. FoodAssistant's own
+image is versioned separately via `FOODASSISTANT_TAG` (see above).
+
 ## API Endpoints
 
 | Endpoint | Purpose |
