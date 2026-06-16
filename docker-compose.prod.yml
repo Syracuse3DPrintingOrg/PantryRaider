@@ -1,0 +1,66 @@
+# Production compose: runs the prebuilt image from GHCR — no local build needed.
+#
+#   curl -fsSL https://raw.githubusercontent.com/Syracuse3DPrinting/FoodAssistant/main/docker-compose.prod.yml -o docker-compose.yml
+#   docker compose up -d
+#   # then open http://YOUR-HOST:9284/setup
+#
+# Add backends with profiles, e.g.:
+#   docker compose --profile with-grocy --profile with-mealie up -d
+#
+# Pin a version by setting FOODASSISTANT_TAG (e.g. v1.0.0); defaults to latest.
+services:
+  service:
+    image: ghcr.io/syracuse3dprinting/foodassistant:${FOODASSISTANT_TAG:-latest}
+    container_name: foodassistant-service
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      - TZ=${TZ:-America/New_York}
+    volumes:
+      - ./data:/app/data
+    ports:
+      - "9284:8000"
+    restart: unless-stopped
+    depends_on:
+      grocy:
+        condition: service_started
+        required: false
+
+  grocy:
+    image: lscr.io/linuxserver/grocy:latest
+    container_name: foodassistant-grocy
+    profiles: ["with-grocy"]
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=${TZ:-America/New_York}
+    volumes:
+      - ./grocy:/config
+    ports:
+      - "9383:80"
+    restart: unless-stopped
+
+  mealie:
+    image: ghcr.io/mealie-recipes/mealie:latest
+    container_name: foodassistant-mealie
+    profiles: ["with-mealie"]
+    environment:
+      - TZ=${TZ:-America/New_York}
+      - ALLOW_SIGNUP=false
+      - BASE_URL=http://localhost:9285
+    volumes:
+      - ./mealie:/app/data
+    ports:
+      - "9285:9000"
+    restart: unless-stopped
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: foodassistant-ollama
+    profiles: ["with-ollama"]
+    volumes:
+      - ./ollama:/root/.ollama
+    ports:
+      - "11434:11434"
+    restart: unless-stopped

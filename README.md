@@ -37,7 +37,15 @@ For a fully local setup with no external dependencies, use Ollama for both visio
 
 ## Quick Start
 
-**Prerequisites:** [Docker](https://docs.docker.com/get-docker/) and [Docker Compose](https://docs.docker.com/compose/install/) on any Linux, macOS, or Windows machine (including Proxmox LXC, TrueNAS SCALE, and Unraid).
+**Prerequisites:** [Docker](https://docs.docker.com/get-docker/) and [Docker Compose](https://docs.docker.com/compose/install/) on any Linux, macOS, or Windows machine (including Proxmox LXC, TrueNAS SCALE, and Unraid). Running Home Assistant OS instead of a general-purpose server? See [Home Assistant add-on](#home-assistant) below for a one-click install with no separate login.
+
+### Fastest - prebuilt image, no build step
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Syracuse3DPrinting/FoodAssistant/main/scripts/install.sh | bash
+```
+
+This pulls the published image, writes a `docker-compose.yml`, and starts FoodAssistant plus a bundled Grocy. Then open **http://YOUR-HOST:9284/setup**. Prefer to do it by hand? Download [`docker-compose.prod.yml`](docker-compose.prod.yml), rename it to `docker-compose.yml`, and run `docker compose up -d`.
 
 ### Option A - FoodAssistant only (you already have Grocy)
 
@@ -47,7 +55,7 @@ cd FoodAssistant
 docker compose up -d --build
 ```
 
-Open **http://YOUR-HOST:9284/setup**, enter your Grocy URL and API key plus an AI provider key, test the connections, then save.
+Open **http://YOUR-HOST:9284/setup**, set a UI password (required by default), enter your Grocy URL and API key plus an AI provider key, test the connections, then save.
 
 ### Option B - FoodAssistant with Grocy included
 

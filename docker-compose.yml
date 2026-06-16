@@ -5,6 +5,9 @@ services:
     env_file: .env
     environment:
       - TZ=${TZ:-America/New_York}
+    # Dev workflow: mount the code and run with --reload so `git pull` applies
+    # changes live. The published image's default command omits --reload.
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
     volumes:
       - ./service/app:/app/app
       - ./service/data:/app/data
