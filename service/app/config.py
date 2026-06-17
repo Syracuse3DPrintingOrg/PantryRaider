@@ -179,7 +179,13 @@ if _sf.exists():
     except Exception:
         pass
 
-# Auto-generate SECRET_KEY on first run so it stays stable across restarts
+# Auto-generate SECRET_KEY on first run so it stays stable across restarts.
+# Persisting is best-effort: if data_dir is not writable (CI, tests, or an
+# import before the volume is mounted) keep the in-memory key for this process
+# rather than crashing on import.
 if not settings.secret_key:
     object.__setattr__(settings, "secret_key", _secrets.token_hex(32))
-    settings.save({"secret_key": settings.secret_key})
+    try:
+        settings.save({"secret_key": settings.secret_key})
+    except OSError:
+        pass
