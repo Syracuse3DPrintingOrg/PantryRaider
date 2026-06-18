@@ -35,5 +35,6 @@ itsdangerous==2.2.0
 # TOTP two-factor authentication (required)
 pyotp==2.10.0
 
-# QR code generation for TOTP setup page (required)
+# QR code generation for TOTP setup page and phone deep-link (required)
 qrcode[pil]==8.2
+qrcode[svg]==8.2

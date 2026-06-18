@@ -61,6 +61,11 @@
         </ul>
         <ul class="navbar-nav">
           <li class="nav-item">
+            <button class="nav-link btn btn-link" data-bs-toggle="modal" data-bs-target="#qrModal" title="Phone QR code">
+              <i class="bi bi-qr-code"></i>
+            </button>
+          </li>
+          <li class="nav-item">
             <a class="nav-link {% if active == 'setup' %}active{% endif %}" href="setup" title="Settings">
               <i class="bi bi-gear"></i>
             </a>
@@ -71,6 +76,32 @@
             </a>
           </li>
         </ul>
+
+        <!-- QR deep-link modal -->
+        <div class="modal fade" id="qrModal" tabindex="-1" aria-labelledby="qrModalLabel" aria-hidden="true">
+          <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+              <div class="modal-header">
+                <h5 class="modal-title" id="qrModalLabel"><i class="bi bi-qr-code me-2"></i>Add items from your phone</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+              </div>
+              <div class="modal-body text-center">
+                <img src="ui/qr" alt="QR code" class="img-fluid mb-3" style="max-width: 240px;">
+                <p class="mb-2">Scan with your phone to add items</p>
+                <code id="qr-url" class="user-select-all small text-muted"></code>
+              </div>
+              <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Dismiss</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <script>
+          (function () {
+            var urlEl = document.getElementById('qr-url');
+            if (urlEl) { urlEl.textContent = 'http://' + window.location.host + '/ui/add'; }
+          })();
+        </script>
       </div>
     </div>
   </nav>
