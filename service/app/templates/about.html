@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block title %}About &amp; Credits — FoodAssistant{% endblock %}
+
+{% block content %}
+<div class="mt-3 mb-4">
+  <h4><i class="bi bi-info-circle me-2"></i>About &amp; Credits</h4>
+  <p class="text-secondary">FoodAssistant is built on top of a number of excellent open-source projects.
+  If this project has been useful to you, please consider donating to the open-source projects listed below.</p>
+</div>
+
+<div class="row g-3">
+
+  <div class="col-md-6 col-lg-4">
+    <div class="card h-100">
+      <div class="card-body">
+        <h5 class="card-title"><a href="https://grocy.info" target="_blank" rel="noopener">Grocy</a></h5>
+        <p class="card-text text-secondary">Inventory backbone. Grocy handles product storage, stock tracking, and expiry management. FoodAssistant is essentially a better front-end for Grocy.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-6 col-lg-4">
+    <div class="card h-100">
+      <div class="card-body">
+        <h5 class="card-title"><a href="https://mealie.io" target="_blank" rel="noopener">Mealie</a></h5>
+        <p class="card-text text-secondary">Recipes and meal planning. Mealie stores your recipe library, drives the meal plan week view, and manages shopping lists.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-6 col-lg-4">
+    <div class="card h-100">
+      <div class="card-body">
+        <h5 class="card-title"><a href="https://world.openfoodfacts.org" target="_blank" rel="noopener">Open Food Facts</a></h5>
+        <p class="card-text text-secondary">Barcode database. Product names, brands, and nutritional data come from Open Food Facts when you scan a barcode.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-6 col-lg-4">
+    <div class="card h-100">
+      <div class="card-body">
+        <h5 class="card-title"><a href="https://www.themealdb.com" target="_blank" rel="noopener">TheMealDB</a></h5>
+        <p class="card-text text-secondary">Recipe database. Browse and import from TheMealDB's free community recipe collection when adding recipes without Mealie.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-6 col-lg-4">
+    <div class="card h-100">
+      <div class="card-body">
+        <h5 class="card-title"><a href="https://getbootstrap.com" target="_blank" rel="noopener">Bootstrap</a></h5>
+        <p class="card-text text-secondary">UI framework. The responsive layout, dark theme, and all component styling come from Bootstrap 5 and Bootstrap Icons.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-6 col-lg-4">
+    <div class="card h-100">
+      <div class="card-body">
+        <h5 class="card-title"><a href="https://fastapi.tiangolo.com" target="_blank" rel="noopener">FastAPI</a></h5>
+        <p class="card-text text-secondary">Web framework. All API routes, background tasks, and the Jinja2 template rendering run on FastAPI.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-6 col-lg-4">
+    <div class="card h-100">
+      <div class="card-body">
+        <h5 class="card-title">Pillow</h5>
+        <p class="card-text text-secondary">Image processing. Photo analysis and barcode camera capture rely on Pillow for image resizing and format conversion before sending to the vision model.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-6 col-lg-4">
+    <div class="card h-100">
+      <div class="card-body">
+        <h5 class="card-title"><a href="https://www.home-assistant.io" target="_blank" rel="noopener">Home Assistant</a></h5>
+        <p class="card-text text-secondary">Automation integration. REST sensors, barcode scanner automations, and the Lovelace inventory dashboard all tie into Home Assistant.</p>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- Hardware and cloud plans coming soon. -->
+
+{% endblock %}
