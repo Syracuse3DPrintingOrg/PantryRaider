@@ -75,6 +75,10 @@ async def require_auth(request: Request, call_next):
     if request.url.path in _PUBLIC_PATHS or _is_static(request.url.path):
         return await call_next(request)
 
+    # Requests from the loopback address are always trusted (local kiosk, cron jobs).
+    if request.client and request.client.host in ("127.0.0.1", "::1"):
+        return await call_next(request)
+
     # totp_pending means password was accepted but TOTP not yet verified — not authed
     session_ok = request.session.get("authed", False) and not request.session.get("totp_pending")
     key_ok = bool(settings.api_key) and secrets.compare_digest(
