@@ -180,6 +180,8 @@ async def import_recipe_url(payload: ImportUrlPayload):
     from ..dependencies import get_enrich_provider
     try:
         recipe = await get_enrich_provider().extract_recipe(page_text=page_text)
+    except NotImplementedError:
+        raise HTTPException(503, {"detail": "AI provider not configured", "setup_url": "/setup"})
     except Exception as e:
         raise HTTPException(502, f"LLM extraction failed: {e}")
     if not recipe or not recipe.get("name"):
@@ -201,6 +203,8 @@ async def extract_recipe_photo(file: UploadFile = File(...)):
     try:
         recipe = await get_vision_provider().extract_recipe(
             image_data=image_data, mime_type=file.content_type or "image/jpeg")
+    except NotImplementedError:
+        raise HTTPException(503, {"detail": "AI provider not configured", "setup_url": "/setup"})
     except Exception as e:
         raise HTTPException(502, f"Vision extraction failed: {e}")
     if not recipe or not recipe.get("name"):
@@ -303,6 +307,8 @@ async def generate_recipe(name: str = Body(..., embed=True)):
     provider = get_enrich_provider()
     try:
         recipe = await provider.generate_recipe(name.strip())
+    except NotImplementedError:
+        raise HTTPException(503, {"detail": "AI provider not configured", "setup_url": "/setup"})
     except Exception as e:
         raise HTTPException(502, f"LLM error: {e}")
     if not recipe or not recipe.get("name"):
@@ -343,6 +349,8 @@ async def suggest_llm(payload: SuggestLLMPayload = Body(default_factory=SuggestL
         suggestions = await provider.suggest_from_inventory(
             item_names, limit=settings.suggest_per_tier,
             preferences=combined_prefs)
+    except NotImplementedError:
+        raise HTTPException(503, {"detail": "AI provider not configured", "setup_url": "/setup"})
     except Exception as e:
         raise HTTPException(502, f"LLM error: {e}")
     return {"suggestions": suggestions or [], "inventory_items": len(stock)}

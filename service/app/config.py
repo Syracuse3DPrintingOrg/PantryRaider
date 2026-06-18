@@ -193,13 +193,15 @@ class Settings(BaseSettings):
             "anthropic": self.anthropic_api_key,
         }.get(provider, "ollama-no-key-needed" if provider == "ollama" else "")
 
+    def ai_configured(self) -> bool:
+        """True when a vision provider key is present and usable."""
+        return bool(self.provider_key(self.vision_provider))
+
     def is_configured(self) -> bool:
         """True when the minimum required settings have been supplied."""
         if not self.grocy_api_key:
             return False
         if not self.grocy_base_url or self.grocy_base_url == _DEFAULT_GROCY_URL:
-            return False
-        if not self.provider_key(self.vision_provider):
             return False
         # Secure by default: refuse to be usable without a password unless the
         # operator has explicitly delegated auth to an outer layer.

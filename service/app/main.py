@@ -124,8 +124,12 @@ async def health():
     from .services.grocy import GrocyClient
     provider = get_vision_provider()
     grocy = GrocyClient()
+    if settings.ai_configured():
+        vision_status = "ok" if await provider.health_check() else "error"
+    else:
+        vision_status = "not configured"
     return {
         "status": "ok",
-        "vision_provider": "ok" if await provider.health_check() else "error",
+        "vision_provider": vision_status,
         "grocy": "ok" if await grocy.health_check() else "error",
     }

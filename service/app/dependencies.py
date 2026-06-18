@@ -5,6 +5,9 @@ from .providers.base import VisionProvider
 
 @lru_cache(maxsize=1)
 def get_vision_provider() -> VisionProvider:
+    if not settings.ai_configured():
+        from .providers.noop import NoOpProvider
+        return NoOpProvider()
     return _build_provider(settings.vision_provider)
 
 
@@ -16,6 +19,9 @@ def get_enrich_provider() -> VisionProvider:
     overrides the provider's default model for enrichment only.
     """
     name = settings.enrich_provider or settings.vision_provider
+    if not settings.provider_key(name):
+        from .providers.noop import NoOpProvider
+        return NoOpProvider()
     if name == settings.vision_provider and not settings.enrich_model:
         return get_vision_provider()
     return _build_provider(name, model=settings.enrich_model or None)
