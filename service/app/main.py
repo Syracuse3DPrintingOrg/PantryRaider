@@ -11,7 +11,7 @@ from .database import engine, get_db, Base
 from .ingress import ingress_redirect
 from .models import db_models  # noqa: F401 — registers models with Base
 from .services.defaults import seed_defaults
-from .routers import analyze, defaults, inventory, expiring, ui, setup, pending, mealie, admin
+from .routers import analyze, defaults, inventory, expiring, ui, setup, pending, mealie, admin, tunnel
 
 
 @asynccontextmanager
@@ -102,6 +102,7 @@ app.include_router(analyze.router)
 app.include_router(defaults.router)
 app.include_router(inventory.router)
 app.include_router(expiring.router)
+app.include_router(tunnel.router)
 app.include_router(ui.router)
 
 
