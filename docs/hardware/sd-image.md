@@ -66,65 +66,48 @@ Then follow the section for your operating system.
 
 ### Windows 11
 
-The SD card's boot partition appears as a lettered drive in File Explorer
-(usually **D:** or **E:**, look for a ~256 MB drive labelled `bootfs`). All
-steps below use that drive letter; substitute yours as needed.
+You need two things from the repo: the `image\config.env` you edit, and a
+helper script that copies everything onto the card for you. Clone the repo (or
+download it as a ZIP from GitHub and extract it), then open **PowerShell** in
+that folder.
 
 **2a. Edit the config file**
 
-Open `image\config.env` from the cloned repo in any text editor (Notepad,
-VS Code, etc.) and set at minimum:
+Open `image\config.env` in any text editor (Notepad, VS Code) and set at least
+the timezone:
 
 ```
 TZ=America/New_York    # change to your IANA timezone
-HOSTNAME=foodassistant # optional, sets the mDNS name
+HOSTNAME=foodassistant # optional, sets the mDNS name (foodassistant.local)
 ```
 
 Save and close the file.
 
-**2b. Copy the provisioner files**
+**2b. Find the boot drive letter**
 
-Open **PowerShell** (or File Explorer) and run:
+In File Explorer, look for a small (~256 MB) drive that appeared when you
+inserted the card, labelled `bootfs`. Note its letter (often **D:** or **E:**).
+
+**2c. Run the helper script**
 
 ```powershell
-# Replace D: with your actual boot partition drive letter.
-$boot = "D:"
-$repo = "."   # or the full path to where you cloned the repo
-
-# Create the setup folder on the boot partition.
-New-Item -ItemType Directory -Path "$boot\foodassistant-setup" -Force
-
-# Copy the four provisioner files into it.
-Copy-Item "$repo\scripts\image-build\firstboot.sh"                    "$boot\foodassistant-setup\"
-Copy-Item "$repo\scripts\image-build\firstrun.sh"                     "$boot\foodassistant-setup\"
-Copy-Item "$repo\scripts\image-build\foodassistant-firstboot.service" "$boot\foodassistant-setup\"
-Copy-Item "$repo\scripts\image-build\docker-compose.appliance.yml"    "$boot\foodassistant-setup\"
-
-# Copy your edited config into the setup folder AND to the top level.
-Copy-Item "$repo\image\config.env" "$boot\foodassistant-setup\config.env"
-Copy-Item "$repo\image\config.env" "$boot\foodassistant.config.env"
-
-# Place firstrun.sh at the root of the boot partition.
-Copy-Item "$repo\scripts\image-build\firstrun.sh" "$boot\firstrun.sh"
+.\scripts\image-build\prepare-image.ps1 -BootDrive D:
 ```
 
-**2c. Edit cmdline.txt**
+Replace `D:` with your boot drive letter. The script copies the provisioner
+files onto the card, installs your config, and wires `cmdline.txt` for you. It
+refuses to run if the drive doesn't look like a Pi boot partition, so it won't
+touch the wrong drive.
 
-Open `D:\cmdline.txt` in Notepad (or VS Code). It is a **single line** with no
-line breaks. Add the following to the end of that line, with a single space
-before it (do not add a newline):
+If PowerShell blocks the script with an execution-policy error, run it for this
+one session only:
 
-```
-systemd.run=/boot/firmware/firstrun.sh systemd.run_success_action=reboot systemd.unit=kernel-command-line.target
-```
-
-The finished line looks something like:
-
-```
-console=serial0,115200 console=tty1 root=PARTUUID=... rootfstype=ext4 fsck.repair=yes rootwait quiet systemd.run=/boot/firmware/firstrun.sh systemd.run_success_action=reboot systemd.unit=kernel-command-line.target
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\image-build\prepare-image.ps1 -BootDrive D:
 ```
 
-Save the file. Eject the drive safely from the system tray before removing the card.
+When it prints `Payload installed`, eject the card safely from the system tray
+and skip to [Step 3](#step-3--first-boot).
 
 ### Linux / macOS (automated)
 
@@ -150,7 +133,12 @@ If you prefer not to run the script, copy these files to the boot partition:
 - All four files from `scripts/image-build/` into `bootfs/foodassistant-setup/`
 - `image/config.env` to both `bootfs/foodassistant-setup/config.env` and `bootfs/foodassistant.config.env`
 
-Then append the same `systemd.run=...` line to `bootfs/cmdline.txt` as shown in the Windows section above.
+Then append this to the single line in `bootfs/cmdline.txt` (one space before
+it, no newline):
+
+```
+systemd.run=/boot/firmware/firstrun.sh systemd.run_success_action=reboot systemd.unit=kernel-command-line.target
+```
 
 Eject the card safely.
 
