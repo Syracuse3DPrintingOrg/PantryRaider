@@ -8,6 +8,7 @@ for the counts shown on status keys.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import shutil
 import subprocess
@@ -153,11 +154,24 @@ class Controller:
         url = f"{self.config.base_url}/{path.lstrip('/')}"
         if self.config.kiosk_cdp_url and self.client is not None:
             try:
-                r = await self.client.put(
-                    f"{self.config.kiosk_cdp_url.rstrip('/')}/json/new?{url}"
-                )
-                if r.status_code < 400:
-                    return True
+                cdp = self.config.kiosk_cdp_url.rstrip("/")
+                r = await self.client.get(f"{cdp}/json")
+                if r.status_code == 200:
+                    targets = r.json()
+                    page = next(
+                        (t for t in targets if t.get("type") == "page"), None
+                    )
+                    ws_url = page.get("webSocketDebuggerUrl") if page else None
+                    if ws_url:
+                        import websockets
+                        async with websockets.connect(ws_url) as ws:
+                            await ws.send(json.dumps({
+                                "id": 1,
+                                "method": "Page.navigate",
+                                "params": {"url": url},
+                            }))
+                            await asyncio.wait_for(ws.recv(), timeout=3.0)
+                        return True
             except Exception:  # noqa: BLE001 - fall through to desktop opener
                 pass
         opener = shutil.which("xdg-open")
