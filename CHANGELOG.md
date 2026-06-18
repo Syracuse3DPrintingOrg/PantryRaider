@@ -8,6 +8,14 @@ All notable changes to FoodAssistant are recorded here. The format is based on
 > than the auto-generated commit list, so notes stay focused on user-facing
 > changes.
 
+## [Unreleased]
+
+### Added
+- **Stream Deck controller** (`streamdeck/`). Drive an Elgato Stream Deck or embedded Stream Deck Module (6, 15, or 32 keys) as a physical control surface. Keys show live counts (items expiring soon, scans waiting to commit) and trigger actions like committing pending scans or opening a page on the attached display. Works alongside a touchscreen or as the only interface on a headless appliance. Includes a systemd unit, udev rule, and example config. See `streamdeck/README.md`.
+
+### Fixed
+- **Theme now saves immediately.** Picking a theme in **Settings, Interface** applies and persists right away instead of waiting for **Save All**, so the choice sticks across pages and devices.
+
 ## [1.4.0]
 
 ### Added

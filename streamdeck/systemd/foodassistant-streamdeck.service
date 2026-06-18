@@ -1,0 +1,22 @@
+[Unit]
+Description=FoodAssistant Stream Deck controller
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Run as a normal user that belongs to the plugdev group (see the udev rule)
+# so the controller can claim the Stream Deck without root.
+User=foodassistant
+Group=plugdev
+WorkingDirectory=/opt/foodassistant
+Environment=FOODASSISTANT_BASE_URL=http://localhost:9284
+# Keep the API key out of the repo and the config file. Point this at a file
+# holding a single line: FOODASSISTANT_API_KEY=...
+EnvironmentFile=-/etc/foodassistant/streamdeck.env
+ExecStart=/opt/foodassistant/venv/bin/python -m foodassistant_streamdeck --config /etc/foodassistant/streamdeck.toml
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

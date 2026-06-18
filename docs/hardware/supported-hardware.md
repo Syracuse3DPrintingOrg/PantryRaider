@@ -57,10 +57,28 @@ A display is optional — FoodAssistant is a web app you can reach from any brow
 network. For a dedicated touchscreen setup, DSI and HDMI capacitive touch panels both
 work; see the [SD-card image guide](sd-image.md) for kiosk-mode setup.
 
+### Stream Deck controllers
+
+An Elgato Stream Deck, or an embedded Stream Deck Module, can act as a physical
+controller. Its keys show live counts (items expiring soon, scans waiting to
+commit) and trigger actions such as committing pending scans or opening a page
+on the attached display. It can sit next to a touchscreen or be the only
+interface on a headless box.
+
+| Device | Keys | Status | Notes |
+|--------|------|--------|-------|
+| Stream Deck Mini / Module 6 | 6 | Supported | Extra actions move to further pages via a "More" key. |
+| Stream Deck / MK.2 / Module 15 | 15 | Supported | Roomy default layout. |
+| Stream Deck XL / Module 32 | 32 | Supported | Plenty of spare keys. |
+
+Setup, configuration, and the controller service live in
+[`streamdeck/`](../../streamdeck/README.md). The connection is plain USB and
+the driver is pure Python, so no Elgato software is involved.
+
 ### Cameras / photos
 
 No dedicated camera is needed. Use your phone's browser to photograph food items and
-receipts — the native camera opens directly from the web UI.
+receipts, the native camera opens directly from the web UI.
 
 ## AI providers and hardware
 

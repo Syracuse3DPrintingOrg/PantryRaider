@@ -1,0 +1,49 @@
+# FoodAssistant Stream Deck controller configuration.
+# Copy to config.toml and edit. Every value has a default, so a deck attached
+# to a fresh appliance works with this file untouched as long as the app is on
+# localhost without authentication.
+
+# Where the FoodAssistant API lives. On the appliance this is the local app.
+base_url = "http://localhost:9284"
+
+# API key, only needed when authentication is enabled. Prefer setting this via
+# the FOODASSISTANT_API_KEY environment variable (the systemd unit does) so it
+# stays out of this file.
+api_key = ""
+
+# Deck brightness on start, 5 to 100. The "brightness" key cycles through
+# preset steps from there.
+brightness = 60
+
+# How often, in seconds, to refresh the counts on status keys.
+poll_seconds = 30
+
+# Items expiring within this many days count toward the "Expiring" key.
+soon_days = 7
+
+# Optional. Chrome DevTools endpoint of a local kiosk browser, for example
+# "http://localhost:9222". When set, the nav keys (Add, Stock, Cook) steer
+# that browser. Leave empty to fall back to the desktop opener.
+kiosk_cdp_url = ""
+
+# Keys, in order, left to right and top to bottom. Trimmed to fit a smaller
+# deck; on a 6-key Mini any overflow moves to extra pages reached by a "More"
+# key. Remove keys you do not want, or reorder freely.
+#
+# Available actions:
+#   expiring    live count of items expired or expiring soon (press to refresh)
+#   pending     live count of scans waiting to commit (press to refresh)
+#   commit      commit every pending scan into inventory
+#   add         open the add-item page on the attached display
+#   inventory   open the inventory dashboard on the attached display
+#   cook        open the recipe suggestions page on the attached display
+#   brightness  cycle deck brightness
+keys = [
+  "expiring",
+  "pending",
+  "commit",
+  "add",
+  "inventory",
+  "cook",
+  "brightness",
+]
