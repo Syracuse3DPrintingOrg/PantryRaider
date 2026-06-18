@@ -19,6 +19,7 @@ NAV_TABS = [
     {"key": "mealplan",  "label": "Meal Plan", "icon": "bi-calendar-week",   "href": "ui/mealplan", "requires": "mealie"},
     {"key": "shopping",  "label": "Shopping",  "icon": "bi-cart",            "href": "ui/shopping", "requires": "mealie"},
     {"key": "defaults",  "label": "Defaults",  "icon": "bi-table",           "href": "ui/defaults"},
+    {"key": "about",     "label": "About",     "icon": "bi-info-circle",     "href": "ui/about"},
 ]
 
 

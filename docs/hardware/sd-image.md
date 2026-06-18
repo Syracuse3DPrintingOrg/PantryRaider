@@ -259,3 +259,12 @@ cd /opt/foodassistant && docker compose ps
 
 **No internet on first boot.** Docker install and image pulls require it.
 Connect the network and re-run provisioning.
+
+**`docker compose up` fails with "unauthorized" or "pull access denied".** The
+GHCR package for `ghcr.io/syracuse3dprinting/foodassistant` has not been made
+public yet (or was recently re-privatized). To fix: go to the GitHub repo ->
+Packages -> foodassistant -> Package settings -> Change visibility -> Public.
+If the package is already public, this is a transient network error -- re-run
+the provisioner. Alternatively, `firstboot.sh` will detect the pull failure and
+build the image from local source automatically, provided the repo was cloned to
+`/home/foodassistant/FoodAssistant` (the `REPO_DIR` default) before first boot.

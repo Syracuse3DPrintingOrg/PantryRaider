@@ -17,6 +17,7 @@
   <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
   <style>
     body { background: var(--bs-body-bg); }
+    /* ── Shared ─────────────────────────────────────────── */
     .setup-wrap { max-width: 980px; margin: 1.5rem auto; padding: 0 1rem 4rem; }
     .section-card { background: var(--bs-tertiary-bg); border: 1px solid var(--bs-border-color); border-radius: 0.75rem; padding: 1.5rem; margin-bottom: 1.25rem; }
     .section-title { font-size: 1.05rem; font-weight: 600; margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem; }
@@ -32,10 +33,42 @@
       .side-menu .nav { flex-direction: row !important; flex-wrap: nowrap; overflow-x: auto; }
       .side-menu .nav-link { white-space: nowrap; }
     }
+    /* ── Wizard (first-time setup only) ─────────────────── */
+    .wiz-wrap { max-width: 680px; margin: 2rem auto; padding: 0 1rem 4rem; }
+    /* Progress bar */
+    .wiz-progress { display: flex; align-items: center; justify-content: center; gap: 0; margin-bottom: 2rem; flex-wrap: nowrap; }
+    .wiz-step-dot { display: flex; flex-direction: column; align-items: center; flex: 1; max-width: 100px; }
+    .wiz-step-num { width: 2rem; height: 2rem; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+                    font-size: 0.85rem; font-weight: 700; border: 2px solid var(--bs-border-color);
+                    background: var(--bs-tertiary-bg); color: var(--bs-secondary-color); transition: all 0.2s; }
+    .wiz-step-num.active { border-color: var(--bs-primary); background: var(--bs-primary); color: #fff; }
+    .wiz-step-num.done { border-color: var(--bs-success); background: var(--bs-success); color: #fff; }
+    .wiz-step-label { font-size: 0.68rem; color: var(--bs-secondary-color); margin-top: 0.2rem; text-align: center; white-space: nowrap; }
+    .wiz-connector { flex: 1; height: 2px; background: var(--bs-border-color); max-width: 40px; margin-bottom: 1.1rem; }
+    .wiz-connector.done { background: var(--bs-success); }
+    /* Wizard cards */
+    .wiz-card { background: var(--bs-tertiary-bg); border: 1px solid var(--bs-border-color); border-radius: 0.75rem; padding: 2rem; }
+    .wiz-card-title { font-size: 1.35rem; font-weight: 700; margin-bottom: 0.4rem; }
+    .wiz-card-sub { color: var(--bs-secondary-color); margin-bottom: 1.5rem; font-size: 0.9rem; }
+    /* Install mode buttons */
+    .install-card { border: 2px solid var(--bs-border-color); border-radius: 0.6rem; padding: 1.25rem 1rem; cursor: pointer; transition: border-color 0.15s, background 0.15s; text-align: center; }
+    .install-card:hover { border-color: var(--bs-primary); }
+    .install-card.selected { border-color: var(--bs-primary); background: rgba(var(--bs-primary-rgb), 0.08); }
+    .install-card .icon { font-size: 2rem; margin-bottom: 0.4rem; }
+    .install-card .label { font-weight: 600; font-size: 0.95rem; }
+    .install-card .desc { font-size: 0.78rem; color: var(--bs-secondary-color); margin-top: 0.25rem; }
+    /* Summary list */
+    .summary-item { display: flex; align-items: center; gap: 0.6rem; padding: 0.55rem 0; border-bottom: 1px solid var(--bs-border-color); font-size: 0.9rem; }
+    .summary-item:last-child { border-bottom: none; }
+    .summary-icon { width: 1.5rem; text-align: center; }
+    .summary-fix-link { font-size: 0.78rem; margin-left: auto; white-space: nowrap; }
   </style>
 </head>
 <body>
 
+{# ═══════════════════════════════════════════════════════════════════════════════
+   Shared macro: password/secret input with show-toggle and clear button
+═══════════════════════════════════════════════════════════════════════════════ #}
 {% macro secret_input(id, placeholder) -%}
 <div class="input-group">
   <input type="password" class="form-control font-monospace" id="{{ id }}" autocomplete="new-password"
@@ -51,16 +84,322 @@
 </div>
 {%- endmacro %}
 
-<div class="setup-wrap">
+
+{# ═══════════════════════════════════════════════════════════════════════════════
+   FIRST-TIME WIZARD  (shown when configured=False)
+═══════════════════════════════════════════════════════════════════════════════ #}
+{% if not configured %}
+<div class="wiz-wrap" id="wizard-root">
+
+  <!-- Header -->
+  <div class="d-flex align-items-center gap-3 mb-3">
+    <div class="logo"><i class="bi bi-fridge me-2 text-primary"></i>FoodAssistant</div>
+    <span class="badge bg-secondary">Setup</span>
+  </div>
+
+  <!-- Progress indicator -->
+  <div class="wiz-progress" id="wiz-progress" aria-label="Setup progress">
+    <div class="wiz-step-dot"><div class="wiz-step-num active" id="dot-1">1</div><div class="wiz-step-label">Welcome</div></div>
+    <div class="wiz-connector" id="con-1-2"></div>
+    <div class="wiz-step-dot"><div class="wiz-step-num" id="dot-2">2</div><div class="wiz-step-label">Security</div></div>
+    <div class="wiz-connector" id="con-2-3"></div>
+    <div class="wiz-step-dot"><div class="wiz-step-num" id="dot-3">3</div><div class="wiz-step-label">Grocy</div></div>
+    <div class="wiz-connector" id="con-3-4"></div>
+    <div class="wiz-step-dot"><div class="wiz-step-num" id="dot-4">4</div><div class="wiz-step-label">AI</div></div>
+    <div class="wiz-connector" id="con-4-5"></div>
+    <div class="wiz-step-dot"><div class="wiz-step-num" id="dot-5">5</div><div class="wiz-step-label">Optional</div></div>
+    <div class="wiz-connector" id="con-5-6"></div>
+    <div class="wiz-step-dot"><div class="wiz-step-num" id="dot-6">6</div><div class="wiz-step-label">Done</div></div>
+  </div>
+
+  <!-- ── Step 1: Welcome ── -->
+  <div class="wiz-card" id="wiz-step-1">
+    <div class="wiz-card-title"><i class="bi bi-house-door text-primary me-2"></i>Welcome to FoodAssistant</div>
+    <div class="wiz-card-sub">Let's get you set up in a few minutes. First, how are you running this?</div>
+
+    <div class="row g-3 mb-4">
+      <div class="col-sm-6">
+        <div class="install-card" id="mode-server" onclick="selectInstallMode('server')">
+          <div class="icon text-info"><i class="bi bi-server"></i></div>
+          <div class="label">Self-hosted / Server</div>
+          <div class="desc">Docker on a PC, NAS, or cloud VM. Grocy runs on your network or elsewhere.</div>
+        </div>
+      </div>
+      <div class="col-sm-6">
+        <div class="install-card" id="mode-pi" onclick="selectInstallMode('pi')">
+          <div class="icon text-success"><i class="bi bi-cpu"></i></div>
+          <div class="label">Raspberry Pi Appliance</div>
+          <div class="desc">All-in-one box. FoodAssistant and Grocy both run on the same device.</div>
+        </div>
+      </div>
+    </div>
+
+    <p class="small text-secondary mb-4">
+      Not sure? Choose <strong>Self-hosted / Server</strong> — you can always change things later.
+      Both options run FoodAssistant the same way; the choice only pre-fills the Grocy URL on the next step.
+    </p>
+
+    <div class="d-flex justify-content-end">
+      <button class="btn btn-primary" onclick="wizNext()" id="wiz-next-1">
+        Next <i class="bi bi-arrow-right ms-1"></i>
+      </button>
+    </div>
+  </div>
+
+  <!-- ── Step 2: Security ── -->
+  <div class="wiz-card d-none" id="wiz-step-2">
+    <div class="wiz-card-title"><i class="bi bi-shield-lock text-success me-2"></i>Security</div>
+    <div class="wiz-card-sub">Set a password to protect your food inventory. Required before setup completes.</div>
+
+    <div class="section-card mb-3">
+      <div class="form-check form-switch mb-3">
+        <input class="form-check-input" type="checkbox" role="switch" id="auth_required"
+               checked onchange="toggleAuthRequired()">
+        <label class="form-check-label" for="auth_required">Require authentication to use the app</label>
+      </div>
+      <div class="mb-3">
+        <label class="form-label">UI Password <span class="badge bg-danger badge-req ms-1">Required</span></label>
+        {{ secret_input('auth_password', 'Choose a password for the web UI') }}
+        <div class="form-text" id="auth-pw-hint">Required while authentication is on. Setup will not complete without it.</div>
+      </div>
+      <div class="mb-3">
+        <label class="form-label">API Key <span class="text-secondary small">(optional — for Home Assistant / headless clients)</span></label>
+        {{ secret_input('api_key', 'Sent as X-API-Key header') }}
+        <div class="form-text">Generate with: <code>openssl rand -hex 24</code></div>
+      </div>
+    </div>
+
+    <div class="d-flex justify-content-between">
+      <button class="btn btn-outline-secondary" onclick="wizBack()"><i class="bi bi-arrow-left me-1"></i>Back</button>
+      <button class="btn btn-primary" onclick="wizNext()">Next <i class="bi bi-arrow-right ms-1"></i></button>
+    </div>
+  </div>
+
+  <!-- ── Step 3: Grocy ── -->
+  <div class="wiz-card d-none" id="wiz-step-3">
+    <div class="wiz-card-title"><i class="bi bi-fridge text-info me-2"></i>Grocy — Inventory Backend</div>
+    <div class="wiz-card-sub">Grocy stores your stock, locations, and consumption history. Connect it here.</div>
+
+    <div class="section-card mb-3">
+      <div class="mb-3">
+        <label class="form-label">Grocy URL <span class="badge bg-danger badge-req ms-1">Required</span></label>
+        <div class="input-group">
+          <input type="url" class="form-control" id="grocy_base_url"
+                 placeholder="http://192.168.1.10:9383"
+                 value="{{ s.grocy_base_url if (s.grocy_base_url and s.grocy_base_url != 'http://grocy:80') else suggested_grocy_url }}">
+          <a class="btn btn-outline-secondary" id="grocy-open-link" href="#" target="_blank" title="Open Grocy in new tab">
+            <i class="bi bi-box-arrow-up-right"></i>
+          </a>
+        </div>
+        <div class="form-text" id="grocy-url-hint">
+          Full URL to your Grocy instance, no trailing slash.
+          {% if suggested_grocy_url and not s.grocy_base_url %}
+          <span class="text-success"><i class="bi bi-check-circle me-1"></i>Grocy detected locally — URL pre-filled.</span>
+          {% endif %}
+        </div>
+      </div>
+      <div id="wiz-grocy-appliance-note" class="alert alert-info py-2 small d-none">
+        <i class="bi bi-cpu me-1"></i>Appliance mode: Grocy is running locally on this device.
+      </div>
+      <div class="mb-3">
+        <label class="form-label">Grocy API Key <span class="badge bg-danger badge-req ms-1">Required</span></label>
+        {{ secret_input('grocy_api_key', 'Grocy → Profile → Manage API Keys') }}
+      </div>
+      <div class="mb-3">
+        <label class="form-label">Grocy Public URL <span class="text-secondary small">(optional — for browser links via reverse proxy)</span></label>
+        <input type="url" class="form-control" id="grocy_public_url"
+               placeholder="https://grocy.yourdomain.com"
+               value="{{ s.grocy_public_url }}">
+        <div class="form-text">External address used when the UI links you to Grocy. Empty = internal URL.</div>
+      </div>
+      <div class="d-flex align-items-center gap-2 flex-wrap">
+        <button class="btn btn-outline-info btn-sm" onclick="testGrocy()">
+          <i class="bi bi-plug me-1"></i>Test Connection
+        </button>
+      </div>
+      <div class="test-result" id="grocy-result"></div>
+    </div>
+
+    <div class="d-flex justify-content-between">
+      <button class="btn btn-outline-secondary" onclick="wizBack()"><i class="bi bi-arrow-left me-1"></i>Back</button>
+      <button class="btn btn-primary" onclick="wizNext()">Next <i class="bi bi-arrow-right ms-1"></i></button>
+    </div>
+  </div>
+
+  <!-- ── Step 4: AI Provider ── -->
+  <div class="wiz-card d-none" id="wiz-step-4">
+    <div class="wiz-card-title"><i class="bi bi-magic text-warning me-2"></i>AI Provider</div>
+    <div class="wiz-card-sub">Analyzes food photos, receipts, and barcodes. Optional — you can add this later.</div>
+
+    <div class="section-card mb-3">
+      <div class="mb-3">
+        <label class="form-label">Provider</label>
+        <select class="form-select" id="vision_provider" onchange="showProvider(); wizUpdateAiKeyVisibility()">
+          <option value="gemini" {{ 'selected' if s.vision_provider == 'gemini' else '' }}>Google Gemini (cloud, recommended)</option>
+          <option value="openai" {{ 'selected' if s.vision_provider == 'openai' else '' }}>OpenAI (cloud)</option>
+          <option value="anthropic" {{ 'selected' if s.vision_provider == 'anthropic' else '' }}>Anthropic Claude (cloud)</option>
+          <option value="ollama" {{ 'selected' if s.vision_provider == 'ollama' else '' }}>Ollama (local, no API key needed)</option>
+          <option value="none">None — skip AI for now</option>
+        </select>
+      </div>
+
+      <div id="wiz-ai-none-note" class="alert alert-secondary py-2 small d-none">
+        <i class="bi bi-info-circle me-1"></i>AI features (photo import, barcode enrichment, recipe suggestions) will be unavailable.
+        You can add a provider later from Settings.
+      </div>
+
+      <!-- Gemini fields -->
+      <div class="provider-fields" id="fields-gemini">
+        <div class="mb-3">
+          <label class="form-label">Gemini API Key</label>
+          {{ secret_input('gemini_api_key', 'Free key at aistudio.google.com') }}
+          <div class="form-text"><a href="https://aistudio.google.com/apikey" target="_blank">Get a free key at aistudio.google.com</a></div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Model</label>
+          <input type="text" class="form-control" id="gemini_model" value="{{ s.gemini_model }}">
+        </div>
+      </div>
+
+      <!-- OpenAI fields -->
+      <div class="provider-fields d-none" id="fields-openai">
+        <div class="mb-3">
+          <label class="form-label">OpenAI API Key</label>
+          {{ secret_input('openai_api_key', 'platform.openai.com → API keys') }}
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Model <span class="text-secondary small">(must be vision-capable)</span></label>
+          <input type="text" class="form-control" id="openai_model" value="{{ s.openai_model }}">
+        </div>
+      </div>
+
+      <!-- Anthropic fields -->
+      <div class="provider-fields d-none" id="fields-anthropic">
+        <div class="mb-3">
+          <label class="form-label">Anthropic API Key</label>
+          {{ secret_input('anthropic_api_key', 'console.anthropic.com → API Keys') }}
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Model</label>
+          <input type="text" class="form-control" id="anthropic_model" value="{{ s.anthropic_model }}">
+          <div class="form-text">claude-opus-4-8 is the most capable; claude-haiku-4-5 the budget option.</div>
+        </div>
+      </div>
+
+      <!-- Ollama fields -->
+      <div class="provider-fields d-none" id="fields-ollama">
+        <div class="mb-3">
+          <label class="form-label">Ollama URL</label>
+          <input type="url" class="form-control" id="ollama_base_url"
+                 placeholder="http://ollama:11434" value="{{ s.ollama_base_url }}">
+          <div class="form-text">Run with <code>docker compose --profile with-ollama up -d</code>, then pull a vision model.</div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Model</label>
+          <input type="text" class="form-control" id="ollama_model" value="{{ s.ollama_model }}">
+        </div>
+      </div>
+
+      <div id="wiz-ai-test-row" class="">
+        <button class="btn btn-outline-info btn-sm" onclick="testVision()">
+          <i class="bi bi-plug me-1"></i>Test Connection
+        </button>
+        <div class="test-result" id="vision-result"></div>
+      </div>
+    </div>
+
+    <div class="d-flex justify-content-between">
+      <button class="btn btn-outline-secondary" onclick="wizBack()"><i class="bi bi-arrow-left me-1"></i>Back</button>
+      <button class="btn btn-primary" onclick="wizNext()">Next <i class="bi bi-arrow-right ms-1"></i></button>
+    </div>
+  </div>
+
+  <!-- ── Step 5: Optional Integrations ── -->
+  <div class="wiz-card d-none" id="wiz-step-5">
+    <div class="wiz-card-title"><i class="bi bi-puzzle text-secondary me-2"></i>Optional Integrations</div>
+    <div class="wiz-card-sub">Connect Mealie for recipes and meal planning. You can skip this and add it later.</div>
+
+    <!-- Collapsible Mealie section -->
+    <div class="section-card mb-3">
+      <button class="btn btn-link p-0 text-decoration-none d-flex align-items-center gap-2 w-100"
+              type="button" data-bs-toggle="collapse" data-bs-target="#mealie-collapse" aria-expanded="false">
+        <i class="bi bi-journal-richtext text-primary"></i>
+        <span class="fw-semibold">Mealie — Recipe Manager</span>
+        <span class="badge bg-secondary ms-1">Optional</span>
+        <i class="bi bi-chevron-down ms-auto"></i>
+      </button>
+      <div class="collapse mt-3" id="mealie-collapse">
+        <p class="text-secondary small">Enables the Recipes, Cook, Meal Plan, and Shopping pages.
+          Run with <code>docker compose --profile with-mealie up -d</code> (port 9285).</p>
+        <div class="mb-3">
+          <label class="form-label">Mealie URL <span class="text-secondary small">(internal — for API calls)</span></label>
+          <input type="url" class="form-control" id="mealie_base_url"
+                 placeholder="http://192.168.1.10:9285" value="{{ s.mealie_base_url }}">
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Mealie Public URL <span class="text-secondary small">(optional — for browser links)</span></label>
+          <input type="url" class="form-control" id="mealie_public_url"
+                 placeholder="https://mealie.example.com" value="{{ s.mealie_public_url }}">
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Mealie API Token</label>
+          {{ secret_input('mealie_api_key', 'Mealie → User Profile → API Tokens') }}
+        </div>
+        <button class="btn btn-outline-info btn-sm" onclick="testMealie()">
+          <i class="bi bi-plug me-1"></i>Test Connection
+        </button>
+        <div class="test-result" id="mealie-result"></div>
+      </div>
+    </div>
+
+    <div class="d-flex justify-content-between">
+      <button class="btn btn-outline-secondary" onclick="wizBack()"><i class="bi bi-arrow-left me-1"></i>Back</button>
+      <div class="d-flex gap-2">
+        <button class="btn btn-outline-secondary" onclick="wizNext()">Skip for now</button>
+        <button class="btn btn-primary" onclick="wizNext()">Next <i class="bi bi-arrow-right ms-1"></i></button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Step 6: Done ── -->
+  <div class="wiz-card d-none" id="wiz-step-6">
+    <div class="wiz-card-title"><i class="bi bi-check-circle-fill text-success me-2"></i>Ready to Go</div>
+    <div class="wiz-card-sub">Here's what you've configured. Click the button below to save and start using FoodAssistant.</div>
+
+    <!-- Summary list, built by JS -->
+    <div id="wiz-summary" class="mb-4"></div>
+
+    <!-- Validation errors (shown if something required is missing) -->
+    <div id="wiz-errors" class="alert alert-warning d-none mb-3">
+      <strong><i class="bi bi-exclamation-triangle-fill me-1"></i>A few things still need attention:</strong>
+      <ul class="mb-0 mt-1 ps-3 small" id="wiz-error-list"></ul>
+    </div>
+
+    <div id="wiz-save-result" class="mb-3"></div>
+
+    <div class="d-flex flex-wrap justify-content-between gap-2">
+      <button class="btn btn-outline-secondary" onclick="wizBack()"><i class="bi bi-arrow-left me-1"></i>Back</button>
+      <button class="btn btn-success btn-lg px-4" onclick="wizSaveAll()" id="wiz-finish-btn">
+        <i class="bi bi-rocket-takeoff me-2"></i>Start using FoodAssistant
+      </button>
+    </div>
+  </div>
+
+</div><!-- /wiz-wrap -->
+{% endif %}
+
+
+{# ═══════════════════════════════════════════════════════════════════════════════
+   SETTINGS FORM  (shown when configured=True; also rendered for re-visits)
+   On first-time setup this block is hidden (wizard above handles that flow).
+═══════════════════════════════════════════════════════════════════════════════ #}
+{% if configured %}
+<div class="setup-wrap" id="settings-root">
 
   <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 my-3">
     <div class="logo"><i class="bi bi-fridge me-2 text-primary"></i>FoodAssistant
       <span class="text-secondary fw-normal fs-6 ms-1">Settings</span></div>
-    {% if configured %}
     <a href="ui/" class="btn btn-sm btn-outline-secondary"><i class="bi bi-arrow-left me-1"></i>Back to app</a>
-    {% else %}
-    <span class="text-secondary small">Welcome! Configure Grocy and an AI provider to get started.</span>
-    {% endif %}
   </div>
 
   <div class="row g-3">
@@ -680,13 +1019,17 @@ docker compose up -d</code></pre>
       </div>
     </div>
   </div>
-</div>
+</div><!-- /setup-wrap -->
+{% endif %}
+
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script>
 const TABS = {{ tabs | tojson }};
+const HAS_AUTH_PASSWORD = {{ 'true' if has.auth_password else 'false' }};
+const IS_CONFIGURED = {{ 'true' if configured else 'false' }};
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
+// ── Shared helpers ────────────────────────────────────────────────────────────
 
 function val(id) { return document.getElementById(id)?.value.trim() || ''; }
 function num(id, fallback) { const v = parseInt(val(id), 10); return isNaN(v) ? fallback : v; }
@@ -753,11 +1096,11 @@ async function saveStorageCategories() {
     const d = await r.json();
     if (!r.ok) throw new Error(d.detail || r.statusText);
     result.className = 'small text-success';
-    result.textContent = '✓ Saved';
+    result.textContent = 'Saved';
     setTimeout(() => { result.textContent = ''; }, 3000);
   } catch(e) {
     result.className = 'small text-danger';
-    result.textContent = '✗ ' + e.message;
+    result.textContent = e.message;
   } finally {
     btn.disabled = false;
     btn.innerHTML = '<i class="bi bi-check2 me-1"></i>Save categories';
@@ -823,24 +1166,34 @@ function toggleVis(id) {
 
 function setResult(id, ok, msg) {
   const el = document.getElementById(id);
+  if (!el) return;
   el.innerHTML = ok
     ? `<span class="text-success"><i class="bi bi-check-circle-fill me-1"></i>${msg}</span>`
     : `<span class="text-danger"><i class="bi bi-x-circle-fill me-1"></i>${msg}</span>`;
 }
 
 function showProvider() {
-  const p = document.getElementById('vision_provider').value;
-  document.querySelectorAll('.provider-fields').forEach(d => d.style.display = 'none');
-  document.getElementById('fields-' + p).style.display = '';
+  const p = val('vision_provider') || document.getElementById('vision_provider')?.value;
+  document.querySelectorAll('.provider-fields').forEach(d => {
+    d.style.display = 'none';
+    d.classList.add('d-none');
+  });
+  const target = document.getElementById('fields-' + p);
+  if (target) {
+    target.style.display = '';
+    target.classList.remove('d-none');
+  }
 }
 
 function showRecipeSource() {
-  const src = document.getElementById('recipe_source').value;
-  document.getElementById('source-themealdb').style.display = src === 'themealdb' ? '' : 'none';
-  document.getElementById('source-spoonacular').style.display = src === 'spoonacular' ? '' : 'none';
+  const src = document.getElementById('recipe_source')?.value;
+  const td = document.getElementById('source-themealdb');
+  const sd = document.getElementById('source-spoonacular');
+  if (td) td.style.display = src === 'themealdb' ? '' : 'none';
+  if (sd) sd.style.display = src === 'spoonacular' ? '' : 'none';
 }
 
-// ── Connection tests (blank key = server uses the saved one) ─────────────────
+// ── Connection tests ──────────────────────────────────────────────────────────
 
 async function postJson(url, body) {
   const r = await fetch(url, {
@@ -863,7 +1216,7 @@ async function testMealie() {
   setResult('mealie-result', d.ok, d.ok ? d.message : d.error);
 }
 
-function providerTestPayload(provider, modelOverride = '') {
+function providerTestPayload(provider, modelOverride) {
   return {
     provider,
     api_key: secretVal(provider + '_api_key'),
@@ -874,8 +1227,9 @@ function providerTestPayload(provider, modelOverride = '') {
 
 async function testVision() {
   setResult('vision-result', true, 'Testing…');
-  const d = await postJson('setup/test/provider',
-    providerTestPayload(document.getElementById('vision_provider').value));
+  const p = document.getElementById('vision_provider').value;
+  if (p === 'none') { setResult('vision-result', false, 'No provider selected.'); return; }
+  const d = await postJson('setup/test/provider', providerTestPayload(p, ''));
   setResult('vision-result', d.ok, d.ok ? d.message : d.error);
 }
 
@@ -900,7 +1254,9 @@ let navState = TABS.map(t => ({key: t.key, label: t.label, icon: t.icon,
                                hidden: t.hidden, available: t.available}));
 
 function renderNavEditor() {
-  document.getElementById('nav-editor').innerHTML = navState.map((t, i) => `
+  const el = document.getElementById('nav-editor');
+  if (!el) return;
+  el.innerHTML = navState.map((t, i) => `
     <div class="nav-tab-row d-flex align-items-center gap-2 px-2 py-1 ${t.hidden ? 'opacity-50' : ''}">
       <div class="btn-group-vertical btn-group-sm">
         <button class="btn btn-outline-secondary py-0 px-1" onclick="moveTab(${i}, -1)" ${i === 0 ? 'disabled' : ''} title="Move up">
@@ -930,7 +1286,7 @@ function moveTab(i, delta) {
 
 async function applyTheme(value) {
   const hint = document.getElementById('theme-hint');
-  hint.textContent = 'Saving…';
+  if (hint) hint.textContent = 'Saving…';
   try {
     await fetch('setup/theme', {
       method: 'POST',
@@ -939,7 +1295,7 @@ async function applyTheme(value) {
     });
     location.reload();
   } catch (e) {
-    hint.textContent = 'Save failed — try Save All.';
+    if (hint) hint.textContent = 'Save failed — try Save All.';
   }
 }
 
@@ -947,7 +1303,7 @@ async function applyTheme(value) {
 
 async function applyScale(value) {
   const hint = document.getElementById('scale-hint');
-  hint.textContent = 'Saving…';
+  if (hint) hint.textContent = 'Saving…';
   try {
     await fetch('setup/scale', {
       method: 'POST',
@@ -956,63 +1312,25 @@ async function applyScale(value) {
     });
     location.reload();
   } catch (e) {
-    hint.textContent = 'Save failed, try Save All.';
+    if (hint) hint.textContent = 'Save failed, try Save All.';
   }
 }
 
-// ── Save ─────────────────────────────────────────────────────────────────────
+// ── Save (settings form — configured=True path) ───────────────────────────────
 
 async function saveAll() {
   const btn = document.getElementById('saveBtn');
   btn.disabled = true;
   btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Saving…';
 
-  const payload = {
-    vision_provider: document.getElementById('vision_provider').value,
-    gemini_api_key:  secretVal('gemini_api_key'),
-    gemini_model:    val('gemini_model') || 'gemini-2.5-flash',
-    ollama_base_url: val('ollama_base_url'),
-    ollama_model:    val('ollama_model') || 'llava:7b',
-    openai_api_key:  secretVal('openai_api_key'),
-    openai_model:    val('openai_model') || 'gpt-4o-mini',
-    anthropic_api_key: secretVal('anthropic_api_key'),
-    anthropic_model: val('anthropic_model') || 'claude-opus-4-8',
-    barcode_enrichment: val('barcode_enrichment') || 'llm',
-    barcode_llm_fallback: document.getElementById('barcode_llm_fallback').checked,
-    barcode_autocheck_shopping: document.getElementById('barcode_autocheck_shopping').checked,
-    enrich_provider: val('enrich_provider'),
-    enrich_model:    val('enrich_model'),
-    grocy_base_url:  val('grocy_base_url'),
-    grocy_api_key:   secretVal('grocy_api_key'),
-    grocy_public_url: val('grocy_public_url'),
-    mealie_base_url: val('mealie_base_url'),
-    mealie_api_key:  secretVal('mealie_api_key'),
-    mealie_public_url: val('mealie_public_url'),
-    recipe_source:   document.getElementById('recipe_source').value,
-    themealdb_api_key: secretVal('themealdb_api_key'),
-    spoonacular_api_key: secretVal('spoonacular_api_key'),
-    staple_items:    val('staple_items'),
-    cook_ai_context: val('cook_ai_context'),
-    perishable_days: num('perishable_days', 14),
-    expiring_soon_days: num('expiring_soon_days', 5),
-    suggest_per_tier: num('suggest_per_tier', 8),
-    nav_order:       navState.map(t => t.key).join(','),
-    nav_hidden:      navState.filter(t => t.hidden).map(t => t.key).join(','),
-    ui_theme:        document.getElementById('ui_theme').value,
-    ui_scale:        document.getElementById('ui_scale').value,
-    auth_required:   document.getElementById('auth_required').checked,
-    auth_password:   secretVal('auth_password'),
-    api_key:         secretVal('api_key'),
-    rclone_remote:   val('rclone_remote'),
-    rclone_schedule_hours: num('rclone_schedule_hours', 0),
-  };
+  const payload = buildPayload();
 
   // Secure by default: block save if auth is required but no password is set or stored.
-  if (payload.auth_required && !{{ 'true' if has.auth_password else 'false' }}
+  if (payload.auth_required && !HAS_AUTH_PASSWORD
       && (!payload.auth_password || payload.auth_password === '__CLEAR__')) {
     document.getElementById('save-result').innerHTML =
       '<span class="text-danger"><i class="bi bi-x-circle-fill me-1"></i>Set a UI password, ' +
-      'or turn off &ldquo;Require authentication&rdquo; if an outer layer handles it.</span>';
+      'or turn off "Require authentication" if an outer layer handles it.</span>';
     btn.disabled = false;
     btn.innerHTML = '<i class="bi bi-check-lg me-1"></i>Save All';
     document.querySelector('[data-bs-target="#pane-security"]')?.click();
@@ -1037,6 +1355,54 @@ async function saveAll() {
     btn.disabled = false;
     btn.innerHTML = '<i class="bi bi-check-lg me-1"></i>Save All';
   }
+}
+
+// Build the full settings payload from form fields — shared by wizard and settings form.
+function buildPayload() {
+  const providerEl = document.getElementById('vision_provider');
+  const providerVal = providerEl ? providerEl.value : 'gemini';
+  // "none" is a wizard-only sentinel; treat it as no provider key (leave existing).
+  const effectiveProvider = providerVal === 'none' ? 'gemini' : providerVal;
+
+  return {
+    vision_provider: effectiveProvider,
+    gemini_api_key:  secretVal('gemini_api_key'),
+    gemini_model:    val('gemini_model') || 'gemini-2.5-flash',
+    ollama_base_url: val('ollama_base_url'),
+    ollama_model:    val('ollama_model') || 'llava:7b',
+    openai_api_key:  secretVal('openai_api_key'),
+    openai_model:    val('openai_model') || 'gpt-4o-mini',
+    anthropic_api_key: secretVal('anthropic_api_key'),
+    anthropic_model: val('anthropic_model') || 'claude-opus-4-8',
+    barcode_enrichment: val('barcode_enrichment') || 'llm',
+    barcode_llm_fallback: document.getElementById('barcode_llm_fallback')?.checked || false,
+    barcode_autocheck_shopping: document.getElementById('barcode_autocheck_shopping')?.checked || false,
+    enrich_provider: val('enrich_provider'),
+    enrich_model:    val('enrich_model'),
+    grocy_base_url:  val('grocy_base_url'),
+    grocy_api_key:   secretVal('grocy_api_key'),
+    grocy_public_url: val('grocy_public_url'),
+    mealie_base_url: val('mealie_base_url'),
+    mealie_api_key:  secretVal('mealie_api_key'),
+    mealie_public_url: val('mealie_public_url'),
+    recipe_source:   document.getElementById('recipe_source')?.value || 'themealdb',
+    themealdb_api_key: secretVal('themealdb_api_key'),
+    spoonacular_api_key: secretVal('spoonacular_api_key'),
+    staple_items:    val('staple_items'),
+    cook_ai_context: val('cook_ai_context'),
+    perishable_days: num('perishable_days', 14),
+    expiring_soon_days: num('expiring_soon_days', 5),
+    suggest_per_tier: num('suggest_per_tier', 8),
+    nav_order:       navState.map(t => t.key).join(','),
+    nav_hidden:      navState.filter(t => t.hidden).map(t => t.key).join(','),
+    ui_theme:        document.getElementById('ui_theme')?.value || 'dark',
+    ui_scale:        document.getElementById('ui_scale')?.value || 'normal',
+    auth_required:   document.getElementById('auth_required')?.checked ?? true,
+    auth_password:   secretVal('auth_password'),
+    api_key:         secretVal('api_key'),
+    rclone_remote:   val('rclone_remote'),
+    rclone_schedule_hours: num('rclone_schedule_hours', 0),
+  };
 }
 
 // ── TOTP 2FA ─────────────────────────────────────────────────────────────────
@@ -1085,7 +1451,6 @@ async function testRemote(btn) {
   const orig = btn.innerHTML;
   btn.disabled = true;
   btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Testing…';
-  // Save the remote field first so the server uses the current value
   await fetch('setup/save', {method:'POST',headers:{'Content-Type':'application/json'},
     body: JSON.stringify({rclone_remote: val('rclone_remote'), rclone_schedule_hours: num('rclone_schedule_hours',0)})});
   const d = await postJson('admin/backup/test-remote', {});
@@ -1124,20 +1489,22 @@ function tunnelModeChanged() {
   const helpSub = document.getElementById('tunnel-help-subscription');
   const label = document.getElementById('tunnel-token-label');
 
+  if (!tokenSection) return;
+
   if (mode === '') {
     tokenSection.style.display = 'none';
-    buttons.style.setProperty('display', 'none', 'important');
+    if (buttons) buttons.style.setProperty('display', 'none', 'important');
   } else {
     tokenSection.style.display = '';
-    buttons.style.removeProperty('display');
+    if (buttons) buttons.style.removeProperty('display');
     if (mode === 'cloudflare') {
-      label.textContent = 'Cloudflare Tunnel Token';
-      helpCF.style.display = '';
-      helpSub.style.display = 'none';
+      if (label) label.textContent = 'Cloudflare Tunnel Token';
+      if (helpCF) helpCF.style.display = '';
+      if (helpSub) helpSub.style.display = 'none';
     } else {
-      label.textContent = 'Subscription Token';
-      helpCF.style.display = 'none';
-      helpSub.style.display = '';
+      if (label) label.textContent = 'Subscription Token';
+      if (helpCF) helpCF.style.display = 'none';
+      if (helpSub) helpSub.style.display = '';
     }
   }
 }
@@ -1145,6 +1512,7 @@ function tunnelModeChanged() {
 function _setTunnelBadge(state, url) {
   const badge = document.getElementById('tunnel-status-badge');
   const urlEl = document.getElementById('tunnel-url-display');
+  if (!badge) return;
   if (state === 'connected') {
     badge.className = 'badge bg-success';
     badge.textContent = 'Connected';
@@ -1155,19 +1523,18 @@ function _setTunnelBadge(state, url) {
     badge.className = 'badge bg-secondary';
     badge.textContent = 'Not connected';
   }
-  if (url) {
-    urlEl.innerHTML = `<a href="${url}" target="_blank" class="text-info">${url}</a>`;
-  } else {
-    urlEl.textContent = '';
+  if (urlEl) {
+    if (url) {
+      urlEl.innerHTML = `<a href="${url}" target="_blank" class="text-info">${url}</a>`;
+    } else {
+      urlEl.textContent = '';
+    }
   }
 }
 
 async function tunnelConnect() {
   const mode = document.querySelector('input[name="tunnel_mode"]:checked')?.value || '';
-  if (!mode) {
-    setResult('tunnel-result', false, 'Select a mode first.');
-    return;
-  }
+  if (!mode) { setResult('tunnel-result', false, 'Select a mode first.'); return; }
   const token = document.getElementById('tunnel_token')?.value.trim() || '';
   const btn = document.getElementById('tunnel-connect-btn');
   const origHtml = btn.innerHTML;
@@ -1251,12 +1618,251 @@ async function _initTunnelStatus() {
   } catch(_) { /* docker may not be available */ }
 }
 
-// Init
-showProvider();
-showRecipeSource();
-renderNavEditor();
-tunnelModeChanged();
-_initTunnelStatus();
+// ═════════════════════════════════════════════════════════════════════════════
+// WIZARD logic (first-time setup only)
+// ═════════════════════════════════════════════════════════════════════════════
+
+{% if not configured %}
+
+let _wizStep = 1;
+const _WIZ_TOTAL = 6;
+// 'server' or 'pi' — drives Grocy URL pre-fill on Step 3
+let _installMode = null;
+
+function selectInstallMode(mode) {
+  _installMode = mode;
+  document.querySelectorAll('.install-card').forEach(c => c.classList.remove('selected'));
+  document.getElementById('mode-' + mode)?.classList.add('selected');
+}
+
+function _wizUpdateProgress() {
+  for (let i = 1; i <= _WIZ_TOTAL; i++) {
+    const dot = document.getElementById('dot-' + i);
+    if (!dot) continue;
+    dot.classList.remove('active', 'done');
+    if (i < _wizStep) dot.classList.add('done');
+    else if (i === _wizStep) dot.classList.add('active');
+  }
+  for (let i = 1; i < _WIZ_TOTAL; i++) {
+    const con = document.getElementById('con-' + i + '-' + (i+1));
+    if (con) con.classList.toggle('done', i < _wizStep);
+  }
+}
+
+function _wizShowStep(n) {
+  for (let i = 1; i <= _WIZ_TOTAL; i++) {
+    const el = document.getElementById('wiz-step-' + i);
+    if (!el) continue;
+    el.classList.toggle('d-none', i !== n);
+  }
+  _wizStep = n;
+  _wizUpdateProgress();
+  window.scrollTo(0, 0);
+}
+
+function wizNext() {
+  if (_wizStep === 6) return;  // shouldn't happen
+  if (_wizStep === 3) {
+    // Update the "Open Grocy" link href when leaving step 3
+    const url = val('grocy_base_url');
+    const link = document.getElementById('grocy-open-link');
+    if (link && url) link.href = url;
+  }
+  if (_wizStep === 4) {
+    // Update AI none-note
+    wizUpdateAiKeyVisibility();
+  }
+  if (_wizStep === 5) {
+    // Build summary before showing step 6
+    _wizBuildSummary();
+  }
+  _wizShowStep(_wizStep + 1);
+}
+
+function wizBack() {
+  if (_wizStep === 1) return;
+  _wizShowStep(_wizStep - 1);
+}
+
+function wizUpdateAiKeyVisibility() {
+  const p = document.getElementById('vision_provider')?.value;
+  const noneNote = document.getElementById('wiz-ai-none-note');
+  const testRow = document.getElementById('wiz-ai-test-row');
+  if (noneNote) noneNote.classList.toggle('d-none', p !== 'none');
+  if (testRow) testRow.classList.toggle('d-none', p === 'none');
+}
+
+// Step 3: respond to install mode choice made in Step 1
+function _wizApplyInstallMode() {
+  const applianceNote = document.getElementById('wiz-grocy-appliance-note');
+  const urlField = document.getElementById('grocy_base_url');
+  if (_installMode === 'pi') {
+    if (urlField && !urlField.value) {
+      urlField.value = 'http://localhost:9383';
+    }
+    if (applianceNote) applianceNote.classList.remove('d-none');
+  } else {
+    if (applianceNote) applianceNote.classList.add('d-none');
+  }
+  // Update "Open Grocy" link
+  const link = document.getElementById('grocy-open-link');
+  if (link) {
+    const url = urlField?.value || '';
+    if (url) link.href = url;
+  }
+}
+
+// Build the Step 6 summary list
+function _wizBuildSummary() {
+  const el = document.getElementById('wiz-summary');
+  if (!el) return;
+
+  const authOn = document.getElementById('auth_required')?.checked ?? true;
+  const hasPassword = HAS_AUTH_PASSWORD || !!secretVal('auth_password');
+  const grocyUrl = val('grocy_base_url');
+  const hasGrocyKey = {{ 'true' if has.grocy_api_key else 'false' }} || !!secretVal('grocy_api_key');
+  const provider = document.getElementById('vision_provider')?.value || 'none';
+  const hasAiKey = provider === 'none' || provider === 'ollama'
+    ? (provider === 'ollama')
+    : ({{ 'true' if (has.gemini_api_key or has.openai_api_key or has.anthropic_api_key) else 'false' }}
+       || !!secretVal(provider + '_api_key'));
+  const mealieUrl = val('mealie_base_url');
+  const hasMealieKey = {{ 'true' if has.mealie_api_key else 'false' }} || !!secretVal('mealie_api_key');
+  const mealieOk = mealieUrl && hasMealieKey;
+
+  const items = [];
+
+  // Security
+  if (!authOn) {
+    items.push({icon:'bi-shield-slash text-warning', label:'Authentication disabled', ok:true, detail:'An outer layer must handle access control.'});
+  } else if (hasPassword) {
+    items.push({icon:'bi-shield-check text-success', label:'Password set', ok:true, detail:''});
+  } else {
+    items.push({icon:'bi-shield-exclamation text-danger', label:'No password set', ok:false, step:2, detail:'Required to complete setup.'});
+  }
+
+  // Grocy
+  if (grocyUrl && hasGrocyKey) {
+    items.push({icon:'bi-fridge text-success', label:'Grocy: ' + grocyUrl, ok:true, detail:''});
+  } else if (!grocyUrl) {
+    items.push({icon:'bi-fridge text-danger', label:'Grocy URL not set', ok:false, step:3, detail:'Required.'});
+  } else {
+    items.push({icon:'bi-fridge text-warning', label:'Grocy URL set, no API key', ok:false, step:3, detail:'Add your Grocy API key.'});
+  }
+
+  // AI
+  if (provider === 'none') {
+    items.push({icon:'bi-magic text-secondary', label:'AI: not configured', ok:true, detail:'Photo import and enrichment will be unavailable.'});
+  } else if (hasAiKey) {
+    const providerLabel = {'gemini':'Gemini','openai':'OpenAI','anthropic':'Anthropic','ollama':'Ollama'}[provider] || provider;
+    items.push({icon:'bi-magic text-success', label:'AI: ' + providerLabel, ok:true, detail:''});
+  } else {
+    const providerLabel = {'gemini':'Gemini','openai':'OpenAI','anthropic':'Anthropic'}[provider] || provider;
+    items.push({icon:'bi-magic text-warning', label:'AI: ' + providerLabel + ' — no API key', ok:false, step:4, detail:'Enter an API key or choose None.'});
+  }
+
+  // Mealie
+  if (mealieOk) {
+    items.push({icon:'bi-journal-richtext text-success', label:'Mealie: ' + mealieUrl, ok:true, detail:''});
+  } else {
+    items.push({icon:'bi-journal-richtext text-secondary', label:'Mealie: not configured', ok:true, detail:'Optional — add later from Settings.'});
+  }
+
+  el.innerHTML = items.map(item => `
+    <div class="summary-item">
+      <span class="summary-icon"><i class="bi ${item.icon}"></i></span>
+      <span>${item.label}${item.detail ? '<span class="text-secondary ms-2 small">' + item.detail + '</span>' : ''}</span>
+      ${!item.ok && item.step ? `<a href="#" class="summary-fix-link text-warning" onclick="event.preventDefault();_wizShowStep(${item.step})">Fix <i class="bi bi-arrow-right"></i></a>` : ''}
+    </div>`).join('');
+
+  // Errors
+  const errors = items.filter(i => !i.ok && i.step);
+  const errEl = document.getElementById('wiz-errors');
+  const errList = document.getElementById('wiz-error-list');
+  if (errors.length > 0 && errEl && errList) {
+    errEl.classList.remove('d-none');
+    errList.innerHTML = errors.map(e => `<li>${e.label}${e.detail ? ' — ' + e.detail : ''}</li>`).join('');
+  } else if (errEl) {
+    errEl.classList.add('d-none');
+  }
+}
+
+// Wizard save: collect all fields and POST to /setup/save, then redirect
+async function wizSaveAll() {
+  const btn = document.getElementById('wiz-finish-btn');
+  const resultEl = document.getElementById('wiz-save-result');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Saving…';
+  resultEl.innerHTML = '';
+
+  const payload = buildPayload();
+
+  // Enforce password requirement
+  if (payload.auth_required && !HAS_AUTH_PASSWORD
+      && (!payload.auth_password || payload.auth_password === '__CLEAR__')) {
+    resultEl.innerHTML = '<div class="alert alert-danger py-2 small"><i class="bi bi-x-circle-fill me-1"></i>' +
+      'A password is required. <a href="#" onclick="event.preventDefault();_wizShowStep(2)">Go to Security</a></div>';
+    btn.disabled = false;
+    btn.innerHTML = '<i class="bi bi-rocket-takeoff me-2"></i>Start using FoodAssistant';
+    return;
+  }
+
+  // Enforce Grocy URL
+  if (!payload.grocy_base_url) {
+    resultEl.innerHTML = '<div class="alert alert-danger py-2 small"><i class="bi bi-x-circle-fill me-1"></i>' +
+      'Grocy URL is required. <a href="#" onclick="event.preventDefault();_wizShowStep(3)">Go to Grocy</a></div>';
+    btn.disabled = false;
+    btn.innerHTML = '<i class="bi bi-rocket-takeoff me-2"></i>Start using FoodAssistant';
+    return;
+  }
+
+  try {
+    const r = await fetch('setup/save', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload),
+    });
+    const d = await r.json();
+    if (d.ok) {
+      window.location.href = 'ui/';
+    } else {
+      throw new Error(d.detail || 'Unknown error');
+    }
+  } catch (e) {
+    resultEl.innerHTML = `<div class="alert alert-danger py-2 small"><i class="bi bi-x-circle-fill me-1"></i>${e.message}</div>`;
+    btn.disabled = false;
+    btn.innerHTML = '<i class="bi bi-rocket-takeoff me-2"></i>Start using FoodAssistant';
+  }
+}
+
+// Hook into wizNext to apply install mode when entering step 3
+(function patchWizNext() {
+  const origWizNext = wizNext;
+  window.wizNext = function() {
+    const goingToStep = _wizStep + 1;
+    origWizNext();
+    if (goingToStep === 3) {
+      _wizApplyInstallMode();
+    }
+  };
+})();
+
+{% endif %}
+
+// ── Initialization ────────────────────────────────────────────────────────────
+
+(function init() {
+  showProvider();
+  showRecipeSource();
+  renderNavEditor();
+  tunnelModeChanged();
+  _initTunnelStatus();
+
+  // Settings form only: update auth hint on load
+  {% if configured %}
+  toggleAuthRequired();
+  {% endif %}
+})();
 </script>
 </body>
 </html>

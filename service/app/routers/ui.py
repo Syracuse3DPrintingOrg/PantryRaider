@@ -228,6 +228,14 @@ def update_default(
     return ingress_redirect(request, "/ui/defaults?msg=Rule+updated.")
 
 
+@router.get("/about", response_class=HTMLResponse)
+async def about_page(request: Request):
+    return templates.TemplateResponse(request, "about.html", {
+        "request": request,
+        "active": "about",
+    })
+
+
 @router.post("/defaults/{default_id}/delete")
 def delete_default(request: Request, default_id: int, db: Session = Depends(get_db)):
     row = db.query(ExpiryDefault).filter(ExpiryDefault.id == default_id).first()

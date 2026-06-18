@@ -4,8 +4,6 @@
 
 A self-hosted food tracker that helps you manage what's in your fridge, reduce waste, and plan meals. Built to run entirely on your own hardware with no cloud dependency required.
 
-Uses [Grocy](https://grocy.info/) as the inventory backend. All AI features are optional and can run fully locally using [Ollama](https://ollama.com/).
-
 Licensed under [PolyForm Noncommercial 1.0](LICENSE) - free for personal, educational, and non-commercial use.
 
 ---
@@ -15,6 +13,22 @@ Licensed under [PolyForm Noncommercial 1.0](LICENSE) - free for personal, educat
 *Inventory dashboard — four storage panels (Refrigerated, Frozen, Room Temp, Pantry) with drag-and-drop moves, inline edits, and expiry badges.*
 
 ---
+
+## Why FoodAssistant?
+
+[Grocy](https://grocy.info/) is an excellent, battle-tested self-hosted grocery and inventory manager. It handles product storage, stock levels, expiry tracking, and more. FoodAssistant uses Grocy as its inventory backbone.
+
+What FoodAssistant adds on top:
+
+- **AI-powered photo import** -- photograph a pile of groceries and get them all queued for review at once, without typing anything
+- **Barcode scanning with LLM enrichment** -- scan barcodes via camera, USB scanner, or manual entry; [Open Food Facts](https://world.openfoodfacts.org) provides product data, and an optional LLM pass cleans up messy names and fills in gaps
+- **Stream Deck kiosk** -- a dedicated kitchen control surface with large buttons for the most common actions, auto-rotation support, and configurable text size; no phone required
+- **Home Assistant integration** -- REST sensors, barcode scanner automations via keyboard_remote, and a Lovelace inventory dashboard
+- **Recipe suggestions from what you have** -- ranks your Mealie recipe library by how much of each recipe is already in stock; items expiring soon float to the top
+
+We stand on the shoulders of giants. See [About & Credits](/ui/about) in the app for the full list.
+
+All AI features are optional. You can run FoodAssistant without any AI provider configured; photo analysis and barcode enrichment will not work, but everything else does.
 
 ## Features
 
@@ -28,8 +42,11 @@ Licensed under [PolyForm Noncommercial 1.0](LICENSE) - free for personal, educat
 - **Meal planning and shopping lists** — optional [Mealie](https://mealie.io) integration with a week view, shopping list with check-off, and inventory-aware recipe suggestions
 - **Custom storage locations** — add buckets beyond the four built-ins (Wine Cellar, Garage Fridge, etc.) from the setup wizard
 - **Home Assistant integration** — REST sensors, notification automations, and a Lovelace dashboard with inventory panels
+- **Stream Deck kiosk** — kitchen control surface with large-text buttons, auto-rotation, and configurable layout
+- **UI scale setting** — adjustable zoom for small screens or kitchen monitors
 - **Web setup wizard** — configure everything at `/setup` with live connection tests; no config file editing required
 - **Two-factor authentication** — optional TOTP (app-based 2FA) on top of password login; works offline with any authenticator app
+- **Localhost auth bypass** — kiosk installs on the local machine can skip the login screen entirely
 
 ## Screenshots
 
@@ -55,7 +72,7 @@ When AI is enabled you have four choices:
 | [OpenAI](https://platform.openai.com/) | API key, usage billed per token | No |
 | [Anthropic](https://console.anthropic.com/) | API key, usage billed per token | No |
 
-For a fully local setup with no external dependencies, use Ollama for both vision and text. Photo analysis quality is lower than cloud models but functional for most food items.
+The default cloud model is Gemini 2.5 Flash, which is fast and has a generous free tier. For a fully local setup with no external dependencies, use Ollama for both vision and text. Photo analysis quality is lower than cloud models but functional for most food items.
 
 ## Install
 
@@ -178,25 +195,9 @@ docker compose up -d grocy   # or mealie / ollama
 
 Check each project's release notes before a major bump - Mealie in particular has had breaking schema migrations between major versions. FoodAssistant's own image is versioned separately via `FOODASSISTANT_TAG` (see above).
 
-## API Endpoints
+## API
 
-| Endpoint | Purpose |
-|---|---|
-| `/setup` | Web setup wizard |
-| `/ui/` | Inventory dashboard |
-| `/ui/expiring` | Expiring items view |
-| `/ui/add` | Add food (barcode, photo, manual) |
-| `/ui/defaults` | Expiry defaults editor |
-| `/ui/cook` | Recipe suggestions ranked by inventory |
-| `/ui/recipes` | Browse and import recipes |
-| `/ui/mealplan` | Week meal plan (Mealie) |
-| `/ui/shopping` | Shopping list (Mealie) |
-| `GET /admin/backup` | Download data as zip |
-| `GET /expiring/summary` | Urgency counts for HA sensors |
-| `GET /inventory/dashboard` | Full stock grouped by storage |
-| `GET /health` | Connectivity status |
-
-Full interactive API docs at `/docs`.
+See [docs/api.md](docs/api.md) for endpoint reference. Interactive docs are at `/docs` when the app is running.
 
 ## Changelog
 

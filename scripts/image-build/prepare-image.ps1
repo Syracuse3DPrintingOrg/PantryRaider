@@ -58,7 +58,7 @@ if (-not (Test-Path (Join-Path $Boot "cmdline.txt"))) {
 
 $Assets = @(
     "firstboot.sh",
-    "firstrun.sh",
+    "foodassistant-firstrun.sh",
     "foodassistant-firstboot.service",
     "docker-compose.appliance.yml"
 )
@@ -80,20 +80,27 @@ if (-not (Test-Path $TopConfig)) {
     Copy-Item $Config $TopConfig -Force
 }
 
-# firstrun.sh must sit at the root of the boot partition where Pi OS finds it.
-Copy-Item (Join-Path $ScriptDir "firstrun.sh") (Join-Path $Boot "firstrun.sh") -Force
+# Place our bootstrap script on the boot partition under its own name. Do NOT
+# overwrite any firstrun.sh placed by Raspberry Pi Imager (wifi/SSH/user-creation).
+$ImagerFirstrun = Join-Path $Boot "firstrun.sh"
+if (Test-Path $ImagerFirstrun) {
+    Say "NOTE: Raspberry Pi Imager's firstrun.sh is present -- NOT overwriting it."
+    Say "      Only adding foodassistant-firstrun.sh alongside it."
+}
+Copy-Item (Join-Path $ScriptDir "foodassistant-firstrun.sh") (Join-Path $Boot "foodassistant-firstrun.sh") -Force
 
-# Wire cmdline.txt (a single line) to run firstrun.sh once. Idempotent: skip if
-# already present. Write back without a BOM or trailing newline so the kernel
-# command line stays clean.
+# Wire cmdline.txt (a single line) to run foodassistant-firstrun.sh once.
+# Idempotent: skip if already present. We leave any existing firstrun.sh hook
+# (placed by Raspberry Pi Imager) untouched. Write back without a BOM or
+# trailing newline so the kernel command line stays clean.
 $CmdlinePath = Join-Path $Boot "cmdline.txt"
 $cmdline = [System.IO.File]::ReadAllText($CmdlinePath)
 $cmdline = $cmdline.Trim()
-$hook = "systemd.run=/boot/firmware/firstrun.sh systemd.run_success_action=reboot systemd.unit=kernel-command-line.target"
-if ($cmdline -match "systemd\.run=.*firstrun\.sh") {
-    Say "cmdline.txt already wired; leaving as-is"
+$hook = "systemd.run=/boot/firmware/foodassistant-firstrun.sh systemd.run_success_action=reboot systemd.unit=kernel-command-line.target"
+if ($cmdline -match "systemd\.run=.*foodassistant-firstrun\.sh") {
+    Say "cmdline.txt already wired for foodassistant-firstrun.sh; leaving as-is"
 } else {
-    Say "Wiring cmdline.txt to run firstrun.sh on first boot"
+    Say "Wiring cmdline.txt to run foodassistant-firstrun.sh on first boot"
     $cmdline = "$cmdline $hook"
     $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
     [System.IO.File]::WriteAllText($CmdlinePath, $cmdline, $utf8NoBom)

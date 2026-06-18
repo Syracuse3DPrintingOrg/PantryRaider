@@ -54,7 +54,7 @@ done
 # Assets copied into the boot partition under foodassistant-setup/.
 ASSETS="
 $SCRIPT_DIR/firstboot.sh
-$SCRIPT_DIR/firstrun.sh
+$SCRIPT_DIR/foodassistant-firstrun.sh
 $SCRIPT_DIR/foodassistant-firstboot.service
 $SCRIPT_DIR/docker-compose.appliance.yml
 "
@@ -75,25 +75,31 @@ install_payload() {
   if [ ! -f "$boot/foodassistant.config.env" ]; then
     cp "$CONFIG_SRC" "$boot/foodassistant.config.env"
   fi
-  # Place firstrun.sh where Pi OS expects it.
-  cp "$SCRIPT_DIR/firstrun.sh" "$boot/firstrun.sh"
-  chmod +x "$boot/firstrun.sh" "$boot/foodassistant-setup/firstboot.sh"
+  # Place our bootstrap script on the boot partition under its own name, leaving
+  # any firstrun.sh that Raspberry Pi Imager wrote (wifi/SSH/user-creation) intact.
+  if [ -f "$boot/firstrun.sh" ]; then
+    say "NOTE: Raspberry Pi Imager's firstrun.sh is present -- NOT overwriting it."
+    say "      Only adding foodassistant-firstrun.sh alongside it."
+  fi
+  cp "$SCRIPT_DIR/foodassistant-firstrun.sh" "$boot/foodassistant-firstrun.sh"
+  chmod +x "$boot/foodassistant-firstrun.sh" "$boot/foodassistant-setup/firstboot.sh"
 
-  # Wire cmdline.txt to invoke firstrun.sh once, the Pi-Imager way. Only append
-  # if not already present, to stay idempotent.
+  # Wire cmdline.txt to invoke foodassistant-firstrun.sh once. Only append if
+  # not already present, to stay idempotent. We leave any existing
+  # firstrun.sh hook (placed by Raspberry Pi Imager) untouched.
   if [ -f "$boot/cmdline.txt" ]; then
-    if ! grep -q 'systemd.run=.*firstrun.sh' "$boot/cmdline.txt"; then
-      say "Wiring cmdline.txt to run firstrun.sh on first boot"
-      # cmdline.txt is a single line; append our systemd.run hooks.
+    if ! grep -q 'systemd.run=.*foodassistant-firstrun.sh' "$boot/cmdline.txt"; then
+      say "Wiring cmdline.txt to run foodassistant-firstrun.sh on first boot"
+      # cmdline.txt is a single line; append our systemd.run hook.
       local line
       line="$(tr -d '\n' < "$boot/cmdline.txt")"
-      printf '%s systemd.run=/boot/firmware/firstrun.sh systemd.run_success_action=reboot systemd.unit=kernel-command-line.target\n' \
+      printf '%s systemd.run=/boot/firmware/foodassistant-firstrun.sh systemd.run_success_action=reboot systemd.unit=kernel-command-line.target\n' \
         "$line" > "$boot/cmdline.txt"
     else
-      say "cmdline.txt already wired; leaving as-is"
+      say "cmdline.txt already wired for foodassistant-firstrun.sh; leaving as-is"
     fi
   else
-    say "NOTE: no cmdline.txt here. firstrun.sh is installed; the systemd unit"
+    say "NOTE: no cmdline.txt here. foodassistant-firstrun.sh is installed; the systemd unit"
     say "      (foodassistant-firstboot.service) will provision on first boot"
     say "      if you enable it, or rely on Pi Imager's own firstrun hook."
   fi

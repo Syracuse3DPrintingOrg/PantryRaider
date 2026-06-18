@@ -33,6 +33,9 @@ def _downscale(data: bytes, mime: str, max_dim: int = _MAX_DIM_FOOD) -> tuple[by
         return data, mime
 
 
+_NO_AI = {"detail": "AI provider not configured", "setup_url": "/setup"}
+
+
 @router.post("/food", response_model=AnalysisResult)
 async def analyze_food(
     file: UploadFile = File(...),
@@ -43,7 +46,10 @@ async def analyze_food(
     if file.content_type not in _ALLOWED_MIME:
         raise HTTPException(400, f"Unsupported image type: {file.content_type}")
     data, mime = _downscale(await file.read(), file.content_type)
-    result = await provider.analyze_food(data, mime)
+    try:
+        result = await provider.analyze_food(data, mime)
+    except NotImplementedError:
+        raise HTTPException(503, detail=_NO_AI)
     result.items = [apply_defaults(item, db) for item in result.items]
     return result
 
@@ -70,6 +76,9 @@ async def analyze_receipt(
     if file.content_type not in _ALLOWED_MIME:
         raise HTTPException(400, f"Unsupported image type: {file.content_type}")
     data, mime = _downscale(await file.read(), file.content_type, _MAX_DIM_RECEIPT)
-    result = await provider.analyze_receipt(data, mime)
+    try:
+        result = await provider.analyze_receipt(data, mime)
+    except NotImplementedError:
+        raise HTTPException(503, detail=_NO_AI)
     result.items = [apply_defaults(item, db) for item in result.items]
     return result

@@ -1,11 +1,11 @@
 #!/bin/sh
-# FoodAssistant firstrun bootstrap (Raspberry Pi Imager mechanism)
-# ================================================================
-# Raspberry Pi OS runs /boot/firmware/firstrun.sh exactly once on first boot
-# (when referenced via systemd.run= in cmdline.txt — this is the same hook the
-# official Raspberry Pi Imager uses for its customization). It runs EARLY, as
-# root, before the full system is up, so we keep it tiny: it just installs our
-# systemd unit and hands off to firstboot.sh on the next/regular boot.
+# FoodAssistant firstrun bootstrap (foodassistant-firstrun.sh)
+# ============================================================
+# Invoked via systemd.run=/boot/firmware/foodassistant-firstrun.sh in
+# cmdline.txt alongside (not replacing) any firstrun.sh that Raspberry Pi
+# Imager wrote for wifi/SSH/user-creation. It runs EARLY, as root, before the
+# full system is up, so we keep it tiny: it just installs our systemd unit and
+# hands off to firstboot.sh on the next/regular boot.
 #
 # This file, together with the foodassistant-setup payload, is placed on the
 # boot partition by scripts/image-build/prepare-image.sh. If you flashed a
@@ -19,7 +19,7 @@ BOOT=/boot/firmware
 SETUP_SRC="$BOOT/foodassistant-setup"
 SETUP_DST=/opt/foodassistant-setup
 
-log() { echo "[firstrun] $*"; }
+log() { echo "[foodassistant-firstrun] $*"; }
 
 log "FoodAssistant firstrun bootstrap starting"
 

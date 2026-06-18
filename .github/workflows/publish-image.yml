@@ -4,6 +4,15 @@ name: Publish container image
 # Container Registry (GHCR) so users can run the app without building locally.
 # Tag a release (e.g. v1.0.0) to publish a versioned image; pushes to main
 # refresh the :main tag. Run manually from the Actions tab via workflow_dispatch.
+#
+# IMPORTANT: package visibility
+# After this workflow pushes the image for the first time, the package defaults
+# to private. Appliance devices cannot pull it without auth until it is made
+# public. To fix: go to the repo on GitHub -> Packages -> foodassistant ->
+# Package settings -> Change visibility -> Public. This is a one-time UI click
+# that cannot be automated here. The firstboot.sh provisioner will fall back to
+# building from local source if the pull fails, but making the package public is
+# the recommended path for zero-friction appliance deploys.
 
 on:
   push:

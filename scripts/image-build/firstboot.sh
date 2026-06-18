@@ -9,6 +9,7 @@
 #      (FoodAssistant + Grocy; Mealie/Ollama opt-in).
 #   5. Optionally installs a Chromium kiosk if ENABLE_KIOSK=true AND a display
 #      is present.
+#   6. Optionally installs the Stream Deck controller if ENABLE_STREAMDECK=true.
 #
 # Design notes
 # ------------
@@ -39,6 +40,9 @@ ASSET_DIR="${ASSET_DIR:-$(cd "$(dirname "$0")" && pwd)}"
 COMPOSE_SRC="${COMPOSE_SRC:-$ASSET_DIR/docker-compose.appliance.yml}"
 # Marker so the systemd unit can disable itself after a successful run.
 DONE_MARKER="${DONE_MARKER:-/var/lib/foodassistant/firstboot.done}"
+# Path to a local clone of the repo. Used as the Docker build context when the
+# pre-built GHCR image is unavailable (see deploy_stack).
+REPO_DIR="${REPO_DIR:-/home/foodassistant/FoodAssistant}"
 
 # ── Logging helpers ────────────────────────────────────────────────────────
 log()  { printf '%s [firstboot] %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"; }
@@ -85,10 +89,11 @@ load_config() {
   ENABLE_OLLAMA="${ENABLE_OLLAMA:-false}"
   ENABLE_KIOSK="${ENABLE_KIOSK:-false}"
   KIOSK_URL="${KIOSK_URL:-http://localhost:9284/ui/}"
+  ENABLE_STREAMDECK="${ENABLE_STREAMDECK:-false}"
   FOODASSISTANT_TAG="${FOODASSISTANT_TAG:-latest}"
   INSTALL_DIR="${INSTALL_DIR:-/opt/foodassistant}"
 
-  log "Config: HOSTNAME=$HOSTNAME TZ=$TZ MEALIE=$ENABLE_MEALIE OLLAMA=$ENABLE_OLLAMA KIOSK=$ENABLE_KIOSK TAG=$FOODASSISTANT_TAG DIR=$INSTALL_DIR"
+  log "Config: HOSTNAME=$HOSTNAME TZ=$TZ MEALIE=$ENABLE_MEALIE OLLAMA=$ENABLE_OLLAMA KIOSK=$ENABLE_KIOSK STREAMDECK=$ENABLE_STREAMDECK TAG=$FOODASSISTANT_TAG DIR=$INSTALL_DIR"
 }
 
 # Normalize a truthy config value to "true" / "false".
@@ -232,11 +237,26 @@ deploy_stack() {
   log "Compose profiles: ${profiles:-<none>}"
 
   if [ "$DRY_RUN" = "1" ]; then
-    log "DRY_RUN would run: (cd $INSTALL_DIR && docker compose $profiles up -d)"
+    log "DRY_RUN would run: (cd $INSTALL_DIR && docker compose $profiles pull service || docker compose $profiles build service && docker compose $profiles up -d)"
     return 0
   fi
+
+  # Try the pre-built image first; fall back to building from local source
+  # if the registry pull fails (e.g. image not yet public or no internet).
+  # Export REPO_DIR so the compose build: context variable resolves correctly.
+  export REPO_DIR
   # shellcheck disable=SC2086
-  ( cd "$INSTALL_DIR" && docker compose $profiles pull && docker compose $profiles up -d )
+  if ! ( cd "$INSTALL_DIR" && docker compose $profiles pull service ) 2>/dev/null; then
+    log "Image pull failed; building from local source at $REPO_DIR/service (this takes a few minutes)"
+    if [ ! -d "$REPO_DIR/service" ]; then
+      die "Local source not found at $REPO_DIR/service and image pull failed. Clone the repo to $REPO_DIR or make the GHCR package public."
+    fi
+    # shellcheck disable=SC2086
+    ( cd "$INSTALL_DIR" && docker compose $profiles build service ) \
+      || die "Local build also failed. Check $REPO_DIR/service and Docker logs."
+  fi
+  # shellcheck disable=SC2086
+  ( cd "$INSTALL_DIR" && docker compose $profiles up -d )
 }
 
 # ── Step: kiosk (opt-in, display-gated) ────────────────────────────────────
@@ -293,6 +313,92 @@ EOF
   systemctl start foodassistant-kiosk.service || warn "kiosk start failed (will retry on boot)"
 }
 
+# ── Step: Stream Deck controller (opt-in) ──────────────────────────────────
+configure_streamdeck() {
+  if ! is_true "$ENABLE_STREAMDECK"; then
+    log "Stream Deck disabled (ENABLE_STREAMDECK=$ENABLE_STREAMDECK); skipping"
+    return 0
+  fi
+  log "Installing Stream Deck controller"
+
+  local venv_dir="/opt/foodassistant/venv"
+  local sd_src="$ASSET_DIR/foodassistant_streamdeck"
+  local sd_dst="/opt/foodassistant/foodassistant_streamdeck"
+
+  # Ensure venv exists (reuse if already created, e.g. on re-run).
+  if [ -d "$venv_dir" ]; then
+    log "venv at $venv_dir already exists; reusing"
+  else
+    log "Creating Python venv at $venv_dir"
+    run python3 -m venv "$venv_dir"
+  fi
+
+  # Pin floor on streamdeck>=0.9.8: 0.9.5 does not recognise USB product id
+  # 0x00ba on current XL / Module 32 hardware.
+  log "Installing Python dependencies into venv"
+  run "$venv_dir/bin/pip" install --quiet --upgrade pip
+  run "$venv_dir/bin/pip" install --quiet \
+    "streamdeck>=0.9.8" \
+    "Pillow>=10.4.0" \
+    "httpx>=0.27.0" \
+    "websockets>=12.0"
+
+  # Copy the streamdeck package from the repo/asset checkout.
+  if [ -d "$sd_src" ]; then
+    log "Copying foodassistant_streamdeck package to $sd_dst"
+    run mkdir -p "$sd_dst"
+    if [ "$DRY_RUN" != "1" ]; then
+      cp -a "$sd_src"/. "$sd_dst"/
+      # Manual installs landed with mode 700 and broke the service.
+      chmod -R a+rX "$sd_dst"
+    fi
+  else
+    warn "foodassistant_streamdeck source not found at $sd_src; skipping package copy"
+  fi
+
+  # Install udev rule so the service user can open the USB device.
+  log "Installing Elgato Stream Deck udev rule"
+  if [ "$DRY_RUN" = "1" ]; then
+    log "DRY_RUN would write /etc/udev/rules.d/99-streamdeck.rules"
+  else
+    printf 'SUBSYSTEM=="usb", ATTR{idVendor}=="0fd9", GROUP="plugdev", MODE="0660"\n' \
+      > /etc/udev/rules.d/99-streamdeck.rules
+    udevadm control --reload-rules || warn "udevadm reload failed"
+  fi
+
+  # Add the service user (foodassistant) to the plugdev group.
+  if getent group plugdev >/dev/null 2>&1; then
+    run usermod -aG plugdev foodassistant || warn "Could not add foodassistant to plugdev"
+  else
+    warn "plugdev group not found; skipping usermod"
+  fi
+
+  # Write the systemd service unit.
+  if [ "$DRY_RUN" = "1" ]; then
+    log "DRY_RUN would write /etc/systemd/system/foodassistant-streamdeck.service"
+    return 0
+  fi
+  cat > /etc/systemd/system/foodassistant-streamdeck.service <<EOF
+[Unit]
+Description=FoodAssistant Stream Deck controller
+After=foodassistant.target network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/opt/foodassistant/venv/bin/python -m foodassistant_streamdeck
+WorkingDirectory=/opt/foodassistant
+Restart=always
+RestartSec=5
+User=foodassistant
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  systemctl daemon-reload
+  systemctl enable foodassistant-streamdeck.service || warn "streamdeck service enable failed"
+  systemctl start foodassistant-streamdeck.service || warn "streamdeck service start failed (will retry on boot)"
+}
+
 # ── Step: mark done ────────────────────────────────────────────────────────
 mark_done() {
   if [ "$DRY_RUN" = "1" ]; then
@@ -339,6 +445,7 @@ main() {
   install_docker
   deploy_stack
   configure_kiosk
+  configure_streamdeck
   mark_done
 
   log "FoodAssistant first-boot complete. Reach the UI at:"
