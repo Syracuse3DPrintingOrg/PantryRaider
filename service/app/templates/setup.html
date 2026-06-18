@@ -89,6 +89,9 @@
           <button class="nav-link" data-bs-toggle="pill" data-bs-target="#pane-data" type="button">
             <i class="bi bi-cloud-arrow-down me-2"></i>Backup &amp; Updates
           </button>
+          <button class="nav-link" data-bs-toggle="pill" data-bs-target="#pane-tunnel" type="button">
+            <i class="bi bi-globe me-2"></i>Remote Access
+          </button>
         </div>
         <button class="btn btn-primary w-100 mt-3" onclick="saveAll()" id="saveBtn">
           <i class="bi bi-check-lg me-1"></i>Save All
@@ -501,6 +504,84 @@
               <li><code>settings.json</code> is written with owner-only permissions (0600).</li>
               <li>Connection-test errors have key material redacted before display.</li>
             </ul>
+          </div>
+        </div>
+
+        <!-- ════ Remote Access ════ -->
+        <div class="tab-pane fade" id="pane-tunnel">
+          <p class="pane-intro">Expose FoodAssistant over the internet without port-forwarding your router.</p>
+
+          <div class="section-card">
+            <div class="section-title"><i class="bi bi-globe text-info"></i> Remote Access Mode</div>
+            <p class="text-secondary small">
+              <strong>Cloudflare Tunnel</strong> (free, DIY) — runs a cloudflared container on your host.
+              <strong>FoodAssistant Cloud</strong> — managed subscription with a stable URL.
+              Both modes require Docker to be available on the host.
+            </p>
+
+            <div class="mb-3">
+              <label class="form-label">Mode</label>
+              <div class="d-flex flex-column gap-2" id="tunnel-mode-group">
+                <div class="form-check">
+                  <input class="form-check-input" type="radio" name="tunnel_mode" id="tunnel_mode_off"
+                         value="" {% if not s.tunnel_mode %}checked{% endif %} onchange="tunnelModeChanged()">
+                  <label class="form-check-label" for="tunnel_mode_off">Off</label>
+                </div>
+                <div class="form-check">
+                  <input class="form-check-input" type="radio" name="tunnel_mode" id="tunnel_mode_cloudflare"
+                         value="cloudflare" {% if s.tunnel_mode == 'cloudflare' %}checked{% endif %} onchange="tunnelModeChanged()">
+                  <label class="form-check-label" for="tunnel_mode_cloudflare">
+                    <i class="bi bi-cloud me-1 text-warning"></i>Cloudflare Tunnel
+                    <span class="badge bg-success ms-1">Free</span>
+                  </label>
+                </div>
+                <div class="form-check">
+                  <input class="form-check-input" type="radio" name="tunnel_mode" id="tunnel_mode_subscription"
+                         value="subscription" {% if s.tunnel_mode == 'subscription' %}checked{% endif %} onchange="tunnelModeChanged()">
+                  <label class="form-check-label" for="tunnel_mode_subscription">
+                    <i class="bi bi-stars me-1 text-primary"></i>FoodAssistant Cloud
+                    <span class="badge bg-primary ms-1">Subscription</span>
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <div id="tunnel-token-section" style="display:none">
+              <div class="mb-3">
+                <label class="form-label" id="tunnel-token-label">Token</label>
+                <input type="password" class="form-control font-monospace" id="tunnel_token"
+                       autocomplete="new-password"
+                       placeholder="{{ '•••• saved — leave blank to keep' if s.tunnel_token else 'Paste your tunnel token here' }}"
+                       value="">
+                <div class="form-text" id="tunnel-token-help">
+                  <span id="tunnel-help-cloudflare">
+                    Get your token from the
+                    <a href="https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/get-started/" target="_blank">
+                      Cloudflare Zero Trust dashboard</a> — create a tunnel, copy the token.
+                  </span>
+                  <span id="tunnel-help-subscription" style="display:none">
+                    Enter the subscription token from your FoodAssistant Cloud account.
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div class="d-flex flex-wrap gap-2 align-items-center mb-3" id="tunnel-buttons" style="display:none!important">
+              <button class="btn btn-outline-success btn-sm" id="tunnel-connect-btn" onclick="tunnelConnect()">
+                <i class="bi bi-plug me-1"></i>Connect
+              </button>
+              <button class="btn btn-outline-danger btn-sm" id="tunnel-disconnect-btn" onclick="tunnelDisconnect()">
+                <i class="bi bi-plug-fill me-1"></i>Disconnect
+              </button>
+            </div>
+
+            <div class="d-flex align-items-center gap-2 mb-2" id="tunnel-status-row">
+              <span class="text-secondary small">Status:</span>
+              <span id="tunnel-status-badge" class="badge bg-secondary">Not connected</span>
+              <span id="tunnel-url-display" class="small"></span>
+            </div>
+
+            <div class="test-result" id="tunnel-result"></div>
           </div>
         </div>
 
@@ -974,10 +1055,151 @@ async function pushToRemote(btn) {
   }
 }
 
+// ── Remote Access / Tunnel ────────────────────────────────────────────────────
+
+let _tunnelPollTimer = null;
+
+function tunnelModeChanged() {
+  const mode = document.querySelector('input[name="tunnel_mode"]:checked')?.value || '';
+  const tokenSection = document.getElementById('tunnel-token-section');
+  const buttons = document.getElementById('tunnel-buttons');
+  const helpCF = document.getElementById('tunnel-help-cloudflare');
+  const helpSub = document.getElementById('tunnel-help-subscription');
+  const label = document.getElementById('tunnel-token-label');
+
+  if (mode === '') {
+    tokenSection.style.display = 'none';
+    buttons.style.setProperty('display', 'none', 'important');
+  } else {
+    tokenSection.style.display = '';
+    buttons.style.removeProperty('display');
+    if (mode === 'cloudflare') {
+      label.textContent = 'Cloudflare Tunnel Token';
+      helpCF.style.display = '';
+      helpSub.style.display = 'none';
+    } else {
+      label.textContent = 'Subscription Token';
+      helpCF.style.display = 'none';
+      helpSub.style.display = '';
+    }
+  }
+}
+
+function _setTunnelBadge(state, url) {
+  const badge = document.getElementById('tunnel-status-badge');
+  const urlEl = document.getElementById('tunnel-url-display');
+  if (state === 'connected') {
+    badge.className = 'badge bg-success';
+    badge.textContent = 'Connected';
+  } else if (state === 'connecting') {
+    badge.className = 'badge bg-warning text-dark';
+    badge.textContent = 'Connecting…';
+  } else {
+    badge.className = 'badge bg-secondary';
+    badge.textContent = 'Not connected';
+  }
+  if (url) {
+    urlEl.innerHTML = `<a href="${url}" target="_blank" class="text-info">${url}</a>`;
+  } else {
+    urlEl.textContent = '';
+  }
+}
+
+async function tunnelConnect() {
+  const mode = document.querySelector('input[name="tunnel_mode"]:checked')?.value || '';
+  if (!mode) {
+    setResult('tunnel-result', false, 'Select a mode first.');
+    return;
+  }
+  const token = document.getElementById('tunnel_token')?.value.trim() || '';
+  const btn = document.getElementById('tunnel-connect-btn');
+  const origHtml = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Connecting…';
+  _setTunnelBadge('connecting', '');
+  setResult('tunnel-result', true, 'Starting tunnel…');
+  _stopTunnelPoll();
+
+  try {
+    const d = await postJson('tunnel/start', {mode, token});
+    if (d.ok) {
+      setResult('tunnel-result', true, 'Tunnel started — waiting for URL…');
+      _startTunnelPoll();
+    } else {
+      _setTunnelBadge('disconnected', '');
+      setResult('tunnel-result', false, d.error || 'Failed to start tunnel.');
+    }
+  } catch(e) {
+    _setTunnelBadge('disconnected', '');
+    setResult('tunnel-result', false, 'Error: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = origHtml;
+  }
+}
+
+async function tunnelDisconnect() {
+  _stopTunnelPoll();
+  const btn = document.getElementById('tunnel-disconnect-btn');
+  const origHtml = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Stopping…';
+
+  try {
+    const d = await postJson('tunnel/stop', {});
+    _setTunnelBadge('disconnected', '');
+    setResult('tunnel-result', d.ok, d.ok ? 'Tunnel stopped.' : (d.error || 'Failed to stop tunnel.'));
+  } catch(e) {
+    setResult('tunnel-result', false, 'Error: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = origHtml;
+  }
+}
+
+function _startTunnelPoll() {
+  _tunnelPollTimer = setInterval(async () => {
+    try {
+      const r = await fetch('tunnel/status');
+      const d = await r.json();
+      if (d.running && d.url) {
+        _stopTunnelPoll();
+        _setTunnelBadge('connected', d.url);
+        setResult('tunnel-result', true, 'Tunnel active.');
+      } else if (d.running) {
+        _setTunnelBadge('connecting', '');
+      } else {
+        _stopTunnelPoll();
+        _setTunnelBadge('disconnected', '');
+        setResult('tunnel-result', false, 'Tunnel stopped unexpectedly.');
+      }
+    } catch(_) { /* ignore transient errors */ }
+  }, 5000);
+}
+
+function _stopTunnelPoll() {
+  if (_tunnelPollTimer) { clearInterval(_tunnelPollTimer); _tunnelPollTimer = null; }
+}
+
+async function _initTunnelStatus() {
+  try {
+    const r = await fetch('tunnel/status');
+    const d = await r.json();
+    if (d.running && d.url) {
+      _setTunnelBadge('connected', d.url);
+    } else if (d.running) {
+      _setTunnelBadge('connecting', '');
+      _startTunnelPoll();
+    }
+  } catch(_) { /* docker may not be available */ }
+}
+
 // Init
 showProvider();
 showRecipeSource();
 renderNavEditor();
+tunnelModeChanged();
+_initTunnelStatus();
 </script>
 </body>
 </html>
