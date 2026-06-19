@@ -29,6 +29,11 @@ set -euo pipefail
 
 # ── Tunables (env-overridable; mostly for tests) ───────────────────────────
 DRY_RUN="${DRY_RUN:-0}"
+# STEPS= comma-list of step names to run instead of the full sequence, bypassing
+# the done-marker check and skipping mark_done.  Valid names: hostname, timezone,
+# mdns, docker, stack, kiosk, streamdeck.  Leave empty (the default) to run all.
+# Example: STEPS=streamdeck sudo bash firstboot.sh
+STEPS="${STEPS:-}"
 LOG_FILE="${LOG_FILE:-/var/log/foodassistant-firstboot.log}"
 # Where to look for the appliance config, in priority order. The first that
 # exists wins. /boot/firmware is the Pi OS Lite boot partition (user-editable
@@ -582,6 +587,18 @@ mark_done() {
   systemctl disable foodassistant-firstboot.service 2>/dev/null || true
 }
 
+# Returns 0 when step $1 should run: always when STEPS is empty (run all),
+# or when $1 appears in the comma-separated STEPS list.
+_step_requested() {
+  [ -z "$STEPS" ] && return 0
+  local s
+  local IFS=','
+  for s in $STEPS; do
+    [ "$s" = "$1" ] && return 0
+  done
+  return 1
+}
+
 # ── Main ───────────────────────────────────────────────────────────────────
 main() {
   # Tee all output to the log (skip under DRY_RUN to keep test output clean and
@@ -593,9 +610,14 @@ main() {
 
   log "FoodAssistant first-boot starting (DRY_RUN=$DRY_RUN, arch=$(detect_arch))"
 
-  if [ -f "$DONE_MARKER" ] && [ "${FORCE:-0}" != "1" ]; then
+  # Done-marker check: bypassed when FORCE=1 or when only specific steps are
+  # targeted (STEPS= means "run these steps regardless of done state").
+  if [ -f "$DONE_MARKER" ] && [ "${FORCE:-0}" != "1" ] && [ -z "$STEPS" ]; then
     log "Already provisioned ($DONE_MARKER exists); nothing to do. Set FORCE=1 to re-run."
     return 0
+  fi
+  if [ -n "$STEPS" ]; then
+    log "Targeted step run (STEPS=$STEPS); done-marker check and write skipped"
   fi
 
   if ! is_debian_like; then
@@ -605,14 +627,15 @@ main() {
 
   load_config
 
-  # Refresh apt metadata once up front (skipped in DRY_RUN by run()).
-  if [ "$DRY_RUN" != "1" ] && is_debian_like; then
+  # Refresh apt metadata once up front; skip for targeted step runs (each step
+  # guards its own installs) and in DRY_RUN.
+  if [ -z "$STEPS" ] && [ "$DRY_RUN" != "1" ] && is_debian_like; then
     DEBIAN_FRONTEND=noninteractive apt-get update -y || warn "apt-get update failed"
   fi
 
-  configure_hostname
-  configure_timezone
-  configure_mdns
+  _step_requested "hostname"    && configure_hostname
+  _step_requested "timezone"    && configure_timezone
+  _step_requested "mdns"        && configure_mdns
 
   if is_remote_mode; then
     # Thin client: no Docker, no Grocy/Mealie, no local FoodAssistant service.
@@ -622,19 +645,19 @@ main() {
       warn "Pi Remote mode selected but REMOTE_SERVER_URL is empty; the kiosk/Stream Deck will have no server to talk to. Set REMOTE_SERVER_URL in config.env."
     fi
     log "Pi Remote mode: skipping Docker and the local stack; controlling ${REMOTE_SERVER_URL:-<unset>}"
-    configure_kiosk
-    configure_streamdeck
-    mark_done
+    _step_requested "kiosk"       && configure_kiosk
+    _step_requested "streamdeck"  && configure_streamdeck
+    [ -z "$STEPS" ] && mark_done
     log "FoodAssistant Pi Remote first-boot complete."
     log "  This device controls: ${REMOTE_SERVER_URL:-<set REMOTE_SERVER_URL>}"
     return 0
   fi
 
-  install_docker
-  deploy_stack
-  configure_kiosk
-  configure_streamdeck
-  mark_done
+  _step_requested "docker"      && install_docker
+  _step_requested "stack"       && deploy_stack
+  _step_requested "kiosk"       && configure_kiosk
+  _step_requested "streamdeck"  && configure_streamdeck
+  [ -z "$STEPS" ] && mark_done
 
   log "FoodAssistant first-boot complete. Reach the UI at:"
   log "  http://${HOSTNAME}.local:9284/   (or http://<device-ip>:9284/)"

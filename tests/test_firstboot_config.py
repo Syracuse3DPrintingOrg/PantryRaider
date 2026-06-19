@@ -190,6 +190,43 @@ def test_done_marker_skips_rerun(tmp_path):
     assert "Already provisioned" in out
 
 
+def test_steps_streamdeck_bypasses_done_marker(tmp_path):
+    # STEPS=streamdeck should bypass the done marker and run only streamdeck.
+    marker = tmp_path / "firstboot.done"
+    marker.write_text("2026-01-01T00:00:00Z\n")
+    rc, out = run_firstboot(
+        tmp_path, "HOSTNAME=foodassistant\n",
+        extra_env={"DONE_MARKER": str(marker), "STEPS": "streamdeck", "FORCE_STREAMDECK": "1"},
+    )
+    assert rc == 0, out
+    assert "Already provisioned" not in out
+    assert "Targeted step run" in out
+    assert "Installing Stream Deck controller" in out
+    # mark_done must NOT fire for a targeted run.
+    assert "DRY_RUN would touch" not in out
+
+
+def test_steps_only_runs_named_steps(tmp_path):
+    # STEPS=kiosk should skip docker and stack entirely.
+    rc, out = run_firstboot(
+        tmp_path, "HOSTNAME=foodassistant\n",
+        extra_env={"STEPS": "kiosk", "FORCE_DISPLAY": ""},
+    )
+    assert rc == 0, out
+    assert "Deploying stack" not in out
+    assert "DRY_RUN would download and run" not in out
+    # kiosk step ran (no display, so it logged the skip)
+    assert "Kiosk not enabled" in out
+
+
+def test_steps_empty_runs_all_and_marks_done(tmp_path):
+    # Default (STEPS unset) runs all steps and writes the done marker.
+    rc, out = run_firstboot(tmp_path, "HOSTNAME=foodassistant\n")
+    assert rc == 0, out
+    assert "Targeted step run" not in out
+    assert "DRY_RUN would touch" in out
+
+
 def test_missing_config_uses_defaults(tmp_path):
     # Point at a nonexistent config path.
     env = {
