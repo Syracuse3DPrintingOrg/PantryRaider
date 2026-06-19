@@ -466,33 +466,53 @@
     <a href="ui/" class="btn btn-sm btn-outline-secondary"><i class="bi bi-arrow-left me-1"></i>Back to app</a>
   </div>
 
+  {% set _inv_ok = s.grocy_api_key and s.grocy_base_url and s.grocy_base_url != 'http://grocy:80' %}
+  {% set _sec_ok = (not s.auth_required) or s.auth_password %}
+  {% if not _inv_ok or not _sec_ok %}
+  <div class="alert alert-warning py-2 small mb-3 d-flex align-items-center gap-2">
+    <i class="bi bi-exclamation-triangle-fill flex-shrink-0"></i>
+    <span>
+      {%- if not _inv_ok %}Grocy is not configured — inventory features need a Grocy URL and API key.{% endif %}
+      {%- if not _inv_ok and not _sec_ok %} &nbsp;{% endif %}
+      {%- if not _sec_ok %}Set a password in Security to protect the app.{% endif %}
+    </span>
+  </div>
+  {% endif %}
+
   <div class="row g-3">
 
     <!-- ── Side menu ── -->
     <div class="col-md-3">
       <div class="side-menu">
+        {# inline status: True = configured, False/None = needs attention #}
+        {% set inv_ok = s.grocy_api_key and s.grocy_base_url and s.grocy_base_url != 'http://grocy:80' %}
+        {% set ai_ok  = s.vision_provider and s.vision_provider != 'none' %}
+        {% set rec_ok = s.mealie_api_key %}
+        {% set sec_ok = (not s.auth_required) or s.auth_password %}
         <div class="nav flex-column nav-pills gap-1" role="tablist">
-          <button class="nav-link active" data-bs-toggle="pill" data-bs-target="#pane-inventory" type="button">
+          <button class="nav-link active d-flex align-items-center" data-bs-toggle="pill" data-bs-target="#pane-inventory" type="button">
             <i class="bi bi-fridge me-2"></i>Inventory
-            <span class="badge bg-danger badge-req ms-1">Required</span>
+            <i class="bi bi-{{ 'check-circle-fill text-success' if inv_ok else 'exclamation-circle-fill text-warning' }} ms-auto" title="{{ 'Configured' if inv_ok else 'Not configured' }}"></i>
           </button>
-          <button class="nav-link" data-bs-toggle="pill" data-bs-target="#pane-ai" type="button">
+          <button class="nav-link d-flex align-items-center" data-bs-toggle="pill" data-bs-target="#pane-ai" type="button">
             <i class="bi bi-magic me-2"></i>AI
-            <span class="badge bg-danger badge-req ms-1">Required</span>
+            <i class="bi bi-{{ 'check-circle-fill text-success' if ai_ok else 'dash-circle text-secondary' }} ms-auto" title="{{ 'Configured' if ai_ok else 'Optional' }}"></i>
           </button>
-          <button class="nav-link" data-bs-toggle="pill" data-bs-target="#pane-recipes" type="button">
+          <button class="nav-link d-flex align-items-center" data-bs-toggle="pill" data-bs-target="#pane-recipes" type="button">
             <i class="bi bi-journal-richtext me-2"></i>Recipes
+            <i class="bi bi-{{ 'check-circle-fill text-success' if rec_ok else 'dash-circle text-secondary' }} ms-auto" title="{{ 'Configured' if rec_ok else 'Optional' }}"></i>
           </button>
-          <button class="nav-link" data-bs-toggle="pill" data-bs-target="#pane-interface" type="button">
+          <button class="nav-link d-flex align-items-center" data-bs-toggle="pill" data-bs-target="#pane-interface" type="button">
             <i class="bi bi-layout-sidebar me-2"></i>Interface
           </button>
-          <button class="nav-link" data-bs-toggle="pill" data-bs-target="#pane-security" type="button">
+          <button class="nav-link d-flex align-items-center" data-bs-toggle="pill" data-bs-target="#pane-security" type="button">
             <i class="bi bi-shield-lock me-2"></i>Security
+            <i class="bi bi-{{ 'check-circle-fill text-success' if sec_ok else 'exclamation-circle-fill text-warning' }} ms-auto" title="{{ 'Configured' if sec_ok else 'Password required' }}"></i>
           </button>
-          <button class="nav-link" data-bs-toggle="pill" data-bs-target="#pane-data" type="button">
+          <button class="nav-link d-flex align-items-center" data-bs-toggle="pill" data-bs-target="#pane-data" type="button">
             <i class="bi bi-cloud-arrow-down me-2"></i>Backup &amp; Updates
           </button>
-          <button class="nav-link" data-bs-toggle="pill" data-bs-target="#pane-tunnel" type="button">
+          <button class="nav-link d-flex align-items-center" data-bs-toggle="pill" data-bs-target="#pane-tunnel" type="button">
             <i class="bi bi-globe me-2"></i>Remote Access
           </button>
         </div>
