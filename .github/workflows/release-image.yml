@@ -1,0 +1,91 @@
+name: Build appliance SD image
+
+# Bakes the FoodAssistant first-boot provisioner into the official Raspberry Pi
+# OS Lite (64-bit) image and publishes a ready-to-flash .img.xz. A customer
+# flashes it with Raspberry Pi Imager, sets only wifi in the Imager GUI, and
+# boots: no config files, no terminal. The provisioner auto-detects the display
+# and Stream Deck and takes its timezone from the OS.
+#
+# Triggers:
+#   - Publishing a GitHub Release: the image is attached to that release.
+#   - Manual run (workflow_dispatch): the image is uploaded as a build artifact.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      pios_url:
+        description: "Override Raspberry Pi OS Lite arm64 .img.xz URL (blank = latest)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write   # attach assets to the release
+
+jobs:
+  build-image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Free up disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android "$AGENT_TOOLSDIRECTORY" || true
+          df -h /
+
+      - name: Download Raspberry Pi OS Lite (64-bit)
+        run: |
+          set -euo pipefail
+          URL="${{ github.event.inputs.pios_url }}"
+          if [ -z "$URL" ]; then
+            # The _latest endpoint redirects to the current stable arm64 Lite image.
+            URL="https://downloads.raspberrypi.com/raspios_lite_arm64_latest"
+          fi
+          echo "Downloading $URL"
+          curl -fL "$URL" -o raspios.img.xz
+          ls -lh raspios.img.xz
+
+      - name: Decompress
+        run: |
+          set -euo pipefail
+          xz -d -T0 raspios.img.xz
+          # The decompressed file keeps the .img name.
+          mv raspios.img base.img || true
+          ls -lh base.img
+
+      - name: Bake in the FoodAssistant provisioner
+        run: |
+          set -euo pipefail
+          sudo scripts/image-build/prepare-image.sh --image "$PWD/base.img"
+
+      - name: Name and compress the output
+        id: pack
+        run: |
+          set -euo pipefail
+          VER="${{ github.event.release.tag_name }}"
+          [ -n "$VER" ] || VER="$(date -u +%Y%m%d)"
+          OUT="foodassistant-appliance-${VER}-arm64.img"
+          mv base.img "$OUT"
+          xz -z -T0 -6 "$OUT"
+          sha256sum "${OUT}.xz" | tee "${OUT}.xz.sha256"
+          echo "artifact=${OUT}.xz" >> "$GITHUB_OUTPUT"
+          echo "checksum=${OUT}.xz.sha256" >> "$GITHUB_OUTPUT"
+          ls -lh "${OUT}.xz"
+
+      - name: Attach to the release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ${{ steps.pack.outputs.artifact }}
+            ${{ steps.pack.outputs.checksum }}
+
+      - name: Upload as a build artifact (manual runs)
+        if: github.event_name != 'release'
+        uses: actions/upload-artifact@v4
+        with:
+          name: appliance-image
+          path: |
+            ${{ steps.pack.outputs.artifact }}
+            ${{ steps.pack.outputs.checksum }}

@@ -7,6 +7,25 @@ minimal setup. No terminal required on the device.
 > New to the hardware side? See [supported-hardware.md](supported-hardware.md)
 > for boards, RAM guidance, and peripherals.
 
+## Easiest path: flash the ready-made image
+
+If you just want a working appliance, download the prebuilt image and flash it.
+No config files, no command line.
+
+1. Download the latest `foodassistant-appliance-*-arm64.img.xz` from the
+   [Releases page](https://github.com/Syracuse3DPrinting/FoodAssistant/releases).
+2. Open **Raspberry Pi Imager**, choose **Use custom** under Operating System,
+   and select the downloaded `.img.xz`.
+3. Click the gear / **Edit Settings** and set your **Wi-Fi** (and optionally a
+   hostname, SSH, and timezone). Write the card.
+4. Insert it, connect power, and wait a few minutes for the first boot. Open
+   **http://foodassistant.local:9284/**.
+
+The appliance auto-detects an attached display (launches the kiosk) and a
+plugged-in Stream Deck, and takes its timezone from whatever Imager set. The
+rest of this guide covers building the card yourself from stock Raspberry Pi OS,
+which you only need for custom setups.
+
 ## How it works
 
 FoodAssistant uses the official **Raspberry Pi OS Lite (64-bit)** image plus a
