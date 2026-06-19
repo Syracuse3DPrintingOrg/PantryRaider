@@ -361,6 +361,44 @@ deploy_stack() {
   ( cd "$INSTALL_DIR" && docker compose $profiles up -d )
 }
 
+# Detect and install the Adafruit LSM6DSOX accelerometer rotation helper.
+# If an LSM6DSOX is wired to I2C-1 (the Pi's default), install smbus2 and
+# copy the helper script so the kiosk service can call it to auto-orient.
+install_accel_rotation() {
+  # Probe I2C-1 for the LSM6DSOX at 0x6A or 0x6B.
+  if ! command -v i2cdetect >/dev/null 2>&1; then
+    return 0  # i2c-tools not available; skip silently
+  fi
+  local found=0
+  for addr in 6a 6b; do
+    if i2cdetect -y 1 2>/dev/null | grep -q "$addr"; then
+      found=1; break
+    fi
+  done
+  [ "$found" = "0" ] && return 0
+
+  log "LSM6DSOX detected on I2C-1; installing accelerometer rotation helper"
+  if [ "$DRY_RUN" = "1" ]; then
+    log "DRY_RUN: would install smbus2 and foodassistant-accel-rotation"; return 0
+  fi
+
+  local helper=""
+  for candidate in "$ASSET_DIR/foodassistant-accel-rotation" \
+                   "$REPO_DIR/scripts/image-build/foodassistant-accel-rotation"; do
+    [ -f "$candidate" ] && helper="$candidate" && break
+  done
+  if [ -z "$helper" ]; then
+    warn "foodassistant-accel-rotation not found; skipping accelerometer install"
+    return 0
+  fi
+
+  pip3 install --quiet smbus2 2>/dev/null || warn "smbus2 install failed; accelerometer rotation may not work"
+  cp "$helper" /usr/local/bin/foodassistant-accel-rotation
+  chmod +x /usr/local/bin/foodassistant-accel-rotation
+  log "Installed /usr/local/bin/foodassistant-accel-rotation"
+  log "Add 'ExecStartPre=/usr/local/bin/foodassistant-accel-rotation' to foodassistant-kiosk.service to auto-orient at boot."
+}
+
 # Step: KMS display rotation
 # Writes video=HDMI-A-1:rotate=N to cmdline.txt so the DRM/KMS framebuffer
 # (boot console, kiosk, everything) is rotated at the hardware level. Requires
@@ -499,6 +537,10 @@ EOF
   systemctl daemon-reload
   systemctl enable foodassistant-kiosk.service || warn "kiosk enable failed"
   systemctl start foodassistant-kiosk.service || warn "kiosk start failed (will retry on boot)"
+
+  # Optional: install the LSM6DSOX accelerometer rotation helper if the sensor
+  # is detected. No-op when the sensor isn't present or i2c-tools is missing.
+  install_accel_rotation
 }
 
 # Step: Stream Deck controller (auto-detected by default)
