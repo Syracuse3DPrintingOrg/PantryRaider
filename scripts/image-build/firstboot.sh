@@ -94,14 +94,47 @@ load_config() {
   ENABLE_MEALIE="${ENABLE_MEALIE:-false}"
   ENABLE_OLLAMA="${ENABLE_OLLAMA:-false}"
   ENABLE_KIOSK="${ENABLE_KIOSK:-auto}"
-  # ?kiosk=1 latches kiosk mode in the browser so the attached-display scale
-  # and orientation settings apply (and never affect other browsers).
-  KIOSK_URL="${KIOSK_URL:-http://localhost:9284/ui/?kiosk=1}"
   ENABLE_STREAMDECK="${ENABLE_STREAMDECK:-auto}"
   FOODASSISTANT_TAG="${FOODASSISTANT_TAG:-latest}"
   INSTALL_DIR="${INSTALL_DIR:-/opt/foodassistant}"
 
-  log "Config: HOSTNAME=$HOSTNAME TZ=$TZ MEALIE=$ENABLE_MEALIE OLLAMA=$ENABLE_OLLAMA KIOSK=$ENABLE_KIOSK STREAMDECK=$ENABLE_STREAMDECK TAG=$FOODASSISTANT_TAG DIR=$INSTALL_DIR"
+  # Deployment mode (see DEPLOYMENT_MODES in the app's config.py):
+  #   pi_remote        - thin client: NO Docker/Grocy/Mealie here, just a kiosk
+  #                      and/or Stream Deck pointed at REMOTE_SERVER_URL.
+  #   pi_hosted/server - full local stack (the default behaviour).
+  # The wizard writes the chosen mode to the app's settings.json; on a Pi Remote
+  # box there is no local app to write it, so it comes from config.env instead.
+  # An existing settings.json wins (a user can switch modes after first boot).
+  DEPLOYMENT_MODE="${DEPLOYMENT_MODE:-}"
+  REMOTE_SERVER_URL="${REMOTE_SERVER_URL:-}"
+  _load_mode_from_settings
+
+  # The kiosk URL defaults to this device, except in remote mode where it points
+  # at the server being controlled. ?kiosk=1 latches kiosk mode in the browser
+  # so the attached-display scale/orientation apply (and never affect others).
+  if is_remote_mode; then
+    KIOSK_URL="${KIOSK_URL:-${REMOTE_SERVER_URL%/}/ui/?kiosk=1}"
+  else
+    KIOSK_URL="${KIOSK_URL:-http://localhost:9284/ui/?kiosk=1}"
+  fi
+
+  log "Config: HOSTNAME=$HOSTNAME TZ=$TZ MODE=${DEPLOYMENT_MODE:-<default>} MEALIE=$ENABLE_MEALIE OLLAMA=$ENABLE_OLLAMA KIOSK=$ENABLE_KIOSK STREAMDECK=$ENABLE_STREAMDECK TAG=$FOODASSISTANT_TAG DIR=$INSTALL_DIR"
+}
+
+# True when this device is a thin remote control surface (no local stack).
+is_remote_mode() { [ "${DEPLOYMENT_MODE:-}" = "pi_remote" ]; }
+
+# Pull deployment_mode / remote_server_url from a settings.json the wizard may
+# have written, so a choice made in the UI survives a re-provision. Best effort:
+# a tiny grep-based read keeps us free of a python/jq dependency here.
+_load_mode_from_settings() {
+  local sf="${SETTINGS_JSON:-$INSTALL_DIR/data/settings.json}"
+  [ -r "$sf" ] || return 0
+  local mode url
+  mode="$(grep -o '"deployment_mode"[[:space:]]*:[[:space:]]*"[^"]*"' "$sf" 2>/dev/null | sed 's/.*"\([^"]*\)"$/\1/')"
+  url="$(grep -o '"remote_server_url"[[:space:]]*:[[:space:]]*"[^"]*"' "$sf" 2>/dev/null | sed 's/.*"\([^"]*\)"$/\1/')"
+  [ -n "$mode" ] && DEPLOYMENT_MODE="$mode"
+  [ -n "$url" ] && REMOTE_SERVER_URL="$url"
 }
 
 # Timezone the OS is already set to (Raspberry Pi Imager writes this), so the
@@ -503,9 +536,16 @@ configure_streamdeck() {
     warn "plugdev group not found; skipping usermod"
   fi
 
+  # In remote mode the controller talks to the remote server, not localhost;
+  # the controller reads FOODASSISTANT_BASE_URL from its environment.
+  local sd_base_env=""
+  if is_remote_mode && [ -n "$REMOTE_SERVER_URL" ]; then
+    sd_base_env="Environment=FOODASSISTANT_BASE_URL=${REMOTE_SERVER_URL%/}"
+  fi
+
   # Write the systemd service unit.
   if [ "$DRY_RUN" = "1" ]; then
-    log "DRY_RUN would write /etc/systemd/system/foodassistant-streamdeck.service for user $sd_user"
+    log "DRY_RUN would write /etc/systemd/system/foodassistant-streamdeck.service for user $sd_user${sd_base_env:+ (base ${REMOTE_SERVER_URL%/})}"
     return 0
   fi
   cat > /etc/systemd/system/foodassistant-streamdeck.service <<EOF
@@ -520,6 +560,7 @@ WorkingDirectory=/opt/foodassistant
 Restart=always
 RestartSec=5
 User=$sd_user
+${sd_base_env}
 
 [Install]
 WantedBy=multi-user.target
@@ -572,6 +613,23 @@ main() {
   configure_hostname
   configure_timezone
   configure_mdns
+
+  if is_remote_mode; then
+    # Thin client: no Docker, no Grocy/Mealie, no local FoodAssistant service.
+    # Just a kiosk and/or Stream Deck pointed at the remote server. This is what
+    # keeps a Pi Remote viable on low-spec hardware (Pi 3).
+    if [ -z "$REMOTE_SERVER_URL" ]; then
+      warn "Pi Remote mode selected but REMOTE_SERVER_URL is empty; the kiosk/Stream Deck will have no server to talk to. Set REMOTE_SERVER_URL in config.env."
+    fi
+    log "Pi Remote mode: skipping Docker and the local stack; controlling ${REMOTE_SERVER_URL:-<unset>}"
+    configure_kiosk
+    configure_streamdeck
+    mark_done
+    log "FoodAssistant Pi Remote first-boot complete."
+    log "  This device controls: ${REMOTE_SERVER_URL:-<set REMOTE_SERVER_URL>}"
+    return 0
+  fi
+
   install_docker
   deploy_stack
   configure_kiosk

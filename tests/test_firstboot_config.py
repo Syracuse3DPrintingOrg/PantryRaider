@@ -111,6 +111,68 @@ def test_kiosk_enabled_with_display(tmp_path):
     assert "Installing Chromium kiosk" in out
 
 
+def test_remote_mode_skips_docker_and_stack(tmp_path):
+    rc, out = run_firstboot(
+        tmp_path,
+        "DEPLOYMENT_MODE=pi_remote\nREMOTE_SERVER_URL=http://192.168.1.50:9284\n",
+    )
+    assert rc == 0, out
+    assert "Pi Remote mode: skipping Docker" in out
+    # The heavy steps must not run in remote mode.
+    assert "Deploying stack" not in out
+    assert "192.168.1.50:9284" in out
+
+
+def test_remote_mode_kiosk_points_at_remote(tmp_path):
+    rc, out = run_firstboot(
+        tmp_path,
+        "DEPLOYMENT_MODE=pi_remote\nREMOTE_SERVER_URL=http://server.local:9284\n",
+        extra_env={"FORCE_DISPLAY": "1"},
+    )
+    assert rc == 0, out
+    assert "Installing Chromium kiosk" in out
+    # Kiosk URL is the remote server, not localhost.
+    assert "server.local:9284/ui/?kiosk=1" in out
+    assert "localhost:9284/ui" not in out
+
+
+def test_remote_mode_without_url_warns(tmp_path):
+    rc, out = run_firstboot(tmp_path, "DEPLOYMENT_MODE=pi_remote\n")
+    assert rc == 0, out
+    assert "REMOTE_SERVER_URL is empty" in out
+
+
+def test_remote_mode_streamdeck_gets_base_env(tmp_path):
+    rc, out = run_firstboot(
+        tmp_path,
+        "DEPLOYMENT_MODE=pi_remote\nREMOTE_SERVER_URL=http://server.local:9284\n",
+        extra_env={"FORCE_STREAMDECK": "1"},
+    )
+    assert rc == 0, out
+    # The DRY_RUN streamdeck step announces the remote base it will inject.
+    assert "base http://server.local:9284" in out
+
+
+def test_hosted_mode_still_deploys_stack(tmp_path):
+    rc, out = run_firstboot(tmp_path, "DEPLOYMENT_MODE=pi_hosted\n")
+    assert rc == 0, out
+    assert "Deploying stack" in out
+    assert "Pi Remote mode" not in out
+
+
+def test_mode_read_from_settings_json(tmp_path):
+    # A settings.json (written by the web wizard) overrides config.env mode.
+    sf = tmp_path / "settings.json"
+    sf.write_text('{"deployment_mode": "pi_remote", "remote_server_url": "http://from-json:9284"}')
+    rc, out = run_firstboot(
+        tmp_path, "HOSTNAME=foodassistant\n",
+        extra_env={"SETTINGS_JSON": str(sf)},
+    )
+    assert rc == 0, out
+    assert "Pi Remote mode: skipping Docker" in out
+    assert "from-json:9284" in out
+
+
 def test_tag_pinning_propagates(tmp_path):
     rc, out = run_firstboot(tmp_path, "FOODASSISTANT_TAG=v1.2.3\n")
     assert rc == 0, out
