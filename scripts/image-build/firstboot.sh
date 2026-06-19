@@ -85,20 +85,50 @@ load_config() {
     warn "No config file found (looked in: $CONFIG_CANDIDATES); using defaults"
   fi
 
-  # Defaults — mirror image/config.env.
+  # Defaults — chosen so a device works with NO config file at all. Display
+  # and Stream Deck default to "auto": the provisioner detects the hardware and
+  # turns each on when present. Timezone comes from the OS (set by Raspberry Pi
+  # Imager), so nothing here needs editing for a turnkey flash-and-boot.
   HOSTNAME="${HOSTNAME:-foodassistant}"
-  TZ="${TZ:-America/New_York}"
+  TZ="${TZ:-$(os_timezone)}"
   ENABLE_MEALIE="${ENABLE_MEALIE:-false}"
   ENABLE_OLLAMA="${ENABLE_OLLAMA:-false}"
-  ENABLE_KIOSK="${ENABLE_KIOSK:-false}"
+  ENABLE_KIOSK="${ENABLE_KIOSK:-auto}"
   # ?kiosk=1 latches kiosk mode in the browser so the attached-display scale
   # and orientation settings apply (and never affect other browsers).
   KIOSK_URL="${KIOSK_URL:-http://localhost:9284/ui/?kiosk=1}"
-  ENABLE_STREAMDECK="${ENABLE_STREAMDECK:-false}"
+  ENABLE_STREAMDECK="${ENABLE_STREAMDECK:-auto}"
   FOODASSISTANT_TAG="${FOODASSISTANT_TAG:-latest}"
   INSTALL_DIR="${INSTALL_DIR:-/opt/foodassistant}"
 
   log "Config: HOSTNAME=$HOSTNAME TZ=$TZ MEALIE=$ENABLE_MEALIE OLLAMA=$ENABLE_OLLAMA KIOSK=$ENABLE_KIOSK STREAMDECK=$ENABLE_STREAMDECK TAG=$FOODASSISTANT_TAG DIR=$INSTALL_DIR"
+}
+
+# Timezone the OS is already set to (Raspberry Pi Imager writes this), so the
+# appliance matches the buyer's locale with no config. Falls back if unknown.
+os_timezone() {
+  local tz=""
+  if command -v timedatectl >/dev/null 2>&1; then
+    tz="$(timedatectl show -p Timezone --value 2>/dev/null)"
+  fi
+  [ -z "$tz" ] && [ -f /etc/timezone ] && tz="$(cat /etc/timezone 2>/dev/null)"
+  echo "${tz:-America/New_York}"
+}
+
+# The interactive user (the account Raspberry Pi Imager created, uid 1000).
+# Kiosk and Stream Deck run as this user; we never assume a fixed name.
+primary_user() {
+  [ -n "${APPLIANCE_USER:-}" ] && { echo "$APPLIANCE_USER"; return; }
+  getent passwd 1000 | cut -d: -f1
+}
+
+# Resolve an enable flag that may be true / false / auto. For "auto", the
+# detector function ($2) decides based on attached hardware.
+flag_enabled() {
+  case "${1:-}" in
+    auto|AUTO|Auto) "$2" ;;
+    *) is_true "$1" ;;
+  esac
 }
 
 # Normalize a truthy config value to "true" / "false".
@@ -282,13 +312,23 @@ has_display() {
   return 1
 }
 
+# Returns 0 if an Elgato Stream Deck (USB vendor 0fd9) is attached now.
+has_streamdeck() {
+  [ -n "${FORCE_STREAMDECK:-}" ] && return 0   # test hook
+  if command -v lsusb >/dev/null 2>&1; then
+    lsusb 2>/dev/null | grep -qi '0fd9:' && return 0
+  fi
+  grep -qil '0fd9' /sys/bus/usb/devices/*/idVendor 2>/dev/null && return 0
+  return 1
+}
+
 configure_kiosk() {
-  if ! is_true "$ENABLE_KIOSK"; then
-    log "Kiosk disabled (ENABLE_KIOSK=$ENABLE_KIOSK); skipping"
+  if ! flag_enabled "$ENABLE_KIOSK" has_display; then
+    log "Kiosk not enabled (ENABLE_KIOSK=$ENABLE_KIOSK); skipping"
     return 0
   fi
   if ! has_display; then
-    warn "ENABLE_KIOSK=true but no display detected; skipping kiosk"
+    warn "Kiosk enabled but no display detected; skipping kiosk"
     return 0
   fi
   log "Installing Chromium kiosk via cage (Wayland) for $KIOSK_URL"
@@ -299,23 +339,51 @@ configure_kiosk() {
   local chromium_bin="chromium"
   command -v chromium-browser >/dev/null 2>&1 && chromium_bin="chromium-browser"
 
-  if [ "$DRY_RUN" = "1" ]; then
-    log "DRY_RUN would write /etc/systemd/system/foodassistant-kiosk.service using $chromium_bin"
+  # cage needs a real logind seat session, which a bare root service does not
+  # get (it fails with "XDG_RUNTIME_DIR is not set" / libseat tty errors). We
+  # run it as the interactive user via PAMName=login, owning tty1 in place of
+  # the getty. --remote-debugging-port lets the Stream Deck drive the browser.
+  local kuser kuid
+  kuser="$(primary_user)"
+  if [ -z "$kuser" ]; then
+    warn "No interactive (uid 1000) user found; cannot run kiosk seat session. Skipping."
     return 0
   fi
+  kuid="$(id -u "$kuser")"
+
+  if [ "$DRY_RUN" = "1" ]; then
+    log "DRY_RUN would run kiosk as $kuser (uid $kuid), disable getty@tty1, write foodassistant-kiosk.service"
+    return 0
+  fi
+
+  loginctl enable-linger "$kuser" || warn "enable-linger failed"
+  systemctl disable getty@tty1.service 2>/dev/null || true
+
   cat > /etc/systemd/system/foodassistant-kiosk.service <<EOF
 [Unit]
 Description=FoodAssistant Chromium kiosk
-After=foodassistant.target network-online.target
+After=foodassistant.target systemd-user-sessions.service getty@tty1.service network-online.target
 Wants=network-online.target
+Conflicts=getty@tty1.service
 
 [Service]
-# cage launches a single fullscreen Wayland app on the first DRM device.
+Type=simple
+User=$kuser
+PAMName=login
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+StandardInput=tty
+StandardOutput=journal
+StandardError=journal
+UtmpIdentifier=tty1
+UtmpMode=user
+Environment=XDG_RUNTIME_DIR=/run/user/$kuid
 ExecStart=/usr/bin/cage -- $chromium_bin --kiosk --noerrdialogs \\
-  --disable-infobars --no-first-run --ozone-platform=wayland $KIOSK_URL
+  --disable-infobars --no-first-run --ozone-platform=wayland \\
+  --remote-debugging-port=9222 --disable-restore-session-state $KIOSK_URL
 Restart=always
 RestartSec=5
-TTYPath=/dev/tty1
 
 [Install]
 WantedBy=multi-user.target
@@ -325,10 +393,10 @@ EOF
   systemctl start foodassistant-kiosk.service || warn "kiosk start failed (will retry on boot)"
 }
 
-# ── Step: Stream Deck controller (opt-in) ──────────────────────────────────
+# ── Step: Stream Deck controller (auto-detected by default) ─────────────────
 configure_streamdeck() {
-  if ! is_true "$ENABLE_STREAMDECK"; then
-    log "Stream Deck disabled (ENABLE_STREAMDECK=$ENABLE_STREAMDECK); skipping"
+  if ! flag_enabled "$ENABLE_STREAMDECK" has_streamdeck; then
+    log "Stream Deck not enabled (ENABLE_STREAMDECK=$ENABLE_STREAMDECK, none detected); skipping"
     return 0
   fi
   log "Installing Stream Deck controller"
@@ -394,16 +462,21 @@ configure_streamdeck() {
     udevadm control --reload-rules || warn "udevadm reload failed"
   fi
 
-  # Add the service user (foodassistant) to the plugdev group.
+  # Run the controller as the interactive user (the account Imager created),
+  # not a fixed name, and add them to plugdev so they can open the USB device.
+  local sd_user
+  sd_user="$(primary_user)"
+  [ -n "$sd_user" ] || { warn "No interactive (uid 1000) user found; skipping Stream Deck service"; return 0; }
+
   if getent group plugdev >/dev/null 2>&1; then
-    run usermod -aG plugdev foodassistant || warn "Could not add foodassistant to plugdev"
+    run usermod -aG plugdev "$sd_user" || warn "Could not add $sd_user to plugdev"
   else
     warn "plugdev group not found; skipping usermod"
   fi
 
   # Write the systemd service unit.
   if [ "$DRY_RUN" = "1" ]; then
-    log "DRY_RUN would write /etc/systemd/system/foodassistant-streamdeck.service"
+    log "DRY_RUN would write /etc/systemd/system/foodassistant-streamdeck.service for user $sd_user"
     return 0
   fi
   cat > /etc/systemd/system/foodassistant-streamdeck.service <<EOF
@@ -417,7 +490,7 @@ ExecStart=/opt/foodassistant/venv/bin/python -m foodassistant_streamdeck
 WorkingDirectory=/opt/foodassistant
 Restart=always
 RestartSec=5
-User=foodassistant
+User=$sd_user
 
 [Install]
 WantedBy=multi-user.target

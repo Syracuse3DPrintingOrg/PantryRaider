@@ -73,7 +73,25 @@ def test_custom_hostname_in_output(tmp_path):
 def test_kiosk_disabled_skips(tmp_path):
     rc, out = run_firstboot(tmp_path, "ENABLE_KIOSK=false\n")
     assert rc == 0, out
-    assert "Kiosk disabled" in out
+    assert "Kiosk not enabled" in out
+
+
+def test_kiosk_auto_no_display_skips(tmp_path):
+    # Default "auto": no display -> kiosk is skipped quietly.
+    rc, out = run_firstboot(
+        tmp_path, "ENABLE_KIOSK=auto\n", extra_env={"FORCE_DISPLAY": ""}
+    )
+    assert rc == 0, out
+    assert "Kiosk not enabled" in out
+
+
+def test_kiosk_auto_with_display_installs(tmp_path):
+    # Default "auto": a display present -> kiosk installs with no flag set.
+    rc, out = run_firstboot(
+        tmp_path, "ENABLE_KIOSK=auto\n", extra_env={"FORCE_DISPLAY": "1"}
+    )
+    assert rc == 0, out
+    assert "Installing Chromium kiosk" in out
 
 
 def test_kiosk_enabled_without_display_warns(tmp_path):
