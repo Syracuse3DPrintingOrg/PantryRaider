@@ -339,3 +339,83 @@ def test_rotated_index_zero_is_identity():
 
 def test_rotated_index_unknown_size_passthrough():
     assert layout.rotated_index(3, 7, 180) == 3
+
+
+# -- timer widget ----------------------------------------------------------
+
+
+def test_timer_idle_shows_base_label():
+    t = actions.TimerState()
+    assert t.label("Timer 1") == "Timer 1"
+    assert not t.is_running()
+    assert not t.alerting
+
+
+def test_timer_press_cycles_presets():
+    t = actions.TimerState()
+    t.press()  # -> 5 min
+    assert t.is_running()
+    assert t.remaining_seconds() > 0
+
+
+def test_timer_press_through_all_resets_to_idle():
+    t = actions.TimerState()
+    for _ in range(len(actions.TIMER_PRESETS) + 1):
+        t.press()
+    assert not t.is_running()
+    assert t.label("T") == "T"
+
+
+def test_timer_label_shows_countdown():
+    t = actions.TimerState()
+    t.press()  # 5 min
+    label = t.label("Timer")
+    assert ":" in label  # MM:SS format
+
+
+def test_timer_alerting_on_expiry():
+    t = actions.TimerState()
+    t.press()
+    # Force expiry by backdating the deadline
+    t._deadline = t._deadline - 400
+    expired = t.tick()
+    assert expired
+    assert t.alerting
+    assert t.label("T") == "Done!"
+
+
+def test_timer_dismiss_alert():
+    t = actions.TimerState()
+    t.press()
+    t._deadline = t._deadline - 400
+    t.tick()
+    assert t.alerting
+    t.press()  # dismiss
+    assert not t.alerting
+    assert t.label("T") == "T"
+
+
+def test_timer_action_registered():
+    for name in ("timer_1", "timer_2", "timer_3"):
+        assert name in actions.ACTIONS
+        assert actions.ACTIONS[name].kind == "timer"
+
+
+def test_timer_press_via_action_context():
+    pressed = {}
+
+    def fake_timer_press(name):
+        pressed["name"] = name
+
+    ctx = actions.ActionContext(
+        client=None,
+        base_url="http://x",
+        refresh=lambda: None,
+        navigate=lambda _: None,
+        cycle_brightness=lambda: 80,
+        page_next=lambda: None,
+        page_prev=lambda: None,
+        timer_press=fake_timer_press,
+    )
+    asyncio.run(actions.run_action(actions.ACTIONS["timer_1"], ctx))
+    assert pressed.get("name") == "timer_1"

@@ -17,7 +17,7 @@ from typing import Optional
 import httpx
 
 from . import actions, layout, render
-from .actions import ActionContext, ActionSpec
+from .actions import ActionContext, ActionSpec, TimerState
 from .config import BRIGHTNESS_STEPS, Config
 
 log = logging.getLogger("foodassistant.streamdeck")
@@ -36,6 +36,7 @@ class Controller:
         )
         self.page = 0
         self.status: dict[str, int] = {"expiring": 0, "pending": 0}
+        self.timers: dict[str, TimerState] = {}  # action name -> timer state
 
         try:
             self._bright_idx = BRIGHTNESS_STEPS.index(
@@ -85,17 +86,27 @@ class Controller:
             if spec is None:
                 image = render.blank_key(*self._key_size())
             else:
-                count = (
-                    self.status.get(spec.status_field)
-                    if spec.kind == "status"
-                    else None
-                )
+                if spec.kind == "timer":
+                    t = self.timers.get(spec.name)
+                    label = t.label(spec.label) if t else spec.label
+                    color = t.color(spec.color) if t else spec.color
+                    alert = t.alert_active() if t else False
+                    count = None
+                else:
+                    count = (
+                        self.status.get(spec.status_field)
+                        if spec.kind == "status"
+                        else None
+                    )
+                    label = spec.label
+                    color = spec.color
+                    alert = bool(count)
                 image = render.render_key(
                     *self._key_size(),
-                    label=spec.label,
-                    color=spec.color,
+                    label=label,
+                    color=color,
                     count=count,
-                    alert=bool(count),
+                    alert=alert,
                 )
             if rotation:
                 # PIL rotates counter-clockwise, so negate to turn the face
@@ -144,6 +155,12 @@ class Controller:
         spec = page[slot]
         asyncio.run_coroutine_threadsafe(self._handle(spec), self.loop)
 
+    def _timer_press(self, name: str) -> None:
+        if name not in self.timers:
+            self.timers[name] = TimerState()
+        self.timers[name].press()
+        self._draw_page()
+
     async def _handle(self, spec: ActionSpec) -> None:
         ctx = ActionContext(
             client=self.client,
@@ -153,6 +170,7 @@ class Controller:
             cycle_brightness=self._cycle_brightness,
             page_next=self._page_next,
             page_prev=self._page_prev,
+            timer_press=self._timer_press,
         )
         try:
             msg = await actions.run_action(spec, ctx)
@@ -227,12 +245,27 @@ class Controller:
             self.client, self.config.base_url, self.config.soon_days
         )
 
+    def _tick_timers(self) -> bool:
+        """Advance all active timers. Returns True if any expired this tick."""
+        expired = any(t.tick() for t in self.timers.values())
+        return expired
+
     async def _poll_forever(self) -> None:
+        tick = 0
         while True:
-            await asyncio.sleep(self.config.poll_seconds)
+            await asyncio.sleep(1)
+            tick += 1
             try:
-                await self._poll_once()
-                self._draw_page()
+                expired = self._tick_timers()
+                any_running = any(t.is_running() for t in self.timers.values())
+                # Redraw every second while a timer is active or just expired;
+                # otherwise only redraw after a full poll cycle.
+                if any_running or expired:
+                    self._draw_page()
+                if tick >= self.config.poll_seconds:
+                    tick = 0
+                    await self._poll_once()
+                    self._draw_page()
             except Exception as e:  # noqa: BLE001 - keep polling
                 log.debug("poll cycle failed: %s", e)
 

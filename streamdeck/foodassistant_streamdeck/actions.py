@@ -10,8 +10,75 @@ paging, kiosk navigation).
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+import time
+from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Optional
+
+# Preset durations (minutes) cycled through on each timer key press.
+TIMER_PRESETS: tuple[int, ...] = (5, 10, 15, 30, 60)
+
+
+class TimerState:
+    """Mutable per-key countdown timer.
+
+    Pressing cycles: idle -> 5 min -> 10 min -> 15 min -> 30 min -> 60 min -> idle.
+    While counting down, ``label()`` returns MM:SS remaining. When expired,
+    ``alerting`` flips to True; the next press dismisses it.
+    """
+
+    def __init__(self) -> None:
+        self._preset_idx: int = -1   # -1 = idle
+        self._deadline: float = 0.0  # monotonic clock target
+        self.alerting: bool = False
+
+    def is_running(self) -> bool:
+        return self._preset_idx >= 0 and not self.alerting
+
+    def remaining_seconds(self) -> int:
+        if not self.is_running():
+            return 0
+        return max(0, int(self._deadline - time.monotonic()))
+
+    def label(self, base_label: str) -> str:
+        if self.alerting:
+            return "Done!"
+        if self._preset_idx < 0:
+            return base_label
+        secs = self.remaining_seconds()
+        if secs <= 0:
+            return "Done!"
+        return f"{secs // 60}:{secs % 60:02d}"
+
+    def color(self, base_color: str) -> str:
+        if self.alerting:
+            return "#ef4444"
+        if self._preset_idx < 0:
+            return base_color
+        secs = self.remaining_seconds()
+        return "#f59e0b" if secs < 60 else "#0d9488"
+
+    def alert_active(self) -> bool:
+        return self.alerting
+
+    def press(self) -> None:
+        if self.alerting:
+            self.alerting = False
+            self._preset_idx = -1
+            return
+        self._preset_idx += 1
+        if self._preset_idx >= len(TIMER_PRESETS):
+            self._preset_idx = -1
+            self._deadline = 0.0
+        else:
+            self._deadline = time.monotonic() + TIMER_PRESETS[self._preset_idx] * 60
+
+    def tick(self) -> bool:
+        """Return True (and set alerting) if the timer just expired."""
+        if self.is_running() and self.remaining_seconds() <= 0:
+            self.alerting = True
+            self._preset_idx = -1
+            return True
+        return False
 
 
 @dataclass(frozen=True)
@@ -100,6 +167,27 @@ ACTIONS: dict[str, ActionSpec] = {
         kind="system",
         description="Show the previous page of keys.",
     ),
+    "timer_1": ActionSpec(
+        name="timer_1",
+        label="Timer 1",
+        color="#0d9488",
+        kind="timer",
+        description="Countdown timer (press to cycle: 5/10/15/30/60 min or stop).",
+    ),
+    "timer_2": ActionSpec(
+        name="timer_2",
+        label="Timer 2",
+        color="#0d9488",
+        kind="timer",
+        description="Second independent countdown timer.",
+    ),
+    "timer_3": ActionSpec(
+        name="timer_3",
+        label="Timer 3",
+        color="#0d9488",
+        kind="timer",
+        description="Third independent countdown timer.",
+    ),
 }
 
 # Order used when no explicit key list is configured. The controller trims or
@@ -160,6 +248,7 @@ class ActionContext:
     cycle_brightness: Callable[[], int]           # returns the new percent
     page_next: Callable[[], None]
     page_prev: Callable[[], None]
+    timer_press: Callable[[str], None] = field(default=lambda _name: None)
 
 
 async def run_action(spec: ActionSpec, ctx: ActionContext) -> str:
@@ -200,5 +289,9 @@ async def run_action(spec: ActionSpec, ctx: ActionContext) -> str:
     if spec.kind == "system" and spec.name == "page_prev":
         ctx.page_prev()
         return "prev page"
+
+    if spec.kind == "timer":
+        ctx.timer_press(spec.name)
+        return f"{spec.name} pressed"
 
     return ""
