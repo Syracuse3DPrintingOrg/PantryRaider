@@ -255,6 +255,53 @@ class GrocyClient:
         await self.add_stock(product_id, item)
         return {"product_id": product_id, "name": item.name}
 
+    async def get_shopping_lists(self) -> list[dict]:
+        return await self._cached_list("/objects/shopping_lists")
+
+    async def ensure_shopping_list(self) -> int:
+        """Return the first shopping list id, creating one if none exist."""
+        lists = await self.get_shopping_lists()
+        if lists:
+            return int(lists[0]["id"])
+        result = await self._post("/objects/shopping_lists", {"name": "Shopping list"})
+        new_id = int(result["created_object_id"])
+        lists.append({"id": new_id, "name": "Shopping list"})
+        return new_id
+
+    async def get_shopping_items(self, list_id: int) -> list[dict]:
+        items = await self._get(
+            f"/objects/shopping_list_items?query%5B%5D=shopping_list_id%3D{list_id}"
+        )
+        products = {str(p["id"]): p["name"] for p in await self.get_products()}
+        for item in items:
+            pid = item.get("product_id")
+            item["product_name"] = products.get(str(pid), "") if pid else ""
+        return sorted(items, key=lambda x: int(x.get("id") or 0))
+
+    async def add_shopping_item(self, list_id: int, note: str, amount: float = 1.0) -> dict:
+        result = await self._post("/objects/shopping_list_items", {
+            "shopping_list_id": list_id,
+            "note": note,
+            "amount": amount,
+            "done": 0,
+        })
+        return result
+
+    async def toggle_shopping_item(self, item_id: int, done: bool) -> None:
+        row = await self._get(f"/objects/shopping_list_items/{item_id}")
+        await self._request("PUT", f"/objects/shopping_list_items/{item_id}",
+                            {**row, "done": int(done)})
+
+    async def delete_shopping_item(self, item_id: int) -> None:
+        await self._request("DELETE", f"/objects/shopping_list_items/{item_id}")
+
+    async def clear_done_shopping_items(self, list_id: int) -> int:
+        items = await self.get_shopping_items(list_id)
+        done_ids = [int(i["id"]) for i in items if i.get("done")]
+        for iid in done_ids:
+            await self.delete_shopping_item(iid)
+        return len(done_ids)
+
     async def health_check(self) -> bool:
         try:
             await self._get("/system/info")
