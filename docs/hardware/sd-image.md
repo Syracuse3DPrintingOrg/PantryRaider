@@ -212,6 +212,7 @@ Set these in `image/config.env` (or directly in
 | `ENABLE_KIOSK` | `false` | Auto-launch full-screen Chromium **if a display is present**. |
 | `ENABLE_STREAMDECK` | `false` | Install and start the Stream Deck controller (venv, driver, udev rule, systemd unit). |
 | `KIOSK_URL` | `http://localhost:9284/ui/?kiosk=1` | What the kiosk opens. `?kiosk=1` enables the attached-display scale/orientation settings. |
+| `DISPLAY_ROTATION` | `0` | KMS display rotation in degrees (0, 90, 180, 270). Rotates the framebuffer at boot before the kiosk starts. Takes effect after first-boot reboot. |
 | `FOODASSISTANT_TAG` | `latest` | Pin a specific app image version. |
 | `INSTALL_DIR` | `/opt/foodassistant` | Where the stack is installed on-device. |
 
@@ -224,6 +225,24 @@ cd /opt/foodassistant
 docker compose --profile with-mealie up -d     # add Mealie
 docker compose --profile with-ollama up -d      # add Ollama
 ```
+
+### Display rotation
+
+Set `DISPLAY_ROTATION=90` (or 180, 270) in `config.env` before flashing to rotate the KMS framebuffer. This rotates everything: the boot console, Plymouth splash screen, and the kiosk browser. The change is written to `cmdline.txt` during the first-boot provisioner run and takes effect after the automatic reboot.
+
+To change rotation on a running device without reflashing:
+
+```bash
+sudo /usr/local/bin/foodassistant-set-rotation 90 --reboot
+```
+
+Install the helper first if it isn't there:
+
+```bash
+sudo cp scripts/image-build/foodassistant-set-rotation /usr/local/bin/
+```
+
+The app's Settings page also offers a CSS-only rotation for the kiosk browser (no reboot needed, but does not affect the boot console).
 
 ### Kiosk mode (touchscreen)
 

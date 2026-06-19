@@ -243,3 +243,36 @@ def test_missing_config_uses_defaults(tmp_path):
     out = proc.stdout + proc.stderr
     assert "No config file found" in out
     assert "http://foodassistant.local:9284/" in out
+
+
+def test_display_rotation_zero_skips(tmp_path):
+    # DISPLAY_ROTATION=0 should do nothing.
+    rc, out = run_firstboot(tmp_path, "DISPLAY_ROTATION=0\n",
+                            extra_env={"STEPS": "rotation"})
+    assert rc == 0, out
+    assert "rotation is 0" in out
+
+
+def test_display_rotation_180_dry_run(tmp_path):
+    # DISPLAY_ROTATION=180 should log the DRY_RUN intent.
+    rc, out = run_firstboot(tmp_path, "DISPLAY_ROTATION=180\n",
+                            extra_env={"STEPS": "rotation"})
+    assert rc == 0, out
+    assert "video=HDMI-A-1:rotate=180" in out or "cmdline.txt not found" in out
+
+
+def test_display_rotation_invalid_warns(tmp_path):
+    # An invalid value should warn and skip without error.
+    rc, out = run_firstboot(tmp_path, "DISPLAY_ROTATION=45\n",
+                            extra_env={"STEPS": "rotation"})
+    assert rc == 0, out
+    assert "not valid" in out
+
+
+def test_display_rotation_step_targeted(tmp_path):
+    # STEPS=rotation should only run the rotation step.
+    rc, out = run_firstboot(tmp_path, "DISPLAY_ROTATION=90\nHOSTNAME=foodassistant\n",
+                            extra_env={"STEPS": "rotation"})
+    assert rc == 0, out
+    assert "Deploying stack" not in out
+    assert "Targeted step run" in out

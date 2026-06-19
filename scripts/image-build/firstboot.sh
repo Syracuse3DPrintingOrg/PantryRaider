@@ -31,7 +31,7 @@ set -euo pipefail
 DRY_RUN="${DRY_RUN:-0}"
 # STEPS= comma-list of step names to run instead of the full sequence, bypassing
 # the done-marker check and skipping mark_done.  Valid names: hostname, timezone,
-# mdns, docker, stack, kiosk, streamdeck.  Leave empty (the default) to run all.
+# mdns, docker, stack, rotation, kiosk, streamdeck.  Leave empty (the default) to run all.
 # Example: STEPS=streamdeck sudo bash firstboot.sh
 STEPS="${STEPS:-}"
 LOG_FILE="${LOG_FILE:-/var/log/foodassistant-firstboot.log}"
@@ -100,6 +100,7 @@ load_config() {
   ENABLE_OLLAMA="${ENABLE_OLLAMA:-false}"
   ENABLE_KIOSK="${ENABLE_KIOSK:-auto}"
   ENABLE_STREAMDECK="${ENABLE_STREAMDECK:-auto}"
+  DISPLAY_ROTATION="${DISPLAY_ROTATION:-0}"
   FOODASSISTANT_TAG="${FOODASSISTANT_TAG:-latest}"
   INSTALL_DIR="${INSTALL_DIR:-/opt/foodassistant}"
 
@@ -358,6 +359,42 @@ deploy_stack() {
   fi
   # shellcheck disable=SC2086
   ( cd "$INSTALL_DIR" && docker compose $profiles up -d )
+}
+
+# Step: KMS display rotation
+# Writes video=HDMI-A-1:rotate=N to cmdline.txt so the DRM/KMS framebuffer
+# (boot console, kiosk, everything) is rotated at the hardware level. Requires
+# a reboot to take effect; the provisioner's normal first-boot reboot handles
+# this automatically. Only runs when DISPLAY_ROTATION != 0.
+configure_display_rotation() {
+  local rot="${DISPLAY_ROTATION:-0}"
+  case "$rot" in
+    0|"") log "Display rotation is 0 (default); nothing to do"; return 0 ;;
+    90|180|270) ;;
+    *) warn "DISPLAY_ROTATION=$rot is not valid (use 0, 90, 180, or 270); skipping"; return 0 ;;
+  esac
+
+  local cmdline=""
+  for path in /boot/firmware/cmdline.txt /boot/cmdline.txt; do
+    [ -f "$path" ] && cmdline="$path" && break
+  done
+
+  if [ -z "$cmdline" ]; then
+    warn "cmdline.txt not found; skipping KMS rotation (non-Pi or boot partition not mounted)"
+    return 0
+  fi
+
+  if [ "$DRY_RUN" = "1" ]; then
+    log "DRY_RUN: would add video=HDMI-A-1:rotate=${rot} to $cmdline"
+    return 0
+  fi
+
+  local line
+  line="$(tr -d '\n' < "$cmdline")"
+  # Remove any existing video=HDMI-A-1:rotate=... parameter first (idempotent).
+  line="$(printf '%s' "$line" | sed 's/ video=HDMI-A-1:rotate=[0-9]*//')"
+  printf '%s video=HDMI-A-1:rotate=%s\n' "$line" "$rot" > "$cmdline"
+  log "KMS rotation set to ${rot} degrees in $cmdline (takes effect after reboot)"
 }
 
 # Step: kiosk (opt-in, display-gated)
@@ -645,6 +682,7 @@ main() {
       warn "Pi Remote mode selected but REMOTE_SERVER_URL is empty; the kiosk/Stream Deck will have no server to talk to. Set REMOTE_SERVER_URL in config.env."
     fi
     log "Pi Remote mode: skipping Docker and the local stack; controlling ${REMOTE_SERVER_URL:-<unset>}"
+    _step_requested "rotation"    && configure_display_rotation
     _step_requested "kiosk"       && configure_kiosk
     _step_requested "streamdeck"  && configure_streamdeck
     [ -z "$STEPS" ] && mark_done
@@ -655,6 +693,7 @@ main() {
 
   _step_requested "docker"      && install_docker
   _step_requested "stack"       && deploy_stack
+  _step_requested "rotation"    && configure_display_rotation
   _step_requested "kiosk"       && configure_kiosk
   _step_requested "streamdeck"  && configure_streamdeck
   [ -z "$STEPS" ] && mark_done

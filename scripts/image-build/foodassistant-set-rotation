@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+# foodassistant-set-rotation -- update KMS display rotation in cmdline.txt
+#
+# Usage: sudo foodassistant-set-rotation <degrees>
+#   degrees: 0, 90, 180, or 270
+#
+# Changes take effect after the next reboot. Pass --reboot to reboot now.
+#
+# This is the post-provisioning companion to the DISPLAY_ROTATION= setting in
+# config.env. Install it to /usr/local/bin and add a sudoers entry so the
+# FoodAssistant app can call it without a password:
+#
+#   foodassistant ALL=(ALL) NOPASSWD: /usr/local/bin/foodassistant-set-rotation
+set -euo pipefail
+
+REBOOT=0
+ROT=""
+
+for arg in "$@"; do
+  case "$arg" in
+    --reboot) REBOOT=1 ;;
+    0|90|180|270) ROT="$arg" ;;
+    *) echo "Usage: $0 <0|90|180|270> [--reboot]" >&2; exit 1 ;;
+  esac
+done
+
+if [ -z "$ROT" ]; then
+  echo "Usage: $0 <0|90|180|270> [--reboot]" >&2
+  exit 1
+fi
+
+cmdline=""
+for path in /boot/firmware/cmdline.txt /boot/cmdline.txt; do
+  [ -f "$path" ] && cmdline="$path" && break
+done
+
+if [ -z "$cmdline" ]; then
+  echo "Error: cmdline.txt not found (expected at /boot/firmware/cmdline.txt)" >&2
+  exit 1
+fi
+
+line="$(tr -d '\n' < "$cmdline")"
+# Remove any existing rotation parameter.
+line="$(printf '%s' "$line" | sed 's/ video=HDMI-A-1:rotate=[0-9]*//')"
+
+if [ "$ROT" = "0" ]; then
+  printf '%s\n' "$line" > "$cmdline"
+  echo "KMS rotation cleared (0 degrees) in $cmdline"
+else
+  printf '%s video=HDMI-A-1:rotate=%s\n' "$line" "$ROT" > "$cmdline"
+  echo "KMS rotation set to ${ROT} degrees in $cmdline"
+fi
+
+if [ "$REBOOT" = "1" ]; then
+  echo "Rebooting now..."
+  reboot
+else
+  echo "Reboot required for the change to take effect."
+fi
