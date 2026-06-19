@@ -7,24 +7,31 @@ minimal setup. No terminal required on the device.
 > New to the hardware side? See [supported-hardware.md](supported-hardware.md)
 > for boards, RAM guidance, and peripherals.
 
-## Easiest path: flash the ready-made image
+## Recommended path: stock Pi OS + provisioner
 
-If you just want a working appliance, download the prebuilt image and flash it.
-No config files, no command line.
+Flash the official Raspberry Pi OS Lite image and add the FoodAssistant
+provisioner payload. This is the recommended path because Raspberry Pi Imager
+fully supports OS customization for official images (Wi-Fi, SSH, hostname,
+timezone), which is not available for third-party custom images.
 
-1. Download the latest `foodassistant-appliance-*-arm64.img.xz` from the
-   [Releases page](https://github.com/Syracuse3DPrinting/FoodAssistant/releases).
-2. Open **Raspberry Pi Imager**, choose **Use custom** under Operating System,
-   and select the downloaded `.img.xz`.
-3. Click the gear / **Edit Settings** and set your **Wi-Fi** (and optionally a
-   hostname, SSH, and timezone). Write the card.
-4. Insert it, connect power, and wait a few minutes for the first boot. Open
-   **http://foodassistant.local:9284/**.
+Skip to [Step 1](#step-1-flash-raspberry-pi-os-lite-64-bit) below.
+
+## Pre-built appliance image (advanced)
+
+A pre-built `foodassistant-appliance-*-arm64.img.xz` is published to the
+[Releases page](https://github.com/Syracuse3DPrinting/FoodAssistant/releases)
+for advanced users. Flash it with balenaEtcher or dd.
+
+> **Limitation:** Raspberry Pi Imager 2.x disables the OS customization tab
+> (Wi-Fi, SSH, hostname) for third-party custom images. If you flash the
+> pre-built image with Imager, you will need to configure Wi-Fi manually by
+> dropping a `wpa_supplicant.conf` on the boot partition before first boot,
+> and create a `/boot/firmware/ssh` empty file to enable SSH. The stock Pi OS
+> path below avoids all of this.
 
 The appliance auto-detects an attached display (launches the kiosk) and a
-plugged-in Stream Deck, and takes its timezone from whatever Imager set. The
-rest of this guide covers building the card yourself from stock Raspberry Pi OS,
-which you only need for custom setups.
+plugged-in Stream Deck, and takes its timezone from whatever was set on the
+boot partition.
 
 ## How it works
 
