@@ -41,8 +41,11 @@ COMPOSE_SRC="${COMPOSE_SRC:-$ASSET_DIR/docker-compose.appliance.yml}"
 # Marker so the systemd unit can disable itself after a successful run.
 DONE_MARKER="${DONE_MARKER:-/var/lib/foodassistant/firstboot.done}"
 # Path to a local clone of the repo. Used as the Docker build context when the
-# pre-built GHCR image is unavailable (see deploy_stack).
+# pre-built GHCR image is unavailable (see deploy_stack). If it is missing when
+# a build is needed, the provisioner clones REPO_URL here so a fresh device can
+# build from source with no manual steps.
 REPO_DIR="${REPO_DIR:-/home/foodassistant/FoodAssistant}"
+REPO_URL="${REPO_URL:-https://github.com/Syracuse3DPrinting/FoodAssistant.git}"
 
 # ── Logging helpers ────────────────────────────────────────────────────────
 log()  { printf '%s [firstboot] %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"; }
@@ -250,8 +253,15 @@ deploy_stack() {
   # shellcheck disable=SC2086
   if ! ( cd "$INSTALL_DIR" && docker compose $profiles pull service ) 2>/dev/null; then
     log "Image pull failed; building from local source at $REPO_DIR/service (this takes a few minutes)"
+    # Self-heal: a flashed device only carries the boot payload, not the full
+    # repo. Clone it (the repo is public) so the build context exists.
     if [ ! -d "$REPO_DIR/service" ]; then
-      die "Local source not found at $REPO_DIR/service and image pull failed. Clone the repo to $REPO_DIR or make the GHCR package public."
+      command -v git >/dev/null 2>&1 || apt_install git || warn "git install failed"
+      command -v git >/dev/null 2>&1 \
+        || die "git unavailable and image pull failed. Make the GHCR package public or pre-clone the repo to $REPO_DIR."
+      log "Source not present; cloning $REPO_URL to $REPO_DIR"
+      run git clone --depth 1 "$REPO_URL" "$REPO_DIR" \
+        || die "Could not clone $REPO_URL. Check internet, or make the GHCR package public."
     fi
     # shellcheck disable=SC2086
     ( cd "$INSTALL_DIR" && docker compose $profiles build service ) \
@@ -324,8 +334,24 @@ configure_streamdeck() {
   log "Installing Stream Deck controller"
 
   local venv_dir="/opt/foodassistant/venv"
-  local sd_src="$ASSET_DIR/foodassistant_streamdeck"
   local sd_dst="/opt/foodassistant/foodassistant_streamdeck"
+  # The package may sit beside this script (boot payload) or in the cloned repo
+  # under streamdeck/. Resolve whichever is present.
+  local sd_src=""
+  if [ -d "$ASSET_DIR/foodassistant_streamdeck" ]; then
+    sd_src="$ASSET_DIR/foodassistant_streamdeck"
+  elif [ -d "$REPO_DIR/streamdeck/foodassistant_streamdeck" ]; then
+    sd_src="$REPO_DIR/streamdeck/foodassistant_streamdeck"
+  fi
+  # Not present anywhere yet: clone the public repo so the package exists.
+  if [ -z "$sd_src" ] && [ ! -d "$REPO_DIR/streamdeck/foodassistant_streamdeck" ]; then
+    command -v git >/dev/null 2>&1 || apt_install git || warn "git install failed"
+    if command -v git >/dev/null 2>&1; then
+      log "Stream Deck package not present; cloning $REPO_URL to $REPO_DIR"
+      run git clone --depth 1 "$REPO_URL" "$REPO_DIR" || warn "clone for streamdeck failed"
+    fi
+    [ -d "$REPO_DIR/streamdeck/foodassistant_streamdeck" ] && sd_src="$REPO_DIR/streamdeck/foodassistant_streamdeck"
+  fi
 
   # Ensure venv exists (reuse if already created, e.g. on re-run).
   if [ -d "$venv_dir" ]; then
@@ -345,9 +371,9 @@ configure_streamdeck() {
     "httpx>=0.27.0" \
     "websockets>=12.0"
 
-  # Copy the streamdeck package from the repo/asset checkout.
-  if [ -d "$sd_src" ]; then
-    log "Copying foodassistant_streamdeck package to $sd_dst"
+  # Copy the streamdeck package from the resolved source.
+  if [ -n "$sd_src" ] && [ -d "$sd_src" ]; then
+    log "Copying foodassistant_streamdeck package from $sd_src to $sd_dst"
     run mkdir -p "$sd_dst"
     if [ "$DRY_RUN" != "1" ]; then
       cp -a "$sd_src"/. "$sd_dst"/
@@ -355,7 +381,7 @@ configure_streamdeck() {
       chmod -R a+rX "$sd_dst"
     fi
   else
-    warn "foodassistant_streamdeck source not found at $sd_src; skipping package copy"
+    warn "foodassistant_streamdeck source not found (looked in boot payload and $REPO_DIR/streamdeck); skipping package copy"
   fi
 
   # Install udev rule so the service user can open the USB device.

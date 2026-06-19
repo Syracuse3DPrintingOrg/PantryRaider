@@ -129,16 +129,20 @@ sudo scripts/image-build/prepare-image.sh --image path/to/raspios-lite-arm64.img
 
 If you prefer not to run the script, copy these files to the boot partition:
 
-- `scripts/image-build/firstrun.sh` to `bootfs/firstrun.sh`
-- All four files from `scripts/image-build/` into `bootfs/foodassistant-setup/`
+- `scripts/image-build/foodassistant-firstrun.sh` to `bootfs/foodassistant-firstrun.sh`
+- All files from `scripts/image-build/` into `bootfs/foodassistant-setup/`
 - `image/config.env` to both `bootfs/foodassistant-setup/config.env` and `bootfs/foodassistant.config.env`
 
 Then append this to the single line in `bootfs/cmdline.txt` (one space before
 it, no newline):
 
 ```
-systemd.run=/boot/firmware/firstrun.sh systemd.run_success_action=reboot systemd.unit=kernel-command-line.target
+systemd.run=/boot/firmware/foodassistant-firstrun.sh systemd.run_success_action=reboot systemd.unit=kernel-command-line.target
 ```
+
+The script name is deliberately not `firstrun.sh`: Raspberry Pi Imager uses that
+exact name for its own wifi/SSH/user setup, so reusing it would wipe those. Our
+hook runs alongside Imager's, not in place of it.
 
 Eject the card safely.
 
@@ -180,7 +184,8 @@ Set these in `image/config.env` (or directly in
 | `ENABLE_MEALIE` | `false` | Start Mealie (recipes/meal plan). Needs 4 GB RAM. |
 | `ENABLE_OLLAMA` | `false` | Start local Ollama. Not recommended on SBCs. |
 | `ENABLE_KIOSK` | `false` | Auto-launch full-screen Chromium **if a display is present**. |
-| `KIOSK_URL` | `http://localhost:9284/ui/` | What the kiosk opens. |
+| `ENABLE_STREAMDECK` | `false` | Install and start the Stream Deck controller (venv, driver, udev rule, systemd unit). |
+| `KIOSK_URL` | `http://localhost:9284/ui/?kiosk=1` | What the kiosk opens. `?kiosk=1` enables the attached-display scale/orientation settings. |
 | `FOODASSISTANT_TAG` | `latest` | Pin a specific app image version. |
 | `INSTALL_DIR` | `/opt/foodassistant` | Where the stack is installed on-device. |
 
@@ -265,6 +270,8 @@ GHCR package for `ghcr.io/syracuse3dprinting/foodassistant` has not been made
 public yet (or was recently re-privatized). To fix: go to the GitHub repo ->
 Packages -> foodassistant -> Package settings -> Change visibility -> Public.
 If the package is already public, this is a transient network error -- re-run
-the provisioner. Alternatively, `firstboot.sh` will detect the pull failure and
-build the image from local source automatically, provided the repo was cloned to
-`/home/foodassistant/FoodAssistant` (the `REPO_DIR` default) before first boot.
+the provisioner. You do not have to do anything, though: when the pull fails,
+`firstboot.sh` clones the (public) repo to `/home/foodassistant/FoodAssistant`
+and builds the image from source automatically. That first build adds a few
+minutes; pulling a public image is faster, so making the package public is still
+worthwhile for at-scale imaging.
