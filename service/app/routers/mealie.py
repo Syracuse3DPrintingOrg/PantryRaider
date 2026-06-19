@@ -17,7 +17,7 @@ router = APIRouter(prefix="/mealie", tags=["mealie"])
 
 def _client() -> MealieClient:
     if not settings.mealie_configured():
-        raise HTTPException(400, "Mealie is not configured — add its URL and API token in /setup.")
+        raise HTTPException(400, "Mealie is not configured: add its URL and API token in /setup.")
     return MealieClient()
 
 
@@ -109,7 +109,7 @@ async def search_recipes(search: str = "", per_page: int = Query(50, ge=1, le=20
             "rating": r.get("rating"),
         } for r in items]
 
-    # External name search needs a query — there's nothing useful to "browse".
+    # External name search needs a query: there's nothing useful to "browse".
     if external and search.strip():
         try:
             ext = await recipes_external.search_recipes_by_name(search)
@@ -187,14 +187,14 @@ async def import_recipe_url(payload: ImportUrlPayload):
     if not recipe or not recipe.get("name"):
         raise HTTPException(422, "Could not find a recipe on that page.")
     return {"ok": True, "saved": False, "recipe": recipe,
-            "message": "Mealie's scraper couldn't read this site — review the AI extraction below, then save."}
+            "message": "Mealie's scraper couldn't read this site: review the AI extraction below, then save."}
 
 
 @router.post("/recipes/extract-photo")
 async def extract_recipe_photo(file: UploadFile = File(...)):
     """Vision-LLM extraction of a photographed recipe (card, cookbook page,
-    handwritten note). Returns a draft for review — nothing is saved yet."""
-    _client()  # 400 early if Mealie isn't configured — there'd be nowhere to save
+    handwritten note). Returns a draft for review: nothing is saved yet."""
+    _client()  # 400 early if Mealie isn't configured: there'd be nowhere to save
     image_data = await file.read()
     if not image_data:
         raise HTTPException(400, "Empty upload.")
@@ -208,7 +208,7 @@ async def extract_recipe_photo(file: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(502, f"Vision extraction failed: {e}")
     if not recipe or not recipe.get("name"):
-        raise HTTPException(422, "Could not read a recipe from that photo — try a clearer shot.")
+        raise HTTPException(422, "Could not read a recipe from that photo: try a clearer shot.")
     return {"ok": True, "recipe": recipe}
 
 
@@ -330,7 +330,7 @@ class SuggestLLMPayload(BaseModel):
 @router.post("/suggest/llm")
 async def suggest_llm(payload: SuggestLLMPayload = Body(default_factory=SuggestLLMPayload)):
     """Ask the LLM to suggest recipes based on current Grocy inventory.
-    Returns a list of {name, description, uses} — lightweight cards the
+    Returns a list of {name, description, uses}: lightweight cards the
     user can expand into a full generated recipe. The Cook page tuning panel
     sends a free-text ``preferences`` string that is combined with the
     operator's saved cook_ai_context and steered into the prompt."""
@@ -435,7 +435,7 @@ async def add_missing_ingredients(payload: AddMissingPayload):
     except MealieError as e:
         raise HTTPException(502, str(e))
     if not lists:
-        raise HTTPException(400, "No shopping lists found in Mealie — create one first.")
+        raise HTTPException(400, "No shopping lists found in Mealie: create one first.")
 
     target = next((l for l in lists if l.get("id") == payload.list_id), lists[0])
     list_id = target["id"]

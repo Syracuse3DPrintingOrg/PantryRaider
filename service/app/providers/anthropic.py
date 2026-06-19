@@ -9,7 +9,7 @@ from .gemini import (_parse_item, _FOOD_PROMPT, _RECEIPT_PROMPT, _ENRICH_PROMPT,
                      _RECIPE_PROMPT, _GENERATE_RECIPE_PROMPT, _SUGGEST_INVENTORY_PROMPT)
 from ..models.food import AnalysisResult
 
-_HEALTH_CACHE_TTL = 3600  # seconds — avoid hammering the API on every /health poll
+_HEALTH_CACHE_TTL = 3600  # seconds: avoid hammering the API on every /health poll
 
 
 class AnthropicProvider(VisionProvider):

@@ -39,7 +39,7 @@ class FoodItem(BaseModel):
 
 
 class FoodItemOverride(BaseModel):
-    """All fields optional — only provided fields are applied."""
+    """All fields optional: only provided fields are applied."""
     name: Optional[str] = None
     quantity: Optional[float] = None
     unit: Optional[str] = None

@@ -1,11 +1,11 @@
 """External recipe sources for inventory-based suggestions.
 
 Selected via settings.recipe_source:
-  themealdb   — free public API (test key "1"); premium supporter key
+  themealdb  : free public API (test key "1"); premium supporter key
                 unlocks the full catalog and removes rate limits
-  spoonacular — large catalog, requires an API key (free tier ~150 pts/day,
+  spoonacular: large catalog, requires an API key (free tier ~150 pts/day,
                 so results are cached aggressively)
-  off         — no external suggestions
+  off        : no external suggestions
 
 Results are normalized to the same shape Mealie recipes use internally so
 the tier classifier treats every source identically.
@@ -61,7 +61,7 @@ def _core_ingredient(name: str) -> str:
     quantities ("1lb", "500g", "2 x"), then drops trailing noise so a name
     like "Boneless Skinless Chicken Thighs" -> "chicken thighs".
 
-    Pure and deterministic — returns a space-separated lowercase string
+    Pure and deterministic: returns a space-separated lowercase string
     (possibly empty if every token was noise). Callers convert spaces to
     underscores for TheMealDB's filter taxonomy.
     """
@@ -310,7 +310,7 @@ async def _spoon_find(
 
 
 async def _spoon_search_name(query: str, limit: int) -> list[dict]:
-    """complexSearch returns id/title/image only — enough for a result list.
+    """complexSearch returns id/title/image only: enough for a result list.
     Full details are fetched on import via get_external_recipe."""
     ck = ("spoonacular-name", query.lower())
     if ck in _recipe_cache:

@@ -10,7 +10,7 @@ Licensed under [PolyForm Noncommercial 1.0](LICENSE) - free for personal, educat
 
 ![Inventory dashboard showing four storage panels with drag-and-drop](docs/screenshots/inventory.png)
 
-*Inventory dashboard — four storage panels (Refrigerated, Frozen, Room Temp, Pantry) with drag-and-drop moves, inline edits, and expiry badges.*
+*Inventory dashboard: four storage panels (Refrigerated, Frozen, Room Temp, Pantry) with drag-and-drop moves, inline edits, and expiry badges.*
 
 ---
 
@@ -32,32 +32,32 @@ All AI features are optional. You can run FoodAssistant without any AI provider 
 
 ## Features
 
-- **Inventory dashboard** — panels for Refrigerated, Frozen, Room Temp, Pantry (plus custom storage locations you define), with drag-and-drop moves, inline edits, and sorting
-- **Photo analysis** — photograph a food item and a vision model extracts name, brand, quantity, and any printed best-by date
-- **Receipt import** — photograph a grocery receipt and every food line item is extracted and queued for review
-- **Barcode lookup** — scan barcodes via camera, a USB/wireless scanner, or manual entry; backed by Open Food Facts with optional AI cleanup for messy product names
-- **Expiry defaults** — an editable rules table fills in best-by dates automatically based on product type; all values are overridable before import
-- **Recipe suggestions** — "What Can I Cook?" ranks your recipes by how much of them you already have in stock; items expiring soon float to the top
-- **Recipe import** — import from any webpage, photograph a recipe card or handwritten note, browse TheMealDB, or have the AI write a recipe from scratch
-- **Meal planning and shopping lists** — optional [Mealie](https://mealie.io) integration with a week view, shopping list with check-off, and inventory-aware recipe suggestions
-- **Custom storage locations** — add buckets beyond the four built-ins (Wine Cellar, Garage Fridge, etc.) from the setup wizard
-- **Home Assistant integration** — REST sensors, notification automations, and a Lovelace dashboard with inventory panels
-- **Stream Deck kiosk** — kitchen control surface with large-text buttons, auto-rotation, and configurable layout
-- **UI scale setting** — adjustable zoom for small screens or kitchen monitors
-- **Web setup wizard** — configure everything at `/setup` with live connection tests; no config file editing required
-- **Two-factor authentication** — optional TOTP (app-based 2FA) on top of password login; works offline with any authenticator app
-- **Localhost auth bypass** — kiosk installs on the local machine can skip the login screen entirely
+- **Inventory dashboard**: panels for Refrigerated, Frozen, Room Temp, Pantry (plus custom storage locations you define), with drag-and-drop moves, inline edits, and sorting
+- **Photo analysis**: photograph a food item and a vision model extracts name, brand, quantity, and any printed best-by date
+- **Receipt import**: photograph a grocery receipt and every food line item is extracted and queued for review
+- **Barcode lookup**: scan barcodes via camera, a USB/wireless scanner, or manual entry; backed by Open Food Facts with optional AI cleanup for messy product names
+- **Expiry defaults**: an editable rules table fills in best-by dates automatically based on product type; all values are overridable before import
+- **Recipe suggestions**: "What Can I Cook?" ranks your recipes by how much of them you already have in stock; items expiring soon float to the top
+- **Recipe import**: import from any webpage, photograph a recipe card or handwritten note, browse TheMealDB, or have the AI write a recipe from scratch
+- **Meal planning and shopping lists**: optional [Mealie](https://mealie.io) integration with a week view, shopping list with check-off, and inventory-aware recipe suggestions
+- **Custom storage locations**: add buckets beyond the four built-ins (Wine Cellar, Garage Fridge, etc.) from the setup wizard
+- **Home Assistant integration**: REST sensors, notification automations, and a Lovelace dashboard with inventory panels
+- **Stream Deck kiosk**: kitchen control surface with large-text buttons, auto-rotation, and configurable layout
+- **UI scale setting**: adjustable zoom for small screens or kitchen monitors
+- **Web setup wizard**: configure everything at `/setup` with live connection tests; no config file editing required
+- **Two-factor authentication**: optional TOTP (app-based 2FA) on top of password login; works offline with any authenticator app
+- **Localhost auth bypass**: kiosk installs on the local machine can skip the login screen entirely
 
 ## Screenshots
 
 | | |
 |---|---|
 | ![Inventory](docs/screenshots/inventory.png) | ![Add item / barcode scan](docs/screenshots/add.png) |
-| **Inventory** — stock grouped by storage, drag-to-move | **Add item** — barcode scan, photo analysis, manual entry |
+| **Inventory**: stock grouped by storage, drag-to-move | **Add item**: barcode scan, photo analysis, manual entry |
 | ![Recipe suggestions](docs/screenshots/cook.png) | ![Meal plan](docs/screenshots/mealplan.png) |
-| **Cook** — recipes ranked by what's in stock | **Meal plan** — week view with Mealie integration |
+| **Cook**: recipes ranked by what's in stock | **Meal plan**: week view with Mealie integration |
 | ![Setup wizard](docs/screenshots/setup.png) | ![Expiring items](docs/screenshots/expiring.png) |
-| **Setup wizard** — configure providers and auth | **Expiring** — urgency-sorted view with HA sensor data |
+| **Setup wizard**: configure providers and auth | **Expiring**: urgency-sorted view with HA sensor data |
 
 ## How AI works in this app
 

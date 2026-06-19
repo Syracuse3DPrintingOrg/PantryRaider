@@ -6,7 +6,7 @@ from ..models.food import AnalysisResult
 from .gemini import (_parse_item, _FOOD_PROMPT, _RECEIPT_PROMPT, _ENRICH_PROMPT,
                      _RECIPE_PROMPT, _GENERATE_RECIPE_PROMPT, _SUGGEST_INVENTORY_PROMPT)
 
-# Reuses the same prompts as Gemini — structured JSON output works with llava/llama3.2-vision
+# Reuses the same prompts as Gemini: structured JSON output works with llava/llama3.2-vision
 
 
 class OllamaProvider(VisionProvider):
@@ -52,7 +52,7 @@ class OllamaProvider(VisionProvider):
         return AnalysisResult(items=items, image_type="receipt", raw_response=raw)
 
     async def enrich_product(self, info: dict) -> dict | None:
-        # Text-only generation — llava and other multimodal models handle this fine
+        # Text-only generation: llava and other multimodal models handle this fine
         prompt = _ENRICH_PROMPT.format(info=json.dumps(info, ensure_ascii=False))
         payload = {
             "model": self.model,

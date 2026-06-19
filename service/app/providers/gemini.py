@@ -112,7 +112,7 @@ Return a JSON object:
 Return ONLY valid JSON. No markdown, no explanation.
 """.strip()
 
-_HEALTH_CACHE_TTL = 3600  # seconds — avoid hammering the API on every /health poll
+_HEALTH_CACHE_TTL = 3600  # seconds: avoid hammering the API on every /health poll
 
 
 class GeminiProvider(VisionProvider):

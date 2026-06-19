@@ -35,7 +35,7 @@ async def get_expiring_display(days: int = Query(default=3, ge=0, le=30)):
 
 @router.get("/summary")
 async def get_expiring_summary():
-    """Counts by urgency bucket — for HA sensors."""
+    """Counts by urgency bucket: for HA sensors."""
     grocy = GrocyClient()
     all_items = await grocy.get_expiring(days=30)
     return {

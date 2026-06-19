@@ -145,7 +145,7 @@ class GrocyClient:
         }
 
         # /stock aggregates per product and drops timestamps; the raw stock
-        # table has row_created_timestamp per entry — take the newest per
+        # table has row_created_timestamp per entry: take the newest per
         # product as "date added".
         added: dict[int, str] = {}
         for row in await self._get("/objects/stock"):

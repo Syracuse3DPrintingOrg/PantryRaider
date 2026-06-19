@@ -79,7 +79,7 @@ async def scan_barcode(body: ScanRequest, db: Session = Depends(get_db)):
     """Headless scanner entry point: look up the barcode and queue it as pending.
 
     Unknown barcodes are still queued (lookup_failed=true) so a scan never
-    silently disappears — the name can be fixed on the Pending page.
+    silently disappears: the name can be fixed on the Pending page.
     """
     barcode = body.barcode.strip()
     if not barcode:

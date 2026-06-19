@@ -51,7 +51,7 @@ class OpenAIProvider(VisionProvider):
         raw = await self._generate(_RECEIPT_PROMPT, image_data, mime_type, max_tokens=8192)
         data = parse_json_response(raw)
         if isinstance(data, dict):
-            # json_object mode wraps arrays in an object sometimes — unwrap
+            # json_object mode wraps arrays in an object sometimes: unwrap
             for v in data.values():
                 if isinstance(v, list):
                     data = v

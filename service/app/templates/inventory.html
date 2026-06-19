@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Inventory — FoodAssistant{% endblock %}
+{% block title %}Inventory: FoodAssistant{% endblock %}
 {% block content %}
 <style>
   .panel-header {
@@ -256,14 +256,14 @@ function renderPanel(panelId, countId, items, bucket) {
   `).join('');
 }
 
-// ── Item lookup map (keyed by product_id) for pre-filling modals ─────────────
+// Item lookup map (keyed by product_id) for pre-filling modals
 const itemsById = {};
 
 function storeItems(items) {
   items.forEach(i => { itemsById[i.product_id] = i; });
 }
 
-// ── Edit modal ────────────────────────────────────────────────────────────────
+// Edit modal
 let editTarget = null;  // product_id
 
 function openEditModal(productId) {
@@ -312,7 +312,7 @@ async function saveEdit() {
   }
 }
 
-// ── Drag & Drop ──────────────────────────────────────────────────────────────
+// Drag & Drop
 let dragged = null;  // { productId, fromBucket, name }
 
 function dragStart(e) {
@@ -356,7 +356,7 @@ async function dropItem(e) {
   await moveItem(productId, panel.dataset.bucket, name);
 }
 
-// ── Move via modal (touch devices) ───────────────────────────────────────────
+// Move via modal (touch devices)
 let moveTarget = null;  // { productId, name }
 
 function openMoveModal(productId, name) {
@@ -437,8 +437,7 @@ function showToast(msg, isError = false) {
   new bootstrap.Toast(toast, { delay: 3000 }).show();
 }
 
-// ── Collapsible panels ────────────────────────────────────────────────────────
-
+// Collapsible panels
 function togglePanel(bucket) {
   const panel = document.querySelector(`[data-bucket="${bucket}"]`);
   const isCollapsed = panel.classList.toggle('panel-collapsed');

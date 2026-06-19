@@ -30,7 +30,7 @@ class VisionProvider(ABC):
         """Normalize barcode-lookup product data (text-only, no image).
 
         Takes raw Open Food Facts fields and returns a dict with name,
-        category, storage_type, shelf_life_days, and brand — or None if
+        category, storage_type, shelf_life_days, and brand: or None if
         the provider doesn't support text enrichment.
         """
         return None
@@ -52,7 +52,7 @@ class VisionProvider(ABC):
         """Extract a structured recipe from a photo OR from webpage text.
 
         Returns a dict with name, description, servings, total_time,
-        ingredients (list[str]), instructions (list[str]) — or None if
+        ingredients (list[str]), instructions (list[str]): or None if
         the provider doesn't support recipe extraction.
         """
         return None

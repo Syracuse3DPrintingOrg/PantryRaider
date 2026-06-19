@@ -151,11 +151,11 @@ def apply_defaults(item: FoodItem, db: Session, extra_match_text: str = "",
     """Fill in best_by_date if not already set, using the defaults table.
 
     extra_match_text lets callers supply additional keywords to match patterns
-    against — e.g. Open Food Facts category tags, so a branded product like
+    against: e.g. Open Food Facts category tags, so a branded product like
     "Chobani Vanilla Greek" still hits the "yogurt" rule.
 
     infer_storage lets a matching rule override the item's storage_type when
-    no rule exists for the guessed storage — e.g. mayonnaise guessed "dry"
+    no rule exists for the guessed storage: e.g. mayonnaise guessed "dry"
     from OFF tags adopts the "mayonnaise → refrigerated" rule's storage.
     """
     if item.best_by_date is not None:

@@ -105,7 +105,7 @@ async def lookup_barcode(barcode: str, db: Session) -> FoodItem:
         raise BarcodeServiceError("Open Food Facts unavailable")
     data = r.json()
     if data.get("status") != 1:
-        # OFF didn't recognise this barcode — optionally try the LLM
+        # OFF didn't recognise this barcode: optionally try the LLM
         if settings.barcode_llm_fallback:
             item = await _llm_identify_barcode(barcode)
             if item:
@@ -177,7 +177,7 @@ async def _llm_identify_barcode(barcode: str) -> FoodItem | None:
         provider = get_enrich_provider()
         result = await provider.enrich_product({
             "barcode": barcode,
-            "product_name": f"UNKNOWN — barcode {barcode} not in Open Food Facts database",
+            "product_name": f"UNKNOWN: barcode {barcode} not in Open Food Facts database",
             "note": "Identify this product by its UPC/EAN barcode if you recognise it. "
                     "Return your best guess; leave name as-is if completely unknown.",
         })

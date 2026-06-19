@@ -78,7 +78,7 @@ async def download_backup(include_secrets: bool = False):
     redacted from settings.json and rclone.conf is omitted, so the file is
     safe to store off-box. Pass include_secrets=true for a restore-complete
     backup (store it somewhere trusted). Grocy and Mealie data live in separate
-    containers — use scripts/backup.sh on the host to capture everything.
+    containers: use scripts/backup.sh on the host to capture everything.
     """
     zip_bytes, filename = _build_zip(include_secrets=include_secrets)
     return StreamingResponse(
@@ -97,7 +97,7 @@ def _redact_settings(raw: bytes) -> bytes:
     try:
         data = json.loads(raw)
     except Exception:
-        return raw  # not parseable — leave as-is rather than risk corrupting
+        return raw  # not parseable: leave as-is rather than risk corrupting
     for k in SECRET_SETTING_KEYS:
         if k in data and data[k]:
             data[k] = ""
@@ -138,7 +138,7 @@ async def push_to_remote(include_secrets: bool = False):
     are redacted by default since the destination is third-party cloud storage.
     """
     if not settings.rclone_remote:
-        raise HTTPException(400, "No rclone remote configured — set one in Settings > Security > Backup.")
+        raise HTTPException(400, "No rclone remote configured: set one in Settings > Security > Backup.")
     import shutil
     if not shutil.which("rclone"):
         raise HTTPException(500, "rclone is not installed in this container. Rebuild the image after adding it to the Dockerfile.")

@@ -1,4 +1,4 @@
-"""Tunnel router — manage Cloudflare Tunnel and FoodAssistant Cloud connections."""
+"""Tunnel router: manage Cloudflare Tunnel and FoodAssistant Cloud connections."""
 
 from fastapi import APIRouter
 from pydantic import BaseModel

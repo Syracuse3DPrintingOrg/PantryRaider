@@ -266,8 +266,8 @@ def _load_staples_file() -> list[frozenset[str]] | None:
     "Chicken stock" in the file does NOT make bare "chicken" a staple.
 
     Search order:
-      1. <data_dir>/staples.txt  — user-customisable, gitignored volume file
-      2. <app>/data/staples_default.txt — bundled default, shipped with the image
+      1. <data_dir>/staples.txt : user-customisable, gitignored volume file
+      2. <app>/data/staples_default.txt: bundled default, shipped with the image
     Returns None only when both files are absent or yield no phrases.
     """
     candidates = [
@@ -362,7 +362,7 @@ def _is_staple_ingredient(ing_toks: set[str]) -> bool:
     # Strip modifier tokens from BOTH sides so "canned chickpeas" ingredient
     # matches "Canned chickpeas" phrase, while bare "chicken" still does NOT
     # match "chicken stock" (neither side has modifier tokens to strip).
-    # Skipped when the settings field is set — that list replaces the file.
+    # Skipped when the settings field is set: that list replaces the file.
     if settings.staple_items.strip():
         return False
     phrases = _active_staple_phrases()
@@ -387,9 +387,9 @@ def classify_recipes(recipes: list[dict], stock: list[dict],
                      top_per_tier: int = 8) -> dict[str, list[dict]]:
     """Sort recipes into three cookability tiers against current inventory.
 
-    ready    — every ingredient matches an item in stock
-    staples  — in stock + common pantry staples (eggs, butter, flour, ...)
-    shopping — uses at least one perishable stock item but needs a shop run
+    ready   : every ingredient matches an item in stock
+    staples : in stock + common pantry staples (eggs, butter, flour, ...)
+    shopping: uses at least one perishable stock item but needs a shop run
 
     Recipes that need shopping without using any perishables are dropped:
     they don't help eat down the inventory.

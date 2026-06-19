@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager
 from .config import settings, APP_VERSION
 from .database import engine, get_db, Base
 from .ingress import ingress_redirect
-from .models import db_models  # noqa: F401 — registers models with Base
+from .models import db_models  # noqa: F401: registers models with Base
 from .services.defaults import seed_defaults
 from .routers import analyze, defaults, inventory, expiring, ui, setup, pending, mealie, admin, qr, tunnel
 
@@ -80,7 +80,7 @@ async def require_auth(request: Request, call_next):
     if request.client and request.client.host in ("127.0.0.1", "::1"):
         return await call_next(request)
 
-    # totp_pending means password was accepted but TOTP not yet verified — not authed
+    # totp_pending means password was accepted but TOTP not yet verified: not authed
     session_ok = request.session.get("authed", False) and not request.session.get("totp_pending")
     key_ok = bool(settings.api_key) and secrets.compare_digest(
         request.headers.get("X-API-Key", ""), settings.api_key)

@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Recipes — FoodAssistant{% endblock %}
+{% block title %}Recipes: FoodAssistant{% endblock %}
 {% block content %}
 
 {% if not mealie_configured %}
@@ -179,8 +179,7 @@
 <script>
 const MEALIE_URL = {{ mealie_url | tojson }};
 
-// ── Browse ──────────────────────────────────────────────────────────────────
-
+// Browse
 let filterTimer = null;
 document.getElementById('recipe-filter').addEventListener('input', e => {
   const q = e.target.value.trim();
@@ -261,8 +260,7 @@ async function loadRecipes(search = '') {
   }
 }
 
-// ── External recipe preview ──────────────────────────────────────────────────
-
+// External recipe preview
 let previewRecipe = null;   // {external_id, source} of the recipe in the modal
 
 async function openPreview(externalId, source) {
@@ -364,8 +362,7 @@ async function saveExternal(externalId, source, btn) {
   }
 }
 
-// ── URL import ───────────────────────────────────────────────────────────────
-
+// URL import
 async function importUrl() {
   const btn = document.getElementById('import-url-btn');
   const status = document.getElementById('import-url-status');
@@ -398,8 +395,7 @@ async function importUrl() {
   }
 }
 
-// ── Photo import ─────────────────────────────────────────────────────────────
-
+// Photo import
 async function extractPhoto(input) {
   const file = input.files[0];
   input.value = '';
@@ -421,8 +417,7 @@ async function extractPhoto(input) {
   progress.classList.add('d-none');
 }
 
-// ── Editor (shared by photo / URL-fallback / manual) ─────────────────────────
-
+// Editor (shared by photo / URL-fallback / manual)
 function openEditor(recipe = null, note = '') {
   document.getElementById('editor-title').textContent = recipe ? 'Review Recipe' : 'New Recipe';
   const noteEl = document.getElementById('editor-note');
@@ -469,8 +464,7 @@ async function saveRecipe() {
   }
 }
 
-// ── AI recipe generation ─────────────────────────────────────────────────────
-
+// AI recipe generation
 async function generateFromSearch() {
   const query = document.getElementById('recipe-filter').value.trim();
   if (!query) return;

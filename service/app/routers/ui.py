@@ -37,7 +37,7 @@ def login(request: Request, password: str = Form(None), totp_code: str = Form(No
             request.session["authed"] = True
             return ingress_redirect(request, "/ui/")
         return templates.TemplateResponse(request, "login.html",
-            {"request": request, "error": "Invalid code — try again.", "step": "totp"},
+            {"request": request, "error": "Invalid code: try again.", "step": "totp"},
             status_code=401)
 
     # Step 1: password check

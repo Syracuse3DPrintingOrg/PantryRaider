@@ -29,7 +29,7 @@ def _downscale(data: bytes, mime: str, max_dim: int = _MAX_DIM_FOOD) -> tuple[by
         img.convert("RGB").save(buf, format="JPEG", quality=85)
         return buf.getvalue(), "image/jpeg"
     except Exception:
-        # Unreadable by Pillow (e.g. HEIC without plugin) — send as-is
+        # Unreadable by Pillow (e.g. HEIC without plugin): send as-is
         return data, mime
 
 

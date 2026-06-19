@@ -7,7 +7,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- Resolve all relative links against the app root (or the HA Ingress prefix) -->
   <base href="{{ ingress_path }}/">
-  <title>Settings — FoodAssistant</title>
+  <title>Settings: FoodAssistant</title>
   {% if theme_css %}
   <link href="{{ theme_css }}" rel="stylesheet">
   {% else %}
@@ -20,7 +20,7 @@
   <script src="static/js/kiosk-display.js"></script>
   <style>
     body { background: var(--bs-body-bg); }
-    /* ── Shared ─────────────────────────────────────────── */
+    /* Shared */
     .setup-wrap { max-width: 980px; margin: 1.5rem auto; padding: 0 1rem 4rem; }
     .section-card { background: var(--bs-tertiary-bg); border: 1px solid var(--bs-border-color); border-radius: 0.75rem; padding: 1.5rem; margin-bottom: 1.25rem; }
     .section-title { font-size: 1.05rem; font-weight: 600; margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem; }
@@ -36,7 +36,7 @@
       .side-menu .nav { flex-direction: row !important; flex-wrap: nowrap; overflow-x: auto; }
       .side-menu .nav-link { white-space: nowrap; }
     }
-    /* ── Wizard (first-time setup only) ─────────────────── */
+    /* Wizard (first-time setup only) */
     .wiz-wrap { max-width: 680px; margin: 2rem auto; padding: 0 1rem 4rem; }
     /* Progress bar */
     .wiz-progress { display: flex; align-items: center; justify-content: center; gap: 0; margin-bottom: 2rem; flex-wrap: nowrap; }
@@ -69,9 +69,7 @@
 </head>
 <body>
 
-{# ═══════════════════════════════════════════════════════════════════════════════
-   Shared macro: password/secret input with show-toggle and clear button
-═══════════════════════════════════════════════════════════════════════════════ #}
+{# Shared macro: password/secret input with show-toggle and clear button #}
 {% macro secret_input(id, placeholder) -%}
 <div class="input-group">
   <input type="password" class="form-control font-monospace" id="{{ id }}" autocomplete="new-password"
@@ -88,9 +86,7 @@
 {%- endmacro %}
 
 
-{# ═══════════════════════════════════════════════════════════════════════════════
-   FIRST-TIME WIZARD  (shown when configured=False)
-═══════════════════════════════════════════════════════════════════════════════ #}
+{# FIRST-TIME WIZARD  (shown when configured=False) #}
 {% if not configured %}
 <div class="wiz-wrap" id="wizard-root">
 
@@ -115,7 +111,7 @@
     <div class="wiz-step-dot"><div class="wiz-step-num" id="dot-6">6</div><div class="wiz-step-label">Done</div></div>
   </div>
 
-  <!-- ── Step 1: Welcome / deployment mode ── -->
+  <!-- Step 1: Welcome / deployment mode -->
   <div class="wiz-card" id="wiz-step-1">
     <div class="wiz-card-title"><i class="bi bi-house-door text-primary me-2"></i>Welcome to FoodAssistant</div>
     <div class="wiz-card-sub">
@@ -173,7 +169,7 @@
     </div>
   </div>
 
-  <!-- ── Step 2: Security ── -->
+  <!-- Step 2: Security -->
   <div class="wiz-card d-none" id="wiz-step-2">
     <div class="wiz-card-title"><i class="bi bi-shield-lock text-success me-2"></i>Security</div>
     <div class="wiz-card-sub">Set a password to protect your food inventory. Required before setup completes.</div>
@@ -202,7 +198,7 @@
     </div>
   </div>
 
-  <!-- ── Step 3: Grocy ── -->
+  <!-- Step 3: Grocy -->
   <div class="wiz-card d-none" id="wiz-step-3">
     <div class="wiz-card-title"><i class="bi bi-fridge text-info me-2"></i>Grocy — Inventory Backend</div>
     <div class="wiz-card-sub">Grocy stores your stock, locations, and consumption history. Connect it here.</div>
@@ -253,7 +249,7 @@
     </div>
   </div>
 
-  <!-- ── Step 4: AI Provider ── -->
+  <!-- Step 4: AI Provider -->
   <div class="wiz-card d-none" id="wiz-step-4">
     <div class="wiz-card-title"><i class="bi bi-magic text-warning me-2"></i>AI Provider</div>
     <div class="wiz-card-sub">Analyzes food photos, receipts, and barcodes. Optional — you can add this later.</div>
@@ -341,7 +337,7 @@
     </div>
   </div>
 
-  <!-- ── Step 5: Optional Integrations ── -->
+  <!-- Step 5: Optional Integrations -->
   <div class="wiz-card d-none" id="wiz-step-5">
     <div class="wiz-card-title"><i class="bi bi-puzzle text-secondary me-2"></i>Optional Integrations</div>
     <div class="wiz-card-sub">Connect a barcode scanner, Mealie for recipes, and more. All optional — add later in Settings.</div>
@@ -425,7 +421,7 @@
     </div>
   </div>
 
-  <!-- ── Step 6: Done ── -->
+  <!-- Step 6: Done -->
   <div class="wiz-card d-none" id="wiz-step-6">
     <div class="wiz-card-title"><i class="bi bi-check-circle-fill text-success me-2"></i>Ready to Go</div>
     <div class="wiz-card-sub">Here's what you've configured. Click the button below to save and start using FoodAssistant.</div>
@@ -453,10 +449,8 @@
 {% endif %}
 
 
-{# ═══════════════════════════════════════════════════════════════════════════════
-   SETTINGS FORM  (shown when configured=True; also rendered for re-visits)
-   On first-time setup this block is hidden (wizard above handles that flow).
-═══════════════════════════════════════════════════════════════════════════════ #}
+{# Settings form: shown when configured=True (also rendered for re-visits).
+   On first-time setup this block is hidden; wizard above handles that flow. #}
 {% if configured %}
 <div class="setup-wrap" id="settings-root">
 
@@ -481,7 +475,7 @@
 
   <div class="row g-3">
 
-    <!-- ── Side menu ── -->
+    <!-- Side menu -->
     <div class="col-md-3">
       <div class="side-menu">
         {# inline status: True = configured, False/None = needs attention #}
@@ -523,11 +517,11 @@
       </div>
     </div>
 
-    <!-- ── Content panes ── -->
+    <!-- Content panes -->
     <div class="col-md-9">
       <div class="tab-content">
 
-        <!-- ════ Inventory (Grocy + storage) ════ -->
+        <!-- Inventory (Grocy + storage) -->
         <div class="tab-pane fade show active" id="pane-inventory">
           <p class="pane-intro">Where your stock lives: the Grocy backend and the storage buckets it's grouped into.</p>
 
@@ -635,7 +629,7 @@
           </div>
         </div>
 
-        <!-- ════ AI Providers ════ -->
+        <!-- AI Providers -->
         <div class="tab-pane fade" id="pane-ai">
           <p class="pane-intro">Models that read your food photos, receipts, and barcodes.</p>
 
@@ -754,7 +748,7 @@
           </div>
         </div>
 
-        <!-- ════ Recipes ════ -->
+        <!-- Recipes -->
         <div class="tab-pane fade" id="pane-recipes">
           <p class="pane-intro">Recipe sources and how "What can I cook?" ranks them against your stock.</p>
 
@@ -862,7 +856,7 @@
           </div>
         </div>
 
-        <!-- ════ Interface ════ -->
+        <!-- Interface -->
         <div class="tab-pane fade" id="pane-interface">
           <p class="pane-intro">How the app's navigation looks and which pages appear.</p>
 
@@ -920,7 +914,7 @@
           </div>
         </div>
 
-        <!-- ════ Security ════ -->
+        <!-- Security -->
         <div class="tab-pane fade" id="pane-security">
           <p class="pane-intro">Who can reach the app and how login is protected.</p>
 
@@ -995,7 +989,7 @@
           </div>
         </div>
 
-        <!-- ════ Remote Access ════ -->
+        <!-- Remote Access -->
         <div class="tab-pane fade" id="pane-tunnel">
           <p class="pane-intro">Expose FoodAssistant over the internet without port-forwarding your router.</p>
 
@@ -1073,7 +1067,7 @@
           </div>
         </div>
 
-        <!-- ════ Backup & Updates ════ -->
+        <!-- Backup & Updates -->
         <div class="tab-pane fade" id="pane-data">
           <p class="pane-intro">Save your data off-box and keep the app up to date.</p>
 
@@ -1156,8 +1150,7 @@ const TABS = {{ tabs | tojson }};
 const HAS_AUTH_PASSWORD = {{ 'true' if has.auth_password else 'false' }};
 const IS_CONFIGURED = {{ 'true' if configured else 'false' }};
 
-// ── Shared helpers ────────────────────────────────────────────────────────────
-
+// Shared helpers
 function val(id) { return document.getElementById(id)?.value.trim() || ''; }
 function num(id, fallback) { const v = parseInt(val(id), 10); return isNaN(v) ? fallback : v; }
 
@@ -1320,8 +1313,7 @@ function showRecipeSource() {
   if (sd) sd.style.display = src === 'spoonacular' ? '' : 'none';
 }
 
-// ── Connection tests ──────────────────────────────────────────────────────────
-
+// Connection tests
 async function postJson(url, body) {
   const r = await fetch(url, {
     method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body),
@@ -1401,8 +1393,7 @@ async function testRecipes() {
   setResult('recipes-result', d.ok, d.ok ? d.message : d.error);
 }
 
-// ── Navigation tab editor ─────────────────────────────────────────────────────
-
+// Navigation tab editor
 let navState = TABS.map(t => ({key: t.key, label: t.label, icon: t.icon,
                                hidden: t.hidden, available: t.available}));
 
@@ -1435,8 +1426,7 @@ function moveTab(i, delta) {
   renderNavEditor();
 }
 
-// ── Theme ─────────────────────────────────────────────────────────────────────
-
+// Theme
 async function applyTheme(value) {
   const hint = document.getElementById('theme-hint');
   if (hint) hint.textContent = 'Saving…';
@@ -1452,8 +1442,7 @@ async function applyTheme(value) {
   }
 }
 
-// ── Attached display (scale + orientation) ────────────────────────────────────
-
+// Attached display (scale + orientation)
 async function applyDisplay() {
   const hint = document.getElementById('display-hint');
   if (hint) hint.textContent = 'Saving…';
@@ -1471,8 +1460,7 @@ async function applyDisplay() {
   }
 }
 
-// ── Save (settings form — configured=True path) ───────────────────────────────
-
+// Save (settings form — configured=True path)
 async function saveAll() {
   const btn = document.getElementById('saveBtn');
   btn.disabled = true;
@@ -1566,8 +1554,7 @@ function buildPayload() {
   };
 }
 
-// ── TOTP 2FA ─────────────────────────────────────────────────────────────────
-
+// TOTP 2FA
 let _totpSecret = '';
 
 async function setupTOTP() {
@@ -1606,8 +1593,7 @@ async function disableTOTP() {
   else alert(d.error || 'Failed');
 }
 
-// ── Rclone remote ─────────────────────────────────────────────────────────────
-
+// Rclone remote
 async function testRemote(btn) {
   const orig = btn.innerHTML;
   btn.disabled = true;
@@ -1638,8 +1624,7 @@ async function pushToRemote(btn) {
   }
 }
 
-// ── Remote Access / Tunnel ────────────────────────────────────────────────────
-
+// Remote Access / Tunnel
 let _tunnelPollTimer = null;
 
 function tunnelModeChanged() {
@@ -1779,10 +1764,9 @@ async function _initTunnelStatus() {
   } catch(_) { /* docker may not be available */ }
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
+// 
 // WIZARD logic (first-time setup only)
-// ═════════════════════════════════════════════════════════════════════════════
-
+// 
 {% if not configured %}
 
 let _wizStep = 1;
@@ -2100,8 +2084,7 @@ async function wizSaveAll() {
 
 {% endif %}
 
-// ── Initialization ────────────────────────────────────────────────────────────
-
+// Initialization
 (function init() {
   showProvider();
   showRecipeSource();

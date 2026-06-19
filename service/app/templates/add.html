@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Add Food — FoodAssistant{% endblock %}
+{% block title %}Add Food: FoodAssistant{% endblock %}
 {% block content %}
 <div class="d-flex justify-content-between align-items-center my-3">
   <h4 class="mb-0"><i class="bi bi-plus-circle me-2"></i>Add Food</h4>
@@ -26,7 +26,7 @@
 
 <div class="tab-content">
 
-  <!-- ── Barcode Tab ── -->
+  <!-- Barcode Tab -->
   <div class="tab-pane fade show active" id="tab-barcode">
     <div class="row g-3">
       <div class="col-md-6">
@@ -74,7 +74,7 @@
     </div>
   </div>
 
-  <!-- ── Photo Tab ── -->
+  <!-- Photo Tab -->
   <div class="tab-pane fade" id="tab-photo">
     <div class="card">
       <div class="card-body">
@@ -112,7 +112,7 @@
     </div>
   </div>
 
-  <!-- ── Manual Tab ── -->
+  <!-- Manual Tab -->
   <div class="tab-pane fade" id="tab-manual">
     <div class="card">
       <div class="card-body">
@@ -170,7 +170,7 @@
 
 </div><!-- /tab-content -->
 
-<!-- ── Results Queue ── -->
+<!-- Results Queue -->
 <div id="results-section" class="d-none mt-4">
   <div class="d-flex justify-content-between align-items-center mb-2">
     <h5 class="mb-0">
@@ -199,7 +199,7 @@ let scanner = null;
 let pendingFile = null;
 let queue = [];   // array of item objects
 
-// ── Barcode Scanner ─────────────────────────────────────────────────────────
+// Barcode Scanner
 // Live camera streaming (getUserMedia) requires a secure context (HTTPS).
 // On HTTP, hide the live-scan button — the photo-snap fallback still works.
 if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
@@ -272,7 +272,7 @@ async function lookupBarcode() {
   }
 }
 
-// ── Photo Upload ─────────────────────────────────────────────────────────────
+// Photo Upload
 function handleDrop(e) {
   e.preventDefault();
   e.currentTarget.style.borderColor = '';
@@ -321,7 +321,7 @@ async function analyzePhoto() {
   }
 }
 
-// ── Manual Entry ─────────────────────────────────────────────────────────────
+// Manual Entry
 function addManualItem() {
   const name = document.getElementById('manual-name').value.trim();
   if (!name) { alert('Name is required.'); return; }
@@ -342,7 +342,7 @@ function addManualItem() {
   document.getElementById('manual-bestby').value = '';
 }
 
-// ── Queue Management ──────────────────────────────────────────────────────────
+// Queue Management
 function addToQueue(items) {
   queue.push(...items);
   renderQueue();
@@ -432,7 +432,7 @@ async function importAll() {
   }
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// Helpers
 const CATEGORIES = ['Poultry','Meat','Seafood','Dairy','Produce','Grains','Condiments','Beverages','Snacks','Frozen','Canned','Other'];
 const STORAGES   = ['refrigerated','frozen','room_temp','dry'];
 const STORAGE_LABELS = {refrigerated:'Refrigerated', frozen:'Frozen', room_temp:'Room Temp', dry:'Dry'};

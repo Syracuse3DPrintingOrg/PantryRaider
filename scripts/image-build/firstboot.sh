@@ -27,7 +27,7 @@
 # docs/hardware/supported-hardware.md and docs/hardware/sd-image.md.
 set -euo pipefail
 
-# ── Tunables (env-overridable; mostly for tests) ───────────────────────────
+# Tunables (env-overridable; mostly for tests)
 DRY_RUN="${DRY_RUN:-0}"
 # STEPS= comma-list of step names to run instead of the full sequence, bypassing
 # the done-marker check and skipping mark_done.  Valid names: hostname, timezone,
@@ -52,7 +52,7 @@ DONE_MARKER="${DONE_MARKER:-/var/lib/foodassistant/firstboot.done}"
 REPO_DIR="${REPO_DIR:-/home/foodassistant/FoodAssistant}"
 REPO_URL="${REPO_URL:-https://github.com/Syracuse3DPrinting/FoodAssistant.git}"
 
-# ── Logging helpers ────────────────────────────────────────────────────────
+# Logging helpers
 log()  { printf '%s [firstboot] %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"; }
 warn() { log "WARN: $*" >&2; }
 die()  { log "ERROR: $*" >&2; exit 1; }
@@ -71,7 +71,7 @@ run() {
 detect_arch() { uname -m; }
 is_debian_like() { [ -f /etc/debian_version ]; }
 
-# ── Config loading ─────────────────────────────────────────────────────────
+# Config loading
 # Locate and source the config file, then apply defaults for anything unset.
 load_config() {
   local f found=""
@@ -206,7 +206,7 @@ ensure_repo() {
     || die "Could not clone $REPO_URL. Check internet access and try again."
 }
 
-# ── Step: hostname ─────────────────────────────────────────────────────────
+# Step: hostname
 configure_hostname() {
   local current
   current="$(hostname 2>/dev/null || echo unknown)"
@@ -233,7 +233,7 @@ configure_hostname() {
   fi
 }
 
-# ── Step: timezone ─────────────────────────────────────────────────────────
+# Step: timezone
 configure_timezone() {
   if [ "$DRY_RUN" = "1" ]; then
     log "DRY_RUN would set timezone to $TZ"
@@ -245,7 +245,7 @@ configure_timezone() {
   fi
 }
 
-# ── Step: mDNS (avahi) ─────────────────────────────────────────────────────
+# Step: mDNS (avahi)
 # Makes the box reachable at <hostname>.local on the LAN.
 configure_mdns() {
   if dpkg -s avahi-daemon >/dev/null 2>&1; then
@@ -257,7 +257,7 @@ configure_mdns() {
   run systemctl enable --now avahi-daemon || warn "avahi-daemon enable failed"
 }
 
-# ── Step: Docker + Compose v2 ──────────────────────────────────────────────
+# Step: Docker + Compose v2
 apt_install() {
   if [ "$DRY_RUN" = "1" ]; then
     log "DRY_RUN would: apt-get install -y $*"
@@ -296,7 +296,7 @@ install_docker() {
   systemctl enable --now docker || warn "Could not enable docker service"
 }
 
-# ── Step: deploy the stack ─────────────────────────────────────────────────
+# Step: deploy the stack
 write_env_file() {
   local env_path="$1"
   if [ "$DRY_RUN" = "1" ]; then
@@ -360,7 +360,7 @@ deploy_stack() {
   ( cd "$INSTALL_DIR" && docker compose $profiles up -d )
 }
 
-# ── Step: kiosk (opt-in, display-gated) ────────────────────────────────────
+# Step: kiosk (opt-in, display-gated)
 # Returns 0 if a display appears usable. We treat a present DRM/KMS card or an
 # existing X/Wayland session as "has display".
 has_display() {
@@ -464,7 +464,7 @@ EOF
   systemctl start foodassistant-kiosk.service || warn "kiosk start failed (will retry on boot)"
 }
 
-# ── Step: Stream Deck controller (auto-detected by default) ─────────────────
+# Step: Stream Deck controller (auto-detected by default)
 configure_streamdeck() {
   if ! flag_enabled "$ENABLE_STREAMDECK" has_streamdeck; then
     log "Stream Deck not enabled (ENABLE_STREAMDECK=$ENABLE_STREAMDECK, none detected); skipping"
@@ -575,7 +575,7 @@ EOF
   systemctl start foodassistant-streamdeck.service || warn "streamdeck service start failed (will retry on boot)"
 }
 
-# ── Step: mark done ────────────────────────────────────────────────────────
+# Step: mark done
 mark_done() {
   if [ "$DRY_RUN" = "1" ]; then
     log "DRY_RUN would touch $DONE_MARKER"
@@ -599,7 +599,7 @@ _step_requested() {
   return 1
 }
 
-# ── Main ───────────────────────────────────────────────────────────────────
+# Main
 main() {
   # Tee all output to the log (skip under DRY_RUN to keep test output clean and
   # avoid needing write access to /var/log).

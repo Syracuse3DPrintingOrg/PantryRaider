@@ -1,4 +1,4 @@
-"""QR code endpoint — returns an SVG QR code for the phone deep-link."""
+"""QR code endpoint: returns an SVG QR code for the phone deep-link."""
 import io
 
 from fastapi import APIRouter, Request

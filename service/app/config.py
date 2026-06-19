@@ -131,7 +131,7 @@ class Settings(BaseSettings):
     barcode_enrichment: str = "llm"
     # When a barcode is not found in Open Food Facts, try the LLM to identify
     # the product by barcode/UPC number. Results are low-confidence guesses
-    # for rare or regional products. Default off — enable when enrichment is on.
+    # for rare or regional products. Default off: enable when enrichment is on.
     barcode_llm_fallback: bool = False
     # When an item is committed to Grocy and Mealie is configured, auto-check
     # any matching unchecked Mealie shopping-list items (token-matched by name).
@@ -152,7 +152,7 @@ class Settings(BaseSettings):
         """URL for browser-facing Grocy links (public address if set, else base)."""
         return (self.grocy_public_url or self.grocy_base_url).rstrip("/")
 
-    # Mealie recipe manager (optional) — enables the Recipes, Meal Plan and
+    # Mealie recipe manager (optional): enables the Recipes, Meal Plan and
     # Shopping List pages. base_url is for API calls (LAN/docker address);
     # public_url is only used for browser links and falls back to base_url.
     mealie_base_url: str = ""
@@ -219,8 +219,8 @@ class Settings(BaseSettings):
 
     # Secure by default: a standalone install must set a password before it is
     # usable (enforced via is_configured). Set AUTH_REQUIRED=false when an
-    # outer layer already handles auth — e.g. the HA add-on (Ingress) or a
-    # zero-trust proxy like Pangolin — to avoid a redundant second login.
+    # outer layer already handles auth: e.g. the HA add-on (Ingress) or a
+    # zero-trust proxy like Pangolin: to avoid a redundant second login.
     auth_required: bool = True
     auth_password: str = ""
     totp_secret: str = ""   # base32 secret; empty = TOTP disabled
@@ -286,7 +286,7 @@ class Settings(BaseSettings):
             data["ui_theme"] = _DEFAULT_THEME
         existing.update({k: v for k, v in data.items() if k in _SAVEABLE and v is not None})
         sf.write_text(json.dumps(existing, indent=2))
-        sf.chmod(0o600)  # settings.json holds API keys — owner-only
+        sf.chmod(0o600)  # settings.json holds API keys: owner-only
         self.apply(existing)
 
 

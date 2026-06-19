@@ -104,7 +104,7 @@ async def test_remote(payload: TestRemotePayload):
         async with httpx.AsyncClient(timeout=6.0, follow_redirects=True) as client:
             r = await client.get(f"{url}/health")
         if r.status_code == 200:
-            return {"ok": True, "message": f"Connected — FoodAssistant reachable at {url}"}
+            return {"ok": True, "message": f"Connected: FoodAssistant reachable at {url}"}
         return {"ok": False, "error": f"HTTP {r.status_code} from {url}/health"}
     except Exception as e:
         return {"ok": False, "error": str(e)}
@@ -185,7 +185,7 @@ async def setup_page(request: Request):
         "request": request,
         "s": settings,
         "configured": settings.is_configured(),
-        # booleans only — never the stored secrets themselves
+        # booleans only: never the stored secrets themselves
         "has": {f: bool(getattr(settings, f, "")) for f in _SECRET_FIELDS},
         "tabs": all_tabs(),
         "version": APP_VERSION,
@@ -299,7 +299,7 @@ async def test_grocy(payload: TestGrocyPayload):
                                  headers={"GROCY-API-KEY": key})
         if r.status_code == 200:
             version = r.json().get("grocy_version", "?")
-            return {"ok": True, "message": f"Connected — Grocy {version}"}
+            return {"ok": True, "message": f"Connected: Grocy {version}"}
         return {"ok": False, "error": f"HTTP {r.status_code}: {_safe_error(r.text[:200], key)}"}
     except Exception as e:
         return {"ok": False, "error": _safe_error(e, key)}
@@ -317,7 +317,7 @@ async def test_mealie(payload: TestMealiePayload):
                                  headers={"Authorization": f"Bearer {key}"})
         if r.status_code == 200:
             user = r.json().get("username") or r.json().get("email", "?")
-            return {"ok": True, "message": f"Connected — authenticated as {user}"}
+            return {"ok": True, "message": f"Connected: authenticated as {user}"}
         return {"ok": False, "error": f"HTTP {r.status_code}: {_safe_error(r.text[:200], key)}"}
     except Exception as e:
         return {"ok": False, "error": _safe_error(e, key)}
@@ -338,7 +338,7 @@ async def test_provider(payload: TestProviderPayload):
             genai.configure(api_key=key)
             model = payload.model or "gemini-2.5-flash"
             genai.get_model(f"models/{model}")
-            return {"ok": True, "message": f"Connected — model {model} available."}
+            return {"ok": True, "message": f"Connected: model {model} available."}
         except Exception as e:
             return {"ok": False, "error": _safe_error(e, key)}
 
@@ -350,7 +350,7 @@ async def test_provider(payload: TestProviderPayload):
             if r.status_code == 200:
                 models = [m["name"] for m in r.json().get("models", [])]
                 model_list = ", ".join(models) if models else "none installed"
-                return {"ok": True, "message": f"Connected — models: {model_list}"}
+                return {"ok": True, "message": f"Connected: models: {model_list}"}
             return {"ok": False, "error": f"HTTP {r.status_code}"}
         except Exception as e:
             return {"ok": False, "error": str(e)}
@@ -364,7 +364,7 @@ async def test_provider(payload: TestProviderPayload):
                 r = await client.get(f"https://api.openai.com/v1/models/{model}",
                                      headers={"Authorization": f"Bearer {key}"})
             if r.status_code == 200:
-                return {"ok": True, "message": f"Connected — model {model} available."}
+                return {"ok": True, "message": f"Connected: model {model} available."}
             return {"ok": False, "error": f"HTTP {r.status_code}: {_safe_error(r.text[:200], key)}"}
         except Exception as e:
             return {"ok": False, "error": _safe_error(e, key)}
@@ -377,7 +377,7 @@ async def test_provider(payload: TestProviderPayload):
             from anthropic import AsyncAnthropic
             client = AsyncAnthropic(api_key=key)
             await client.models.retrieve(model)
-            return {"ok": True, "message": f"Connected — model {model} available."}
+            return {"ok": True, "message": f"Connected: model {model} available."}
         except Exception as e:
             return {"ok": False, "error": _safe_error(e, key)}
 
@@ -398,7 +398,7 @@ async def test_recipes(payload: TestRecipesPayload):
                     params={"ingredients": "apple", "number": 1, "apiKey": key})
             if r.status_code == 200:
                 quota = r.headers.get("x-api-quota-left", "?")
-                return {"ok": True, "message": f"Connected — quota left today: {quota} points."}
+                return {"ok": True, "message": f"Connected: quota left today: {quota} points."}
             return {"ok": False, "error": f"HTTP {r.status_code}: {_safe_error(r.text[:200], key)}"}
         except Exception as e:
             return {"ok": False, "error": _safe_error(e, key)}
@@ -412,7 +412,7 @@ async def test_recipes(payload: TestRecipesPayload):
                     params={"i": "chicken"})
             if r.status_code == 200 and (r.json() or {}).get("meals"):
                 kind = "public key" if key == "1" else "premium key"
-                return {"ok": True, "message": f"Connected — TheMealDB reachable ({kind})."}
+                return {"ok": True, "message": f"Connected: TheMealDB reachable ({kind})."}
             return {"ok": False, "error": f"HTTP {r.status_code}: {_safe_error(r.text[:200], key)}"}
         except Exception as e:
             return {"ok": False, "error": _safe_error(e, key)}

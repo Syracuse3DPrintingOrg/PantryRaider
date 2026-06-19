@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}What Can I Cook — FoodAssistant{% endblock %}
+{% block title %}What Can I Cook: FoodAssistant{% endblock %}
 
 {% block content %}
 
@@ -332,8 +332,7 @@ input[type=range].pref-slider {
 <script>
 const MEALIE_URL = {{ mealie_url | tojson }};
 
-// ── Preference state ──────────────────────────────────────────────────────────
-
+// Preference state
 let cVal = 3, sVal = 3, tVal = 3, pVal = 3;
 let activeDiets = new Set();
 let activeCuisines = new Set();
@@ -687,8 +686,7 @@ async function importExternal(externalId, source, addToList, btn) {
   }
 }
 
-// ── Add to meal plan ─────────────────────────────────────────────────────────
-
+// Add to meal plan
 let planRecipeId = null;
 
 function openPlan(recipeId, name) {
@@ -719,8 +717,7 @@ async function savePlan() {
   }
 }
 
-// ── AI inventory-based suggestions ───────────────────────────────────────────
-
+// AI inventory-based suggestions
 let aiGeneratedRecipe = null;
 
 async function loadAiSuggestions() {

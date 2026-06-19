@@ -10,12 +10,12 @@ from .navigation import visible_tabs, auto_hidden_groups
 def theme_context(request: Request) -> dict:
     """Context processor: expose the current UI theme to every render.
 
-    ``ui_theme``      — the selected theme key (for the setup <select>).
-    ``theme_mode``    — "light"/"dark" for the <html data-bs-theme> attribute.
-    ``theme_css``     — a vendored Bootswatch stylesheet href, or None to use
+    ``ui_theme``     : the selected theme key (for the setup <select>).
+    ``theme_mode``   : "light"/"dark" for the <html data-bs-theme> attribute.
+    ``theme_css``    : a vendored Bootswatch stylesheet href, or None to use
                         the default Bootstrap CSS. Resolved per request so a
                         settings change applies on the next page load.
-    ``theme_overlay`` — a second CSS href loaded after the main stylesheet
+    ``theme_overlay``: a second CSS href loaded after the main stylesheet
                         (used by overlay themes like Synthwave), or None.
     """
     info = theme_info(settings.ui_theme)
