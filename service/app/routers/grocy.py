@@ -103,6 +103,19 @@ async def delete_shopping_item(item_id: int):
     return {"ok": True}
 
 
+# Restock suggestions ----------------------------------------------------
+
+@router.get("/suggestions")
+async def get_suggestions(days: int = 30, min_consumes: int = 2):
+    """Return products consumed recently that are now out of stock."""
+    g = _client()
+    try:
+        items = await g.get_restock_suggestions(days=days, min_consumes=min_consumes)
+    except GrocyError as e:
+        raise HTTPException(502, str(e))
+    return {"items": items, "days": days}
+
+
 # Stock journal -----------------------------------------------------------
 
 @router.get("/stock-log")

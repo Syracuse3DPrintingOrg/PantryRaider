@@ -34,6 +34,17 @@
     </div>
     {% endif %}
   </div>
+
+  {% if not mealie_configured %}
+  <div class="col-lg-5 col-xl-4 mt-3 mt-lg-0">
+    <div id="suggestions-card" class="d-none">
+      <h6 class="text-secondary mb-2">
+        <i class="bi bi-arrow-repeat me-1"></i>Restock suggestions
+      </h6>
+      <div id="suggestions" class="list-group"></div>
+    </div>
+  </div>
+  {% endif %}
 </div>
 
 {% endblock %}
@@ -201,7 +212,42 @@ async function clearDone() {
   load(currentListId);
 }
 
+async function loadSuggestions() {
+  const card = document.getElementById('suggestions-card');
+  const el = document.getElementById('suggestions');
+  if (!card || !el) return;
+  try {
+    const r = await fetch('grocy/suggestions');
+    if (!r.ok) return;
+    const data = await r.json();
+    if (!data.items || !data.items.length) return;
+    card.classList.remove('d-none');
+    el.innerHTML = data.items.map(s => `
+      <div class="list-group-item d-flex align-items-center justify-content-between">
+        <span class="small">${s.product_name}
+          <span class="text-secondary ms-1">(used ${s.consume_count}x / ${s.days}d)</span>
+        </span>
+        <button class="btn btn-sm btn-outline-primary btn-icon"
+                onclick="addSuggestion('${s.product_name.replace(/'/g, "\\'")}')"
+                title="Add to list">
+          <i class="bi bi-plus-lg"></i>
+        </button>
+      </div>`).join('');
+  } catch (_) {}
+}
+
+async function addSuggestion(name) {
+  if (currentListId == null) return;
+  await fetch('grocy/shopping/items', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({list_id: currentListId, note: name}),
+  });
+  load(currentListId);
+}
+
 load();
+loadSuggestions();
 </script>
 {% endif %}
 {% endblock %}

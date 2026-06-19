@@ -302,6 +302,50 @@ class GrocyClient:
             await self.delete_shopping_item(iid)
         return len(done_ids)
 
+    async def get_restock_suggestions(self, days: int = 30, min_consumes: int = 2) -> list[dict]:
+        """Return products that were consumed recently but are now out of stock.
+
+        Looks at 'consume' and 'product-opened' transactions in the last ``days``
+        days, counts occurrences per product, and cross-checks against current
+        stock. Returns products with at least ``min_consumes`` consume events and
+        zero stock remaining, sorted by consume frequency (most frequent first).
+        """
+        from datetime import datetime, timedelta, timezone
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
+
+        log_rows = await self._get(
+            f"/objects/stock_log?order=row_created_timestamp%3Adesc&limit=500"
+        )
+        products = {str(p["id"]): p["name"] for p in await self.get_products()}
+        stock = {str(e.get("product_id")): float(e.get("amount") or 0)
+                 for e in await self._get("/stock")}
+
+        consume_counts: dict[str, int] = {}
+        for row in log_rows:
+            ts = (row.get("row_created_timestamp") or "")[:10]
+            if ts < cutoff:
+                continue
+            if row.get("transaction_type") not in ("consume", "product-opened"):
+                continue
+            pid = str(row.get("product_id") or "")
+            if pid:
+                consume_counts[pid] = consume_counts.get(pid, 0) + 1
+
+        suggestions = []
+        for pid, count in consume_counts.items():
+            if count < min_consumes:
+                continue
+            if float(stock.get(pid, 0)) > 0:
+                continue
+            suggestions.append({
+                "product_id": int(pid),
+                "product_name": products.get(pid, f"Product {pid}"),
+                "consume_count": count,
+                "days": days,
+            })
+        suggestions.sort(key=lambda x: -x["consume_count"])
+        return suggestions
+
     async def get_stock_log(self, limit: int = 50) -> list[dict]:
         """Return recent stock log entries, newest first, enriched with product names."""
         rows = await self._get(f"/objects/stock_log?limit={limit}&order=row_created_timestamp%3Adesc")
