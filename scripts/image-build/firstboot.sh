@@ -142,6 +142,7 @@ _load_mode_from_settings() {
   url="$(grep -o '"remote_server_url"[[:space:]]*:[[:space:]]*"[^"]*"' "$sf" 2>/dev/null | sed 's/.*"\([^"]*\)"$/\1/' || true)"
   [ -n "$mode" ] && DEPLOYMENT_MODE="$mode"
   [ -n "$url" ] && REMOTE_SERVER_URL="$url"
+  return 0
 }
 
 # Timezone the OS is already set to (Raspberry Pi Imager writes this), so the
