@@ -576,11 +576,12 @@ configure_streamdeck() {
   fi
 
   # Ensure venv exists (reuse if already created, e.g. on re-run).
+  log "Installing python3-venv and Stream Deck USB dependencies"
+  apt_install python3-venv libhidapi-libusb0 libudev-dev || warn "streamdeck dependencies install failed"
+
   if [ -d "$venv_dir" ]; then
     log "venv at $venv_dir already exists; reusing"
   else
-    log "Installing python3-venv and Stream Deck USB dependencies"
-    apt_install python3-venv libhidapi-hidraw0 libudev-dev || warn "streamdeck dependencies install failed"
     log "Creating Python venv at $venv_dir"
     run python3 -m venv "$venv_dir"
   fi
