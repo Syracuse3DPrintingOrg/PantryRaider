@@ -10,6 +10,15 @@ All notable changes to FoodAssistant are recorded here. The format is based on
 
 ## [Unreleased]
 
+### Added
+- **On-device Pi installer.** A new `install.sh` (run on the device over SSH: `curl -fsSL .../install.sh | bash`) replaces the old "edit config on your PC and copy a payload onto the boot partition" flow. Flash a stock Raspberry Pi OS Lite card with Imager, boot, SSH in, and run one line. The installer detects the board, attached display, and Stream Deck, asks for the deployment mode (Pi Hosted, Pi Remote, or Server) and add-ons (Mealie, Ollama, kiosk, Stream Deck), then provisions only what you picked. Pi Remote installs nothing heavy. Supports unattended use with `NONINTERACTIVE=1` plus env vars.
+
+### Changed
+- **SD-card guide rewritten** around the SSH installer; nothing to edit on your PC and no repo clone on your PC. The pre-built turnkey image remains documented as an advanced no-SSH alternative.
+
+### Removed
+- `scripts/image-build/prepare-image.ps1` and the documented boot-partition payload flow it implemented. Use the on-device installer instead. The pre-built image pipeline (`prepare-image.sh --image`, used by CI) is unchanged.
+
 ## [1.6.0]
 
 ### Added

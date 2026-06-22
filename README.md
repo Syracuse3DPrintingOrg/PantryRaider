@@ -113,6 +113,16 @@ Runs inside Home Assistant with the UI in the sidebar and no separate login - HA
 
 Install the community **Grocy** add-on first and point FoodAssistant at it in the wizard. Full details, including low-power AI options: [add-on docs](homeassistant/addon/foodassistant/DOCS.md).
 
+### Option 3 - Raspberry Pi appliance
+
+Turn a Raspberry Pi into a dedicated FoodAssistant appliance (optionally with a kiosk display and a Stream Deck). Flash a stock Raspberry Pi OS Lite card with Raspberry Pi Imager (set wifi, hostname, and SSH there), boot, SSH in, and run:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Syracuse3DPrinting/FoodAssistant/main/install.sh | bash
+```
+
+The installer detects the board, any attached display, and any Stream Deck, then asks for the deployment mode (full **Pi Hosted** stack, or a thin **Pi Remote** that only drives a kiosk/Stream Deck for a server elsewhere) and which add-ons to enable. Nothing to edit on your PC. Full walkthrough: [docs/hardware/sd-image.md](docs/hardware/sd-image.md).
+
 ### Timezone
 
 Set `TZ` in `.env` (e.g. `TZ=Europe/London`); defaults to `America/New_York`.

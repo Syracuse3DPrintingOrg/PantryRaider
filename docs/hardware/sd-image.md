@@ -1,187 +1,100 @@
 # SD-card image guide
 
-Flash a pre-configured FoodAssistant appliance to an SD card (or USB/NVMe),
-boot your board, and reach the app at **http://foodassistant.local:9284/** with
-minimal setup. No terminal required on the device.
+Set up a FoodAssistant appliance on a Raspberry Pi in four steps: flash a stock
+Raspberry Pi OS Lite card, boot, SSH in, and run one install command. The
+installer asks what you want (full stack, or a thin remote) and provisions only
+that. No files to edit on your PC, nothing to clone on your PC.
 
 > New to the hardware side? See [supported-hardware.md](supported-hardware.md)
 > for boards, RAM guidance, and peripherals.
 
-## Recommended path: stock Pi OS + provisioner
-
-Flash the official Raspberry Pi OS Lite image and add the FoodAssistant
-provisioner payload. This is the recommended path because Raspberry Pi Imager
-fully supports OS customization for official images (Wi-Fi, SSH, hostname,
-timezone), which is not available for third-party custom images.
-
-Skip to [Step 1](#step-1-flash-raspberry-pi-os-lite-64-bit) below.
-
-## Pre-built appliance image (advanced)
-
-A pre-built `foodassistant-appliance-*-arm64.img.xz` is published to the
-[Releases page](https://github.com/Syracuse3DPrinting/FoodAssistant/releases)
-for advanced users. Flash it with balenaEtcher or dd.
-
-> **Limitation:** Raspberry Pi Imager 2.x disables the OS customization tab
-> (Wi-Fi, SSH, hostname) for third-party custom images. If you flash the
-> pre-built image with Imager, you will need to configure Wi-Fi manually by
-> dropping a `wpa_supplicant.conf` on the boot partition before first boot,
-> and create a `/boot/firmware/ssh` empty file to enable SSH. The stock Pi OS
-> path below avoids all of this.
-
-The appliance auto-detects an attached display (launches the kiosk) and a
-plugged-in Stream Deck, and takes its timezone from whatever was set on the
-boot partition.
-
 ## How it works
 
-FoodAssistant uses the official **Raspberry Pi OS Lite (64-bit)** image plus a
-small **first-boot provisioner** instead of a bespoke custom image. On first
-boot the device installs Docker, downloads the FoodAssistant + Grocy
-containers, and starts them automatically. This keeps you on Raspberry Pi's
-official, security-patched base image.
+FoodAssistant runs on the official **Raspberry Pi OS Lite (64-bit)** image plus
+an on-device installer. You flash the stock OS, boot it, then run the installer
+over SSH. It detects the board, any attached display, and any attached Stream
+Deck, asks for the deployment mode and add-ons, then installs Docker and the
+containers (for a full host) or just the kiosk/Stream Deck (for a thin remote).
 
-**Tradeoff:** the very first boot needs internet and takes a few minutes while
-it pulls Docker and the container images. After that it is fully self-contained
-and boots fast. (Maintainer/build details: `scripts/image-build/README.md`.)
+**Tradeoff:** the install needs internet and takes a few minutes the first time
+while it pulls Docker and the container images. After that the device is
+self-contained and boots fast. Staying on the official base image means you keep
+Raspberry Pi's security updates. (Maintainer/build details:
+`scripts/image-build/README.md`.)
 
 ## What you need
 
-- A supported board: **Raspberry Pi 4 or Pi 5 (ARM64)** recommended; generic
-  ARM64/x86-64 Debian/Ubuntu also works (see "Hardware coverage" below).
+- A supported board: **Raspberry Pi 4 or Pi 5 (ARM64)** for a full host; a
+  **Pi 3** is fine for a thin remote (see "Hardware coverage" below).
 - A 16 GB+ SD card (32 GB+ recommended).
-- Ethernet or Wi-Fi with internet for the first boot.
-- A flashing tool: **Raspberry Pi Imager** (recommended) or **balenaEtcher**.
+- Ethernet or Wi-Fi with internet.
+- **Raspberry Pi Imager** on your PC to flash the card.
 
 ## Step 1: Flash Raspberry Pi OS Lite (64-bit)
-
-### Using Raspberry Pi Imager (recommended)
 
 1. Install [Raspberry Pi Imager](https://www.raspberrypi.com/software/).
 2. **Choose Device:** your Pi model. **Choose OS:** *Raspberry Pi OS (other) →
    Raspberry Pi OS Lite (64-bit)*. **Choose Storage:** your card.
 3. Click the gear / **Edit Settings** and set:
-   - **Hostname:** `foodassistant` (optional: our config sets this too).
+   - **Hostname:** `foodassistant` (this becomes `foodassistant.local`).
+   - **Enable SSH** (use a password or your public key) — required for Step 3.
    - **Wi-Fi** credentials (skip if using Ethernet).
    - **Locale / timezone.**
-   - Enable **SSH** if you want remote access (optional).
-4. **Write** the image, but **do not eject yet.**
+4. **Write** the image, then eject the card.
 
-### Using balenaEtcher
+That is the only thing you do on your PC. Everything else happens on the Pi.
 
-Download Raspberry Pi OS Lite (64-bit) from
-[raspberrypi.com](https://www.raspberrypi.com/software/operating-systems/),
-flash it with [balenaEtcher](https://etcher.balena.io/), then continue to
-Step 2 to add the FoodAssistant payload (Etcher has no customization, so the
-prepare step is required).
+## Step 2: Boot the Pi
 
-## Step 2: Add the FoodAssistant first-boot payload
+Insert the card, connect the network (Ethernet or the Wi-Fi you configured), and
+power on. Give it a minute to come up on the network.
 
-After flashing, the card's **boot partition** (`bootfs`) reappears as a small
-FAT volume on your PC. You need to copy the provisioner files onto it and edit
-one config file.
+## Step 3: SSH in and run the installer
 
-First, clone the repository if you haven't already:
+From your PC, SSH to the Pi using the user and hostname you set in Imager:
 
 ```bash
-git clone https://github.com/Syracuse3DPrinting/FoodAssistant
-cd FoodAssistant
+ssh <user>@foodassistant.local
 ```
 
-Then follow the section for your operating system.
+If `foodassistant.local` doesn't resolve, use the Pi's IP address (find it in
+your router, or it may print on an attached screen).
 
-### Windows 11
-
-You need two things from the repo: the `image\config.env` you edit, and a
-helper script that copies everything onto the card for you. Clone the repo (or
-download it as a ZIP from GitHub and extract it), then open **PowerShell** in
-that folder.
-
-**2a. Edit the config file**
-
-Open `image\config.env` in any text editor (Notepad, VS Code) and set at least
-the timezone:
-
-```
-TZ=America/New_York    # change to your IANA timezone
-HOSTNAME=foodassistant # optional, sets the mDNS name (foodassistant.local)
-```
-
-Save and close the file.
-
-**2b. Find the boot drive letter**
-
-In File Explorer, look for a small (~256 MB) drive that appeared when you
-inserted the card, labelled `bootfs`. Note its letter (often **D:** or **E:**).
-
-**2c. Run the helper script**
-
-```powershell
-.\scripts\image-build\prepare-image.ps1 -BootDrive D:
-```
-
-Replace `D:` with your boot drive letter. The script copies the provisioner
-files onto the card, installs your config, and wires `cmdline.txt` for you. It
-refuses to run if the drive doesn't look like a Pi boot partition, so it won't
-touch the wrong drive.
-
-If PowerShell blocks the script with an execution-policy error, run it for this
-one session only:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\image-build\prepare-image.ps1 -BootDrive D:
-```
-
-When it prints `Payload installed`, eject the card safely from the system tray
-and skip to [Step 3](#step-3--first-boot).
-
-### Linux / macOS (automated)
+Then run the installer:
 
 ```bash
-# Edit the appliance config first:
-nano image/config.env
-# Then point at the mounted boot volume (path varies by OS):
-scripts/image-build/prepare-image.sh --boot-dir /Volumes/bootfs        # macOS
-scripts/image-build/prepare-image.sh --boot-dir /media/$USER/bootfs    # Linux
+curl -fsSL https://raw.githubusercontent.com/Syracuse3DPrinting/FoodAssistant/main/install.sh | bash
 ```
 
-You can also bake it into an `.img` before flashing (Linux, as root):
+The installer shows what it detected (board, display, Stream Deck) and asks:
+
+- **Deployment mode**
+  - **Pi Hosted** — run the full FoodAssistant stack on this Pi (FoodAssistant +
+    Grocy, with optional Mealie). Pick this for a normal appliance.
+  - **Pi Remote** — thin client. Installs **no** Docker, Grocy, or Mealie; this
+    device only drives a kiosk and/or Stream Deck pointed at a FoodAssistant
+    server already running elsewhere on your LAN. Viable on a Pi 3. It asks for
+    that server's URL.
+- **Add-ons** — Mealie (recipes/meal plan), Ollama (local LLM), the kiosk
+  browser (defaults on when a display is attached), and the Stream Deck
+  controller (defaults on when a deck is attached).
+
+Confirm the plan and it provisions. When it finishes it prints the URL to open.
+
+### Non-interactive / scripted installs
+
+The installer can run unattended by passing the choices as environment variables
+and setting `NONINTERACTIVE=1`:
 
 ```bash
-sudo scripts/image-build/prepare-image.sh --image path/to/raspios-lite-arm64.img
+curl -fsSL https://raw.githubusercontent.com/Syracuse3DPrinting/FoodAssistant/main/install.sh \
+  | NONINTERACTIVE=1 DEPLOYMENT_MODE=pi_hosted ENABLE_MEALIE=true bash
 ```
 
-### Linux / macOS (manual)
-
-If you prefer not to run the script, copy these files to the boot partition:
-
-- `scripts/image-build/foodassistant-firstrun.sh` to `bootfs/foodassistant-firstrun.sh`
-- All files from `scripts/image-build/` into `bootfs/foodassistant-setup/`
-- `image/config.env` to both `bootfs/foodassistant-setup/config.env` and `bootfs/foodassistant.config.env`
-
-Then append this to the single line in `bootfs/cmdline.txt` (one space before
-it, no newline):
-
-```
-systemd.run=/boot/firmware/foodassistant-firstrun.sh systemd.run_success_action=reboot systemd.unit=kernel-command-line.target
-```
-
-The script name is deliberately not `firstrun.sh`: Raspberry Pi Imager uses that
-exact name for its own wifi/SSH/user setup, so reusing it would wipe those. Our
-hook runs alongside Imager's, not in place of it.
-
-Eject the card safely.
-
-## Step 3: First boot
-
-1. Insert the card, connect network, power on.
-2. The first boot runs the provisioner. Expect **a few minutes** while it
-   installs Docker and pulls images. The device may reboot once.
-3. Watch progress (if you enabled SSH):
-   ```bash
-   ssh <user>@foodassistant.local
-   tail -f /var/log/foodassistant-firstboot.log
-   ```
+Recognized variables: `DEPLOYMENT_MODE` (`pi_hosted` | `pi_remote` | `server`),
+`REMOTE_SERVER_URL`, `ENABLE_MEALIE`, `ENABLE_OLLAMA`, `ENABLE_KIOSK`,
+`ENABLE_STREAMDECK`, `DISPLAY_ROTATION`, `HOSTNAME`. Anything left unset is
+auto-detected (kiosk/Stream Deck default to whether the hardware is attached).
 
 ## Step 4: Open the app
 
@@ -192,33 +105,35 @@ http://foodassistant.local:9284/
 ```
 
 First time, you'll be sent to `http://foodassistant.local:9284/setup` to set a
-password and add your Grocy + AI provider details.
+password and add your Grocy + AI provider details. (A Pi Remote install has no
+local app; it drives the server URL you gave the installer.)
 
 If `foodassistant.local` doesn't resolve, use the device's IP:
 `http://<device-ip>:9284/`. (Some Android devices and older Windows lack mDNS;
 see Troubleshooting.)
 
-## Configuration (`config.env`)
+## Pre-built appliance image (advanced, no SSH)
 
-Set these in `image/config.env` (or directly in
-`bootfs/foodassistant.config.env` after flashing):
+If you want a flash-and-go card with no SSH step, a pre-built
+`foodassistant-appliance-*-arm64.img.xz` is published to the
+[Releases page](https://github.com/Syracuse3DPrinting/FoodAssistant/releases).
+It bakes the provisioner into the image so it self-installs the full Pi Hosted
+stack on first boot. Flash it with balenaEtcher or `dd`.
 
-| Key | Default | Purpose |
-|-----|---------|---------|
-| `HOSTNAME` | `foodassistant` | Hostname and mDNS name (`<name>.local`). |
-| `TZ` | `America/New_York` | Timezone (IANA name). |
-| `ENABLE_MEALIE` | `false` | Start Mealie (recipes/meal plan). Needs 4 GB RAM. |
-| `ENABLE_OLLAMA` | `false` | Start local Ollama. Not recommended on SBCs. |
-| `ENABLE_KIOSK` | `false` | Auto-launch full-screen Chromium **if a display is present**. |
-| `ENABLE_STREAMDECK` | `false` | Install and start the Stream Deck controller (venv, driver, udev rule, systemd unit). |
-| `KIOSK_URL` | `http://localhost:9284/ui/?kiosk=1` | What the kiosk opens. `?kiosk=1` enables the attached-display scale/orientation settings. |
-| `DISPLAY_ROTATION` | `0` | KMS display rotation in degrees (0, 90, 180, 270). Rotates the framebuffer at boot before the kiosk starts. Takes effect after first-boot reboot. |
-| `FOODASSISTANT_TAG` | `latest` | Pin a specific app image version. |
-| `INSTALL_DIR` | `/opt/foodassistant` | Where the stack is installed on-device. |
+> **Limitations:** Raspberry Pi Imager 2.x disables the OS customization tab
+> (Wi-Fi, SSH, hostname) for third-party images, so with the pre-built image you
+> configure Wi-Fi manually (drop a `wpa_supplicant.conf` on the boot partition)
+> and create an empty `/boot/firmware/ssh` file to enable SSH. The pre-built
+> image always installs the full host stack; to choose Pi Remote or pick
+> add-ons, use the stock-OS + installer path above. The pre-built image takes
+> its timezone from whatever the OS is set to and auto-detects display/Stream
+> Deck.
 
-### Enabling Mealie / Ollama later
+## Add-ons and settings
 
-Edit `config.env` before flashing, **or** on a running device:
+The installer enables add-ons for you. To change them later on a running device:
+
+### Enable Mealie / Ollama later
 
 ```bash
 cd /opt/foodassistant
@@ -228,33 +143,29 @@ docker compose --profile with-ollama up -d      # add Ollama
 
 ### Display rotation
 
-Set `DISPLAY_ROTATION=90` (or 180, 270) in `config.env` before flashing to rotate the KMS framebuffer. This rotates everything: the boot console, Plymouth splash screen, and the kiosk browser. The change is written to `cmdline.txt` during the first-boot provisioner run and takes effect after the automatic reboot.
-
-To change rotation on a running device without reflashing:
+Choose a rotation in the installer, or change it later without reflashing:
 
 ```bash
 sudo /usr/local/bin/foodassistant-set-rotation 90 --reboot
 ```
 
-Install the helper first if it isn't there:
-
-```bash
-sudo cp scripts/image-build/foodassistant-set-rotation /usr/local/bin/
-```
-
-The app's Settings page also offers a CSS-only rotation for the kiosk browser (no reboot needed, but does not affect the boot console).
+This rotates the KMS framebuffer (boot console, splash, and kiosk). The app's
+Settings page also offers a CSS-only rotation for the kiosk browser (no reboot,
+but it does not affect the boot console).
 
 ### Kiosk mode (touchscreen)
 
-Set `ENABLE_KIOSK=true`. On first boot, if a display is detected (DRM/KMS, or
-an X/Wayland session), the provisioner installs `cage` + Chromium and starts
-`foodassistant-kiosk.service`, which opens `KIOSK_URL` full-screen on `tty1`.
-On a headless box the flag is harmless: it logs and skips. Manage it with:
+If a display is present at install time the installer offers to set up the
+kiosk: it installs `cage` + Chromium and starts `foodassistant-kiosk.service`,
+which opens the app full-screen on `tty1`. Manage it with:
 
 ```bash
 systemctl status foodassistant-kiosk
 systemctl restart foodassistant-kiosk
 ```
+
+A display added later still lights up the kiosk after a re-run (see
+Troubleshooting).
 
 ## Hardware coverage
 
@@ -263,18 +174,13 @@ systemctl restart foodassistant-kiosk
 | Raspberry Pi 5 (ARM64) | ✅ Recommended |
 | Raspberry Pi 4B 4/8 GB (ARM64) | ✅ Supported |
 | Raspberry Pi 4B 2 GB | 🟡 Grocy-only; Mealie tight |
-| Generic x86-64 Debian/Ubuntu | ✅ Provisioner runs (boot-partition wiring is Pi-specific; run `firstboot.sh` directly) |
-| Other ARM64 Debian/Ubuntu boards | 🟡 Best-effort; Docker install via get.docker.com |
-| Pi 3B+ / Zero 2 W | ❌ Insufficient RAM |
+| Raspberry Pi 3B+ / equivalent | ✅ Pi Remote (thin client) only |
+| Generic x86-64 Debian/Ubuntu | ✅ Server mode (the installer runs the same way) |
+| Other ARM64 Debian/Ubuntu boards | 🟡 Best-effort; Docker via get.docker.com |
+| Pi Zero 2 W | ❌ Insufficient RAM |
 
-On non-Pi hardware there's no `cmdline.txt`/`firstrun.sh` boot hook. Install
-the provisioner directly:
-
-```bash
-sudo cp -r scripts/image-build /opt/foodassistant-setup
-sudo cp image/config.env /etc/foodassistant/config.env   # mkdir -p first
-sudo /opt/foodassistant-setup/firstboot.sh
-```
+The installer runs on any Debian/Ubuntu host, not just a Pi. On a non-Pi host it
+selects **Server** mode automatically.
 
 See [supported-hardware.md](supported-hardware.md) for the full matrix.
 
@@ -282,20 +188,18 @@ See [supported-hardware.md](supported-hardware.md) for the full matrix.
 
 **`foodassistant.local` won't resolve.** mDNS isn't universal. Use the device
 IP, or install Bonjour (Windows) / ensure `avahi-daemon` is running on the
-device (`systemctl status avahi-daemon`). Find the IP from your router or
-`ssh` with the IP.
+device (`systemctl status avahi-daemon`). Find the IP from your router.
 
-**First boot seems stuck.** It's pulling Docker images: give it 5–10 minutes
-on a slow connection. Check `tail -f /var/log/foodassistant-firstboot.log`.
-The provisioner is idempotent and retries on transient failures
-(`foodassistant-firstboot.service` is `Restart=on-failure`).
+**The install seems stuck.** It's pulling Docker images: give it 5–10 minutes on
+a slow connection. The provisioner logs to
+`/var/log/foodassistant-firstboot.log` (`tail -f` it in another SSH session).
 
-**Want to re-run provisioning.** Remove the marker and restart the service:
+**Re-run the installer / change choices.** Just run the `curl ... | bash` line
+again. To force the provisioner to redo a completed step set `FORCE=1`:
 
 ```bash
 sudo rm -f /var/lib/foodassistant/firstboot.done
-sudo systemctl start foodassistant-firstboot.service
-# or run directly:  sudo FORCE=1 /opt/foodassistant-setup/firstboot.sh
+curl -fsSL https://raw.githubusercontent.com/Syracuse3DPrinting/FoodAssistant/main/install.sh | bash
 ```
 
 **Verify the stack.**
@@ -305,18 +209,12 @@ cd /opt/foodassistant && docker compose ps
 ```
 
 **Containers didn't start.** Confirm Docker installed:
-`docker --version && docker compose version`. Re-run the provisioner (above).
+`docker --version && docker compose version`, then re-run the installer.
 
-**No internet on first boot.** Docker install and image pulls require it.
-Connect the network and re-run provisioning.
+**No internet during install.** Docker install and image pulls require it.
+Connect the network and re-run.
 
 **`docker compose up` fails with "unauthorized" or "pull access denied".** The
-GHCR package for `ghcr.io/syracuse3dprinting/foodassistant` has not been made
-public yet (or was recently re-privatized). To fix: go to the GitHub repo ->
-Packages -> foodassistant -> Package settings -> Change visibility -> Public.
-If the package is already public, this is a transient network error -- re-run
-the provisioner. You do not have to do anything, though: when the pull fails,
-`firstboot.sh` clones the (public) repo to `/home/foodassistant/FoodAssistant`
-and builds the image from source automatically. That first build adds a few
-minutes; pulling a public image is faster, so making the package public is still
-worthwhile for at-scale imaging.
+GHCR package may be private. The installer handles this automatically: when the
+pull fails it builds the image from the on-device checkout at
+`/opt/foodassistant-src`. That first build adds a few minutes.
