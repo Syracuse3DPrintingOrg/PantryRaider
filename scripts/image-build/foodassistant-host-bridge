@@ -19,9 +19,13 @@ POST /display/rotation     set KMS rotation      {degrees, reboot?}
 POST /streamdeck/restart   restart Stream Deck service
 GET  /mealie/status        whether the Mealie container is running
 POST /mealie/start         start Mealie via docker compose --profile with-mealie up -d
+GET  /hardware/status      display/Stream Deck presence + service/install state
+POST /kiosk/install        provision the kiosk service (display attached later)
+POST /streamdeck/install   provision the Stream Deck service (attached later)
 """
 import http.server
 import json
+import os
 import re
 import subprocess
 import sys
@@ -29,6 +33,70 @@ import sys
 LISTEN_HOST = "127.0.0.1"
 LISTEN_PORT = 9299
 INSTALL_DIR = "/opt/foodassistant"
+
+# Candidate locations for the provisioner script (curl-installer clone first,
+# then a baked-image asset dir, then the legacy home-dir clone).
+_FIRSTBOOT_CANDIDATES = [
+    "/opt/foodassistant-src/scripts/image-build/firstboot.sh",
+    "/opt/foodassistant-setup/firstboot.sh",
+    "/home/foodassistant/FoodAssistant/scripts/image-build/firstboot.sh",
+]
+# Background provisioning processes, keyed by step name ("kiosk"/"streamdeck").
+_INSTALL_PROCS = {}
+
+
+def _find_firstboot():
+    """Return (script_path, repo_dir) for the provisioner, or (None, None)."""
+    for path in _FIRSTBOOT_CANDIDATES:
+        if os.path.isfile(path):
+            # firstboot.sh lives at <repo>/scripts/image-build/firstboot.sh;
+            # derive the repo root so it can find the streamdeck package etc.
+            repo_dir = ""
+            if path.endswith("/scripts/image-build/firstboot.sh"):
+                repo_dir = path[: -len("/scripts/image-build/firstboot.sh")]
+            return path, repo_dir
+    return None, None
+
+
+def _service_active(unit):
+    """True when the given systemd unit is active."""
+    try:
+        return subprocess.run(
+            ["systemctl", "is-active", "--quiet", unit], timeout=5
+        ).returncode == 0
+    except Exception:
+        return False
+
+
+def _display_present():
+    return os.path.exists("/dev/dri/card0")
+
+
+def _streamdeck_present():
+    try:
+        out = subprocess.run(["lsusb"], capture_output=True, text=True, timeout=5).stdout
+        if "0fd9:" in out.lower():
+            return True
+    except Exception:
+        pass
+    # Fallback: scan sysfs idVendor files.
+    try:
+        import glob
+        for f in glob.glob("/sys/bus/usb/devices/*/idVendor"):
+            try:
+                with open(f) as fh:
+                    if fh.read().strip().lower() == "0fd9":
+                        return True
+            except OSError:
+                continue
+    except Exception:
+        pass
+    return False
+
+
+def _installing(step):
+    p = _INSTALL_PROCS.get(step)
+    return bool(p and p.poll() is None)
 
 
 class _Handler(http.server.BaseHTTPRequestHandler):
@@ -53,6 +121,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._get_rotation()
         elif self.path == "/mealie/status":
             self._mealie_status()
+        elif self.path == "/hardware/status":
+            self._hardware_status()
         else:
             self._send(404, {"error": "not found"})
 
@@ -67,6 +137,10 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._streamdeck_restart()
         elif self.path == "/mealie/start":
             self._mealie_start()
+        elif self.path == "/kiosk/install":
+            self._provision("kiosk", "foodassistant-kiosk.service")
+        elif self.path == "/streamdeck/install":
+            self._provision("streamdeck", "foodassistant-streamdeck.service")
         else:
             self._send(404, {"error": "not found"})
 
@@ -206,6 +280,43 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 self._send(500, {"ok": False, "error": (r.stderr or r.stdout).strip()})
         except subprocess.TimeoutExpired:
             self._send(500, {"ok": False, "error": "Timed out starting Mealie."})
+        except Exception as e:
+            self._send(500, {"ok": False, "error": str(e)})
+
+    def _hardware_status(self):
+        self._send(200, {
+            "ok": True,
+            "kiosk": {
+                "present": _display_present(),
+                "active": _service_active("foodassistant-kiosk.service"),
+                "installing": _installing("kiosk"),
+            },
+            "streamdeck": {
+                "present": _streamdeck_present(),
+                "active": _service_active("foodassistant-streamdeck.service"),
+                "installing": _installing("streamdeck"),
+            },
+        })
+
+    def _provision(self, step, unit):
+        if _installing(step):
+            self._send(200, {"ok": True, "started": False, "message": "Already installing."})
+            return
+        script, repo_dir = _find_firstboot()
+        if not script:
+            self._send(500, {"ok": False, "error": "Provisioner not found on this device."})
+            return
+        try:
+            env = dict(os.environ, STEPS=step)
+            if repo_dir:
+                env["REPO_DIR"] = repo_dir
+            log_path = f"/var/log/foodassistant-{step}-install.log"
+            log = open(log_path, "ab")
+            p = subprocess.Popen(
+                ["bash", script], env=env, stdout=log, stderr=subprocess.STDOUT
+            )
+            _INSTALL_PROCS[step] = p
+            self._send(200, {"ok": True, "started": True})
         except Exception as e:
             self._send(500, {"ok": False, "error": str(e)})
 

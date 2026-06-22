@@ -614,6 +614,45 @@ async def mealie_start():
         return JSONResponse({"ok": False, "error": str(e)})
 
 
+@router.get("/hardware/status")
+async def hardware_status():
+    """Display / Stream Deck presence and service state, via the Pi host bridge."""
+    if not is_raspberry_pi():
+        return {"ok": False, "error": "Not available on this platform."}
+    try:
+        async with httpx.AsyncClient(timeout=6.0) as c:
+            r = (await c.get(f"{_HOST_BRIDGE}/hardware/status")).json()
+        return r
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+@router.post("/kiosk/install")
+async def kiosk_install():
+    """Provision the kiosk service for a display attached after first install."""
+    if not is_raspberry_pi():
+        return JSONResponse({"ok": False, "error": "Not available on this platform."})
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as c:
+            r = await c.post(f"{_HOST_BRIDGE}/kiosk/install")
+        return r.json()
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)})
+
+
+@router.post("/streamdeck/install")
+async def streamdeck_install():
+    """Provision the Stream Deck service for a deck attached after first install."""
+    if not is_raspberry_pi():
+        return JSONResponse({"ok": False, "error": "Not available on this platform."})
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as c:
+            r = await c.post(f"{_HOST_BRIDGE}/streamdeck/install")
+        return r.json()
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)})
+
+
 # Backwards-compatible alias for the old endpoint name
 @router.post("/test/vision")
 async def test_vision_legacy(payload: dict):

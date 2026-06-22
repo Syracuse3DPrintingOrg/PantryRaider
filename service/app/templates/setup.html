@@ -651,10 +651,10 @@
           </button>
           {% if is_pi %}
           <div class="nav-link text-secondary px-2 mt-2 mb-0" style="font-size:0.7rem;letter-spacing:.06em;text-transform:uppercase;">Appliance</div>
-          <button class="nav-link d-flex align-items-center" data-bs-toggle="pill" data-bs-target="#pane-display" type="button" onclick="loadDisplayStatus()">
+          <button class="nav-link d-flex align-items-center" data-bs-toggle="pill" data-bs-target="#pane-display" type="button" onclick="loadDisplayStatus(); loadHardwareStatus()">
             <i class="bi bi-display me-2"></i>Display
           </button>
-          <button class="nav-link d-flex align-items-center" data-bs-toggle="pill" data-bs-target="#pane-streamdeck" type="button">
+          <button class="nav-link d-flex align-items-center" data-bs-toggle="pill" data-bs-target="#pane-streamdeck" type="button" onclick="loadHardwareStatus()">
             <i class="bi bi-grid-3x3-gap me-2"></i>Stream Deck
           </button>
           <button class="nav-link d-flex align-items-center" data-bs-toggle="pill" data-bs-target="#pane-network" type="button" onclick="loadNetworkStatus()">
@@ -1314,6 +1314,16 @@ docker compose up -d</code></pre>
           <p class="pane-intro">Configure the screen wired to this appliance. These settings only affect the local kiosk display, not browsers on other devices.</p>
 
           <div class="section-card mb-3">
+            <div class="section-title"><i class="bi bi-display text-info"></i> Kiosk Service</div>
+            <p class="text-secondary small">Runs the on-device browser in full-screen kiosk mode. If you attached the screen after the first install, provision it here, no SSH needed.</p>
+            <div id="kiosk-status-row" class="mb-2"><span class="text-secondary small">Checking...</span></div>
+            <button class="btn btn-outline-info btn-sm d-none" id="btn-install-kiosk" onclick="installKiosk(this)">
+              <i class="bi bi-download me-1"></i>Install kiosk service
+            </button>
+            <div class="test-result mt-2" id="kiosk-install-result"></div>
+          </div>
+
+          <div class="section-card mb-3">
             <div class="section-title"><i class="bi bi-aspect-ratio text-info"></i> Kiosk Display</div>
             <p class="text-secondary small">Scale and CSS rotation apply immediately in the kiosk browser without a reboot.</p>
             <div class="row g-3 mb-3">
@@ -1406,6 +1416,11 @@ docker compose up -d</code></pre>
                 <div class="form-text">Used to fill the key layout. You can also set this in <code>config.toml</code>.</div>
               </div>
             </div>
+            <div id="streamdeck-status-row" class="mb-2"><span class="text-secondary small">Checking...</span></div>
+            <button class="btn btn-outline-info btn-sm d-none mb-2" id="btn-install-streamdeck" onclick="installStreamDeck(this)">
+              <i class="bi bi-download me-1"></i>Install Stream Deck service
+            </button>
+            <div class="test-result mb-2" id="streamdeck-install-result"></div>
             <div class="d-flex gap-2 flex-wrap">
               <button class="btn btn-outline-info btn-sm" onclick="saveStreamDeckSettings()">
                 <i class="bi bi-check-lg me-1"></i>Save Stream Deck settings
@@ -1421,7 +1436,7 @@ docker compose up -d</code></pre>
             <div class="section-title"><i class="bi bi-info-circle text-secondary"></i> Stream Deck Notes</div>
             <ul class="small text-secondary mb-0">
               <li>The Stream Deck service starts automatically at boot after it is enabled by the installer.</li>
-              <li>If the deck was not attached at install time, run <code>STEPS=streamdeck sudo bash firstboot.sh</code> via SSH to install the service.</li>
+              <li>If the deck was not attached at install time, use the Install button above after plugging it in.</li>
               <li>Logs: <code>journalctl -u foodassistant-streamdeck -f</code></li>
               <li>Config file: <code>/opt/foodassistant/foodassistant_streamdeck/config.toml</code></li>
             </ul>
@@ -2617,6 +2632,67 @@ async function restartStreamDeck() {
       : `<span class="text-danger">${d.error}</span>`;
   } catch (e) {
     if (el) el.innerHTML = `<span class="text-danger">${e}</span>`;
+  }
+}
+
+function _renderHwRow(name, st) {
+  const row = document.getElementById(name + '-status-row');
+  const btn = document.getElementById('btn-install-' + name);
+  if (!row) return;
+  if (!st) { row.innerHTML = '<span class="text-secondary small">Status unavailable.</span>'; return; }
+  if (st.active) {
+    row.innerHTML = '<span class="text-success small"><i class="bi bi-check-circle-fill me-1"></i>Service installed and running.</span>';
+    if (btn) btn.classList.add('d-none');
+  } else if (st.installing) {
+    row.innerHTML = '<span class="text-info small"><span class="spinner-border spinner-border-sm me-1"></span>Installing, this can take a few minutes...</span>';
+    if (btn) btn.classList.add('d-none');
+  } else if (st.present) {
+    row.innerHTML = '<span class="text-warning small"><i class="bi bi-exclamation-circle me-1"></i>Hardware detected but the service is not installed.</span>';
+    if (btn) btn.classList.remove('d-none');
+  } else {
+    row.innerHTML = '<span class="text-secondary small"><i class="bi bi-dash-circle me-1"></i>No hardware detected. Plug it in, then refresh.</span>';
+    if (btn) btn.classList.add('d-none');
+  }
+}
+
+async function loadHardwareStatus() {
+  try {
+    const r = await fetch('setup/hardware/status').then(x => x.json());
+    if (!r.ok) { _renderHwRow('kiosk', null); _renderHwRow('streamdeck', null); return; }
+    _renderHwRow('kiosk', r.kiosk);
+    _renderHwRow('streamdeck', r.streamdeck);
+    // Keep polling while either install is in flight.
+    if ((r.kiosk && r.kiosk.installing) || (r.streamdeck && r.streamdeck.installing)) {
+      clearTimeout(window._hwPoll);
+      window._hwPoll = setTimeout(loadHardwareStatus, 4000);
+    }
+  } catch (e) {
+    _renderHwRow('kiosk', null);
+    _renderHwRow('streamdeck', null);
+  }
+}
+
+async function installKiosk(btn) { await _installHw('kiosk', btn, 'kiosk-install-result'); }
+async function installStreamDeck(btn) { await _installHw('streamdeck', btn, 'streamdeck-install-result'); }
+
+async function _installHw(name, btn, resultId) {
+  btn.disabled = true;
+  const orig = btn.innerHTML;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Starting...';
+  try {
+    const r = await fetch('setup/' + name + '/install', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'});
+    const d = await r.json();
+    if (d.ok) {
+      setResult(resultId, true, 'Installation started. This page will update when the service is running.');
+      loadHardwareStatus();
+    } else {
+      setResult(resultId, false, d.error || 'Failed to start installation.');
+    }
+  } catch (e) {
+    setResult(resultId, false, e.message);
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = orig;
   }
 }
 
