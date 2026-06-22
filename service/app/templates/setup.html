@@ -2569,7 +2569,12 @@ async function saveDisplaySettings() {
   const el = document.getElementById('display-save-result');
   if (el) el.innerHTML = '<span class="text-secondary">Saving...</span>';
   const ui_scale = document.getElementById('ui_scale')?.value || 'normal';
-  const display_rotation = parseInt(document.getElementById('display_rotation')?.value || '0', 10);
+  // On the Pi the orientation lives in the Orientation card (kms_rotation), the
+  // only rotation control here, so read it; otherwise saving scale would reset
+  // the saved rotation to 0. Fall back to the non-Pi select when present.
+  const display_rotation = parseInt(
+    document.getElementById('kms_rotation')?.value
+    ?? document.getElementById('display_rotation')?.value ?? '0', 10);
   const display_touch = document.getElementById('display_touch')?.checked || false;
   try {
     await fetch('setup/scale', {
