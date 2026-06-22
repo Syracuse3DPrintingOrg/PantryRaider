@@ -66,20 +66,23 @@ Then run the installer:
 curl -fsSL https://raw.githubusercontent.com/Syracuse3DPrinting/FoodAssistant/main/install.sh | bash
 ```
 
-The installer shows what it detected (board, display, Stream Deck) and asks:
+The installer shows what it detected (board, display, Stream Deck) and asks one
+question:
 
 - **Deployment mode**
   - **Pi Hosted** — run the full FoodAssistant stack on this Pi (FoodAssistant +
-    Grocy, with optional Mealie). Pick this for a normal appliance.
+    Grocy). Pick this for a normal appliance.
   - **Pi Remote** — thin client. Installs **no** Docker, Grocy, or Mealie; this
     device only drives a kiosk and/or Stream Deck pointed at a FoodAssistant
     server already running elsewhere on your LAN. Viable on a Pi 3. It asks for
     that server's URL.
-- **Add-ons** — Mealie (recipes/meal plan), Ollama (local LLM), the kiosk
-  browser (defaults on when a display is attached), and the Stream Deck
-  controller (defaults on when a deck is attached).
 
-Confirm the plan and it provisions. When it finishes it prints the URL to open.
+The kiosk browser and Stream Deck controller are auto-enabled when the hardware
+is detected at install time. Everything else (Mealie, Ollama, display rotation,
+AI provider, password, Grocy key) is configured in the browser after the install
+completes.
+
+When it finishes, the terminal prints the URL to open in your browser.
 
 ### Non-interactive / scripted installs
 
@@ -96,17 +99,21 @@ Recognized variables: `DEPLOYMENT_MODE` (`pi_hosted` | `pi_remote` | `server`),
 `ENABLE_STREAMDECK`, `DISPLAY_ROTATION`, `HOSTNAME`. Anything left unset is
 auto-detected (kiosk/Stream Deck default to whether the hardware is attached).
 
-## Step 4: Open the app
+## Step 4: Complete setup in the browser
 
-Browse to:
+The installer prints the URL when it finishes. Open it:
 
 ```
-http://foodassistant.local:9284/
+http://foodassistant.local:9284/setup
 ```
 
-First time, you'll be sent to `http://foodassistant.local:9284/setup` to set a
-password and add your Grocy + AI provider details. (A Pi Remote install has no
-local app; it drives the server URL you gave the installer.)
+The web wizard takes you through: deployment mode confirmation, security
+(set a password), hardware (display scale and rotation, Stream Deck), Grocy
+connection, AI provider, and optional integrations. When you click
+**Start using FoodAssistant** everything is saved and you're done.
+
+A Pi Remote install has no local app; it drives the server URL you gave the
+installer.
 
 If `foodassistant.local` doesn't resolve, use the device's IP:
 `http://<device-ip>:9284/`. (Some Android devices and older Windows lack mDNS;
@@ -131,7 +138,11 @@ stack on first boot. Flash it with balenaEtcher or `dd`.
 
 ## Add-ons and settings
 
-The installer enables add-ons for you. To change them later on a running device:
+The installer auto-enables the kiosk and Stream Deck when the hardware is
+present. Use **Settings** in the web UI to adjust display settings, Stream Deck
+configuration, Wi-Fi, and hostname at any time.
+
+To add optional backends to a running device:
 
 ### Enable Mealie / Ollama later
 

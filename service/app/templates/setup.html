@@ -632,6 +632,18 @@
           <button class="nav-link d-flex align-items-center" data-bs-toggle="pill" data-bs-target="#pane-tunnel" type="button">
             <i class="bi bi-globe me-2"></i>Remote Access
           </button>
+          {% if is_pi %}
+          <div class="nav-link text-secondary px-2 mt-2 mb-0" style="font-size:0.7rem;letter-spacing:.06em;text-transform:uppercase;">Appliance</div>
+          <button class="nav-link d-flex align-items-center" data-bs-toggle="pill" data-bs-target="#pane-display" type="button" onclick="loadDisplayStatus()">
+            <i class="bi bi-display me-2"></i>Display
+          </button>
+          <button class="nav-link d-flex align-items-center" data-bs-toggle="pill" data-bs-target="#pane-streamdeck" type="button">
+            <i class="bi bi-grid-3x3-gap me-2"></i>Stream Deck
+          </button>
+          <button class="nav-link d-flex align-items-center" data-bs-toggle="pill" data-bs-target="#pane-network" type="button" onclick="loadNetworkStatus()">
+            <i class="bi bi-wifi me-2"></i>Network
+          </button>
+          {% endif %}
         </div>
         <button class="btn btn-primary w-100 mt-3" onclick="saveAll()" id="saveBtn">
           <i class="bi bi-check-lg me-1"></i>Save All
@@ -1000,10 +1012,11 @@
             </div>
           </div>
 
+          {% if not is_pi %}
           <div class="section-card">
-            <div class="section-title"><i class="bi bi-aspect-ratio text-success"></i> Attached Display (Pi screen)</div>
-            <p class="text-secondary small">These apply only to a hardware screen running in kiosk mode (the panel
-              wired to this device), not to a phone or laptop browsing the app. The kiosk launches with kiosk mode on;
+            <div class="section-title"><i class="bi bi-aspect-ratio text-success"></i> Display</div>
+            <p class="text-secondary small">These apply only to a hardware screen running in kiosk mode,
+              not to a phone or laptop browsing the app. The kiosk launches with kiosk mode on;
               you can also toggle it from the top bar.</p>
             <div class="row g-3">
               <div class="col-sm-6">
@@ -1022,12 +1035,12 @@
                   <option value="{{ deg }}" {{ 'selected' if s.display_rotation == deg else '' }}>{{ deg }}&deg;{{ ' (normal)' if deg == 0 else '' }}</option>
                   {% endfor %}
                 </select>
-                <div class="form-text">Rotate for a physically turned screen. 180&deg; is reliable; 90&deg; and 270&deg;
-                  may need a tweak on some panels.</div>
+                <div class="form-text">Rotate for a physically turned screen (CSS only, no reboot).</div>
               </div>
             </div>
             <div class="form-text mt-2" id="display-hint">Changes apply on the kiosk display immediately.</div>
           </div>
+          {% endif %}
 
           <div class="section-card">
             <div class="section-title"><i class="bi bi-layout-sidebar text-success"></i> Navigation Tabs</div>
@@ -1259,6 +1272,180 @@ docker compose up -d</code></pre>
             </div>
           </div>
         </div>
+
+        {% if is_pi %}
+
+        <!-- Display (Pi appliance only) -->
+        <div class="tab-pane fade" id="pane-display">
+          <p class="pane-intro">Configure the screen wired to this appliance. These settings only affect the local kiosk display, not browsers on other devices.</p>
+
+          <div class="section-card mb-3">
+            <div class="section-title"><i class="bi bi-aspect-ratio text-info"></i> Kiosk Display</div>
+            <p class="text-secondary small">Scale and CSS rotation apply immediately in the kiosk browser without a reboot.</p>
+            <div class="row g-3 mb-3">
+              <div class="col-sm-6">
+                <label class="form-label" for="ui_scale">Scale</label>
+                <select class="form-select" id="ui_scale" onchange="applyDisplay()">
+                  {% for key, sc in ui_scales.items() %}
+                  <option value="{{ key }}" {{ 'selected' if s.ui_scale == key else '' }}>{{ sc.label }}</option>
+                  {% endfor %}
+                </select>
+                <div class="form-text">Larger for a small panel; smaller for a wide monitor.</div>
+              </div>
+              <div class="col-sm-6">
+                <label class="form-label" for="display_rotation">CSS Rotation</label>
+                <select class="form-select" id="display_rotation" onchange="applyDisplay()">
+                  {% for deg in display_rotations %}
+                  <option value="{{ deg }}" {{ 'selected' if s.display_rotation == deg else '' }}>{{ deg }}&deg;{{ ' (normal)' if deg == 0 else '' }}</option>
+                  {% endfor %}
+                </select>
+                <div class="form-text">Rotates the kiosk page layout. No reboot required; does not affect the boot console or splash.</div>
+              </div>
+            </div>
+            <div class="form-check form-switch mb-3">
+              <input class="form-check-input" type="checkbox" role="switch" id="display_touch"
+                     {{ 'checked' if s.display_touch else '' }}>
+              <label class="form-check-label" for="display_touch">Touch-compatible display</label>
+            </div>
+            <div class="d-flex gap-2 flex-wrap">
+              <button class="btn btn-outline-info btn-sm" onclick="saveDisplaySettings()">
+                <i class="bi bi-check-lg me-1"></i>Save display settings
+              </button>
+            </div>
+            <div class="test-result mt-2" id="display-save-result"></div>
+            <div class="form-text mt-2" id="display-hint">CSS changes apply on the kiosk immediately.</div>
+          </div>
+
+          <div class="section-card">
+            <div class="section-title"><i class="bi bi-aspect-ratio text-warning"></i> KMS Framebuffer Rotation</div>
+            <p class="text-secondary small">Rotates the kernel framebuffer at the OS level so the boot console, splash screen,
+              and kiosk all appear correctly. Requires a reboot to take effect.</p>
+            <div id="kms-rotation-status" class="mb-3">
+              <span class="text-secondary small">Checking...</span>
+            </div>
+            <div class="row g-3 mb-3">
+              <div class="col-sm-6">
+                <label class="form-label">Framebuffer rotation</label>
+                <select class="form-select" id="kms_rotation">
+                  <option value="0">0&deg; (normal)</option>
+                  <option value="90">90&deg;</option>
+                  <option value="180">180&deg;</option>
+                  <option value="270">270&deg;</option>
+                </select>
+              </div>
+            </div>
+            <div class="d-flex gap-2 flex-wrap align-items-center">
+              <button class="btn btn-outline-warning btn-sm" onclick="setKmsRotation(false)">
+                <i class="bi bi-arrow-repeat me-1"></i>Apply (next reboot)
+              </button>
+              <button class="btn btn-outline-danger btn-sm" onclick="setKmsRotation(true)">
+                <i class="bi bi-power me-1"></i>Apply and reboot now
+              </button>
+            </div>
+            <div class="test-result mt-2" id="kms-rotation-result"></div>
+            <div class="alert alert-secondary py-2 small mt-3 mb-0">
+              <i class="bi bi-info-circle me-1"></i>Run <code>sudo foodassistant-set-rotation 90 --reboot</code> via SSH for the same effect.
+            </div>
+          </div>
+        </div>
+
+        <!-- Stream Deck (Pi appliance only) -->
+        <div class="tab-pane fade" id="pane-streamdeck">
+          <p class="pane-intro">Configure the Elgato Stream Deck attached to this appliance.</p>
+
+          <div class="section-card mb-3">
+            <div class="section-title"><i class="bi bi-grid-3x3-gap text-info"></i> Stream Deck Device</div>
+            <div class="form-check form-switch mb-3">
+              <input class="form-check-input" type="checkbox" role="switch" id="has_streamdeck"
+                     {{ 'checked' if s.has_streamdeck else '' }}
+                     onchange="toggleStreamDeckOptions()">
+              <label class="form-check-label" for="has_streamdeck">Stream Deck connected to this device</label>
+            </div>
+            <div id="streamdeck-opts" class="{{ '' if s.has_streamdeck else 'd-none' }}">
+              <div class="mb-3">
+                <label class="form-label">Model (key count)</label>
+                <select class="form-select form-select-sm" id="streamdeck_key_count" style="max-width:280px">
+                  <option value="6" {{ 'selected' if s.streamdeck_key_count == 6 else '' }}>6 keys (Stream Deck Mini)</option>
+                  <option value="15" {{ 'selected' if (s.streamdeck_key_count == 15 or not s.streamdeck_key_count) else '' }}>15 keys (Stream Deck MK.2 / Classic)</option>
+                  <option value="32" {{ 'selected' if s.streamdeck_key_count == 32 else '' }}>32 keys (Stream Deck XL)</option>
+                </select>
+                <div class="form-text">Used to fill the key layout. You can also set this in <code>config.toml</code>.</div>
+              </div>
+            </div>
+            <div class="d-flex gap-2 flex-wrap">
+              <button class="btn btn-outline-info btn-sm" onclick="saveStreamDeckSettings()">
+                <i class="bi bi-check-lg me-1"></i>Save Stream Deck settings
+              </button>
+              <button class="btn btn-outline-secondary btn-sm" onclick="restartStreamDeck()">
+                <i class="bi bi-arrow-repeat me-1"></i>Restart service
+              </button>
+            </div>
+            <div class="test-result mt-2" id="streamdeck-save-result"></div>
+          </div>
+
+          <div class="section-card">
+            <div class="section-title"><i class="bi bi-info-circle text-secondary"></i> Stream Deck Notes</div>
+            <ul class="small text-secondary mb-0">
+              <li>The Stream Deck service starts automatically at boot after it is enabled by the installer.</li>
+              <li>If the deck was not attached at install time, run <code>STEPS=streamdeck sudo bash firstboot.sh</code> via SSH to install the service.</li>
+              <li>Logs: <code>journalctl -u foodassistant-streamdeck -f</code></li>
+              <li>Config file: <code>/opt/foodassistant/foodassistant_streamdeck/config.toml</code></li>
+            </ul>
+          </div>
+        </div>
+
+        <!-- Network (Pi appliance only) -->
+        <div class="tab-pane fade" id="pane-network">
+          <p class="pane-intro">Manage the Wi-Fi connection and hostname for this appliance.</p>
+
+          <div class="section-card mb-3">
+            <div class="section-title"><i class="bi bi-wifi text-info"></i> Wi-Fi</div>
+            <div id="wifi-status-row" class="mb-3">
+              <span class="text-secondary small"><span class="spinner-border spinner-border-sm me-2"></span>Checking connection...</span>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Network name (SSID)</label>
+              <input type="text" class="form-control" id="wifi_ssid" placeholder="Your Wi-Fi network name" autocomplete="off">
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Password</label>
+              <div class="input-group">
+                <input type="password" class="form-control" id="wifi_password" placeholder="Leave blank for open networks" autocomplete="new-password">
+                <button class="btn btn-outline-secondary" type="button" onclick="toggleVis('wifi_password')" title="Show/hide">
+                  <i class="bi bi-eye"></i>
+                </button>
+              </div>
+            </div>
+            <div class="alert alert-warning py-2 small mb-3">
+              <i class="bi bi-exclamation-triangle me-1"></i>The device will briefly disconnect while switching networks.
+              If you are connected via Wi-Fi you may need to reconnect on the new network to reach the web UI.
+              Connecting via Ethernet avoids this.
+            </div>
+            <button class="btn btn-outline-warning btn-sm" onclick="changeWifi()">
+              <i class="bi bi-wifi me-1"></i>Switch Network
+            </button>
+            <div class="test-result mt-2" id="wifi-result"></div>
+          </div>
+
+          <div class="section-card">
+            <div class="section-title"><i class="bi bi-pc-display text-info"></i> Hostname</div>
+            <div id="hostname-status-row" class="mb-3">
+              <span class="text-secondary small">Checking...</span>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Hostname</label>
+              <input type="text" class="form-control" id="new_hostname" placeholder="foodassistant" autocomplete="off" style="max-width:320px">
+              <div class="form-text">This device is reachable at <code>&lt;hostname&gt;.local</code>.
+                Lowercase letters, digits, and hyphens only. Takes effect immediately.</div>
+            </div>
+            <button class="btn btn-outline-info btn-sm" onclick="changeHostname()">
+              <i class="bi bi-check-lg me-1"></i>Update Hostname
+            </button>
+            <div class="test-result mt-2" id="hostname-result"></div>
+          </div>
+        </div>
+
+        {% endif %}
 
       </div>
     </div>
@@ -2038,6 +2225,7 @@ async function testRemote() {
 function toggleStreamDeckOptions() {
   const checked = document.getElementById('has_streamdeck')?.checked;
   document.getElementById('wiz-streamdeck-opts')?.classList.toggle('d-none', !checked);
+  document.getElementById('streamdeck-opts')?.classList.toggle('d-none', !checked);
 }
 
 function toggleDisplayOptions() {
@@ -2286,6 +2474,175 @@ async function wizSaveAll() {
     }
   }
 })();
+
+// Appliance-only: Display pane
+
+async function saveDisplaySettings() {
+  const el = document.getElementById('display-save-result');
+  if (el) el.innerHTML = '<span class="text-secondary">Saving...</span>';
+  const ui_scale = document.getElementById('ui_scale')?.value || 'normal';
+  const display_rotation = parseInt(document.getElementById('display_rotation')?.value || '0', 10);
+  const display_touch = document.getElementById('display_touch')?.checked || false;
+  try {
+    await fetch('setup/scale', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ui_scale, display_rotation}),
+    });
+    await fetch('setup/save', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({display_touch}),
+    });
+    if (el) el.innerHTML = '<span class="text-success"><i class="bi bi-check-circle me-1"></i>Display settings saved.</span>';
+    location.reload();
+  } catch (e) {
+    if (el) el.innerHTML = `<span class="text-danger">${e}</span>`;
+  }
+}
+
+async function loadDisplayStatus() {
+  const el = document.getElementById('kms-rotation-status');
+  if (!el) return;
+  try {
+    const r = await fetch('setup/display/rotation');
+    const d = await r.json();
+    if (d.ok) {
+      el.innerHTML = `<span class="text-secondary small">Current KMS rotation: <strong>${d.rotation}&deg;</strong></span>`;
+      const sel = document.getElementById('kms_rotation');
+      if (sel) sel.value = String(d.rotation);
+    } else {
+      el.innerHTML = `<span class="text-secondary small">Could not read KMS rotation (${d.error})</span>`;
+    }
+  } catch (e) {
+    el.innerHTML = '<span class="text-secondary small">Host bridge unavailable.</span>';
+  }
+}
+
+async function setKmsRotation(reboot) {
+  const degrees = parseInt(document.getElementById('kms_rotation')?.value || '0', 10);
+  const el = document.getElementById('kms-rotation-result');
+  if (el) el.innerHTML = '<span class="text-secondary">Applying...</span>';
+  try {
+    const r = await fetch('setup/display/rotation', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({degrees, reboot}),
+    });
+    const d = await r.json();
+    if (d.ok) {
+      const msg = reboot ? 'Rotation applied. Rebooting...' : `KMS rotation set to ${degrees}&deg;. Reboot to activate.`;
+      if (el) el.innerHTML = `<span class="text-success"><i class="bi bi-check-circle me-1"></i>${msg}</span>`;
+    } else {
+      if (el) el.innerHTML = `<span class="text-danger">${d.error}</span>`;
+    }
+  } catch (e) {
+    if (el) el.innerHTML = `<span class="text-danger">${e}</span>`;
+  }
+}
+
+// Appliance-only: Stream Deck pane
+
+async function saveStreamDeckSettings() {
+  const el = document.getElementById('streamdeck-save-result');
+  if (el) el.innerHTML = '<span class="text-secondary">Saving...</span>';
+  const has_streamdeck = document.getElementById('has_streamdeck')?.checked || false;
+  const streamdeck_key_count = parseInt(document.getElementById('streamdeck_key_count')?.value || '15', 10);
+  try {
+    await fetch('setup/save', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({has_streamdeck, streamdeck_key_count}),
+    });
+    if (el) el.innerHTML = '<span class="text-success"><i class="bi bi-check-circle me-1"></i>Stream Deck settings saved.</span>';
+  } catch (e) {
+    if (el) el.innerHTML = `<span class="text-danger">${e}</span>`;
+  }
+}
+
+async function restartStreamDeck() {
+  const el = document.getElementById('streamdeck-save-result');
+  if (el) el.innerHTML = '<span class="text-secondary">Restarting service...</span>';
+  try {
+    const r = await fetch('setup/streamdeck/restart', {method: 'POST'});
+    const d = await r.json();
+    if (el) el.innerHTML = d.ok
+      ? '<span class="text-success"><i class="bi bi-check-circle me-1"></i>Stream Deck service restarted.</span>'
+      : `<span class="text-danger">${d.error}</span>`;
+  } catch (e) {
+    if (el) el.innerHTML = `<span class="text-danger">${e}</span>`;
+  }
+}
+
+// Appliance-only: Network pane
+
+async function loadNetworkStatus() {
+  const wifiEl = document.getElementById('wifi-status-row');
+  const hnEl = document.getElementById('hostname-status-row');
+  try {
+    const r = await fetch('setup/network/status');
+    const d = await r.json();
+    if (d.ok) {
+      if (wifiEl) {
+        wifiEl.innerHTML = d.ssid
+          ? `<span class="badge bg-success me-2"><i class="bi bi-wifi me-1"></i>Connected</span><span class="text-secondary small">${d.ssid}</span>`
+          : `<span class="badge bg-secondary me-2"><i class="bi bi-wifi-off me-1"></i>Not connected</span><span class="text-secondary small">No active Wi-Fi</span>`;
+      }
+      if (hnEl) {
+        hnEl.innerHTML = `<span class="text-secondary small">Current hostname: <strong>${d.hostname}</strong> (reachable at <code>${d.hostname}.local</code>)</span>`;
+        const inp = document.getElementById('new_hostname');
+        if (inp && !inp.value) inp.value = d.hostname;
+      }
+    } else {
+      const msg = `<span class="text-secondary small">Status unavailable: ${d.error}</span>`;
+      if (wifiEl) wifiEl.innerHTML = msg;
+      if (hnEl) hnEl.innerHTML = msg;
+    }
+  } catch (e) {
+    const msg = '<span class="text-secondary small">Could not reach host bridge. Is the appliance running on a Pi?</span>';
+    if (wifiEl) wifiEl.innerHTML = msg;
+    if (hnEl) hnEl.innerHTML = msg;
+  }
+}
+
+async function changeWifi() {
+  const ssid = document.getElementById('wifi_ssid')?.value.trim();
+  const password = document.getElementById('wifi_password')?.value || '';
+  const el = document.getElementById('wifi-result');
+  if (!ssid) { if (el) el.innerHTML = '<span class="text-danger">Enter a network name first.</span>'; return; }
+  if (el) el.innerHTML = '<span class="text-secondary"><span class="spinner-border spinner-border-sm me-1"></span>Connecting...</span>';
+  try {
+    const r = await fetch('setup/network/wifi', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ssid, password}),
+    });
+    const d = await r.json();
+    if (el) el.innerHTML = d.ok
+      ? `<span class="text-success"><i class="bi bi-check-circle me-1"></i>Connected to <strong>${ssid}</strong>.</span>`
+      : `<span class="text-danger">${d.error}</span>`;
+    if (d.ok) loadNetworkStatus();
+  } catch (e) {
+    if (el) el.innerHTML = `<span class="text-danger">${e}</span>`;
+  }
+}
+
+async function changeHostname() {
+  const hostname = document.getElementById('new_hostname')?.value.trim().toLowerCase() || '';
+  const el = document.getElementById('hostname-result');
+  if (!hostname) { if (el) el.innerHTML = '<span class="text-danger">Enter a hostname.</span>'; return; }
+  if (el) el.innerHTML = '<span class="text-secondary">Updating...</span>';
+  try {
+    const r = await fetch('setup/network/hostname', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({hostname}),
+    });
+    const d = await r.json();
+    if (d.ok) {
+      if (el) el.innerHTML = `<span class="text-success"><i class="bi bi-check-circle me-1"></i>Hostname changed to <strong>${hostname}</strong>. Reconnect at <a href="http://${hostname}.local:9284/setup">http://${hostname}.local:9284/setup</a>.</span>`;
+      loadNetworkStatus();
+    } else {
+      if (el) el.innerHTML = `<span class="text-danger">${d.error}</span>`;
+    }
+  } catch (e) {
+    if (el) el.innerHTML = `<span class="text-danger">${e}</span>`;
+  }
+}
 </script>
 </body>
 </html>

@@ -468,6 +468,122 @@ async def totp_disable():
     return {"ok": True, "message": "Two-factor authentication disabled."}
 
 
+# Pi host bridge endpoints
+# -------------------------
+# These call a small helper service running on 127.0.0.1:9299 on the Pi host.
+# Because docker-compose.appliance.yml uses network_mode: host, localhost in the
+# container is the same as localhost on the host, so no special networking is needed.
+# On non-Pi or non-appliance installs the endpoints return a clear error.
+
+_HOST_BRIDGE = "http://127.0.0.1:9299"
+
+
+@router.get("/network/status")
+async def network_status():
+    """Current Wi-Fi SSID and hostname, via the Pi host bridge."""
+    if not is_raspberry_pi():
+        return {"ok": False, "error": "Not available on this platform."}
+    try:
+        async with httpx.AsyncClient(timeout=4.0) as c:
+            wifi = (await c.get(f"{_HOST_BRIDGE}/wifi/status")).json()
+            hn = (await c.get(f"{_HOST_BRIDGE}/hostname")).json()
+        return {
+            "ok": True,
+            "ssid": wifi.get("ssid", ""),
+            "hostname": hn.get("hostname", ""),
+        }
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+class WifiPayload(BaseModel):
+    ssid: str = ""
+    password: str = ""
+
+
+@router.post("/network/wifi")
+async def network_wifi(payload: WifiPayload):
+    """Connect to a Wi-Fi network (Pi appliance only)."""
+    if not is_raspberry_pi():
+        return JSONResponse({"ok": False, "error": "Not available on this platform."})
+    if not payload.ssid.strip():
+        return JSONResponse({"ok": False, "error": "SSID is required."})
+    try:
+        async with httpx.AsyncClient(timeout=35.0) as c:
+            r = await c.post(f"{_HOST_BRIDGE}/wifi/connect",
+                             json={"ssid": payload.ssid.strip(), "password": payload.password})
+        return r.json()
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)})
+
+
+class HostnamePayload(BaseModel):
+    hostname: str = ""
+
+
+@router.post("/network/hostname")
+async def network_hostname(payload: HostnamePayload):
+    """Change the device hostname (Pi appliance only)."""
+    if not is_raspberry_pi():
+        return JSONResponse({"ok": False, "error": "Not available on this platform."})
+    name = payload.hostname.strip().lower()
+    if not name:
+        return JSONResponse({"ok": False, "error": "Hostname is required."})
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as c:
+            r = await c.post(f"{_HOST_BRIDGE}/hostname", json={"hostname": name})
+        return r.json()
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)})
+
+
+@router.get("/display/rotation")
+async def display_rotation_status():
+    """Current KMS framebuffer rotation (Pi appliance only)."""
+    if not is_raspberry_pi():
+        return {"ok": False, "error": "Not available on this platform."}
+    try:
+        async with httpx.AsyncClient(timeout=4.0) as c:
+            r = (await c.get(f"{_HOST_BRIDGE}/display/rotation")).json()
+        return r
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+class KmsRotationPayload(BaseModel):
+    degrees: int = 0
+    reboot: bool = False
+
+
+@router.post("/display/rotation")
+async def set_display_rotation(payload: KmsRotationPayload):
+    """Set the KMS framebuffer rotation (Pi appliance only). Takes effect after reboot."""
+    if not is_raspberry_pi():
+        return JSONResponse({"ok": False, "error": "Not available on this platform."})
+    if payload.degrees not in (0, 90, 180, 270):
+        return JSONResponse({"ok": False, "error": "degrees must be 0, 90, 180, or 270."})
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as c:
+            r = await c.post(f"{_HOST_BRIDGE}/display/rotation",
+                             json={"degrees": payload.degrees, "reboot": payload.reboot})
+        return r.json()
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)})
+
+
+@router.post("/streamdeck/restart")
+async def streamdeck_restart():
+    """Restart the Stream Deck systemd service (Pi appliance only)."""
+    if not is_raspberry_pi():
+        return JSONResponse({"ok": False, "error": "Not available on this platform."})
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as c:
+            r = await c.post(f"{_HOST_BRIDGE}/streamdeck/restart")
+        return r.json()
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)})
+
+
 # Backwards-compatible alias for the old endpoint name
 @router.post("/test/vision")
 async def test_vision_legacy(payload: dict):

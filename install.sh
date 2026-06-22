@@ -170,7 +170,9 @@ banner() {
 interactive_config() {
   have_tty || die "No terminal for prompts. Run over SSH, or set NONINTERACTIVE=1 with the choices as env vars (see the header of this script)."
 
-  # Mode
+  # Mode is the only question asked interactively. Everything else (kiosk,
+  # Stream Deck, display rotation, Mealie, Ollama) is auto-detected or set
+  # later via the web setup wizard at /setup.
   if [ "$IS_PI" = true ]; then
     DEPLOYMENT_MODE="$(prompt_choice "How will this device be used?" \
       "pi_hosted:Pi Hosted  - run the full FoodAssistant stack on this Pi" \
@@ -187,33 +189,10 @@ interactive_config() {
     done
   fi
 
-  # Add-ons. Mealie/Ollama only make sense where the stack runs.
-  if [ "$DEPLOYMENT_MODE" != "pi_remote" ]; then
-    prompt_yn "Enable Mealie (recipes & meal planning, needs 4 GB+ RAM)?" n \
-      && ENABLE_MEALIE=true || ENABLE_MEALIE=false
-    prompt_yn "Enable Ollama (local LLM, not recommended on small SBCs)?" n \
-      && ENABLE_OLLAMA=true || ENABLE_OLLAMA=false
-  fi
-
-  # Kiosk: default yes when a display is present.
-  local kdef=n; [ "$HAS_DISPLAY" = true ] && kdef=y
-  if prompt_yn "Install the full-screen kiosk browser on the attached display?" "$kdef"; then
-    ENABLE_KIOSK=true
-    if prompt_yn "Rotate the display?" n; then
-      DISPLAY_ROTATION="$(prompt_choice "Rotation (degrees clockwise):" \
-        "0:0 (normal)" "90:90" "180:180" "270:270")"
-    fi
-  else
-    ENABLE_KIOSK=false
-  fi
-
-  # Stream Deck: default yes when one is attached.
-  local sdef=n; [ "$HAS_DECK" = true ] && sdef=y
-  if prompt_yn "Install the Stream Deck controller service?" "$sdef"; then
-    ENABLE_STREAMDECK=true
-  else
-    ENABLE_STREAMDECK=false
-  fi
+  # Auto-detect kiosk and Stream Deck based on attached hardware.
+  # Display orientation, Mealie, and Ollama are configured in the web UI.
+  [ -z "$ENABLE_KIOSK" ]      && ENABLE_KIOSK="$([ "$HAS_DISPLAY" = true ] && echo true || echo false)"
+  [ -z "$ENABLE_STREAMDECK" ] && ENABLE_STREAMDECK="$([ "$HAS_DECK" = true ] && echo true || echo false)"
 }
 
 # Non-interactive: fill any unset enable flags from detection so a bare
@@ -287,12 +266,13 @@ run_provisioner() {
 
 print_done() {
   hr
-  ok "FoodAssistant install complete."
+  ok "FoodAssistant installed."
   if [ "$DEPLOYMENT_MODE" = "pi_remote" ]; then
     say "This device controls: $REMOTE_SERVER_URL"
   else
-    say "Open the app at:  http://${HOSTNAME_CHOICE}.local:9284/"
-    say "First-time setup: http://${HOSTNAME_CHOICE}.local:9284/setup"
+    say "Open this URL in your browser to finish configuration:"
+    printf '    %shttp://%s.local:9284/setup%s\n' "$C_GREEN" "$HOSTNAME_CHOICE" "$C_OFF"
+    say "(If .local doesn't resolve, use the device IP instead.)"
   fi
   hr
 }
