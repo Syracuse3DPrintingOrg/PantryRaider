@@ -1408,7 +1408,7 @@ docker compose up -d</code></pre>
               <div class="row g-3 mb-3">
                 <div class="col-md-6">
                   <label class="form-label">Deck Rotation</label>
-                  <select class="form-select form-select-sm" id="streamdeck_rotation">
+                  <select class="form-select form-select-sm" id="streamdeck_rotation" onchange="_sdRenderGrid()">
                     <option value="0">0° (Normal)</option>
                     <option value="90">90° (Clockwise)</option>
                     <option value="180">180° (Upside down)</option>
@@ -1422,8 +1422,9 @@ docker compose up -d</code></pre>
               </div>
               <div class="mb-3">
                 <label class="form-label">Key Layout</label>
-                <div class="form-text mb-2">Click a key to assign an action. The grid matches your deck; the top-left cell is physical key 1.</div>
-                <div id="streamdeck-grid" class="d-inline-grid gap-1" style="grid-template-columns: repeat(5, minmax(0,1fr));"></div>
+                <div class="form-text mb-2">Drag actions from the palette onto grid cells. The grid shape matches your deck orientation. Long-press a timer key to reset it.</div>
+                <div id="streamdeck-grid" class="d-inline-grid gap-1 mb-2" style="grid-template-columns: repeat(5, minmax(0,1fr));"></div>
+                <div id="streamdeck-palette" class="d-flex flex-column gap-1 mt-1" style="max-width:700px;"></div>
               </div>
               <div class="row g-3 mb-3">
                 <div class="col-md-6">
@@ -2636,8 +2637,9 @@ async function setKmsRotation(reboot) {
 
 // Stream Deck visual key-grid editor
 const SD_GRID = { 6: {cols:3, rows:2}, 15: {cols:5, rows:3}, 32: {cols:8, rows:4} };
-let _sdCatalog = null;       // [{name,label,kind,group,description}]
+let _sdCatalog = null;       // [{name,label,kind,group,color,description}]
 let _sdKeys = [];            // flat, deck-index order; "blank" for empty
+let _sdDragSrc = null;       // {type:'grid'|'palette', idx?:number, name:string}
 
 async function _sdLoadCatalog() {
   if (_sdCatalog) return _sdCatalog;
@@ -2647,71 +2649,167 @@ async function _sdLoadCatalog() {
   } catch (e) { /* fall through to fallback */ }
   // Fallback list so the editor still renders if the bridge is unreachable.
   _sdCatalog = [
-    {name:'blank',label:'Empty',group:'System'},
-    {name:'expiring',label:'Expiring',group:'Status'},
-    {name:'pending',label:'Pending',group:'Status'},
-    {name:'commit',label:'Commit',group:'Actions'},
-    {name:'add',label:'Add',group:'Navigation'},
-    {name:'inventory',label:'Stock',group:'Navigation'},
-    {name:'cook',label:'Cook',group:'Navigation'},
-    {name:'recipes',label:'Recipes',group:'Navigation'},
-    {name:'mealplan',label:'Plan',group:'Navigation'},
-    {name:'shopping',label:'Shop',group:'Navigation'},
-    {name:'defaults',label:'Defaults',group:'Navigation'},
-    {name:'timer_1',label:'Timer 1',group:'Timers'},
-    {name:'timer_2',label:'Timer 2',group:'Timers'},
-    {name:'timer_3',label:'Timer 3',group:'Timers'},
-    {name:'weather',label:'Weather',group:'Weather'},
-    {name:'forecast',label:'Forecast',group:'Weather'},
-    {name:'ha_1',label:'HA 1',group:'Home Assistant'},
-    {name:'ha_2',label:'HA 2',group:'Home Assistant'},
-    {name:'ha_3',label:'HA 3',group:'Home Assistant'},
-    {name:'ha_4',label:'HA 4',group:'Home Assistant'},
-    {name:'ha_5',label:'HA 5',group:'Home Assistant'},
-    {name:'brightness',label:'Bright',group:'System'},
-    {name:'page_next',label:'More',group:'System'},
-    {name:'page_prev',label:'Back',group:'System'},
+    {name:'blank',label:'Empty',kind:'blank',group:'System',color:'#1f2937'},
+    {name:'expiring',label:'Expiring',kind:'status',group:'Status',color:'#b54708'},
+    {name:'pending',label:'Pending',kind:'status',group:'Status',color:'#1d4ed8'},
+    {name:'commit',label:'Commit',kind:'trigger',group:'Actions',color:'#15803d'},
+    {name:'add',label:'Add',kind:'nav',group:'Navigation',color:'#b45309'},
+    {name:'inventory',label:'Stock',kind:'nav',group:'Navigation',color:'#0f766e'},
+    {name:'cook',label:'Cook',kind:'nav',group:'Navigation',color:'#7e22ce'},
+    {name:'recipes',label:'Recipes',kind:'nav',group:'Navigation',color:'#7e22ce'},
+    {name:'mealplan',label:'Plan',kind:'nav',group:'Navigation',color:'#7e22ce'},
+    {name:'shopping',label:'Shop',kind:'nav',group:'Navigation',color:'#7e22ce'},
+    {name:'defaults',label:'Defaults',kind:'nav',group:'Navigation',color:'#7e22ce'},
+    {name:'timer_1',label:'Timer 1',kind:'timer',group:'Timers',color:'#0d9488'},
+    {name:'timer_2',label:'Timer 2',kind:'timer',group:'Timers',color:'#0d9488'},
+    {name:'timer_3',label:'Timer 3',kind:'timer',group:'Timers',color:'#0d9488'},
+    {name:'weather',label:'Weather',kind:'weather',group:'Weather',color:'#1e40af'},
+    {name:'forecast',label:'Forecast',kind:'forecast',group:'Weather',color:'#0e7490'},
+    {name:'ha_1',label:'HA 1',kind:'ha_entity',group:'Home Assistant',color:'#475569'},
+    {name:'ha_2',label:'HA 2',kind:'ha_entity',group:'Home Assistant',color:'#475569'},
+    {name:'ha_3',label:'HA 3',kind:'ha_entity',group:'Home Assistant',color:'#475569'},
+    {name:'ha_4',label:'HA 4',kind:'ha_entity',group:'Home Assistant',color:'#475569'},
+    {name:'ha_5',label:'HA 5',kind:'ha_entity',group:'Home Assistant',color:'#475569'},
+    {name:'brightness',label:'Bright',kind:'system',group:'System',color:'#475569'},
+    {name:'page_next',label:'More',kind:'system',group:'System',color:'#334155'},
+    {name:'page_prev',label:'Back',kind:'system',group:'System',color:'#334155'},
   ];
   return _sdCatalog;
 }
 
-function _sdOptionsHtml(selected) {
-  // Group catalog into <optgroup>s; mark the selected one.
-  const groups = {};
-  for (const a of _sdCatalog) { (groups[a.group] = groups[a.group] || []).push(a); }
-  let html = '';
-  for (const g of Object.keys(groups)) {
-    html += `<optgroup label="${g}">`;
-    for (const a of groups[g]) {
-      const sel = a.name === selected ? ' selected' : '';
-      html += `<option value="${a.name}"${sel}>${a.label}</option>`;
+function _sdActionByName(name) {
+  if (!_sdCatalog) return null;
+  return _sdCatalog.find(a => a.name === name) || null;
+}
+
+function _sdEffectiveDim(count, rotation) {
+  const dim = SD_GRID[count] || SD_GRID[15];
+  // For 90 or 270 degree rotation the deck is mounted on its side,
+  // so the visible grid swaps columns and rows.
+  if (rotation === 90 || rotation === 270) return {cols: dim.rows, rows: dim.cols};
+  return dim;
+}
+
+function _sdMakeCell(idx, name) {
+  const action = _sdActionByName(name) || {name:'blank', label:'Empty', color:'#1f2937'};
+  const cell = document.createElement('div');
+  cell.className = 'rounded position-relative';
+  cell.style.cssText = [
+    'min-width:60px', 'min-height:44px', 'display:flex', 'align-items:center',
+    'justify-content:center', 'overflow:hidden', `background:${action.color || '#1f2937'}`,
+    'cursor:grab', 'user-select:none', 'transition:filter 0.1s', 'border:2px solid rgba(255,255,255,0.15)',
+  ].join(';');
+  cell.draggable = true;
+  cell.dataset.idx = String(idx);
+
+  const lbl = document.createElement('span');
+  lbl.style.cssText = 'color:#fff;font-size:0.65rem;line-height:1.1;text-align:center;word-break:break-word;padding:2px 3px;';
+  lbl.textContent = action.label;
+  cell.appendChild(lbl);
+
+  const badge = document.createElement('span');
+  badge.style.cssText = 'position:absolute;top:2px;right:3px;font-size:0.5rem;color:rgba(255,255,255,0.45);';
+  badge.textContent = String(idx + 1);
+  cell.appendChild(badge);
+
+  cell.addEventListener('dragstart', e => {
+    _sdDragSrc = {type:'grid', idx, name: _sdKeys[idx] || 'blank'};
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', _sdKeys[idx] || 'blank');
+    cell.style.opacity = '0.45';
+  });
+  cell.addEventListener('dragend', () => { cell.style.opacity = '1'; });
+  cell.addEventListener('dragover', e => {
+    e.preventDefault();
+    cell.style.filter = 'brightness(1.5)';
+    cell.style.borderColor = 'rgba(255,255,255,0.7)';
+    e.dataTransfer.dropEffect = _sdDragSrc?.type === 'grid' ? 'move' : 'copy';
+  });
+  cell.addEventListener('dragleave', () => {
+    cell.style.filter = '';
+    cell.style.borderColor = 'rgba(255,255,255,0.15)';
+  });
+  cell.addEventListener('drop', e => {
+    e.preventDefault();
+    cell.style.filter = '';
+    cell.style.borderColor = 'rgba(255,255,255,0.15)';
+    if (!_sdDragSrc) return;
+    const tgtIdx = parseInt(cell.dataset.idx, 10);
+    if (_sdDragSrc.type === 'grid') {
+      const tmp = _sdKeys[tgtIdx] || 'blank';
+      _sdKeys[tgtIdx] = _sdKeys[_sdDragSrc.idx] || 'blank';
+      _sdKeys[_sdDragSrc.idx] = tmp;
+    } else {
+      _sdKeys[tgtIdx] = _sdDragSrc.name;
     }
-    html += '</optgroup>';
-  }
-  return html;
+    _sdDragSrc = null;
+    _sdRenderGrid();
+  });
+
+  return cell;
 }
 
 async function _sdRenderGrid() {
   await _sdLoadCatalog();
   const grid = document.getElementById('streamdeck-grid');
+  const palette = document.getElementById('streamdeck-palette');
   if (!grid) return;
+
   const count = parseInt(document.getElementById('streamdeck_key_count')?.value || '15', 10);
-  const dim = SD_GRID[count] || SD_GRID[15];
+  const rotation = parseInt(document.getElementById('streamdeck_rotation')?.value || '0', 10);
+  const dim = _sdEffectiveDim(count, rotation);
+
   grid.style.gridTemplateColumns = `repeat(${dim.cols}, minmax(0,1fr))`;
-  // Normalize _sdKeys to the cell count (pad with blank, truncate extras).
+
+  // Normalize _sdKeys to the cell count.
   const total = dim.cols * dim.rows;
   const keys = _sdKeys.slice(0, total);
   while (keys.length < total) keys.push('blank');
   _sdKeys = keys;
+
   grid.innerHTML = '';
   for (let i = 0; i < total; i++) {
-    const cell = document.createElement('select');
-    cell.className = 'form-select form-select-sm';
-    cell.style.minWidth = '64px';
-    cell.dataset.idx = String(i);
-    cell.innerHTML = _sdOptionsHtml(_sdKeys[i] || 'blank');
-    cell.onchange = (e) => { _sdKeys[parseInt(e.target.dataset.idx,10)] = e.target.value; };
-    grid.appendChild(cell);
+    grid.appendChild(_sdMakeCell(i, _sdKeys[i] || 'blank'));
+  }
+
+  // Render grouped palette below the grid.
+  if (palette) {
+    palette.innerHTML = '';
+    const groups = {};
+    for (const a of _sdCatalog) {
+      (groups[a.group] = groups[a.group] || []).push(a);
+    }
+    for (const [gname, items] of Object.entries(groups)) {
+      const row = document.createElement('div');
+      row.className = 'd-flex align-items-center gap-1 flex-wrap';
+
+      const lbl = document.createElement('span');
+      lbl.className = 'text-secondary small';
+      lbl.style.cssText = 'min-width:90px;font-size:0.65rem;';
+      lbl.textContent = gname + ':';
+      row.appendChild(lbl);
+
+      for (const a of items) {
+        const chip = document.createElement('div');
+        chip.style.cssText = [
+          `background:${a.color || '#374151'}`, 'color:#fff', 'border-radius:4px',
+          'padding:2px 8px', 'font-size:0.7rem', 'cursor:grab', 'user-select:none',
+          'border:1px solid rgba(255,255,255,0.2)',
+        ].join(';');
+        chip.draggable = true;
+        chip.textContent = a.label;
+        chip.title = a.description || '';
+        chip.addEventListener('dragstart', e => {
+          _sdDragSrc = {type:'palette', name: a.name};
+          e.dataTransfer.effectAllowed = 'copy';
+          e.dataTransfer.setData('text/plain', a.name);
+          chip.style.opacity = '0.5';
+        });
+        chip.addEventListener('dragend', () => { chip.style.opacity = '1'; });
+        row.appendChild(chip);
+      }
+      palette.appendChild(row);
+    }
   }
 }
 

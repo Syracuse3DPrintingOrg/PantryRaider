@@ -12,6 +12,7 @@ import json
 import logging
 import shutil
 import subprocess
+import time
 from typing import Optional
 
 import httpx
@@ -37,6 +38,7 @@ class Controller:
         self.page = 0
         self.status: dict[str, int] = {"expiring": 0, "pending": 0}
         self.timers: dict[str, TimerState] = {}  # action name -> timer state
+        self._key_down_time: dict[int, float] = {}  # physical key -> press timestamp
         self.weather: WeatherState = WeatherState(
             location=config.weather_location, units=config.weather_units
         )
@@ -182,8 +184,15 @@ class Controller:
     # -- input -------------------------------------------------------------
 
     def _on_key(self, deck, key: int, pressed: bool) -> None:
-        if not pressed or self.loop is None:
+        if self.loop is None:
             return
+        if pressed:
+            # Record when this key went down so we can measure hold duration.
+            self._key_down_time[key] = time.monotonic()
+            return
+        # Key released: determine short vs long press.
+        down_at = self._key_down_time.pop(key, None)
+        long_press = down_at is not None and (time.monotonic() - down_at) >= 0.5
         # `key` is the physical index pressed. Invert the draw-time mapping to
         # recover the visual slot, so the action matches what the user sees.
         slot = self._visual_slot(key)
@@ -191,7 +200,9 @@ class Controller:
         if slot >= len(page) or page[slot] is None:
             return
         spec = page[slot]
-        fut = asyncio.run_coroutine_threadsafe(self._handle(spec), self.loop)
+        fut = asyncio.run_coroutine_threadsafe(
+            self._handle(spec, long_press=long_press), self.loop
+        )
         def _on_done(f):
             try:
                 f.result()
@@ -199,13 +210,16 @@ class Controller:
                 log.error("Action failed: %s", e)
         fut.add_done_callback(_on_done)
 
-    def _timer_press(self, name: str) -> None:
+    def _timer_press(self, name: str, long_press: bool = False) -> None:
         if name not in self.timers:
             self.timers[name] = TimerState()
-        self.timers[name].press()
+        if long_press:
+            self.timers[name].long_press()
+        else:
+            self.timers[name].short_press()
         self._draw_page()
 
-    async def _handle(self, spec: ActionSpec) -> None:
+    async def _handle(self, spec: ActionSpec, long_press: bool = False) -> None:
         ctx = ActionContext(
             client=self.client,
             base_url=self.config.base_url,
@@ -221,7 +235,7 @@ class Controller:
             ha_entity_refresh=self._refresh_ha_entities,
         )
         try:
-            msg = await actions.run_action(spec, ctx)
+            msg = await actions.run_action(spec, ctx, long_press=long_press)
             if msg:
                 log.info("%s -> %s", spec.name, msg)
         except Exception as e:  # noqa: BLE001 - one bad press must not crash

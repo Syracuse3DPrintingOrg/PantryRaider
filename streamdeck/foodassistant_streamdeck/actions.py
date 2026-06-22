@@ -14,25 +14,22 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Optional
 
-# Preset durations (minutes) cycled through on each timer key press.
-TIMER_PRESETS: tuple[int, ...] = (5, 10, 15, 30, 60)
-
-
 class TimerState:
     """Mutable per-key countdown timer.
 
-    Pressing cycles: idle -> 5 min -> 10 min -> 15 min -> 30 min -> 60 min -> idle.
-    While counting down, ``label()`` returns MM:SS remaining. When expired,
-    ``alerting`` flips to True; the next press dismisses it.
+    Short press: add 1 minute (starts from idle; rapid presses accumulate).
+    Long press: reset to idle immediately.
+    When the countdown expires, ``alerting`` flips to True; the next short
+    press dismisses it.
     """
 
     def __init__(self) -> None:
-        self._preset_idx: int = -1   # -1 = idle
+        self._minutes: int = 0       # 0 = idle; positive = minutes set
         self._deadline: float = 0.0  # monotonic clock target
         self.alerting: bool = False
 
     def is_running(self) -> bool:
-        return self._preset_idx >= 0 and not self.alerting
+        return self._minutes > 0 and not self.alerting
 
     def remaining_seconds(self) -> int:
         if not self.is_running():
@@ -42,7 +39,7 @@ class TimerState:
     def label(self, base_label: str) -> str:
         if self.alerting:
             return "Done!"
-        if self._preset_idx < 0:
+        if self._minutes == 0:
             return base_label
         secs = self.remaining_seconds()
         if secs <= 0:
@@ -52,7 +49,7 @@ class TimerState:
     def color(self, base_color: str) -> str:
         if self.alerting:
             return "#ef4444"
-        if self._preset_idx < 0:
+        if self._minutes == 0:
             return base_color
         secs = self.remaining_seconds()
         return "#f59e0b" if secs < 60 else "#0d9488"
@@ -60,23 +57,31 @@ class TimerState:
     def alert_active(self) -> bool:
         return self.alerting
 
-    def press(self) -> None:
+    def short_press(self) -> None:
+        """Add one minute. Dismisses the alert if one is active."""
         if self.alerting:
             self.alerting = False
-            self._preset_idx = -1
-            return
-        self._preset_idx += 1
-        if self._preset_idx >= len(TIMER_PRESETS):
-            self._preset_idx = -1
+            self._minutes = 0
             self._deadline = 0.0
-        else:
-            self._deadline = time.monotonic() + TIMER_PRESETS[self._preset_idx] * 60
+            return
+        self._minutes += 1
+        self._deadline = time.monotonic() + self._minutes * 60
+
+    def long_press(self) -> None:
+        """Reset the timer to idle immediately."""
+        self.alerting = False
+        self._minutes = 0
+        self._deadline = 0.0
+
+    def press(self) -> None:
+        """Backward-compatible alias for short_press."""
+        self.short_press()
 
     def tick(self) -> bool:
         """Return True (and set alerting) if the timer just expired."""
         if self.is_running() and self.remaining_seconds() <= 0:
             self.alerting = True
-            self._preset_idx = -1
+            self._minutes = 0
             return True
         return False
 
@@ -431,10 +436,12 @@ def catalog() -> list[dict]:
         "label": spec.label,
         "kind": spec.kind,
         "group": _GROUP_BY_KIND.get(spec.kind, "Other"),
+        "color": spec.color,
         "description": getattr(spec, "description", ""),
     } for spec in ACTIONS.values()]
     items.append({"name": "blank", "label": "Empty", "kind": "blank",
-                  "group": "System", "description": "Leave this key blank."})
+                  "group": "System", "color": "#1f2937",
+                  "description": "Leave this key blank."})
     return items
 
 
@@ -483,7 +490,7 @@ class ActionContext:
     cycle_brightness: Callable[[], int]           # returns the new percent
     page_next: Callable[[], None]
     page_prev: Callable[[], None]
-    timer_press: Callable[[str], None] = field(default=lambda _name: None)
+    timer_press: Callable[[str, bool], None] = field(default=lambda _name, _long=False: None)
     weather_refresh: Callable[[], Awaitable[None]] = field(
         default=lambda: __import__("asyncio").sleep(0)
     )
@@ -494,7 +501,7 @@ class ActionContext:
     )
 
 
-async def run_action(spec: ActionSpec, ctx: ActionContext) -> str:
+async def run_action(spec: ActionSpec, ctx: ActionContext, long_press: bool = False) -> str:
     """Perform the side effect for a pressed key. Returns a short status line.
 
     Handlers are intentionally forgiving: a failed HTTP call returns a readable
@@ -534,8 +541,8 @@ async def run_action(spec: ActionSpec, ctx: ActionContext) -> str:
         return "prev page"
 
     if spec.kind == "timer":
-        ctx.timer_press(spec.name)
-        return f"{spec.name} pressed"
+        ctx.timer_press(spec.name, long_press)
+        return f"{spec.name} {'reset' if long_press else '+1min'}"
 
     if spec.kind == "weather":
         await ctx.weather_refresh()

@@ -351,31 +351,50 @@ def test_timer_idle_shows_base_label():
     assert not t.alerting
 
 
-def test_timer_press_cycles_presets():
+def test_timer_short_press_starts_at_one_minute():
     t = actions.TimerState()
-    t.press()  # -> 5 min
+    t.short_press()
     assert t.is_running()
-    assert t.remaining_seconds() > 0
+    assert t._minutes == 1
+    assert t.remaining_seconds() > 55
 
 
-def test_timer_press_through_all_resets_to_idle():
+def test_timer_rapid_presses_accumulate():
     t = actions.TimerState()
-    for _ in range(len(actions.TIMER_PRESETS) + 1):
-        t.press()
+    t.short_press()  # 1 min
+    t.short_press()  # 2 min
+    t.short_press()  # 3 min
+    assert t._minutes == 3
+    assert t.is_running()
+
+
+def test_timer_press_alias_works():
+    t = actions.TimerState()
+    t.press()  # same as short_press
+    assert t._minutes == 1
+    assert t.is_running()
+
+
+def test_timer_long_press_resets_to_idle():
+    t = actions.TimerState()
+    t.short_press()
+    assert t.is_running()
+    t.long_press()
     assert not t.is_running()
+    assert t._minutes == 0
     assert t.label("T") == "T"
 
 
 def test_timer_label_shows_countdown():
     t = actions.TimerState()
-    t.press()  # 5 min
+    t.short_press()  # 1 min
     label = t.label("Timer")
     assert ":" in label  # MM:SS format
 
 
 def test_timer_alerting_on_expiry():
     t = actions.TimerState()
-    t.press()
+    t.short_press()
     # Force expiry by backdating the deadline
     t._deadline = t._deadline - 400
     expired = t.tick()
@@ -384,15 +403,26 @@ def test_timer_alerting_on_expiry():
     assert t.label("T") == "Done!"
 
 
-def test_timer_dismiss_alert():
+def test_timer_dismiss_alert_via_short_press():
     t = actions.TimerState()
-    t.press()
+    t.short_press()
     t._deadline = t._deadline - 400
     t.tick()
     assert t.alerting
-    t.press()  # dismiss
+    t.short_press()  # dismiss
     assert not t.alerting
     assert t.label("T") == "T"
+
+
+def test_timer_long_press_dismisses_alert():
+    t = actions.TimerState()
+    t.short_press()
+    t._deadline = t._deadline - 400
+    t.tick()
+    assert t.alerting
+    t.long_press()
+    assert not t.alerting
+    assert t._minutes == 0
 
 
 def test_timer_action_registered():
@@ -404,8 +434,9 @@ def test_timer_action_registered():
 def test_timer_press_via_action_context():
     pressed = {}
 
-    def fake_timer_press(name):
+    def fake_timer_press(name, long_press=False):
         pressed["name"] = name
+        pressed["long"] = long_press
 
     ctx = actions.ActionContext(
         client=None,
@@ -419,6 +450,29 @@ def test_timer_press_via_action_context():
     )
     asyncio.run(actions.run_action(actions.ACTIONS["timer_1"], ctx))
     assert pressed.get("name") == "timer_1"
+    assert pressed.get("long") is False
+
+
+def test_timer_long_press_via_action_context():
+    pressed = {}
+
+    def fake_timer_press(name, long_press=False):
+        pressed["name"] = name
+        pressed["long"] = long_press
+
+    ctx = actions.ActionContext(
+        client=None,
+        base_url="http://x",
+        refresh=lambda: None,
+        navigate=lambda _: None,
+        cycle_brightness=lambda: 80,
+        page_next=lambda: None,
+        page_prev=lambda: None,
+        timer_press=fake_timer_press,
+    )
+    asyncio.run(actions.run_action(actions.ACTIONS["timer_1"], ctx, long_press=True))
+    assert pressed.get("name") == "timer_1"
+    assert pressed.get("long") is True
 
 
 # -- weather widget ---------------------------------------------------------
