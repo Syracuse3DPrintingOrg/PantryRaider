@@ -17,6 +17,7 @@ POST /hostname             change hostname       {hostname}
 GET  /display/rotation     current KMS rotation (from /boot/firmware/config.txt)
 POST /display/rotation     set KMS rotation      {degrees, reboot?}
 POST /streamdeck/restart   restart Stream Deck service
+POST /kiosk/restart        restart the kiosk browser (apply scale/rotation)
 GET  /mealie/status        whether the Mealie container is running
 POST /mealie/start         start Mealie via docker compose --profile with-mealie up -d
 GET  /hardware/status      display/Stream Deck presence + service/install state
@@ -137,6 +138,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._set_rotation()
         elif self.path == "/streamdeck/restart":
             self._streamdeck_restart()
+        elif self.path == "/kiosk/restart":
+            self._kiosk_restart()
         elif self.path == "/mealie/start":
             self._mealie_start()
         elif self.path == "/kiosk/install":
@@ -214,12 +217,12 @@ class _Handler(http.server.BaseHTTPRequestHandler):
     def _get_rotation(self):
         rotation = 0
         try:
-            with open("/boot/firmware/config.txt") as f:
+            with open("/etc/foodassistant/kiosk-env") as f:
                 for line in f:
-                    m = re.match(r"^\s*display_rotate\s*=\s*(\d+)", line)
+                    m = re.match(r"^\s*WLR_OUTPUT_TRANSFORM\s*=\s*(\S+)", line)
                     if m:
-                        deg_map = {"0": 0, "1": 90, "2": 180, "3": 270}
-                        rotation = deg_map.get(m.group(1), 0)
+                        val = m.group(1).strip()
+                        rotation = int(val) if val.isdigit() else 0
         except OSError:
             pass
         self._send(200, {"ok": True, "rotation": rotation})
@@ -250,7 +253,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
     def _streamdeck_get_config(self):
         try:
             import tomllib
-            path = "/opt/foodassistant/foodassistant_streamdeck/config.toml"
+            path = "/opt/foodassistant/config.toml"
             if not os.path.exists(path):
                 self._send(200, {"ok": True, "config": {}})
                 return
@@ -277,7 +280,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                     lines.append(f'{k} = [{items}]')
             toml_str = "\n".join(lines) + "\n"
             
-            path = "/opt/foodassistant/foodassistant_streamdeck/config.toml"
+            path = "/opt/foodassistant/config.toml"
             os.makedirs(os.path.dirname(path), exist_ok=True)
             with open(path, "w") as f:
                 f.write(toml_str)
@@ -294,6 +297,16 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._send(200, {"ok": True})
         except subprocess.CalledProcessError as e:
             self._send(500, {"ok": False, "error": str(e)})
+        except Exception as e:
+            self._send(500, {"ok": False, "error": str(e)})
+
+    def _kiosk_restart(self):
+        try:
+            subprocess.run(
+                ["systemctl", "restart", "foodassistant-kiosk.service"],
+                check=True, timeout=30
+            )
+            self._send(200, {"ok": True})
         except Exception as e:
             self._send(500, {"ok": False, "error": str(e)})
 

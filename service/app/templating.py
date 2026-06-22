@@ -3,6 +3,7 @@ from fastapi import Request
 from fastapi.templating import Jinja2Templates
 
 from .config import settings, theme_info, ui_scale_factor
+from .hardware import is_raspberry_pi
 from .ingress import template_globals
 from .navigation import visible_tabs, auto_hidden_groups
 
@@ -27,6 +28,7 @@ def theme_context(request: Request) -> dict:
         "ui_scale": settings.ui_scale,
         "ui_scale_factor": ui_scale_factor(settings.ui_scale),
         "display_rotation": settings.display_rotation,
+        "is_pi": is_raspberry_pi(),
     }
 
 

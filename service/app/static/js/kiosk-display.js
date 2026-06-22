@@ -29,6 +29,11 @@
 
   if (scale && scale !== 1) html.style.zoom = scale;
 
+  // On the Pi appliance the compositor rotates the whole output
+  // (WLR_OUTPUT_TRANSFORM), so applying an in-page CSS rotation here would
+  // double it. Scale (zoom) still applies; rotation is a no-op in that mode.
+  if (html.getAttribute('data-rotation-mode') === 'compositor') rot = 0;
+
   if (!rot) return;
 
   function applyRotation() {

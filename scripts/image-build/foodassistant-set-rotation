@@ -1,21 +1,18 @@
 #!/usr/bin/env bash
-# foodassistant-set-rotation -- update KMS display rotation in cmdline.txt
+# foodassistant-set-rotation -- set the kiosk display rotation
 #
-# Usage: sudo foodassistant-set-rotation <degrees>
+# Usage: sudo foodassistant-set-rotation <degrees> [--reboot]
 #   degrees: 0, 90, 180, or 270
 #
-# Changes take effect after the next reboot. Pass --reboot to reboot now.
-#
-# This is the post-provisioning companion to the DISPLAY_ROTATION= setting in
-# config.env. Install it to /usr/local/bin and add a sudoers entry so the
-# FoodAssistant app can call it without a password:
-#
-#   foodassistant ALL=(ALL) NOPASSWD: /usr/local/bin/foodassistant-set-rotation
+# Rotation is applied by the Wayland compositor (cage/wlroots) via the
+# WLR_OUTPUT_TRANSFORM environment variable, written to
+# /etc/foodassistant/kiosk-env and read by the kiosk service. The change takes
+# effect when the kiosk restarts; this script restarts it for you (pass
+# --reboot to reboot the whole device instead).
 set -euo pipefail
 
 REBOOT=0
 ROT=""
-
 for arg in "$@"; do
   case "$arg" in
     --reboot) REBOOT=1 ;;
@@ -23,47 +20,39 @@ for arg in "$@"; do
     *) echo "Usage: $0 <0|90|180|270> [--reboot]" >&2; exit 1 ;;
   esac
 done
-
 if [ -z "$ROT" ]; then
   echo "Usage: $0 <0|90|180|270> [--reboot]" >&2
   exit 1
 fi
 
-cmdline=""
-for path in /boot/firmware/cmdline.txt /boot/cmdline.txt; do
-  [ -f "$path" ] && cmdline="$path" && break
-done
-
-if [ -z "$cmdline" ]; then
-  echo "Error: cmdline.txt not found (expected at /boot/firmware/cmdline.txt)" >&2
-  exit 1
-fi
-
-line="$(tr -d '\n' < "$cmdline")"
-# Remove any existing rotation parameter.
-line="$(printf '%s' "$line" | sed 's/ video=HDMI-A-1:rotate=[0-9]*//')"
+transform="normal"
+[ "$ROT" != "0" ] && transform="$ROT"
 
 mkdir -p /etc/foodassistant
+echo "WLR_OUTPUT_TRANSFORM=$transform" > /etc/foodassistant/kiosk-env
+echo "Kiosk rotation set to ${ROT} degrees (WLR_OUTPUT_TRANSFORM=$transform)"
 
-if [ "$ROT" = "0" ]; then
-  printf '%s\n' "$line" > "$cmdline"
-  echo "KMS rotation cleared (0 degrees) in $cmdline"
-  echo "CAGE_ROTATION_ARGS=" > /etc/foodassistant/kiosk-env
-else
-  printf '%s video=HDMI-A-1:rotate=%s\n' "$line" "$ROT" > "$cmdline"
-  echo "KMS rotation set to ${ROT} degrees in $cmdline"
-  
-  CAGE_ARGS=""
-  if [ "$ROT" = "90" ]; then CAGE_ARGS="-r"
-  elif [ "$ROT" = "180" ]; then CAGE_ARGS="-r -r"
-  elif [ "$ROT" = "270" ]; then CAGE_ARGS="-r -r -r"
+# Remove any stale KMS rotation a previous version may have written to
+# cmdline.txt, so it does not stack with the compositor transform. Clearing it
+# fully takes effect on the next reboot.
+stale=0
+for cmdline in /boot/firmware/cmdline.txt /boot/cmdline.txt; do
+  [ -f "$cmdline" ] || continue
+  if grep -q 'video=HDMI-A-1:rotate=' "$cmdline"; then
+    line="$(tr -d '\n' < "$cmdline" | sed 's/ video=HDMI-A-1:rotate=[0-9]*//')"
+    printf '%s\n' "$line" > "$cmdline"
+    stale=1
   fi
-  echo "CAGE_ROTATION_ARGS=$CAGE_ARGS" > /etc/foodassistant/kiosk-env
-fi
+done
 
 if [ "$REBOOT" = "1" ]; then
   echo "Rebooting now..."
   reboot
+elif systemctl list-unit-files foodassistant-kiosk.service >/dev/null 2>&1; then
+  systemctl restart foodassistant-kiosk.service \
+    && echo "Kiosk restarted; rotation applied." \
+    || echo "Could not restart the kiosk service; rotation will apply on next start."
+  [ "$stale" = "1" ] && echo "Note: a previous KMS rotation was cleared from cmdline.txt; reboot once to fully clear it."
 else
-  echo "Reboot required for the change to take effect."
+  echo "Kiosk service not installed; the transform will apply when it starts."
 fi

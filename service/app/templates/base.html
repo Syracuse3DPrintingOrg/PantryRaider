@@ -1,7 +1,8 @@
 <!DOCTYPE html>
 <html lang="en" data-bs-theme="{{ theme_mode }}"
       data-ui-scale="{{ ui_scale_factor | default(1.0) }}"
-      data-display-rotation="{{ display_rotation | default(0) }}">
+      data-display-rotation="{{ display_rotation | default(0) }}"
+      data-rotation-mode="{{ 'compositor' if is_pi else 'css' }}">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">

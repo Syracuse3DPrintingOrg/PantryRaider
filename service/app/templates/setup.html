@@ -1336,15 +1336,6 @@ docker compose up -d</code></pre>
                 </select>
                 <div class="form-text">Larger for a small panel; smaller for a wide monitor.</div>
               </div>
-              <div class="col-sm-6">
-                <label class="form-label" for="display_rotation">CSS Rotation</label>
-                <select class="form-select" id="display_rotation" onchange="applyDisplay()">
-                  {% for deg in display_rotations %}
-                  <option value="{{ deg }}" {{ 'selected' if s.display_rotation == deg else '' }}>{{ deg }}&deg;{{ ' (normal)' if deg == 0 else '' }}</option>
-                  {% endfor %}
-                </select>
-                <div class="form-text">Rotates the kiosk page layout. No reboot required; does not affect the boot console or splash.</div>
-              </div>
             </div>
             <div class="form-check form-switch mb-3">
               <input class="form-check-input" type="checkbox" role="switch" id="display_touch"
@@ -1361,9 +1352,8 @@ docker compose up -d</code></pre>
           </div>
 
           <div class="section-card">
-            <div class="section-title"><i class="bi bi-aspect-ratio text-warning"></i> KMS Framebuffer Rotation</div>
-            <p class="text-secondary small">Rotates the kernel framebuffer at the OS level so the boot console, splash screen,
-              and kiosk all appear correctly. Requires a reboot to take effect.</p>
+            <div class="section-title"><i class="bi bi-aspect-ratio text-warning"></i> Orientation</div>
+            <p class="text-secondary small">Rotates the kiosk display using the compositor. The change applies when the kiosk restarts (a few seconds); no reboot is needed.</p>
             <div id="kms-rotation-status" class="mb-3">
               <span class="text-secondary small">Checking...</span>
             </div>
@@ -1380,15 +1370,15 @@ docker compose up -d</code></pre>
             </div>
             <div class="d-flex gap-2 flex-wrap align-items-center">
               <button class="btn btn-outline-warning btn-sm" onclick="setKmsRotation(false)">
-                <i class="bi bi-arrow-repeat me-1"></i>Apply (next reboot)
+                <i class="bi bi-arrow-repeat me-1"></i>Apply (restart kiosk)
               </button>
               <button class="btn btn-outline-danger btn-sm" onclick="setKmsRotation(true)">
-                <i class="bi bi-power me-1"></i>Apply and reboot now
+                <i class="bi bi-power me-1"></i>Apply and reboot device
               </button>
             </div>
             <div class="test-result mt-2" id="kms-rotation-result"></div>
             <div class="alert alert-secondary py-2 small mt-3 mb-0">
-              <i class="bi bi-info-circle me-1"></i>Run <code>sudo foodassistant-set-rotation 90 --reboot</code> via SSH for the same effect.
+              <i class="bi bi-info-circle me-1"></i>Run <code>sudo foodassistant-set-rotation 90</code> via SSH for the same effect.
             </div>
           </div>
         </div>
@@ -2590,6 +2580,7 @@ async function saveDisplaySettings() {
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({display_touch}),
     });
+    fetch('setup/kiosk/restart', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'}).catch(() => {});
     if (el) el.innerHTML = '<span class="text-success"><i class="bi bi-check-circle me-1"></i>Display settings saved.</span>';
     location.reload();
   } catch (e) {

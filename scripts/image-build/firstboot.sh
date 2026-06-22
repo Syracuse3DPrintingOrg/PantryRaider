@@ -409,33 +409,19 @@ install_accel_rotation() {
 # this automatically. Only runs when DISPLAY_ROTATION != 0.
 configure_display_rotation() {
   local rot="${DISPLAY_ROTATION:-0}"
+  local transform="normal"
   case "$rot" in
-    0|"") log "Display rotation is 0 (default); nothing to do"; return 0 ;;
-    90|180|270) ;;
+    0|"") transform="normal" ;;
+    90|180|270) transform="$rot" ;;
     *) warn "DISPLAY_ROTATION=$rot is not valid (use 0, 90, 180, or 270); skipping"; return 0 ;;
   esac
-
-  local cmdline=""
-  for path in /boot/firmware/cmdline.txt /boot/cmdline.txt; do
-    [ -f "$path" ] && cmdline="$path" && break
-  done
-
-  if [ -z "$cmdline" ]; then
-    warn "cmdline.txt not found; skipping KMS rotation (non-Pi or boot partition not mounted)"
-    return 0
-  fi
-
   if [ "$DRY_RUN" = "1" ]; then
-    log "DRY_RUN: would add video=HDMI-A-1:rotate=${rot} to $cmdline"
+    log "DRY_RUN: would set WLR_OUTPUT_TRANSFORM=$transform in /etc/foodassistant/kiosk-env"
     return 0
   fi
-
-  local line
-  line="$(tr -d '\n' < "$cmdline")"
-  # Remove any existing video=HDMI-A-1:rotate=... parameter first (idempotent).
-  line="$(printf '%s' "$line" | sed 's/ video=HDMI-A-1:rotate=[0-9]*//')"
-  printf '%s video=HDMI-A-1:rotate=%s\n' "$line" "$rot" > "$cmdline"
-  log "KMS rotation set to ${rot} degrees in $cmdline (takes effect after reboot)"
+  mkdir -p /etc/foodassistant
+  echo "WLR_OUTPUT_TRANSFORM=$transform" > /etc/foodassistant/kiosk-env
+  log "Kiosk rotation set to ${rot} degrees (compositor transform $transform; applies when the kiosk starts)"
 }
 
 # Step: kiosk (opt-in, display-gated)
@@ -529,7 +515,7 @@ StandardError=journal
 UtmpIdentifier=tty1
 UtmpMode=user
 Environment=XDG_RUNTIME_DIR=/run/user/$kuid
-ExecStart=/usr/bin/cage \$CAGE_ROTATION_ARGS -- \$chromium_bin --kiosk --noerrdialogs \\
+ExecStart=/usr/bin/cage -- $chromium_bin --kiosk --noerrdialogs \\
   --disable-infobars --no-first-run --ozone-platform=wayland \\
   --remote-debugging-port=9222 --disable-restore-session-state $KIOSK_URL
 Restart=always
@@ -561,7 +547,7 @@ configure_streamdeck() {
   log "Installing Stream Deck controller"
 
   local venv_dir="/opt/foodassistant/venv"
-  local sd_dst="/opt/foodassistant/streamdeck"
+  local sd_dst="/opt/foodassistant/foodassistant_streamdeck"
   # The package may sit beside this script (boot payload) or in the cloned repo
   # under streamdeck/. Resolve whichever is present.
   local sd_src=""
@@ -658,7 +644,8 @@ Wants=network-online.target
 
 [Service]
 ExecStart=/opt/foodassistant/venv/bin/python -m foodassistant_streamdeck
-WorkingDirectory=$sd_dst
+Environment=FOODASSISTANT_STREAMDECK_CONFIG=/opt/foodassistant/config.toml
+WorkingDirectory=/opt/foodassistant
 Restart=always
 RestartSec=5
 User=$sd_user

@@ -27,7 +27,7 @@ ALLOWED_ROTATIONS: tuple[int, ...] = (0, 90, 180, 270)
 
 @dataclass
 class Config:
-    base_url: str = "http://localhost:9284"
+    base_url: str = "http://127.0.0.1:9284"
     api_key: str = ""
     brightness: int = 60
     poll_seconds: int = 30

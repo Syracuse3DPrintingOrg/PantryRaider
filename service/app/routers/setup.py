@@ -583,6 +583,7 @@ async def set_display_rotation(payload: KmsRotationPayload):
         async with httpx.AsyncClient(timeout=20.0) as c:
             r = await c.post(f"{_HOST_BRIDGE}/display/rotation",
                              json={"degrees": payload.degrees, "reboot": payload.reboot})
+        settings.save({"display_rotation": payload.degrees})
         return r.json()
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)})
@@ -596,6 +597,19 @@ async def streamdeck_restart():
     try:
         async with httpx.AsyncClient(timeout=15.0) as c:
             r = await c.post(f"{_HOST_BRIDGE}/streamdeck/restart")
+        return r.json()
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)})
+
+
+@router.post("/kiosk/restart")
+async def kiosk_restart():
+    """Restart the kiosk browser so display scale/rotation changes apply."""
+    if not is_raspberry_pi():
+        return JSONResponse({"ok": False, "error": "Not available on this platform."})
+    try:
+        async with httpx.AsyncClient(timeout=35.0) as c:
+            r = await c.post(f"{_HOST_BRIDGE}/kiosk/restart")
         return r.json()
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)})
