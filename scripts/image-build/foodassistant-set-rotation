@@ -43,6 +43,8 @@ line="$(tr -d '\n' < "$cmdline")"
 # Remove any existing rotation parameter.
 line="$(printf '%s' "$line" | sed 's/ video=HDMI-A-1:rotate=[0-9]*//')"
 
+mkdir -p /etc/foodassistant
+
 if [ "$ROT" = "0" ]; then
   printf '%s\n' "$line" > "$cmdline"
   echo "KMS rotation cleared (0 degrees) in $cmdline"
