@@ -640,6 +640,33 @@ async def kiosk_install():
         return JSONResponse({"ok": False, "error": str(e)})
 
 
+@router.get("/streamdeck/config")
+async def streamdeck_config_get():
+    """Proxy GET config from host bridge."""
+    if _HOST_BRIDGE:
+        try:
+            async with httpx.AsyncClient(timeout=3.0) as c:
+                r = await c.get(f"{_HOST_BRIDGE}/streamdeck/config")
+                return JSONResponse(status_code=r.status_code, content=r.json())
+        except Exception as e:
+            return JSONResponse(status_code=500, content={"ok": False, "error": str(e)})
+    return JSONResponse(status_code=500, content={"ok": False, "error": "bridge unavailable"})
+
+
+@router.post("/streamdeck/config")
+async def streamdeck_config_set(request: Request):
+    """Proxy POST config to host bridge."""
+    if _HOST_BRIDGE:
+        try:
+            payload = await request.json()
+            async with httpx.AsyncClient(timeout=3.0) as c:
+                r = await c.post(f"{_HOST_BRIDGE}/streamdeck/config", json=payload)
+                return JSONResponse(status_code=r.status_code, content=r.json())
+        except Exception as e:
+            return JSONResponse(status_code=500, content={"ok": False, "error": str(e)})
+    return JSONResponse(status_code=500, content={"ok": False, "error": "bridge unavailable"})
+
+
 @router.post("/streamdeck/install")
 async def streamdeck_install():
     """Provision the Stream Deck service for a deck attached after first install."""

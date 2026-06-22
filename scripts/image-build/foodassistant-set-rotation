@@ -46,9 +46,11 @@ line="$(printf '%s' "$line" | sed 's/ video=HDMI-A-1:rotate=[0-9]*//')"
 if [ "$ROT" = "0" ]; then
   printf '%s\n' "$line" > "$cmdline"
   echo "KMS rotation cleared (0 degrees) in $cmdline"
+  echo "WLR_OUTPUT_TRANSFORM=normal" > /etc/foodassistant/kiosk-env
 else
   printf '%s video=HDMI-A-1:rotate=%s\n' "$line" "$ROT" > "$cmdline"
   echo "KMS rotation set to ${ROT} degrees in $cmdline"
+  echo "WLR_OUTPUT_TRANSFORM=$ROT" > /etc/foodassistant/kiosk-env
 fi
 
 if [ "$REBOOT" = "1" ]; then

@@ -516,6 +516,7 @@ Wants=network-online.target
 Conflicts=getty@tty1.service
 
 [Service]
+EnvironmentFile=-/etc/foodassistant/kiosk-env
 Type=simple
 User=$kuser
 PAMName=login

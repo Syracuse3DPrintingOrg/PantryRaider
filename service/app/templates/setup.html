@@ -1414,6 +1414,40 @@ docker compose up -d</code></pre>
                   <option value="32" {{ 'selected' if s.streamdeck_key_count == 32 else '' }}>32 keys (Stream Deck XL)</option>
                 </select>
                 <div class="form-text">Used to fill the key layout. You can also set this in <code>config.toml</code>.</div>
+                <div class="form-text">Used to fill the key layout. You can also set this in <code>config.toml</code>.</div>
+              </div>
+              <div class="row g-3 mb-3">
+                <div class="col-md-6">
+                  <label class="form-label">Deck Rotation</label>
+                  <select class="form-select form-select-sm" id="streamdeck_rotation">
+                    <option value="0">0° (Normal)</option>
+                    <option value="90">90° (Clockwise)</option>
+                    <option value="180">180° (Upside down)</option>
+                    <option value="270">270° (Counter-clockwise)</option>
+                  </select>
+                </div>
+                <div class="col-md-6">
+                  <label class="form-label">Brightness (5-100)</label>
+                  <input type="number" class="form-control form-control-sm" id="streamdeck_brightness" min="5" max="100" value="60">
+                </div>
+              </div>
+              <div class="mb-3">
+                <label class="form-label">Keys Layout (comma separated)</label>
+                <textarea class="form-control form-control-sm" id="streamdeck_keys" rows="3" placeholder="inventory, expiring, mealplan, cook, shopping, recipes, timer_1, timer_2, brightness"></textarea>
+                <div class="form-text">Available actions: inventory, expiring, mealplan, cook, shopping, recipes, timer_1, timer_2, timer_3, commit, weather, brightness, page_next, page_prev</div>
+              </div>
+              <div class="row g-3 mb-3">
+                <div class="col-md-6">
+                  <label class="form-label">Weather Location</label>
+                  <input type="text" class="form-control form-control-sm" id="streamdeck_weather_location" placeholder="Leave empty to auto-detect">
+                </div>
+                <div class="col-md-6">
+                  <label class="form-label">Weather Units</label>
+                  <select class="form-select form-select-sm" id="streamdeck_weather_units">
+                    <option value="f">Fahrenheit (°F)</option>
+                    <option value="c">Celsius (°C)</option>
+                  </select>
+                </div>
               </div>
             </div>
             <div id="streamdeck-status-row" class="mb-2"><span class="text-secondary small">Checking...</span></div>
@@ -2610,11 +2644,37 @@ async function saveStreamDeckSettings() {
   if (el) el.innerHTML = '<span class="text-secondary">Saving...</span>';
   const has_streamdeck = document.getElementById('has_streamdeck')?.checked || false;
   const streamdeck_key_count = parseInt(document.getElementById('streamdeck_key_count')?.value || '15', 10);
+  
+  const rotation = parseInt(document.getElementById('streamdeck_rotation')?.value || '0', 10);
+  const brightness = parseInt(document.getElementById('streamdeck_brightness')?.value || '60', 10);
+  const keysStr = document.getElementById('streamdeck_keys')?.value || '';
+  const keys = keysStr.split(',').map(s => s.trim()).filter(s => s.length > 0);
+  const weather_location = document.getElementById('streamdeck_weather_location')?.value || '';
+  const weather_units = document.getElementById('streamdeck_weather_units')?.value || 'f';
+
   try {
     await fetch('setup/save', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({has_streamdeck, streamdeck_key_count}),
     });
+    
+    if (has_streamdeck) {
+      await fetch('setup/streamdeck/config', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          config: {
+            rotation,
+            brightness,
+            keys: keys.length > 0 ? keys : undefined,
+            weather_location,
+            weather_units
+          }
+        }),
+      });
+      // Automatically restart to apply config changes
+      await fetch('setup/streamdeck/restart', {method: 'POST'});
+    }
+    
     if (el) el.innerHTML = '<span class="text-success"><i class="bi bi-check-circle me-1"></i>Stream Deck settings saved.</span>';
   } catch (e) {
     if (el) el.innerHTML = `<span class="text-danger">${e}</span>`;
@@ -2661,6 +2721,37 @@ async function loadHardwareStatus() {
     if (!r.ok) { _renderHwRow('kiosk', null); _renderHwRow('streamdeck', null); return; }
     _renderHwRow('kiosk', r.kiosk);
     _renderHwRow('streamdeck', r.streamdeck);
+    
+    // Load streamdeck config
+    try {
+      const cfg_resp = await fetch('setup/streamdeck/config').then(x => x.json());
+      if (cfg_resp.ok && cfg_resp.config) {
+        const cfg = cfg_resp.config;
+        if (cfg.rotation !== undefined) {
+          const rotEl = document.getElementById('streamdeck_rotation');
+          if (rotEl) rotEl.value = cfg.rotation.toString();
+        }
+        if (cfg.brightness !== undefined) {
+          const brEl = document.getElementById('streamdeck_brightness');
+          if (brEl) brEl.value = cfg.brightness.toString();
+        }
+        if (cfg.keys !== undefined) {
+          const keysEl = document.getElementById('streamdeck_keys');
+          if (keysEl) keysEl.value = cfg.keys.join(', ');
+        }
+        if (cfg.weather_location !== undefined) {
+          const wlEl = document.getElementById('streamdeck_weather_location');
+          if (wlEl) wlEl.value = cfg.weather_location;
+        }
+        if (cfg.weather_units !== undefined) {
+          const wuEl = document.getElementById('streamdeck_weather_units');
+          if (wuEl) wuEl.value = cfg.weather_units;
+        }
+      }
+    } catch (e) {
+      console.warn("Could not load streamdeck config:", e);
+    }
+
     // Keep polling while either install is in flight.
     if ((r.kiosk && r.kiosk.installing) || (r.streamdeck && r.streamdeck.installing)) {
       clearTimeout(window._hwPoll);

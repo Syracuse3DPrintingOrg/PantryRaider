@@ -123,6 +123,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._mealie_status()
         elif self.path == "/hardware/status":
             self._hardware_status()
+        elif self.path == "/streamdeck/config":
+            self._streamdeck_get_config()
         else:
             self._send(404, {"error": "not found"})
 
@@ -141,6 +143,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._provision("kiosk", "foodassistant-kiosk.service")
         elif self.path == "/streamdeck/install":
             self._provision("streamdeck", "foodassistant-streamdeck.service")
+        elif self.path == "/streamdeck/config":
+            self._streamdeck_set_config()
         else:
             self._send(404, {"error": "not found"})
 
@@ -240,6 +244,44 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 self._send(200, {"ok": True})
             else:
                 self._send(500, {"ok": False, "error": (r.stderr or r.stdout).strip()})
+        except Exception as e:
+            self._send(500, {"ok": False, "error": str(e)})
+
+    def _streamdeck_get_config(self):
+        try:
+            import tomllib
+            path = "/opt/foodassistant/foodassistant_streamdeck/config.toml"
+            if not os.path.exists(path):
+                self._send(200, {"ok": True, "config": {}})
+                return
+            with open(path, "rb") as f:
+                data = tomllib.load(f)
+            self._send(200, {"ok": True, "config": data})
+        except Exception as e:
+            self._send(500, {"ok": False, "error": str(e)})
+
+    def _streamdeck_set_config(self):
+        try:
+            body = self._body()
+            cfg = body.get("config", {})
+            lines = []
+            for k, v in cfg.items():
+                if isinstance(v, str):
+                    lines.append(f'{k} = "{v}"')
+                elif isinstance(v, bool):
+                    lines.append(f'{k} = {"true" if v else "false"}')
+                elif isinstance(v, int):
+                    lines.append(f'{k} = {v}')
+                elif isinstance(v, list):
+                    items = ", ".join(f'"{x}"' for x in v)
+                    lines.append(f'{k} = [{items}]')
+            toml_str = "\n".join(lines) + "\n"
+            
+            path = "/opt/foodassistant/foodassistant_streamdeck/config.toml"
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w") as f:
+                f.write(toml_str)
+            self._send(200, {"ok": True})
         except Exception as e:
             self._send(500, {"ok": False, "error": str(e)})
 

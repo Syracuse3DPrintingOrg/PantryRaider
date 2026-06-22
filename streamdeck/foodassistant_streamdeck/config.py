@@ -34,7 +34,7 @@ class Config:
     soon_days: int = 7
     # Optional Chrome DevTools endpoint of a local kiosk browser, e.g.
     # "http://localhost:9222". When set, nav keys steer that browser.
-    kiosk_cdp_url: str = ""
+    kiosk_cdp_url: str = "http://localhost:9222"
     # Clockwise rotation of the rendered key faces, in degrees. Only the four
     # values in ALLOWED_ROTATIONS are accepted; anything else falls back to 0.
     rotation: int = 0
