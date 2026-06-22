@@ -37,9 +37,9 @@ INSTALL_DIR = "/opt/foodassistant"
 # Candidate locations for the provisioner script (curl-installer clone first,
 # then a baked-image asset dir, then the legacy home-dir clone).
 _FIRSTBOOT_CANDIDATES = [
-    "/opt/foodassistant-src/scripts/image-build/firstboot.sh",
-    "/opt/foodassistant-setup/firstboot.sh",
+    "/boot/firmware/firstboot.sh",
     "/home/foodassistant/FoodAssistant/scripts/image-build/firstboot.sh",
+    "/opt/foodassistant-src/scripts/image-build/firstboot.sh",
 ]
 # Background provisioning processes, keyed by step name ("kiosk"/"streamdeck").
 _INSTALL_PROCS = {}
