@@ -529,7 +529,7 @@ StandardError=journal
 UtmpIdentifier=tty1
 UtmpMode=user
 Environment=XDG_RUNTIME_DIR=/run/user/$kuid
-ExecStart=/usr/bin/cage -- $chromium_bin --kiosk --noerrdialogs \\
+ExecStart=/usr/bin/cage \$CAGE_ROTATION_ARGS -- \$chromium_bin --kiosk --noerrdialogs \\
   --disable-infobars --no-first-run --ozone-platform=wayland \\
   --remote-debugging-port=9222 --disable-restore-session-state $KIOSK_URL
 Restart=always

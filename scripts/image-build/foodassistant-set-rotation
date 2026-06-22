@@ -48,11 +48,17 @@ mkdir -p /etc/foodassistant
 if [ "$ROT" = "0" ]; then
   printf '%s\n' "$line" > "$cmdline"
   echo "KMS rotation cleared (0 degrees) in $cmdline"
-  echo "WLR_OUTPUT_TRANSFORM=normal" > /etc/foodassistant/kiosk-env
+  echo "CAGE_ROTATION_ARGS=" > /etc/foodassistant/kiosk-env
 else
   printf '%s video=HDMI-A-1:rotate=%s\n' "$line" "$ROT" > "$cmdline"
   echo "KMS rotation set to ${ROT} degrees in $cmdline"
-  echo "WLR_OUTPUT_TRANSFORM=$ROT" > /etc/foodassistant/kiosk-env
+  
+  CAGE_ARGS=""
+  if [ "$ROT" = "90" ]; then CAGE_ARGS="-r"
+  elif [ "$ROT" = "180" ]; then CAGE_ARGS="-r -r"
+  elif [ "$ROT" = "270" ]; then CAGE_ARGS="-r -r -r"
+  fi
+  echo "CAGE_ROTATION_ARGS=$CAGE_ARGS" > /etc/foodassistant/kiosk-env
 fi
 
 if [ "$REBOOT" = "1" ]; then

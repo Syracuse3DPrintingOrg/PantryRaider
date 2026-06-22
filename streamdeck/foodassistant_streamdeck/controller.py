@@ -186,7 +186,13 @@ class Controller:
         if slot >= len(page) or page[slot] is None:
             return
         spec = page[slot]
-        asyncio.run_coroutine_threadsafe(self._handle(spec), self.loop)
+        fut = asyncio.run_coroutine_threadsafe(self._handle(spec), self.loop)
+        def _on_done(f):
+            try:
+                f.result()
+            except Exception as e:
+                log.error("Action failed: %s", e)
+        fut.add_done_callback(_on_done)
 
     def _timer_press(self, name: str) -> None:
         if name not in self.timers:
