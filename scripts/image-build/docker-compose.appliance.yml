@@ -32,6 +32,7 @@ services:
         required: false
     environment:
       - TZ=${TZ:-America/New_York}
+      - FOODASSISTANT_FORCE_MODEL=Raspberry Pi
     volumes:
       - ./data:/app/data
     restart: unless-stopped
