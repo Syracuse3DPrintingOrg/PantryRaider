@@ -950,9 +950,15 @@ configure_port80() {
     iptables -t nat -A PREROUTING -p tcp --dport 80 -j REDIRECT --to-port 9284
     log "Added iptables PREROUTING rule: port 80 -> 9284"
   fi
-  # Same for loopback (OUTPUT chain covers connections from localhost).
-  if ! iptables -t nat -C OUTPUT -p tcp --dport 80 -j REDIRECT --to-port 9284 2>/dev/null; then
-    iptables -t nat -A OUTPUT     -p tcp --dport 80 -j REDIRECT --to-port 9284
+  # Same for the device browsing to its own port 80, but scoped to the loopback
+  # interface. Locally generated packets to our own address (127.0.0.1 or the
+  # host's own LAN IP) route through lo, while traffic to other hosts exits a
+  # physical NIC. Without "-o lo" this rule hijacked ALL outbound port-80
+  # traffic, including apt to the Debian mirrors, which then hit the local app
+  # and got a 401. Remove any old unscoped rule before adding the scoped one.
+  iptables -t nat -D OUTPUT -p tcp --dport 80 -j REDIRECT --to-port 9284 2>/dev/null || true
+  if ! iptables -t nat -C OUTPUT -o lo -p tcp --dport 80 -j REDIRECT --to-port 9284 2>/dev/null; then
+    iptables -t nat -A OUTPUT -o lo -p tcp --dport 80 -j REDIRECT --to-port 9284
   fi
 
   # Install a oneshot systemd unit that re-applies the rule on boot. iptables
@@ -972,7 +978,7 @@ Type=oneshot
 RemainAfterExit=yes
 # Idempotent: only add each rule if it is not already present.
 ExecStart=/bin/sh -c 'iptables -t nat -C PREROUTING -p tcp --dport 80 -j REDIRECT --to-port 9284 2>/dev/null || iptables -t nat -A PREROUTING -p tcp --dport 80 -j REDIRECT --to-port 9284'
-ExecStart=/bin/sh -c 'iptables -t nat -C OUTPUT -p tcp --dport 80 -j REDIRECT --to-port 9284 2>/dev/null || iptables -t nat -A OUTPUT -p tcp --dport 80 -j REDIRECT --to-port 9284'
+ExecStart=/bin/sh -c 'iptables -t nat -D OUTPUT -p tcp --dport 80 -j REDIRECT --to-port 9284 2>/dev/null; iptables -t nat -C OUTPUT -o lo -p tcp --dport 80 -j REDIRECT --to-port 9284 2>/dev/null || iptables -t nat -A OUTPUT -o lo -p tcp --dport 80 -j REDIRECT --to-port 9284'
 
 [Install]
 WantedBy=multi-user.target
