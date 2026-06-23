@@ -828,12 +828,18 @@ deploy_remote_service() {
   else
     cat > "$env_file" <<EOF
 DEPLOYMENT_MODE=pi_remote
-REMOTE_SERVER_URL=${REMOTE_SERVER_URL:-}
 TZ=${TZ:-America/New_York}
 AUTH_REQUIRED=false
 FOODASSISTANT_FORCE_MODEL=Raspberry Pi
 DATA_DIR=$INSTALL_DIR/data
 EOF
+    # Only pin REMOTE_SERVER_URL when we actually have one. An empty env var
+    # still counts as "set" to pydantic and would shadow the value saved to
+    # settings.json by the web wizard, bouncing the device back to setup on
+    # every reboot. When blank here, settings.json is the single source.
+    if [ -n "${REMOTE_SERVER_URL:-}" ]; then
+      echo "REMOTE_SERVER_URL=${REMOTE_SERVER_URL}" >> "$env_file"
+    fi
     chmod 600 "$env_file"
   fi
 

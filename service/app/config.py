@@ -111,7 +111,7 @@ SATELLITE_PULL_FIELDS = [
     "recipe_source", "themealdb_api_key", "spoonacular_api_key",
     "staple_items", "cook_ai_context",
     "perishable_days", "expiring_soon_days", "suggest_per_tier",
-    "custom_storage_categories",
+    "custom_storage_categories", "ui_theme",
 ]
 
 # Settings that hold credentials. These are redacted from backups unless the
@@ -383,6 +383,14 @@ if _sf.exists():
         for _k, _v in _saved.items():
             if _k in _SAVEABLE and _k not in settings.model_fields_set:
                 object.__setattr__(settings, _k, _v)
+        # Self-heal the satellite link fields. The systemd unit may pass these as
+        # env vars, and an EMPTY env value (e.g. REMOTE_SERVER_URL= when the URL
+        # was entered later in the web wizard) counts as "set" and would shadow
+        # the saved value, bouncing the device back to setup on every reboot. A
+        # non-empty env var still wins; we only fill a blank live value here.
+        for _k in ("remote_server_url", "upstream_api_key"):
+            if not getattr(settings, _k, "") and _saved.get(_k):
+                object.__setattr__(settings, _k, _saved[_k])
     except Exception:
         pass
 
