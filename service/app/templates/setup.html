@@ -2851,6 +2851,13 @@ function _sdActionByName(name) {
   return _sdCatalog.find(a => a.name === name) || null;
 }
 
+// Bootstrap Icons class for a catalog action's glyph (the deck uses the same
+// glyph names). Accepts "plus-circle" or "bi-plus-circle"; '' when unset.
+function _sdIconClass(action) {
+  const g = action && action.icon ? String(action.icon).replace(/^bi-/, '') : '';
+  return g ? 'bi bi-' + g : '';
+}
+
 function _sdEffectiveDim(count, rotation) {
   const dim = SD_GRID[count] || SD_GRID[15];
   // For 90 or 270 degree rotation the deck is mounted on its side,
@@ -2864,15 +2871,24 @@ function _sdMakeCell(idx, name) {
   const cell = document.createElement('div');
   cell.className = 'rounded position-relative';
   cell.style.cssText = [
-    'min-width:60px', 'min-height:44px', 'display:flex', 'align-items:center',
-    'justify-content:center', 'overflow:hidden', `background:${action.color || '#1f2937'}`,
+    'min-width:60px', 'min-height:44px', 'display:flex', 'flex-direction:column',
+    'align-items:center', 'justify-content:center', 'gap:1px',
+    'overflow:hidden', `background:${action.color || '#1f2937'}`,
     'cursor:grab', 'user-select:none', 'transition:filter 0.1s', 'border:2px solid rgba(255,255,255,0.15)',
   ].join(';');
   cell.draggable = true;
   cell.dataset.idx = String(idx);
 
+  const iconCls = _sdIconClass(action);
+  if (iconCls) {
+    const ic = document.createElement('i');
+    ic.className = iconCls;
+    ic.style.cssText = 'color:#fff;font-size:0.95rem;line-height:1;';
+    cell.appendChild(ic);
+  }
+
   const lbl = document.createElement('span');
-  lbl.style.cssText = 'color:#fff;font-size:0.65rem;line-height:1.1;text-align:center;word-break:break-word;padding:2px 3px;';
+  lbl.style.cssText = 'color:#fff;font-size:0.6rem;line-height:1.1;text-align:center;word-break:break-word;padding:0 3px;';
   lbl.textContent = action.label;
   cell.appendChild(lbl);
 
@@ -2966,7 +2982,9 @@ async function _sdRenderGrid() {
           'border:1px solid rgba(255,255,255,0.2)',
         ].join(';');
         chip.draggable = true;
-        chip.textContent = a.label;
+        const chipIcon = _sdIconClass(a);
+        chip.innerHTML = (chipIcon ? `<i class="${chipIcon} me-1"></i>` : '') +
+          escapeHtml(a.label);
         chip.title = a.description || '';
         chip.addEventListener('dragstart', e => {
           _sdDragSrc = {type:'palette', name: a.name};
