@@ -672,6 +672,11 @@
           <button class="nav-link d-flex align-items-center" data-bs-toggle="pill" data-bs-target="#pane-tunnel" type="button">
             <i class="bi bi-globe me-2"></i>Remote Access
           </button>
+          {% if not features.satellite %}
+          <button class="nav-link d-flex align-items-center" data-bs-toggle="pill" data-bs-target="#pane-devices" type="button" onclick="loadDevices()">
+            <i class="bi bi-hdd-stack me-2"></i>Satellite Devices
+          </button>
+          {% endif %}
           {% if is_pi %}
           <div class="nav-link text-secondary px-2 mt-2 mb-0" style="font-size:0.7rem;letter-spacing:.06em;text-transform:uppercase;">Appliance</div>
           <button class="nav-link d-flex align-items-center" data-bs-toggle="pill" data-bs-target="#pane-display" type="button" onclick="loadDisplayStatus(); loadHardwareStatus()">
@@ -1383,6 +1388,37 @@ docker compose up -d</code></pre>
             </div>
           </div>
         </div>
+
+        {% if not features.satellite %}
+        <!-- Satellite Devices (main server only) -->
+        <div class="tab-pane fade" id="pane-devices">
+          <p class="pane-intro">Pi Remote satellites that pull their config from this server. Each device checks in on every config sync, so this list updates itself. You can queue a resync or forget a device here.</p>
+
+          <div class="section-card mb-3">
+            <div class="section-title d-flex align-items-center">
+              <i class="bi bi-hdd-stack text-info"></i> Known Devices
+              <button class="btn btn-outline-secondary btn-sm ms-auto" onclick="loadDevices()" title="Refresh">
+                <i class="bi bi-arrow-clockwise"></i>
+              </button>
+            </div>
+            <div id="devices-list">
+              <span class="text-secondary small"><span class="spinner-border spinner-border-sm me-2"></span>Loading...</span>
+            </div>
+          </div>
+
+          <div class="section-card">
+            <div class="section-title"><i class="bi bi-search text-info"></i> Find Devices on the LAN</div>
+            <p class="text-secondary small">Scan your local network for FoodAssistant instances that have not checked in yet. Leave the range blank to scan this server's own subnet.</p>
+            <div class="input-group mb-2" style="max-width:420px">
+              <input type="text" class="form-control" id="scan_cidr" placeholder="192.168.1.0/24 (optional)" autocomplete="off">
+              <button class="btn btn-outline-info" type="button" onclick="scanLan()" id="scan-lan-btn">
+                <i class="bi bi-search me-1"></i>Scan LAN
+              </button>
+            </div>
+            <div class="test-result" id="scan-result"></div>
+          </div>
+        </div>
+        {% endif %}
 
         {% if is_pi %}
 
@@ -3297,6 +3333,104 @@ async function changeHostname() {
     }
   } catch (e) {
     if (el) el.innerHTML = `<span class="text-danger">${e}</span>`;
+  }
+}
+
+// -- Satellite devices (main server) ----------------------------------------
+
+function deviceRowHtml(d) {
+  const name = d.label || d.hostname || d.device_id || 'unknown device';
+  const online = d.online
+    ? '<span class="badge bg-success">Online</span>'
+    : '<span class="badge bg-secondary">Offline</span>';
+  const ip = d.ip
+    ? `<a href="http://${escapeHtml(d.ip)}:9284/" target="_blank" rel="noopener">${escapeHtml(d.ip)}</a>`
+    : '<span class="text-secondary">--</span>';
+  const mode = d.deployment_mode ? escapeHtml(d.deployment_mode) : '--';
+  const version = d.version ? escapeHtml(d.version) : '--';
+  const seen = d.last_seen ? escapeHtml(d.last_seen) : '--';
+  const id = escapeHtml(d.device_id || '').replace(/'/g, "\\'");
+  return `<tr>
+    <td>${online}<div class="small fw-semibold mt-1">${escapeHtml(name)}</div></td>
+    <td class="small">${ip}</td>
+    <td class="small">${mode}</td>
+    <td class="small">${version}</td>
+    <td class="small text-secondary">${seen}</td>
+    <td class="text-end text-nowrap">
+      <button class="btn btn-outline-secondary btn-sm" onclick="resyncDevice('${id}')" title="Queue a resync"><i class="bi bi-arrow-repeat"></i></button>
+      <button class="btn btn-outline-danger btn-sm" onclick="forgetDevice('${id}')" title="Forget this device"><i class="bi bi-trash"></i></button>
+    </td>
+  </tr>`;
+}
+
+async function loadDevices() {
+  const out = document.getElementById('devices-list');
+  if (!out) return;
+  out.innerHTML = '<span class="text-secondary small"><span class="spinner-border spinner-border-sm me-2"></span>Loading...</span>';
+  try {
+    const r = await fetch('api/devices');
+    const d = await r.json();
+    const devs = d.devices || [];
+    if (!devs.length) {
+      out.innerHTML = '<span class="text-secondary small">No devices yet. A satellite appears here after its first config sync, or run a LAN scan below.</span>';
+      return;
+    }
+    const rows = devs.map(deviceRowHtml).join('');
+    out.innerHTML = `<div class="table-responsive"><table class="table table-sm align-middle mb-0">
+      <thead><tr class="small text-secondary">
+        <th>Device</th><th>IP</th><th>Mode</th><th>Version</th><th>Last seen</th><th></th>
+      </tr></thead><tbody>${rows}</tbody></table></div>`;
+  } catch (e) {
+    out.innerHTML = `<span class="text-danger small">${escapeHtml(String(e))}</span>`;
+  }
+}
+
+async function resyncDevice(id) {
+  try {
+    await fetch(`api/devices/${encodeURIComponent(id)}/command`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({command: 'resync'}),
+    });
+  } catch (e) { /* best effort */ }
+  loadDevices();
+}
+
+async function forgetDevice(id) {
+  if (!confirm('Forget this device? It reappears on its next check-in.')) return;
+  try {
+    await fetch(`api/devices/${encodeURIComponent(id)}`, {method: 'DELETE'});
+  } catch (e) { /* best effort */ }
+  loadDevices();
+}
+
+async function scanLan() {
+  const btn = document.getElementById('scan-lan-btn');
+  const out = document.getElementById('scan-result');
+  if (btn) btn.disabled = true;
+  if (out) { out.className = 'test-result text-secondary'; out.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Scanning the network, this can take a moment...'; }
+  try {
+    const r = await fetch('api/devices/scan', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({cidr: val('scan_cidr') || ''}),
+    });
+    const d = await r.json();
+    if (!d.ok) {
+      if (out) { out.className = 'test-result text-danger'; out.textContent = d.error || 'Scan failed.'; }
+      return;
+    }
+    const found = d.found || [];
+    const where = d.cidr ? ` on ${escapeHtml(d.cidr)}` : '';
+    if (out) {
+      out.className = 'test-result text-success';
+      out.textContent = found.length
+        ? `Found ${found.length} instance(s)${where}.`
+        : `No instances found${where}.`;
+    }
+    loadDevices();
+  } catch (e) {
+    if (out) { out.className = 'test-result text-danger'; out.textContent = String(e); }
+  } finally {
+    if (btn) btn.disabled = false;
   }
 }
 </script>

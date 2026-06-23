@@ -12,12 +12,27 @@ whatever it last had (or runs unconfigured) rather than crashing.
 from __future__ import annotations
 
 import logging
+import socket
 
 import httpx
 
-from ..config import settings, SATELLITE_PULL_FIELDS
+from ..config import settings, SATELLITE_PULL_FIELDS, APP_VERSION
 
 logger = logging.getLogger("foodassistant.satellite")
+
+
+def _local_ip() -> str:
+    """Best-effort local IP for this device, '' if it cannot be determined.
+
+    Opening a UDP socket toward a public address sends nothing but lets the OS
+    pick the outbound interface, whose address we read back.
+    """
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.connect(("8.8.8.8", 80))
+            return sock.getsockname()[0]
+    except OSError:
+        return ""
 
 
 def _apply_config(config: dict) -> list[str]:
@@ -67,20 +82,31 @@ def sync_from_upstream(timeout: float = 8.0) -> dict:
     """Pull backend config + defaults from the main server and apply them.
 
     Returns a small status dict: {"ok": bool, "applied": [...], "defaults": N,
-    "error": str|None}. Never raises on a network/HTTP failure.
+    "command": str|None, "error": str|None}. Never raises on a network/HTTP
+    failure.
     """
     if not settings.is_satellite():
-        return {"ok": False, "error": "not a satellite", "applied": [], "defaults": 0}
+        return {"ok": False, "error": "not a satellite", "applied": [], "defaults": 0, "command": None}
     base = (settings.remote_server_url or "").rstrip("/")
     if not base or not settings.upstream_api_key:
-        return {"ok": False, "error": "missing server URL or API key", "applied": [], "defaults": 0}
+        return {"ok": False, "error": "missing server URL or API key", "applied": [], "defaults": 0, "command": None}
 
     url = f"{base}/api/config/satellite"
+    # Identity headers turn this pull into a heartbeat: the server records us in
+    # its remotes list and may hand back a queued command in the response.
+    headers = {
+        "X-API-Key": settings.upstream_api_key,
+        "X-Device-Id": settings.device_id,
+        "X-Device-Hostname": socket.gethostname(),
+        "X-Device-Mode": settings.deployment_mode,
+        "X-Device-Version": APP_VERSION,
+        "X-Device-Ip": _local_ip(),
+    }
     try:
-        resp = httpx.get(url, headers={"X-API-Key": settings.upstream_api_key}, timeout=timeout)
+        resp = httpx.get(url, headers=headers, timeout=timeout)
     except Exception as exc:  # network error: keep prior config
         logger.warning("satellite sync: cannot reach %s: %s", url, exc)
-        return {"ok": False, "error": f"cannot reach server: {exc}", "applied": [], "defaults": 0}
+        return {"ok": False, "error": f"cannot reach server: {exc}", "applied": [], "defaults": 0, "command": None}
 
     if resp.status_code != 200:
         detail = ""
@@ -89,7 +115,7 @@ def sync_from_upstream(timeout: float = 8.0) -> dict:
         except Exception:
             detail = resp.text[:200]
         logger.warning("satellite sync: server returned %s: %s", resp.status_code, detail)
-        return {"ok": False, "error": f"server {resp.status_code}: {detail}", "applied": [], "defaults": 0}
+        return {"ok": False, "error": f"server {resp.status_code}: {detail}", "applied": [], "defaults": 0, "command": None}
 
     data = resp.json()
     applied = _apply_config(data.get("config", {}))
@@ -106,6 +132,15 @@ def sync_from_upstream(timeout: float = 8.0) -> dict:
     except Exception:
         pass
 
+    command = data.get("command")
+    if command == "resync":
+        # The heartbeat already re-pulled config in this same request, so a
+        # queued resync is satisfied just by us getting here. Nothing more to do.
+        logger.info("satellite sync: server requested resync (already fulfilled by this pull)")
+    elif command:
+        # Unknown command from a newer server: ignore so old satellites keep working.
+        logger.info("satellite sync: ignoring unknown command %r", command)
+
     logger.info("satellite sync: applied %d fields, %d defaults from %s",
                 len(applied), defaults_n, base)
-    return {"ok": True, "applied": applied, "defaults": defaults_n, "error": None}
+    return {"ok": True, "applied": applied, "defaults": defaults_n, "command": command, "error": None}

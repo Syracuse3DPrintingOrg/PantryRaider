@@ -12,7 +12,7 @@ from .database import engine, get_db, Base
 from .ingress import ingress_redirect
 from .models import db_models  # noqa: F401: registers models with Base
 from .services.defaults import seed_defaults
-from .routers import analyze, defaults, inventory, expiring, ui, setup, pending, mealie, admin, qr, tunnel, grocy, satellite, proxy
+from .routers import analyze, defaults, inventory, expiring, ui, setup, pending, mealie, admin, qr, tunnel, grocy, satellite, proxy, devices
 
 
 @asynccontextmanager
@@ -173,6 +173,7 @@ app.include_router(ui.router)
 app.include_router(qr.router)
 app.include_router(satellite.router)
 app.include_router(proxy.router)
+app.include_router(devices.router)
 
 
 @app.get("/")
@@ -180,10 +181,17 @@ async def root():
     return RedirectResponse("/ui/", status_code=303)
 
 
+# Stable fingerprint so a LAN scan can tell a FoodAssistant instance apart from
+# any other service answering on the same port. Public (no auth) on purpose: it
+# reveals only the app name, version and deployment mode, never config or keys.
+_FINGERPRINT = {"app": "foodassistant", "version": APP_VERSION}
+
+
 @app.get("/health")
 async def health():
     if not settings.is_configured():
-        return {"status": "unconfigured", "setup": "/setup"}
+        return {**_FINGERPRINT, "status": "unconfigured", "setup": "/setup",
+                "mode": settings.deployment_mode}
     from .dependencies import get_vision_provider
     from .services.grocy import GrocyClient
     provider = get_vision_provider()
@@ -193,7 +201,9 @@ async def health():
     else:
         vision_status = "not configured"
     return {
+        **_FINGERPRINT,
         "status": "ok",
+        "mode": settings.deployment_mode,
         "vision_provider": vision_status,
         "grocy": "ok" if await grocy.health_check() else "error",
     }

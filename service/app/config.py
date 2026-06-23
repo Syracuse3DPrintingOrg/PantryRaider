@@ -89,7 +89,7 @@ _SAVEABLE = [
     "nav_order", "nav_hidden", "custom_storage_categories", "ui_theme", "ui_scale", "display_rotation",
     "has_streamdeck", "streamdeck_key_count", "display_touch",
     "deployment_mode", "remote_server_url", "upstream_api_key", "kiosk_pin",
-    "satellite_sync_minutes",
+    "satellite_sync_minutes", "device_id",
     "secret_key", "auth_password", "totp_secret", "api_key", "auth_required",
     "rclone_remote", "rclone_schedule_hours",
     "tunnel_mode", "tunnel_token", "tunnel_url",
@@ -251,6 +251,11 @@ class Settings(BaseSettings):
     # in minutes. 0 disables the periodic refresh (boot + manual sync only).
     satellite_sync_minutes: int = 15
 
+    # Stable per-device identifier. Auto-generated on first run and persisted so
+    # a satellite presents the same identity across reboots and IP changes, and
+    # so the main server can track it as one device in its remotes list.
+    device_id: str = ""
+
     def is_remote_mode(self) -> bool:
         return self.deployment_mode == "pi_remote"
 
@@ -389,5 +394,15 @@ if not settings.secret_key:
     object.__setattr__(settings, "secret_key", _secrets.token_hex(32))
     try:
         settings.save({"secret_key": settings.secret_key})
+    except OSError:
+        pass
+
+# Auto-generate a stable device id on first run (used by satellite heartbeat and
+# the server's remotes list). Short hex is plenty: it only needs to be unique
+# among a household's devices, not unguessable.
+if not settings.device_id:
+    object.__setattr__(settings, "device_id", _secrets.token_hex(8))
+    try:
+        settings.save({"device_id": settings.device_id})
     except OSError:
         pass
