@@ -24,7 +24,7 @@ _SECRET_FIELDS = [
     "gemini_api_key", "openai_api_key", "anthropic_api_key",
     "grocy_api_key", "mealie_api_key",
     "themealdb_api_key", "spoonacular_api_key",
-    "auth_password", "api_key", "upstream_api_key",
+    "auth_password", "api_key", "upstream_api_key", "kiosk_pin",
 ]
 _CLEAR = "__CLEAR__"
 
@@ -72,6 +72,7 @@ class SetupPayload(BaseModel):
     deployment_mode: str = ""
     remote_server_url: str = ""
     upstream_api_key: str = ""
+    kiosk_pin: str = ""
     barcode_llm_fallback: bool = False
     barcode_autocheck_shopping: bool = False
     cook_ai_context: str = ""
@@ -649,15 +650,32 @@ async def kiosk_restart():
 
 @router.post("/mealie/start")
 async def mealie_start():
-    """Start the Mealie container on a Pi appliance via the host bridge."""
+    """Kick off the Mealie container start on a Pi appliance via the host bridge.
+
+    The bridge runs the image pull/up in the background and returns at once, so
+    a short timeout is enough; the web UI polls /mealie/status for progress.
+    """
     if not is_raspberry_pi():
         return JSONResponse({"ok": False, "error": "Not available on this platform."})
     try:
-        async with httpx.AsyncClient(timeout=130.0) as c:
+        async with httpx.AsyncClient(timeout=10.0) as c:
             r = await c.post(f"{_HOST_BRIDGE}/mealie/start")
         return r.json()
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)})
+
+
+@router.get("/mealie/status")
+async def mealie_status():
+    """Mealie start progress (not-installed / starting / running), via the bridge."""
+    if not is_raspberry_pi():
+        return {"ok": False, "error": "Not available on this platform."}
+    try:
+        async with httpx.AsyncClient(timeout=12.0) as c:
+            r = (await c.get(f"{_HOST_BRIDGE}/mealie/status")).json()
+        return r
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
 
 
 @router.get("/hardware/status")
