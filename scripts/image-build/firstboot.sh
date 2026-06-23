@@ -810,14 +810,17 @@ deploy_remote_service() {
     fi
   fi
 
-  # Write the .env file that the service reads on startup.
+  # Write the .env file that the service reads on startup. Always (re)write it:
+  # it is derived state, and REMOTE_SERVER_URL is carried in from settings.json
+  # by _load_mode_from_settings, so a re-provision keeps the user's URL while
+  # still picking up corrections like DATA_DIR. A stale env file here was what
+  # left data_dir at the Docker default (/app/data) and crashed the service.
   local env_file="/opt/foodassistant/remote.env"
-  if [ ! -f "$env_file" ] || [ "$DRY_RUN" = "1" ]; then
-    log "Writing $env_file"
-    if [ "$DRY_RUN" = "1" ]; then
-      log "DRY_RUN would write $env_file (DEPLOYMENT_MODE=pi_remote, REMOTE_SERVER_URL, TZ)"
-    else
-      cat > "$env_file" <<EOF
+  log "Writing $env_file"
+  if [ "$DRY_RUN" = "1" ]; then
+    log "DRY_RUN would write $env_file (DEPLOYMENT_MODE=pi_remote, REMOTE_SERVER_URL, TZ, DATA_DIR)"
+  else
+    cat > "$env_file" <<EOF
 DEPLOYMENT_MODE=pi_remote
 REMOTE_SERVER_URL=${REMOTE_SERVER_URL:-}
 TZ=${TZ:-America/New_York}
@@ -825,8 +828,7 @@ AUTH_REQUIRED=false
 FOODASSISTANT_FORCE_MODEL=Raspberry Pi
 DATA_DIR=$INSTALL_DIR/data
 EOF
-      chmod 600 "$env_file"
-    fi
+    chmod 600 "$env_file"
   fi
 
   seed_app_settings
