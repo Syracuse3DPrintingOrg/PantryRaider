@@ -300,6 +300,95 @@ def test_density_factor_clamped_and_inverse():
     assert render._density_factor(96, 96) == 1.0
 
 
+# -- action -> icon mapping ------------------------------------------------
+
+
+def test_every_real_action_has_an_icon_glyph():
+    # Every bindable action (everything the web grid offers except the "blank"
+    # placeholder) must map to a Bootstrap Icons glyph name.
+    for name in actions.ACTIONS:
+        glyph = actions.icon_for(name)
+        assert glyph, f"action {name} has no icon mapping"
+
+
+def test_action_specs_carry_their_icon():
+    # The glyph stamped onto each ActionSpec must match the source-of-truth map.
+    for name, spec in actions.ACTIONS.items():
+        assert spec.icon == actions.ACTION_ICONS[name]
+
+
+def test_known_action_icons_match_web_ui():
+    # Spot-check the glyphs the web UI uses for the same action so the deck and
+    # the browser stay in sync (navigation.py + pending.html commit button).
+    assert actions.icon_for("inventory") == "grid"
+    assert actions.icon_for("expiring") == "clock-history"
+    assert actions.icon_for("add") == "plus-circle"
+    assert actions.icon_for("pending") == "hourglass-split"
+    assert actions.icon_for("cook") == "lightbulb"
+    assert actions.icon_for("commit") == "cloud-upload"
+    assert actions.icon_for("shopping") == "cart"
+    assert actions.icon_for("defaults") == "table"
+
+
+def test_catalog_exposes_icons():
+    cat = {a["name"]: a for a in actions.catalog()}
+    assert cat["commit"]["icon"] == "cloud-upload"
+    # The blank placeholder is not an action and carries no glyph.
+    assert cat["blank"].get("icon", "") == ""
+
+
+def test_every_action_glyph_resolves_to_a_codepoint():
+    # If the font map is vendored, every action glyph must resolve to a real
+    # codepoint. When the map is absent (font not yet dropped in), skip rather
+    # than fail, since the renderer degrades to text-only by design.
+    if not render._icon_codepoints():
+        pytest.skip("bootstrap-icons.json not vendored")
+    for name in actions.ACTIONS:
+        glyph = actions.icon_for(name)
+        assert render._icon_char(glyph) is not None, f"{name}:{glyph} unresolved"
+
+
+def test_icon_char_accepts_bi_prefix():
+    if not render._icon_codepoints():
+        pytest.skip("bootstrap-icons.json not vendored")
+    assert render._icon_char("bi-cart") == render._icon_char("cart")
+
+
+def test_icon_char_unknown_is_none():
+    assert render._icon_char("definitely-not-a-real-glyph-xyz") is None
+    assert render._icon_char("") is None
+
+
+# -- icon rendering --------------------------------------------------------
+
+
+def test_render_key_with_icon_size_and_mode():
+    img = render.render_key(96, 96, label="Cook", color="#7e22ce", icon="lightbulb")
+    assert img.size == (96, 96)
+    assert img.mode == "RGB"
+
+
+def test_render_key_with_missing_glyph_falls_back_to_text():
+    # An unknown glyph must not raise; it renders the same as a text-only key.
+    plain = render.render_key(96, 96, label="Cook", color="#7e22ce")
+    missing = render.render_key(
+        96, 96, label="Cook", color="#7e22ce", icon="no-such-glyph"
+    )
+    assert missing.size == plain.size == (96, 96)
+    assert missing.tobytes() == plain.tobytes()
+
+
+def test_status_key_ignores_icon_and_keeps_count_layout():
+    # Status keys keep their count-dominant layout regardless of an icon arg.
+    with_icon = render.render_key(
+        96, 96, label="Pending", color="#1d4ed8", count=3, icon="hourglass-split"
+    )
+    without = render.render_key(
+        96, 96, label="Pending", color="#1d4ed8", count=3
+    )
+    assert with_icon.tobytes() == without.tobytes()
+
+
 # -- rotation config -------------------------------------------------------
 
 

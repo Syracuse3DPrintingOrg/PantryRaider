@@ -7,7 +7,9 @@ import so it can be exercised in tests.
 """
 from __future__ import annotations
 
+import json
 from functools import lru_cache
+from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
@@ -15,6 +17,18 @@ _FONT_CANDIDATES = (
     "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
     "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
 )
+
+# Vendored Bootstrap Icons font and its name -> codepoint table. The font lets
+# PIL rasterise the same glyphs the web UI uses (see actions.ACTION_ICONS).
+# Both files are optional: if either is missing the renderer falls back to a
+# text-only key, so the deck still works without the binary present.
+_ASSETS_DIR = Path(__file__).resolve().parent / "assets"
+_ICON_FONT_PATH = _ASSETS_DIR / "bootstrap-icons.ttf"
+_ICON_MAP_PATH = _ASSETS_DIR / "bootstrap-icons.json"
+
+# Fraction of key height used for the glyph when a key has both an icon and a
+# label stacked beneath it.
+_ICON_FRACTION = 0.42
 
 # Per-model pixel density (FoodAssistant-pjk).
 #
@@ -53,6 +67,43 @@ def _font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
         except OSError:
             continue
     return ImageFont.load_default()
+
+
+@lru_cache(maxsize=1)
+def _icon_codepoints() -> dict[str, int]:
+    """Bootstrap Icons name -> codepoint, or empty if the map is absent."""
+    try:
+        data = json.loads(_ICON_MAP_PATH.read_text())
+    except (OSError, ValueError):
+        return {}
+    return {k: int(v) for k, v in data.items() if isinstance(v, int)}
+
+
+@lru_cache(maxsize=32)
+def _icon_font(size: int) -> ImageFont.FreeTypeFont | None:
+    """Load the vendored Bootstrap Icons font at ``size``, or None if missing."""
+    try:
+        return ImageFont.truetype(str(_ICON_FONT_PATH), size)
+    except OSError:
+        return None
+
+
+def _icon_char(name: str) -> str | None:
+    """Resolve a Bootstrap Icons glyph name to its character, or None.
+
+    Accepts names with or without the ``bi-`` prefix. Returns None when the
+    glyph is unknown or the codepoint table could not be loaded.
+    """
+    if not name:
+        return None
+    key = name[3:] if name.startswith("bi-") else name
+    cp = _icon_codepoints().get(key)
+    return chr(cp) if cp is not None else None
+
+
+def icon_available(name: str) -> bool:
+    """True when both the font and the named glyph are present."""
+    return _icon_char(name) is not None and _icon_font(16) is not None
 
 
 def _hex_to_rgb(value: str) -> tuple[int, int, int]:
@@ -135,6 +186,7 @@ def render_key(
     count: int | None = None,
     alert: bool = False,
     *,
+    icon: str = "",
     reference_px: int = _REFERENCE_PX,
 ) -> Image.Image:
     """Render one key.
@@ -142,6 +194,13 @@ def render_key(
     ``count`` shows a large number for status keys; when it is greater than
     zero and ``alert`` is set the background is brightened so a full fridge or
     a backlog of scans is visible across the room.
+
+    ``icon`` is a Bootstrap Icons glyph name (with or without the ``bi-``
+    prefix). When the vendored icon font and that glyph are present, the glyph
+    is drawn in the upper portion of the key and the label is moved to the
+    bottom. If the font or glyph is missing, or the key shows a status count,
+    the key falls back to the text-only layout, so the deck still works without
+    the font binary.
 
     ``reference_px`` is the key resolution the font fractions are tuned for; the
     actual key pixel size is compared against it so text keeps a consistent
@@ -160,6 +219,8 @@ def render_key(
     max_label_width = int(width * _FIT_FRACTION)
 
     if count is not None:
+        # Status keys keep the large count and a small label; the count is the
+        # focus, so no glyph is drawn here.
         num = str(count)
         num_px = _font_px(
             height, _STATUS_COUNT_FRACTION, density=density, floor=20
@@ -176,12 +237,34 @@ def render_key(
         label_px = _font_px(
             height, _STATUS_LABEL_FRACTION, density=density, floor=_MIN_FONT_PX
         )
-    else:
-        label_px = _font_px(
-            height, _LABEL_FRACTION, density=density, floor=_MIN_FONT_PX
-        )
-        label_y = (height - label_px) / 2
+        _draw_label(draw, label, label_px, width, height, label_y, max_label_width)
+        return img
 
+    glyph = _icon_char(icon)
+    icon_font = _icon_font(_font_px(
+        height, _ICON_FRACTION, density=density, floor=18
+    )) if glyph else None
+
+    if glyph and icon_font is not None:
+        # Icon on top, label bottom-aligned beneath it.
+        box = draw.textbbox((0, 0), glyph, font=icon_font)
+        gw = box[2] - box[0]
+        gh = box[3] - box[1]
+        gx = (width - gw) / 2 - box[0]
+        gy = height * 0.12 - box[1]
+        draw.text((gx, gy), glyph, font=icon_font, fill=(235, 235, 235))
+        label_px = _font_px(
+            height, _STATUS_LABEL_FRACTION, density=density, floor=_MIN_FONT_PX
+        )
+        label_y = height * 0.66
+        _draw_label(draw, label, label_px, width, height, label_y, max_label_width)
+        return img
+
+    # No icon (or font/glyph missing): centred text-only label, as before.
+    label_px = _font_px(
+        height, _LABEL_FRACTION, density=density, floor=_MIN_FONT_PX
+    )
+    label_y = (height - label_px) / 2
     _draw_label(draw, label, label_px, width, height, label_y, max_label_width)
     return img
 

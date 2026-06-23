@@ -152,6 +152,7 @@ class Controller:
                     color=color,
                     count=count,
                     alert=alert,
+                    icon=spec.icon,
                 )
             if rotation:
                 # PIL rotates counter-clockwise, so negate to turn the face

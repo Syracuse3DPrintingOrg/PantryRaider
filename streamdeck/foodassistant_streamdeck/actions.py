@@ -11,7 +11,7 @@ paging, kiosk navigation).
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Awaitable, Callable, Optional
 
 class TimerState:
@@ -267,6 +267,49 @@ class ActionSpec:
     ha_entity_id: str = ""   # for kind=="ha_entity": HA entity to show/toggle
     ha_service: str = ""     # for kind=="ha_entity": HA service to call on press
     description: str = ""
+    icon: str = ""           # Bootstrap Icons glyph name (without the "bi-"
+                             # prefix) drawn above the label; see ACTION_ICONS.
+
+
+# Single source of truth for key iconography. Each action maps to the same
+# Bootstrap Icons glyph the web UI uses for that feature, so the deck face and
+# the browser stay visually in sync. Values are glyph names without the "bi-"
+# prefix (the render layer rasterises them from the vendored bootstrap-icons
+# font). Keep this in step with service/app/navigation.py (nav tab icons) and
+# the action buttons in the page templates:
+#   nav tabs (navigation.py): inventory=grid, expiring=clock-history,
+#     add=plus-circle, pending=hourglass-split, recipes=journal-richtext,
+#     cook=lightbulb, mealplan=calendar-week, shopping=cart, defaults=table.
+#   commit button (pending.html): cloud-upload.
+# The remaining keys are deck-only widgets with no web equivalent; they use the
+# closest standard Bootstrap glyph (timers=stopwatch, weather=cloud-sun,
+# forecast=thermometer-half, brightness=brightness-high, paging=chevrons,
+# Home Assistant=house).
+ACTION_ICONS: dict[str, str] = {
+    "expiring": "clock-history",
+    "pending": "hourglass-split",
+    "commit": "cloud-upload",
+    "add": "plus-circle",
+    "inventory": "grid",
+    "cook": "lightbulb",
+    "recipes": "journal-richtext",
+    "mealplan": "calendar-week",
+    "shopping": "cart",
+    "defaults": "table",
+    "brightness": "brightness-high",
+    "page_next": "chevron-right",
+    "page_prev": "chevron-left",
+    "timer_1": "stopwatch",
+    "timer_2": "stopwatch",
+    "timer_3": "stopwatch",
+    "weather": "cloud-sun",
+    "forecast": "thermometer-half",
+    "ha_1": "house",
+    "ha_2": "house",
+    "ha_3": "house",
+    "ha_4": "house",
+    "ha_5": "house",
+}
 
 
 # The actions a key can be bound to. status_field names must match the keys
@@ -423,6 +466,21 @@ ACTIONS: dict[str, ActionSpec] = {
                        description="Home Assistant entity slot 5. Configure in config.toml."),
 }
 
+# Stamp each spec with its glyph from the single-source-of-truth map above, so
+# the icon travels with the ActionSpec (and the web catalog) without repeating
+# the name in every literal.
+for _name, _glyph in ACTION_ICONS.items():
+    _spec = ACTIONS.get(_name)
+    if _spec is not None:
+        ACTIONS[_name] = replace(_spec, icon=_glyph)
+del _name, _glyph, _spec
+
+
+def icon_for(name: str) -> str:
+    """Return the Bootstrap Icons glyph name for an action, or "" if none."""
+    return ACTION_ICONS.get(name, "")
+
+
 # Order used when no explicit key list is configured. The controller trims or
 # paginates this to fit the connected deck.
 DEFAULT_ORDER: list[str] = [
@@ -451,6 +509,7 @@ def catalog() -> list[dict]:
         "kind": spec.kind,
         "group": _GROUP_BY_KIND.get(spec.kind, "Other"),
         "color": spec.color,
+        "icon": spec.icon,
         "description": getattr(spec, "description", ""),
     } for spec in ACTIONS.values()]
     items.append({"name": "blank", "label": "Empty", "kind": "blank",
