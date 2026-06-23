@@ -201,6 +201,9 @@
           </button>
           <span class="form-text mb-0">Satellite devices enter this key in their setup wizard under "Main Server."</span>
         </div>
+        <div class="form-text text-warning mt-1">
+          <i class="bi bi-exclamation-triangle me-1"></i>Save this key somewhere safe now. For security it is masked after you save and will not be shown in full again.
+        </div>
       </div>
       <div class="mb-3 d-none" id="wiz-pin-row" style="max-width: 240px;">
         <label class="form-label">Kiosk PIN <span class="text-secondary small">(optional, digits only)</span></label>
@@ -286,6 +289,18 @@
   <div class="wiz-card d-none" id="wiz-step-4">
     <div class="wiz-card-title"><i class="bi bi-fridge text-info me-2"></i>Grocy — Inventory Backend</div>
     <div class="wiz-card-sub">Grocy stores your stock, locations, and consumption history. Connect it here.</div>
+
+    <div class="alert alert-secondary py-2 small">
+      <div class="fw-semibold mb-1"><i class="bi bi-info-circle me-1"></i>How to connect Grocy</div>
+      <ol class="mb-1 ps-3">
+        <li>Open Grocy in your browser (a pi_hosted appliance serves it on port 9383).</li>
+        <li>Go to your user menu, then <span class="text-info">Manage API keys</span>, and add a new key.</li>
+        <li>Paste the Grocy address and that key below, then use Test connection.</li>
+      </ol>
+      <a href="https://github.com/Syracuse3DPrinting/FoodAssistant/blob/main/docs/hardware/sd-image.md" target="_blank" rel="noopener">
+        <i class="bi bi-book me-1"></i>Setup instructions
+      </a>
+    </div>
 
     <div class="section-card mb-3">
       <div class="mb-3">
