@@ -35,6 +35,7 @@ itsdangerous==2.2.0
 # TOTP two-factor authentication (required)
 pyotp==2.10.0
 
-# QR code generation for TOTP setup page and phone deep-link (required)
+# QR code generation for TOTP setup page and phone deep-link (required).
+# [pil] pulls Pillow for the PNG TOTP code; SVG output uses qrcode's built-in
+# stdlib SVG factory in 8.x, so no extra (and no lxml) is needed.
 qrcode[pil]==8.2
-qrcode[svg]==8.2
