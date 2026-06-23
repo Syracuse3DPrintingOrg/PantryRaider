@@ -823,6 +823,7 @@ REMOTE_SERVER_URL=${REMOTE_SERVER_URL:-}
 TZ=${TZ:-America/New_York}
 AUTH_REQUIRED=false
 FOODASSISTANT_FORCE_MODEL=Raspberry Pi
+DATA_DIR=$INSTALL_DIR/data
 EOF
       chmod 600 "$env_file"
     fi
@@ -836,6 +837,16 @@ EOF
   local sd_user
   sd_user="$(primary_user)"
   local exec_uvicorn="$venv_dir/bin/uvicorn"
+
+  # The service runs as the primary (non-root) user, so it must be able to read
+  # the app and read/write the data dir (settings.json is saved from the wizard).
+  # firstboot created these as root, so hand them to the service user.
+  if [ "$DRY_RUN" != "1" ] && [ -n "$sd_user" ]; then
+    run mkdir -p "$INSTALL_DIR/data"
+    run chown -R "$sd_user":"$sd_user" "$INSTALL_DIR" 2>/dev/null \
+      || chown -R "$sd_user" "$INSTALL_DIR" 2>/dev/null \
+      || warn "could not chown $INSTALL_DIR to $sd_user; service may not be able to save settings"
+  fi
 
   if [ "$DRY_RUN" = "1" ]; then
     log "DRY_RUN would write /etc/systemd/system/foodassistant-remote.service"
