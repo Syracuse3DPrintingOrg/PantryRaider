@@ -3,8 +3,9 @@ import httpx
 import base64
 from .base import VisionProvider
 from ..models.food import AnalysisResult
-from .gemini import (_parse_item, _FOOD_PROMPT, _RECEIPT_PROMPT, _ENRICH_PROMPT,
-                     _RECIPE_PROMPT, _GENERATE_RECIPE_PROMPT, _SUGGEST_INVENTORY_PROMPT)
+from .gemini import (_parse_item, _parse_receipt, _FOOD_PROMPT, _RECEIPT_PROMPT,
+                     _ENRICH_PROMPT, _RECIPE_PROMPT, _GENERATE_RECIPE_PROMPT,
+                     _SUGGEST_INVENTORY_PROMPT)
 
 # Reuses the same prompts as Gemini: structured JSON output works with llava/llama3.2-vision
 
@@ -46,10 +47,7 @@ class OllamaProvider(VisionProvider):
     async def analyze_receipt(self, image_data: bytes, mime_type: str) -> AnalysisResult:
         raw = await self._generate(_RECEIPT_PROMPT, image_data)
         data = json.loads(raw)
-        if isinstance(data, dict):
-            data = [data]
-        items = [_parse_item(d, default_confidence=0.75) for d in data]
-        return AnalysisResult(items=items, image_type="receipt", raw_response=raw)
+        return _parse_receipt(data, default_confidence=0.75, raw=raw)
 
     async def enrich_product(self, info: dict) -> dict | None:
         # Text-only generation: llava and other multimodal models handle this fine

@@ -115,9 +115,15 @@ class GrocyClient:
         best_before = (
             item.best_by_date.isoformat() if item.best_by_date else date.today().isoformat()
         )
+        # When the item came off a back-dated receipt, land it on the receipt's
+        # purchase date; otherwise Grocy defaults the entry to today.
+        purchased = (
+            item.purchased_on.isoformat() if item.purchased_on else date.today().isoformat()
+        )
         return await self._post(f"/stock/products/{product_id}/add", {
             "amount": item.quantity,
             "best_before_date": best_before,
+            "purchased_date": purchased,
             "price": None,
             "note": item.brand or "",
         })

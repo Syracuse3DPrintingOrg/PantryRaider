@@ -186,6 +186,20 @@
       </button>
     </div>
   </div>
+  <div id="receipt-meta" class="d-none card mb-2">
+    <div class="card-body py-2">
+      <div class="row g-2 align-items-center">
+        <div class="col-auto">
+          <label class="col-form-label col-form-label-sm" for="receipt-date">Purchase date</label>
+        </div>
+        <div class="col-auto">
+          <input class="form-control form-control-sm" type="date" id="receipt-date"
+                 onchange="applyPurchaseDate(this.value)" title="Applied to all items on this receipt">
+        </div>
+        <div class="col text-muted small" id="receipt-store"></div>
+      </div>
+    </div>
+  </div>
   <div id="results-list"></div>
   <div id="import-status" class="mt-2"></div>
 </div>
@@ -311,6 +325,11 @@ async function analyzePhoto() {
     const r = await fetch(endpoint, { method: 'POST', body: fd });
     if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
     const result = await r.json();
+    if (type === 'receipt') {
+      const purchaseDate = result.purchased_on || todayISO();
+      result.items.forEach(it => { it.purchased_on = purchaseDate; });
+      showReceiptMeta(purchaseDate, result.store);
+    }
     addToQueue(result.items);
     showStatus('photo-status',
       `Found <strong>${result.items.length}</strong> item(s). Added to import queue.`, 'success');
@@ -360,6 +379,26 @@ function clearQueue() {
   queue = [];
   renderQueue();
   document.getElementById('results-section').classList.add('d-none');
+  document.getElementById('receipt-meta').classList.add('d-none');
+}
+
+function todayISO() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+// Reveal the receipt purchase-date control, defaulting to the extracted date
+// (or today), and show the store name when one was read off the receipt.
+function showReceiptMeta(purchaseDate, store) {
+  document.getElementById('receipt-date').value = purchaseDate || todayISO();
+  document.getElementById('receipt-store').textContent = store ? `Store: ${store}` : '';
+  document.getElementById('receipt-meta').classList.remove('d-none');
+}
+
+// Apply an edited purchase date to every queued item so back-filled receipts
+// land on the right date in Grocy.
+function applyPurchaseDate(value) {
+  const d = value || null;
+  queue.forEach(it => { it.purchased_on = d; });
 }
 
 function renderQueue() {

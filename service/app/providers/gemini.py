@@ -1,6 +1,7 @@
 import asyncio
 import json
 import time
+from datetime import date
 import google.generativeai as genai
 from .base import VisionProvider
 from ..models.food import AnalysisResult, FoodItem, StorageType, FoodCategory
@@ -24,21 +25,28 @@ Return ONLY valid JSON. No markdown, no explanation.
 
 _RECEIPT_PROMPT = """
 Analyze this grocery receipt image. Extract every food or beverage item purchased.
-Return a JSON array where each element is:
+Return a JSON object with these exact fields:
 {
-  "name": "specific food name",
-  "quantity": 1.0,
-  "unit": "item | lbs | oz | etc",
-  "best_by_date": null,
-  "storage_type": "refrigerated | frozen | room_temp | dry",
-  "category": "Poultry | Meat | Seafood | Dairy | Produce | Grains | Condiments | Beverages | Snacks | Frozen | Canned | Other",
-  "brand": "brand name or null",
-  "notes": null,
-  "confidence": 0.85
+  "store": "store name printed on the receipt, or null if not visible",
+  "purchase_date": "YYYY-MM-DD date of purchase printed on the receipt, or null if not visible",
+  "items": [
+    {
+      "name": "specific food name",
+      "quantity": 1.0,
+      "unit": "item | lbs | oz | etc",
+      "best_by_date": null,
+      "storage_type": "refrigerated | frozen | room_temp | dry",
+      "category": "Poultry | Meat | Seafood | Dairy | Produce | Grains | Condiments | Beverages | Snacks | Frozen | Canned | Other",
+      "brand": "brand name or null",
+      "notes": null,
+      "confidence": 0.85
+    }
+  ]
 }
-Include only food/beverage items. Skip non-food items, taxes, fees, totals, and store info.
+Include only food/beverage items in "items". Skip non-food items, taxes, fees, and totals.
 Infer storage_type and category from your knowledge of the product.
-Return ONLY a valid JSON array. No markdown, no explanation.
+For purchase_date, convert any printed date into YYYY-MM-DD; use null if no date is legible.
+Return ONLY valid JSON. No markdown, no explanation.
 """.strip()
 
 _ENRICH_PROMPT = """
@@ -139,10 +147,7 @@ class GeminiProvider(VisionProvider):
         response = await self.model.generate_content_async([_RECEIPT_PROMPT, image_part])
         raw = response.text
         data = json.loads(raw)
-        if isinstance(data, dict):
-            data = [data]
-        items = [_parse_item(d, default_confidence=0.8) for d in data]
-        return AnalysisResult(items=items, image_type="receipt", raw_response=raw)
+        return _parse_receipt(data, default_confidence=0.8, raw=raw)
 
     async def enrich_product(self, info: dict) -> dict | None:
         prompt = _ENRICH_PROMPT.format(info=json.dumps(info, ensure_ascii=False))
@@ -201,6 +206,47 @@ def _parse_item(data: dict, default_confidence: float) -> FoodItem:
         notes=data.get("notes"),
         confidence=float(data.get("confidence", default_confidence)),
     )
+
+
+def _safe_date(value) -> date | None:
+    """Parse a YYYY-MM-DD string into a date, returning None on anything else."""
+    if isinstance(value, date):
+        return value
+    if not value or not isinstance(value, str):
+        return None
+    try:
+        return date.fromisoformat(value.strip())
+    except ValueError:
+        return None
+
+
+def _parse_receipt(data, default_confidence: float, raw: str) -> AnalysisResult:
+    """Build a receipt AnalysisResult from a parsed model reply.
+
+    Accepts the current object form ({store, purchase_date, items}) as well as
+    the legacy bare array (or single object) form, so older prompts and models
+    that ignore the wrapper still work. Extracts the purchase date and store
+    when present and threads the date onto every item.
+    """
+    store = None
+    purchased_on = None
+    if isinstance(data, dict) and "items" in data and isinstance(data["items"], list):
+        store = data.get("store") or None
+        purchased_on = _safe_date(data.get("purchase_date"))
+        rows = data["items"]
+    elif isinstance(data, dict):
+        rows = [data]
+    else:
+        rows = data
+
+    items = []
+    for d in rows:
+        item = _parse_item(d, default_confidence=default_confidence)
+        item.purchased_on = purchased_on
+        items.append(item)
+    return AnalysisResult(items=items, image_type="receipt",
+                          purchased_on=purchased_on, store=store,
+                          raw_response=raw)
 
 
 def _safe_storage(value: str | None) -> StorageType:

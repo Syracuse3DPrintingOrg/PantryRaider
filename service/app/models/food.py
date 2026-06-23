@@ -31,6 +31,7 @@ class FoodItem(BaseModel):
     quantity: float = 1.0
     unit: str = "item"
     best_by_date: Optional[date] = None
+    purchased_on: Optional[date] = None
     storage_type: StorageType = StorageType.refrigerated
     category: FoodCategory = FoodCategory.other
     brand: Optional[str] = None
@@ -44,6 +45,7 @@ class FoodItemOverride(BaseModel):
     quantity: Optional[float] = None
     unit: Optional[str] = None
     best_by_date: Optional[date] = None
+    purchased_on: Optional[date] = None
     storage_type: Optional[StorageType] = None
     category: Optional[FoodCategory] = None
     brand: Optional[str] = None
@@ -53,6 +55,10 @@ class FoodItemOverride(BaseModel):
 class AnalysisResult(BaseModel):
     items: list[FoodItem]
     image_type: str  # "food" or "receipt"
+    # Receipt-only metadata: the purchase date and store read off the receipt.
+    # Both are None for food photos and for receipts where they are not present.
+    purchased_on: Optional[date] = None
+    store: Optional[str] = None
     raw_response: Optional[str] = None
 
 
