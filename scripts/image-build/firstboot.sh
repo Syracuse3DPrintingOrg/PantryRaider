@@ -613,9 +613,12 @@ configure_streamdeck() {
   # Copy the streamdeck package from the resolved source.
   if [ -n "$sd_src" ] && [ -d "$sd_src" ]; then
     log "Copying foodassistant_streamdeck package from $sd_src to $sd_dst"
-    run mkdir -p "$sd_dst"
     if [ "$DRY_RUN" != "1" ]; then
-      cp -a "$sd_src" "$sd_dst/"
+      # Replace any prior copy outright. Copying into an existing target dir
+      # nests the package one level too deep (sd_dst/foodassistant_streamdeck),
+      # which leaves __main__.py unreachable and breaks `python -m`.
+      rm -rf "$sd_dst"
+      cp -a "$sd_src" "$sd_dst"
       # Manual installs landed with mode 700 and broke the service.
       chmod -R a+rX "$sd_dst"
     fi
