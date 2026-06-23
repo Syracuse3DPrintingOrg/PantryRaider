@@ -97,7 +97,9 @@ load_config() {
   # Imager), so nothing here needs editing for a turnkey flash-and-boot.
   HOSTNAME="${HOSTNAME:-foodassistant}"
   TZ="${TZ:-$(os_timezone)}"
-  ENABLE_MEALIE="${ENABLE_MEALIE:-false}"
+  # Mealie default depends on the deployment mode, which is not resolved until
+  # _load_mode_from_settings below. Leave it unset here and decide afterwards.
+  ENABLE_MEALIE="${ENABLE_MEALIE:-}"
   ENABLE_OLLAMA="${ENABLE_OLLAMA:-false}"
   ENABLE_KIOSK="${ENABLE_KIOSK:-auto}"
   ENABLE_STREAMDECK="${ENABLE_STREAMDECK:-auto}"
@@ -115,6 +117,18 @@ load_config() {
   DEPLOYMENT_MODE="${DEPLOYMENT_MODE:-}"
   REMOTE_SERVER_URL="${REMOTE_SERVER_URL:-}"
   _load_mode_from_settings
+
+  # Resolve the Mealie default now that the mode is known. A pi_hosted appliance
+  # is a full kitchen hub, so recipes and meal planning ship on by default; pull
+  # the image during provisioning instead of making the user wait post-setup. A
+  # satellite (pi_remote) runs no local backend, so it stays off there.
+  if [ -z "$ENABLE_MEALIE" ]; then
+    if is_remote_mode; then
+      ENABLE_MEALIE="false"
+    else
+      ENABLE_MEALIE="true"
+    fi
+  fi
 
   # The kiosk URL defaults to this device, except in remote mode where it points
   # at the server being controlled. ?kiosk=1 latches kiosk mode in the browser

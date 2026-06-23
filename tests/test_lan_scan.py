@@ -68,6 +68,32 @@ def test_scan_swallows_probe_errors(monkeypatch):
     assert results == []
 
 
+def test_scan_excludes_local_host(monkeypatch):
+    """The scanning host fingerprints as itself and must be dropped by default."""
+    def fake_probe(ip, ports, timeout):
+        return {"ip": ip, "port": 9284, "version": "1.6.0", "mode": "pi_hosted", "status": "ok"}
+
+    monkeypatch.setattr(lan_scan, "_probe_host", fake_probe)
+    monkeypatch.setattr(lan_scan, "_local_ips", lambda: {"192.168.1.3"})
+    results = lan_scan.scan_for_instances("192.168.1.0/29")  # hosts .1-.6
+    found_ips = {r["ip"] for r in results}
+    assert "192.168.1.3" not in found_ips
+    assert "192.168.1.1" in found_ips
+
+
+def test_scan_exclude_override_scans_everything(monkeypatch):
+    """An explicit empty exclude set scans every host, self included."""
+    def fake_probe(ip, ports, timeout):
+        if ip == "192.168.1.3":
+            return {"ip": ip, "port": 9284, "version": "1.6.0", "mode": "pi_hosted", "status": "ok"}
+        return None
+
+    monkeypatch.setattr(lan_scan, "_probe_host", fake_probe)
+    monkeypatch.setattr(lan_scan, "_local_ips", lambda: {"192.168.1.3"})
+    results = lan_scan.scan_for_instances("192.168.1.0/29", exclude=set())
+    assert {r["ip"] for r in results} == {"192.168.1.3"}
+
+
 def test_default_cidr_returns_slash24_or_none(monkeypatch):
     """default_cidr should return a /24 string or None; never raise."""
     import socket

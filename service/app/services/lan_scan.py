@@ -56,12 +56,17 @@ def _probe_host(ip: str, ports: list[int], timeout: float) -> dict | None:
 
 
 def scan_for_instances(cidr: str, ports: list[int] | None = None,
-                       timeout: float = 0.4, concurrency: int = 64) -> list[dict]:
+                       timeout: float = 0.4, concurrency: int = 64,
+                       exclude: set[str] | None = None) -> list[dict]:
     """Scan a CIDR for FoodAssistant instances.
 
     Returns a list of result dicts (one per instance found). On a malformed or
     too-large CIDR returns a single-element list carrying an "error" key, so the
     caller can surface it without a separate exception path.
+
+    The host running the scan answers its own /health fingerprint, so by default
+    we drop this machine's own address from the sweep; callers can override the
+    excluded set (pass an empty set to scan everything, including self).
     """
     ports = ports or list(DEFAULT_PORTS)
     try:
@@ -71,7 +76,9 @@ def scan_for_instances(cidr: str, ports: list[int] | None = None,
     if net.num_addresses > MAX_HOSTS:
         return [{"error": f"network too large (max {MAX_HOSTS} hosts); use a /22 or smaller"}]
 
-    hosts = [str(h) for h in net.hosts()]
+    if exclude is None:
+        exclude = _local_ips()
+    hosts = [str(h) for h in net.hosts() if str(h) not in exclude]
     found: list[dict] = []
 
     def _safe_probe(ip: str) -> dict | None:
@@ -87,8 +94,8 @@ def scan_for_instances(cidr: str, ports: list[int] | None = None,
     return found
 
 
-def default_cidr() -> str | None:
-    """Best-effort guess of this server's own /24, or None if it cannot be found.
+def _outbound_ip() -> str | None:
+    """This host's outbound interface address, or None if it cannot be found.
 
     Opening a UDP socket toward a public address does not send anything but lets
     the OS pick the outbound interface, whose address we read back.
@@ -96,8 +103,33 @@ def default_cidr() -> str | None:
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
             sock.connect(("8.8.8.8", 80))
-            ip = sock.getsockname()[0]
+            return sock.getsockname()[0]
     except OSError:
+        return None
+
+
+def _local_ips() -> set[str]:
+    """Addresses that resolve to this host, so a scan can skip itself.
+
+    Covers loopback plus the primary outbound interface. Resolving the hostname
+    catches additional bound addresses where the platform supports it.
+    """
+    ips = {"127.0.0.1"}
+    out = _outbound_ip()
+    if out:
+        ips.add(out)
+    try:
+        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+            ips.add(info[4][0])
+    except OSError:
+        pass
+    return ips
+
+
+def default_cidr() -> str | None:
+    """Best-effort guess of this server's own /24, or None if it cannot be found."""
+    ip = _outbound_ip()
+    if not ip:
         return None
     try:
         net = ipaddress.ip_network(f"{ip}/24", strict=False)
