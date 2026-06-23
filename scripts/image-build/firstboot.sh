@@ -479,12 +479,27 @@ configure_kiosk() {
     return 0
   fi
   log "Installing Chromium kiosk via cage (Wayland) for $KIOSK_URL"
-  # cage = minimal single-app Wayland compositor; chromium = browser.
-  apt_install cage chromium || apt_install cage chromium-browser \
-    || warn "kiosk package install failed"
+  # cage = minimal single-app Wayland compositor; chromium = browser. Install
+  # them on separate apt lines and try both browser package names. Bundling
+  # them in one "apt-get install cage chromium" meant a single unmatched name
+  # (the browser is "chromium" on Bookworm, "chromium-browser" on older Pi OS)
+  # aborted the whole line and left cage uninstalled too, so the unit crash
+  # looped on status=203/EXEC.
+  apt_install cage || warn "cage install failed"
+  apt_install chromium || apt_install chromium-browser \
+    || warn "chromium install failed"
 
-  local chromium_bin="chromium"
-  command -v chromium-browser >/dev/null 2>&1 && chromium_bin="chromium-browser"
+  # Bake absolute binary paths into the unit. cage execs the browser via PATH,
+  # but a systemd service runs with a minimal environment, so we resolve full
+  # paths here and skip cleanly if either binary is missing rather than leave a
+  # unit that fails to exec on every restart.
+  local cage_bin chromium_bin
+  cage_bin="$(command -v cage || true)"
+  chromium_bin="$(command -v chromium || command -v chromium-browser || true)"
+  if [ -z "$cage_bin" ] || [ -z "$chromium_bin" ]; then
+    warn "kiosk binaries missing (cage=${cage_bin:-none} chromium=${chromium_bin:-none}); skipping kiosk service"
+    return 0
+  fi
 
   # cage needs a real logind seat session, which a bare root service does not
   # get (it fails with "XDG_RUNTIME_DIR is not set" / libseat tty errors). We
@@ -527,7 +542,7 @@ StandardError=journal
 UtmpIdentifier=tty1
 UtmpMode=user
 Environment=XDG_RUNTIME_DIR=/run/user/$kuid
-ExecStart=/usr/bin/cage -- $chromium_bin --kiosk --noerrdialogs \\
+ExecStart=$cage_bin -- $chromium_bin --kiosk --noerrdialogs \\
   --disable-infobars --no-first-run --ozone-platform=wayland \\
   --remote-debugging-port=9222 --disable-restore-session-state $KIOSK_URL
 Restart=always
