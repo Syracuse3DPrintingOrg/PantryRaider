@@ -834,8 +834,23 @@ deploy_remote_service() {
   if [ -n "$svc_src" ] && [ -f "$svc_src/requirements.txt" ]; then
     log "Installing service requirements into venv"
     if [ "$DRY_RUN" != "1" ]; then
-      "$venv_dir/bin/pip" install --quiet -r "$svc_src/requirements.txt" \
-        || warn "pip install failed; service may not start"
+      # Retry the install: a single transient network or mirror hiccup here
+      # used to leave uvicorn uninstalled, and the unit then crash looped
+      # forever on status=203/EXEC (no such executable). Try a few times with
+      # backoff before giving up.
+      local _try
+      for _try in 1 2 3; do
+        if "$venv_dir/bin/pip" install --quiet -r "$svc_src/requirements.txt"; then
+          break
+        fi
+        warn "pip install attempt $_try failed; retrying"
+        sleep $((_try * 5))
+      done
+      # Verify the entry point actually landed. If it did not, the service can
+      # never start, so say so loudly rather than hand systemd a doomed unit.
+      if [ ! -x "$venv_dir/bin/uvicorn" ]; then
+        warn "uvicorn missing from venv after pip install; the remote UI service will not start. Re-run with network access: $venv_dir/bin/pip install -r $svc_src/requirements.txt"
+      fi
     fi
   else
     warn "service/requirements.txt not found; pip install skipped"
