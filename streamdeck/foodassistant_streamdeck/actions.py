@@ -321,8 +321,9 @@ ACTIONS: dict[str, ActionSpec] = {
         color="#b54708",
         kind="status",
         status_field="expiring",
+        target_path="ui/expiring",
         description="Count of items expired or expiring within the soon window. "
-        "Press to refresh now.",
+        "Press to open the expiring list and refresh.",
     ),
     "pending": ActionSpec(
         name="pending",
@@ -330,8 +331,9 @@ ACTIONS: dict[str, ActionSpec] = {
         color="#1d4ed8",
         kind="status",
         status_field="pending",
+        target_path="ui/pending",
         description="Count of scanned items waiting to be committed. "
-        "Press to refresh now.",
+        "Press to open the pending list and refresh.",
     ),
     "commit": ActionSpec(
         name="commit",
@@ -583,8 +585,15 @@ async def run_action(spec: ActionSpec, ctx: ActionContext, long_press: bool = Fa
     base = ctx.base_url.rstrip("/")
 
     if spec.kind == "status":
+        # A status key with a target view doubles as a deep link: glance at the
+        # live count, press, and the kiosk jumps to the matching list. Without a
+        # target view it stays a plain refresh, exactly as before. A missing or
+        # unreachable display just means no navigation happened, never an error.
+        opened = False
+        if spec.target_path:
+            opened = await ctx.navigate(spec.target_path)
         await ctx.refresh()
-        return "refreshed"
+        return "opened" if opened else "refreshed"
 
     if spec.kind == "trigger" and spec.name == "commit":
         try:

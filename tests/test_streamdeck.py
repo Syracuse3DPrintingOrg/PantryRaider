@@ -235,11 +235,74 @@ def test_commit_action_handles_failure():
     assert "failed" in msg
 
 
-def test_status_press_triggers_refresh():
-    ctx, refreshed = _ctx(_FakeClient())
-    msg = asyncio.run(actions.run_action(actions.ACTIONS["pending"], ctx))
+def _ctx_recording(navigate_result=True):
+    """Context that records navigate paths and refresh count.
+
+    Returns (ctx, navigated, refreshed) where navigated is a list of the paths
+    passed to navigate() and refreshed["n"] counts refresh() calls.
+    """
+    navigated = []
+    refreshed = {"n": 0}
+
+    async def refresh():
+        refreshed["n"] += 1
+
+    async def navigate(path):
+        navigated.append(path)
+        return navigate_result
+
+    ctx = actions.ActionContext(
+        client=_FakeClient(),
+        base_url="http://x",
+        refresh=refresh,
+        navigate=navigate,
+        cycle_brightness=lambda: 80,
+        page_next=lambda: None,
+        page_prev=lambda: None,
+    )
+    return ctx, navigated, refreshed
+
+
+def test_status_press_without_target_only_refreshes():
+    # A status spec with no target_path keeps the old refresh-only behavior and
+    # never touches the kiosk display.
+    spec = actions.ActionSpec(
+        name="bare", label="Bare", color="#000", kind="status",
+        status_field="pending",
+    )
+    ctx, navigated, refreshed = _ctx_recording()
+    msg = asyncio.run(actions.run_action(spec, ctx))
     assert msg == "refreshed"
     assert refreshed["n"] == 1
+    assert navigated == []
+
+
+def test_expiring_status_press_navigates_and_refreshes():
+    # Pressing the expiring status key deep-links the kiosk to the expiring
+    # list AND re-polls the counts.
+    ctx, navigated, refreshed = _ctx_recording()
+    msg = asyncio.run(actions.run_action(actions.ACTIONS["expiring"], ctx))
+    assert navigated == ["ui/expiring"]
+    assert refreshed["n"] == 1
+    assert msg == "opened"
+
+
+def test_pending_status_press_navigates_to_pending_view():
+    ctx, navigated, refreshed = _ctx_recording()
+    msg = asyncio.run(actions.run_action(actions.ACTIONS["pending"], ctx))
+    assert navigated == ["ui/pending"]
+    assert refreshed["n"] == 1
+    assert msg == "opened"
+
+
+def test_status_press_with_no_display_still_refreshes():
+    # When no kiosk display is attached, navigate returns False. The press must
+    # still refresh and report "refreshed" rather than raise.
+    ctx, navigated, refreshed = _ctx_recording(navigate_result=False)
+    msg = asyncio.run(actions.run_action(actions.ACTIONS["expiring"], ctx))
+    assert navigated == ["ui/expiring"]
+    assert refreshed["n"] == 1
+    assert msg == "refreshed"
 
 
 def test_brightness_action_returns_percent():
