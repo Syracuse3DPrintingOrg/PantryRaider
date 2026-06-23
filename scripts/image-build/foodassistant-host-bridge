@@ -19,8 +19,8 @@ POST /display/rotation     set KMS rotation      {degrees, reboot?}
 POST /streamdeck/restart   restart Stream Deck service
 GET  /streamdeck/actions     list assignable deck actions (for the web editor)
 POST /kiosk/restart        restart the kiosk browser (apply scale/rotation)
-GET  /mealie/status        whether the Mealie container is running
-POST /mealie/start         start Mealie via docker compose --profile with-mealie up -d
+GET  /mealie/status        Mealie state: not-installed / starting / running
+POST /mealie/start         start Mealie in the background (docker compose --profile with-mealie up -d)
 GET  /hardware/status      display/Stream Deck presence + service/install state
 POST /kiosk/install        provision the kiosk service (display attached later)
 POST /streamdeck/install   provision the Stream Deck service (attached later)
@@ -43,7 +43,9 @@ _FIRSTBOOT_CANDIDATES = [
     "/home/foodassistant/FoodAssistant/scripts/image-build/firstboot.sh",
     "/opt/foodassistant-src/scripts/image-build/firstboot.sh",
 ]
-# Background provisioning processes, keyed by step name ("kiosk"/"streamdeck").
+# Background long-running processes, keyed by step name
+# ("kiosk"/"streamdeck" installs, "mealie" start). Each value is a Popen whose
+# poll() tells us whether the work is still in flight.
 _INSTALL_PROCS = {}
 
 
@@ -58,6 +60,22 @@ def _find_firstboot():
                 repo_dir = path[: -len("/scripts/image-build/firstboot.sh")]
             return path, repo_dir
     return None, None
+
+
+def _compose_env():
+    """Environment for `docker compose` runs from INSTALL_DIR.
+
+    The appliance compose file resolves the service build context from
+    ${REPO_DIR}; firstboot.sh exports it before every compose call. The bridge
+    process does not inherit that export, so derive it the same way (from the
+    provisioner location, falling back to the compose file's own default) to
+    keep the build context valid if compose ever needs to build `service`.
+    """
+    env = dict(os.environ)
+    if not env.get("REPO_DIR"):
+        _, repo_dir = _find_firstboot()
+        env["REPO_DIR"] = repo_dir or "/home/foodassistant/FoodAssistant"
+    return env
 
 
 def _service_active(unit):
@@ -348,31 +366,63 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         except Exception as e:
             self._send(500, {"ok": False, "error": str(e)})
 
-    def _mealie_status(self):
+    def _mealie_running(self):
+        """True when the Mealie container is up (compose service 'mealie')."""
         try:
             r = subprocess.run(
                 ["docker", "compose", "ps", "--format=json", "mealie"],
                 cwd=INSTALL_DIR,
                 capture_output=True, text=True, timeout=10
             )
-            running = bool(r.stdout.strip()) and r.returncode == 0
-            self._send(200, {"ok": True, "running": running})
+            return bool(r.stdout.strip()) and r.returncode == 0
+        except Exception:
+            return False
+
+    def _mealie_status(self):
+        # Report a single phase the web UI can poll on:
+        #   running        -> the container is up
+        #   starting       -> the background pull/up is still in flight
+        #   not-installed  -> neither (idle, image not pulled / not started)
+        try:
+            running = self._mealie_running()
+            starting = _installing("mealie")
+            if running:
+                state = "running"
+            elif starting:
+                state = "starting"
+            else:
+                state = "not-installed"
+            self._send(200, {
+                "ok": True,
+                "state": state,
+                "running": running,
+                "starting": starting,
+            })
         except Exception as e:
             self._send(500, {"ok": False, "error": str(e)})
 
     def _mealie_start(self):
+        # Pulling the Mealie image on first run can take several minutes on a
+        # Pi, far longer than any reasonable HTTP timeout. Run the pull/up in
+        # the background (mirroring the install provisioner) and return
+        # immediately; the web UI polls /mealie/status for progress.
+        if self._mealie_running():
+            self._send(200, {"ok": True, "started": False, "state": "running"})
+            return
+        if _installing("mealie"):
+            self._send(200, {"ok": True, "started": False, "state": "starting"})
+            return
         try:
-            r = subprocess.run(
+            log_path = "/var/log/foodassistant-mealie-start.log"
+            log = open(log_path, "ab")
+            p = subprocess.Popen(
                 ["docker", "compose", "--profile", "with-mealie", "up", "-d"],
                 cwd=INSTALL_DIR,
-                capture_output=True, text=True, timeout=120
+                env=_compose_env(),
+                stdout=log, stderr=subprocess.STDOUT,
             )
-            if r.returncode == 0:
-                self._send(200, {"ok": True})
-            else:
-                self._send(500, {"ok": False, "error": (r.stderr or r.stdout).strip()})
-        except subprocess.TimeoutExpired:
-            self._send(500, {"ok": False, "error": "Timed out starting Mealie."})
+            _INSTALL_PROCS["mealie"] = p
+            self._send(200, {"ok": True, "started": True, "state": "starting"})
         except Exception as e:
             self._send(500, {"ok": False, "error": str(e)})
 
