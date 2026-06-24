@@ -103,6 +103,14 @@ load_config() {
   ENABLE_OLLAMA="${ENABLE_OLLAMA:-false}"
   ENABLE_KIOSK="${ENABLE_KIOSK:-auto}"
   ENABLE_STREAMDECK="${ENABLE_STREAMDECK:-auto}"
+  # Hide the mouse cursor in the kiosk:
+  #   auto  - hide only when no pointer (mouse/touchpad) device is attached at
+  #           provision time. A touch-only or Stream-Deck-only appliance then
+  #           shows no stray cursor; plug in a mouse and the cursor returns.
+  #   true  - always hide the cursor (even with a mouse attached).
+  #   false - never hide; leave the normal cursor.
+  # Applied by configure_kiosk via a transparent XCursor theme (see below).
+  HIDE_CURSOR="${HIDE_CURSOR:-auto}"
   DISPLAY_ROTATION="${DISPLAY_ROTATION:-0}"
   # Touch driver for the kiosk display:
   #   auto     - try to detect (checks for SPI/ADS7846 and existing HID touch)
@@ -157,7 +165,7 @@ load_config() {
     KIOSK_URL="${KIOSK_URL:-http://localhost:9284/ui/?kiosk=1}"
   fi
 
-  log "Config: HOSTNAME=$HOSTNAME TZ=$TZ MODE=${DEPLOYMENT_MODE:-<default>} MEALIE=$ENABLE_MEALIE OLLAMA=$ENABLE_OLLAMA KIOSK=$ENABLE_KIOSK STREAMDECK=$ENABLE_STREAMDECK TAG=$FOODASSISTANT_TAG DIR=$INSTALL_DIR"
+  log "Config: HOSTNAME=$HOSTNAME TZ=$TZ MODE=${DEPLOYMENT_MODE:-<default>} MEALIE=$ENABLE_MEALIE OLLAMA=$ENABLE_OLLAMA KIOSK=$ENABLE_KIOSK STREAMDECK=$ENABLE_STREAMDECK HIDE_CURSOR=$HIDE_CURSOR TAG=$FOODASSISTANT_TAG DIR=$INSTALL_DIR"
 }
 
 # True when this device is a thin remote control surface (no local stack).
@@ -620,6 +628,78 @@ configure_touch() {
   fi
 }
 
+# Returns 0 when a pointer device (mouse, trackball, touchpad) is attached now.
+# Touchscreens are NOT pointers for our purposes: a touch panel reports absolute
+# touch events, not a moving cursor, so a touch-only box has no pointer here.
+# FORCE_POINTER overrides for tests (1 = pretend a mouse is present, "" = none).
+has_pointer_device() {
+  [ -n "${FORCE_POINTER:-}" ] && return 0   # test hook
+  # by-path symlinks libinput/udev create for relative pointing devices.
+  local p
+  for p in /dev/input/by-path/*event-mouse* /dev/input/by-id/*event-mouse*; do
+    [ -e "$p" ] && return 0
+  done
+  # Fall back to the device names the kernel exposes; match Mouse/Touchpad but
+  # deliberately not Touchscreen.
+  if ls /sys/class/input/*/device/name >/dev/null 2>&1; then
+    grep -qiE 'mouse|touchpad|trackball|trackpad' /sys/class/input/*/device/name 2>/dev/null && return 0
+  fi
+  return 1
+}
+
+# Decide whether to hide the cursor, resolving HIDE_CURSOR=auto against the
+# attached hardware. Echoes "true" or "false". auto hides only when no pointer
+# device is present at provision time.
+_resolve_hide_cursor() {
+  case "${HIDE_CURSOR:-auto}" in
+    auto|AUTO|Auto)
+      if has_pointer_device; then echo "false"; else echo "true"; fi
+      ;;
+    *)
+      if is_true "$HIDE_CURSOR"; then echo "true"; else echo "false"; fi
+      ;;
+  esac
+}
+
+# Ship a fully-transparent XCursor theme so wlroots/cage renders an invisible
+# pointer. cage has no native hide-cursor flag on the Pi OS versions we target
+# (see cage-kiosk/cage issues #235, #299, #422), and there is no Chromium or
+# WLR_* flag that hides it. The portable, well-known kiosk fix is to point the
+# cursor theme at a transparent cursor via XCURSOR_PATH/XCURSOR_THEME, which the
+# unit's Environment lines do.
+#
+# We write the Xcursor binary directly with printf rather than depend on
+# xcursorgen (not always installable). The bytes below are a valid single-image
+# Xcursor: "Xcur" magic, a 16-byte file header, one TOC entry pointing at one
+# 1x1 image chunk whose only pixel is ARGB 0x00000000 (fully transparent).
+# `file` reports this as "X11 cursor". Format ref: x.org Xcursor(3).
+# Echoes the theme name on success; returns non-zero (and the caller falls back
+# to the normal cursor) if the files cannot be written.
+_install_blank_cursor_theme() {
+  local theme="foodassistant-hidden"
+  local base="/usr/share/icons/$theme"
+  local cdir="$base/cursors"
+  mkdir -p "$cdir" || return 1
+  # The single transparent cursor file.
+  if ! printf '\130\143\165\162\020\000\000\000\000\000\001\000\001\000\000\000\002\000\375\377\001\000\000\000\034\000\000\000\044\000\000\000\002\000\375\377\001\000\000\000\001\000\000\000\001\000\000\000\001\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000' > "$cdir/left_ptr"; then
+    return 1
+  fi
+  # Point the common cursor names at the one transparent cursor so whatever
+  # name an app asks for resolves to the invisible pointer. Symlinks keep it
+  # to a single real file; libxcursor follows them.
+  local name
+  for name in default left_ptr_watch watch text xterm hand1 hand2 pointer \
+              top_left_arrow arrow crosshair fleur grabbing; do
+    ln -sf left_ptr "$cdir/$name" 2>/dev/null || true
+  done
+  cat > "$base/index.theme" <<'THEME'
+[Icon Theme]
+Name=FoodAssistant Hidden Cursor
+Comment=Fully transparent cursor for touch/Stream Deck kiosks
+THEME
+  echo "$theme"
+}
+
 configure_kiosk() {
   if ! flag_enabled "$ENABLE_KIOSK" has_display; then
     log "Kiosk not enabled (ENABLE_KIOSK=$ENABLE_KIOSK); skipping"
@@ -630,6 +710,18 @@ configure_kiosk() {
     return 0
   fi
   log "Installing Chromium kiosk via cage (Wayland) for $KIOSK_URL"
+
+  # Decide whether to hide the cursor (HIDE_CURSOR=auto/true/false). Resolved
+  # early so the choice is visible (and testable) even in DRY_RUN. auto hides
+  # only when no pointer device is attached at provision time.
+  local hide_cursor
+  hide_cursor="$(_resolve_hide_cursor)"
+  if [ "$hide_cursor" = "true" ]; then
+    log "Cursor will be hidden (HIDE_CURSOR=$HIDE_CURSOR; no pointer device or forced)"
+  else
+    log "Cursor will be shown (HIDE_CURSOR=$HIDE_CURSOR)"
+  fi
+
   # cage = minimal single-app Wayland compositor; chromium = browser. Install
   # them on separate apt lines and try both browser package names. Bundling
   # them in one "apt-get install cage chromium" meant a single unmatched name
@@ -672,6 +764,23 @@ configure_kiosk() {
   loginctl enable-linger "$kuser" || warn "enable-linger failed"
   systemctl disable getty@tty1.service 2>/dev/null || true
 
+  # When hiding, install the transparent cursor theme and prepare the extra
+  # Environment lines for the unit. If theme install fails we leave the cursor
+  # visible rather than risk a broken unit.
+  local cursor_env=""
+  if [ "$hide_cursor" = "true" ]; then
+    local theme
+    theme="$(_install_blank_cursor_theme || true)"
+    if [ -n "$theme" ]; then
+      cursor_env="Environment=XCURSOR_PATH=/usr/share/icons
+Environment=XCURSOR_THEME=$theme
+Environment=XCURSOR_SIZE=24"
+      log "Installed transparent cursor theme '$theme' for the kiosk"
+    else
+      warn "Could not install transparent cursor theme; cursor will remain visible"
+    fi
+  fi
+
   cat > /etc/systemd/system/foodassistant-kiosk.service <<EOF
 [Unit]
 Description=FoodAssistant Chromium kiosk
@@ -693,7 +802,8 @@ StandardError=journal
 UtmpIdentifier=tty1
 UtmpMode=user
 Environment=XDG_RUNTIME_DIR=/run/user/$kuid
-ExecStart=$cage_bin -- $chromium_bin --kiosk --noerrdialogs \\
+${cursor_env:+$cursor_env
+}ExecStart=$cage_bin -- $chromium_bin --kiosk --noerrdialogs \\
   --disable-infobars --no-first-run --ozone-platform=wayland \\
   --remote-debugging-port=9222 --disable-restore-session-state $KIOSK_URL
 Restart=always

@@ -120,6 +120,54 @@ def test_kiosk_enabled_with_display(tmp_path):
     assert "Installing Chromium kiosk" in out
 
 
+def test_hide_cursor_auto_no_pointer_hides(tmp_path):
+    # HIDE_CURSOR=auto with no pointer device attached -> hide the cursor.
+    rc, out = run_firstboot(
+        tmp_path,
+        "ENABLE_KIOSK=true\n",
+        extra_env={"FORCE_DISPLAY": "1", "FORCE_POINTER": ""},
+    )
+    assert rc == 0, out
+    assert "HIDE_CURSOR=auto" in out
+    assert "Cursor will be hidden" in out
+
+
+def test_hide_cursor_auto_with_pointer_shows(tmp_path):
+    # HIDE_CURSOR=auto with a pointer device present -> keep the cursor visible.
+    rc, out = run_firstboot(
+        tmp_path,
+        "ENABLE_KIOSK=true\n",
+        extra_env={"FORCE_DISPLAY": "1", "FORCE_POINTER": "1"},
+    )
+    assert rc == 0, out
+    assert "Cursor will be shown" in out
+    assert "Cursor will be hidden" not in out
+
+
+def test_hide_cursor_false_never_hides(tmp_path):
+    # HIDE_CURSOR=false keeps the cursor even with no pointer device.
+    rc, out = run_firstboot(
+        tmp_path,
+        "ENABLE_KIOSK=true\nHIDE_CURSOR=false\n",
+        extra_env={"FORCE_DISPLAY": "1", "FORCE_POINTER": ""},
+    )
+    assert rc == 0, out
+    assert "HIDE_CURSOR=false" in out
+    assert "Cursor will be shown" in out
+
+
+def test_hide_cursor_true_hides_even_with_pointer(tmp_path):
+    # HIDE_CURSOR=true forces hiding even when a mouse is attached.
+    rc, out = run_firstboot(
+        tmp_path,
+        "ENABLE_KIOSK=true\nHIDE_CURSOR=true\n",
+        extra_env={"FORCE_DISPLAY": "1", "FORCE_POINTER": "1"},
+    )
+    assert rc == 0, out
+    assert "HIDE_CURSOR=true" in out
+    assert "Cursor will be hidden" in out
+
+
 def test_remote_mode_skips_docker_and_stack(tmp_path):
     rc, out = run_firstboot(
         tmp_path,
