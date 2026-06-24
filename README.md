@@ -205,6 +205,14 @@ docker compose up -d grocy   # or mealie / ollama
 
 Check each project's release notes before a major bump - Mealie in particular has had breaking schema migrations between major versions. FoodAssistant's own image is versioned separately via `FOODASSISTANT_TAG` (see above).
 
+## Documentation
+
+- [docs/hardware.md](docs/hardware.md) - supported boards, displays and touch panels, Stream Deck models, accelerometer, and barcode scanners.
+- [docs/platforms.md](docs/platforms.md) - deployment modes (server, Pi Hosted, Pi Remote), hosting, pinned versions and ports, AI providers, and Home Assistant.
+- [docs/hardware/supported-hardware.md](docs/hardware/supported-hardware.md) - minimum specs and the board test matrix.
+- [docs/hardware/sd-image.md](docs/hardware/sd-image.md) - flashing the ready-made SD-card image.
+- [docs/api.md](docs/api.md) - REST endpoint reference.
+
 ## API
 
 See [docs/api.md](docs/api.md) for endpoint reference. Interactive docs are at `/docs` when the app is running.
