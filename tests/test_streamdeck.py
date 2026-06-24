@@ -1075,3 +1075,148 @@ def test_ha_run_action_calls_service():
     assert calls, "should have POSTed to HA"
     assert "light/toggle" in calls[0]["url"]
     assert refreshed, "ha_entity_refresh should have been called"
+
+
+# -- idle blank ----------------------------------------------------------------
+
+
+class _FakeDeck:
+    """Minimal stand-in for a StreamDeck device used in idle-blank tests."""
+
+    def __init__(self, key_count=15):
+        self._key_count = key_count
+        self.brightness_calls: list[int] = []
+        self.reset_calls: int = 0
+        self._callback = None
+
+    def key_count(self) -> int:
+        return self._key_count
+
+    def key_image_format(self) -> dict:
+        return {"size": (72, 72)}
+
+    def deck_type(self) -> str:
+        return "FakeDeck"
+
+    def open(self) -> None:
+        pass
+
+    def close(self) -> None:
+        pass
+
+    def set_brightness(self, pct: int) -> None:
+        self.brightness_calls.append(pct)
+
+    def reset(self) -> None:
+        self.reset_calls += 1
+
+    def set_key_callback(self, cb) -> None:
+        self._callback = cb
+
+    def set_key_image(self, key, image) -> None:
+        pass
+
+    def press(self, key: int) -> None:
+        """Simulate a key press+release pair."""
+        if self._callback:
+            self._callback(self, key, True)
+            self._callback(self, key, False)
+
+    def press_down(self, key: int) -> None:
+        """Simulate only the press event (key held down)."""
+        if self._callback:
+            self._callback(self, key, True)
+
+    def release(self, key: int) -> None:
+        """Simulate only the release event."""
+        if self._callback:
+            self._callback(self, key, False)
+
+
+def _make_controller(idle_timeout_minutes: int = 0):
+    """Build a Controller backed by a fake deck with no real hardware."""
+    from foodassistant_streamdeck.controller import Controller
+
+    cfg = config.Config(idle_timeout_minutes=idle_timeout_minutes).validated()
+    deck = _FakeDeck()
+    ctrl = Controller(deck, cfg)
+    # Give the controller a minimal event loop reference so _on_key can schedule.
+    loop = asyncio.new_event_loop()
+    ctrl.loop = loop
+    # Wire up the key callback as run() would do.
+    deck.set_key_callback(ctrl._on_key)
+    # Stub _draw_page to avoid importing the real StreamDeck library.
+    ctrl._draw_page = lambda: None
+    return ctrl, deck, loop
+
+
+def test_key_press_updates_last_activity():
+    import time as _time
+    ctrl, deck, loop = _make_controller()
+    before = ctrl._last_activity
+    _time.sleep(0.02)
+    deck.press_down(0)
+    assert ctrl._last_activity > before
+    loop.close()
+
+
+def test_idle_blanks_deck_after_timeout():
+    import time as _time
+    ctrl, deck, loop = _make_controller(idle_timeout_minutes=1)
+    # Wind the clock back so the controller looks idle.
+    ctrl._last_activity = _time.monotonic() - 70
+    loop.run_until_complete(ctrl._idle_loop_once())
+    assert ctrl._idle_blanked
+    assert deck.reset_calls >= 1
+    assert 0 in deck.brightness_calls
+    loop.close()
+
+
+def test_idle_loop_does_not_blank_when_timeout_zero():
+    import time as _time
+    ctrl, deck, loop = _make_controller(idle_timeout_minutes=0)
+    ctrl._last_activity = _time.monotonic() - 3600
+    loop.run_until_complete(ctrl._idle_loop_once())
+    assert not ctrl._idle_blanked
+    assert deck.reset_calls == 0
+    loop.close()
+
+
+def test_wake_on_key_press_when_blanked():
+    ctrl, deck, loop = _make_controller(idle_timeout_minutes=1)
+    # Force blanked state.
+    ctrl._idle_blanked = True
+    # Press down a key -- should record the key as a wake key.
+    deck.press_down(0)
+    assert 0 in ctrl._wake_keys
+    # Drain any pending coroutines scheduled by run_coroutine_threadsafe.
+    loop.run_until_complete(asyncio.sleep(0))
+    loop.close()
+
+
+def test_wake_key_release_does_not_trigger_action():
+    ctrl, deck, loop = _make_controller(idle_timeout_minutes=1)
+    ctrl._idle_blanked = True
+    handled = []
+
+    async def fake_handle(spec, long_press=False):
+        handled.append(spec)
+
+    ctrl._handle = fake_handle
+    # Press down while blanked: key lands in _wake_keys.
+    deck.press_down(0)
+    # Clear the blanked flag (as _wake_from_idle would do) so release can run.
+    ctrl._idle_blanked = False
+    # Release: action must be swallowed because the key is in _wake_keys.
+    deck.release(0)
+    loop.run_until_complete(asyncio.sleep(0))
+    assert handled == [], "action must not fire on a wake press"
+    loop.close()
+
+
+def test_wake_restores_page_and_clears_blank_flag():
+    ctrl, deck, loop = _make_controller(idle_timeout_minutes=1)
+    ctrl._idle_blanked = True
+    loop.run_until_complete(ctrl._wake_from_idle())
+    assert not ctrl._idle_blanked
+    loop.close()

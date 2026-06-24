@@ -363,19 +363,27 @@ class Controller:
         self.deck.set_brightness(BRIGHTNESS_STEPS[self._bright_idx])
         self._draw_page()
 
+    async def _idle_loop_once(self) -> None:
+        """Check idle state and blank the deck if the timeout has elapsed.
+
+        This is the per-tick body extracted for testability. The main
+        _idle_loop calls this repeatedly on a 10-second interval.
+        """
+        timeout_mins = self.config.idle_timeout_minutes
+        if timeout_mins <= 0 or self._idle_blanked:
+            return
+        idle_secs = time.monotonic() - self._last_activity
+        if idle_secs >= timeout_mins * 60:
+            log.info("Stream Deck idle for %.0fs -- blanking", idle_secs)
+            self._idle_blanked = True
+            self.deck.set_brightness(0)
+            self.deck.reset()
+
     async def _idle_loop(self) -> None:
-        """Blank the deck after streamdeck_idle_timeout minutes without a key press."""
+        """Blank the deck after idle_timeout_minutes without a key press."""
         while True:
             await asyncio.sleep(10)
-            timeout_mins = self.config.idle_timeout_minutes
-            if timeout_mins <= 0 or self._idle_blanked:
-                continue
-            idle_secs = time.monotonic() - self._last_activity
-            if idle_secs >= timeout_mins * 60:
-                log.info("Stream Deck idle for %.0fs -- blanking", idle_secs)
-                self._idle_blanked = True
-                self.deck.set_brightness(0)
-                self.deck.reset()
+            await self._idle_loop_once()
 
     async def _refresh(self) -> None:
         await self._poll_once()
