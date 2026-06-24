@@ -26,6 +26,11 @@ Defaults, in order:
 * **Commit** commits every pending scan into the inventory.
 * **Add**, **Stock**, **Cook** open the matching pages on an attached display.
 * **Brightness** cycles the deck brightness.
+* **Unlock** (the `pin` action) turns the deck into a numeric keypad so you can
+  unlock the PIN-locked app without a keyboard or touchscreen. Tap the digits
+  (they show masked, never as the real code), press Enter to submit, or Cancel
+  to back out. On success the deck returns to the normal layout; a wrong code
+  clears the entry and flashes a brief error.
 
 Status keys repaint on a timer (every 30 seconds by default), so the expiring
 and pending counts stay current without you touching anything.

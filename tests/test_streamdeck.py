@@ -841,6 +841,188 @@ def test_ha_run_action_unconfigured():
     assert "not configured" in msg
 
 
+# -- PIN keypad ------------------------------------------------------------
+
+
+def test_pin_buffer_accumulates_digits():
+    b = actions.PinBuffer()
+    assert b.is_empty()
+    for ch in "1234":
+        b.digit(ch)
+    assert b.length() == 4
+    assert b.value == "1234"
+    assert not b.is_empty()
+
+
+def test_pin_buffer_masks_and_never_shows_digits():
+    b = actions.PinBuffer()
+    for ch in "9173":
+        b.digit(ch)
+    masked = b.masked()
+    assert len(masked) == 4
+    # The mask must not leak any actual digit.
+    assert not any(c.isdigit() for c in masked)
+
+
+def test_pin_buffer_backspace_and_clear():
+    b = actions.PinBuffer()
+    for ch in "555":
+        b.digit(ch)
+    b.backspace()
+    assert b.value == "55"
+    b.clear()
+    assert b.is_empty()
+    assert b.value == ""
+    # Backspace on an empty buffer is a no-op, not an error.
+    b.backspace()
+    assert b.is_empty()
+
+
+def test_pin_buffer_ignores_non_digits_and_overflow():
+    b = actions.PinBuffer(max_len=3)
+    b.digit("a")     # not a digit
+    b.digit("12")    # not a single char
+    assert b.is_empty()
+    for ch in "12345":
+        b.digit(ch)  # caps at max_len
+    assert b.length() == 3
+    assert b.value == "123"
+
+
+def test_pin_action_registered():
+    assert "pin" in actions.ACTIONS
+    assert actions.ACTIONS["pin"].kind == "pin"
+
+
+def test_keypad_specs_cover_digits_and_controls():
+    specs = actions.keypad_specs()
+    for d in "0123456789":
+        assert specs[f"keypad_{d}"].keypad_key == d
+        assert specs[f"keypad_{d}"].kind == "keypad"
+    for ctl in (actions.KEYPAD_CLEAR, actions.KEYPAD_ENTER, actions.KEYPAD_CANCEL):
+        assert specs[f"keypad_{ctl}"].keypad_key == ctl
+
+
+def test_pin_action_enters_keypad_via_context():
+    entered = {"n": 0}
+
+    async def noop():
+        pass
+
+    ctx = actions.ActionContext(
+        client=None,
+        base_url="http://x",
+        refresh=noop,
+        navigate=lambda _: noop(),
+        cycle_brightness=lambda: 80,
+        page_next=lambda: None,
+        page_prev=lambda: None,
+        keypad_enter=lambda: entered.__setitem__("n", entered["n"] + 1),
+    )
+    msg = asyncio.run(actions.run_action(actions.ACTIONS["pin"], ctx))
+    assert msg == "keypad"
+    assert entered["n"] == 1
+
+
+def test_keypad_press_dispatched_via_context():
+    pressed = []
+
+    async def fake_keypad_press(key):
+        pressed.append(key)
+
+    async def noop():
+        pass
+
+    ctx = actions.ActionContext(
+        client=None,
+        base_url="http://x",
+        refresh=noop,
+        navigate=lambda _: noop(),
+        cycle_brightness=lambda: 80,
+        page_next=lambda: None,
+        page_prev=lambda: None,
+        keypad_press=fake_keypad_press,
+    )
+    spec = actions.keypad_specs()["keypad_7"]
+    msg = asyncio.run(actions.run_action(spec, ctx))
+    assert msg == "keypad 7"
+    assert pressed == ["7"]
+
+
+def test_submit_pin_success():
+    client = _FakeClient(post_map={"/ui/login": _Resp(303, {})})
+    ok = asyncio.run(actions.submit_pin(client, "http://x", "1234"))
+    assert ok is True
+    assert client.calls == [("POST", "http://x/ui/login")]
+
+
+def test_submit_pin_failure_on_401():
+    client = _FakeClient(post_map={"/ui/login": _Resp(401, {})})
+    ok = asyncio.run(actions.submit_pin(client, "http://x", "0000"))
+    assert ok is False
+
+
+def test_submit_pin_tolerates_errors():
+    class Boom:
+        async def post(self, *a, **k):
+            raise RuntimeError("network down")
+
+    ok = asyncio.run(actions.submit_pin(Boom(), "http://x", "1234"))
+    assert ok is False
+
+
+# -- keypad layout ---------------------------------------------------------
+
+
+def test_keypad_pages_cover_all_keys_across_pages():
+    for key_count in layout.supported_key_counts():
+        pages = layout.build_keypad_pages(key_count)
+        assert pages
+        for page in pages:
+            assert len(page) == key_count
+        # Gather every keypad key across all pages: the full pad must be present
+        # somewhere, even on a deck that has to paginate.
+        keys = {
+            s.keypad_key
+            for page in pages
+            for s in page
+            if s is not None and s.kind == "keypad"
+        }
+        for d in "0123456789":
+            assert d in keys
+        assert actions.KEYPAD_CLEAR in keys
+        assert actions.KEYPAD_ENTER in keys
+        assert actions.KEYPAD_CANCEL in keys
+
+
+def test_keypad_single_page_when_it_fits():
+    # The 15-key Original holds the whole pad on one page.
+    assert len(layout.build_keypad_pages(15)) == 1
+    assert len(layout.build_keypad_pages(32)) == 1
+
+
+def test_keypad_paginates_on_mini():
+    # The 6-key Mini cannot fit the 13-key pad, so it spills onto more pages,
+    # each ending in a wrapping page-cycle key.
+    pages = layout.build_keypad_pages(6)
+    assert len(pages) > 1
+    for page in pages:
+        assert page[-1].name == "page_next"
+
+
+def test_keypad_pages_reject_bad_size():
+    with pytest.raises(ValueError):
+        layout.build_keypad_pages(0)
+
+
+def test_keypad_xl_phone_block():
+    # On the XL (8x4) the first three digits sit in the top-left row.
+    page = layout.build_keypad_pages(32)[0]
+    assert page[0].keypad_key == "1"
+    assert page[1].keypad_key == "2"
+    assert page[2].keypad_key == "3"
+
+
 def test_ha_run_action_calls_service():
     import json
     calls = []

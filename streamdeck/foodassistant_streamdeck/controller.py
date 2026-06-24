@@ -18,7 +18,17 @@ from typing import Optional
 import httpx
 
 from . import actions, layout, render
-from .actions import ActionContext, ActionSpec, HaEntityState, TimerState, WeatherState
+from .actions import (
+    KEYPAD_CANCEL,
+    KEYPAD_CLEAR,
+    KEYPAD_ENTER,
+    ActionContext,
+    ActionSpec,
+    HaEntityState,
+    PinBuffer,
+    TimerState,
+    WeatherState,
+)
 from .config import BRIGHTNESS_STEPS, Config
 
 log = logging.getLogger("foodassistant.streamdeck")
@@ -36,6 +46,17 @@ class Controller:
             config.keys, self.key_count
         )
         self.page = 0
+        # On-deck PIN keypad. ``keypad_mode`` swaps the visible page for the
+        # numeric pad; ``pin_buffer`` accumulates the entered code and
+        # ``pin_status`` carries a short transient label (e.g. an error) shown
+        # while the pad is up.
+        self.keypad_mode: bool = False
+        self.keypad_pages: list[list[Optional[ActionSpec]]] = layout.build_keypad_pages(
+            self.key_count
+        )
+        self.keypad_page_idx: int = 0
+        self.pin_buffer: PinBuffer = PinBuffer()
+        self.pin_status: str = ""
         self.status: dict[str, int] = {"expiring": 0, "pending": 0}
         self.timers: dict[str, TimerState] = {}  # action name -> timer state
         # Toggles each poll tick while a timer alert is active so the key blinks
@@ -103,6 +124,8 @@ class Controller:
     # -- rendering ---------------------------------------------------------
 
     def _current(self) -> list[Optional[ActionSpec]]:
+        if self.keypad_mode:
+            return self.keypad_pages[self.keypad_page_idx % len(self.keypad_pages)]
         return self.pages[self.page % len(self.pages)]
 
     def _draw_page(self) -> None:
@@ -113,7 +136,11 @@ class Controller:
             if spec is None:
                 image = render.blank_key(*self._key_size())
             else:
-                if spec.kind == "timer":
+                if spec.kind == "keypad":
+                    label, color = self._keypad_face(spec)
+                    alert = False
+                    count = None
+                elif spec.kind == "timer":
                     t = self.timers.get(spec.name)
                     label = t.label(spec.label) if t else spec.label
                     color = (
@@ -165,6 +192,22 @@ class Controller:
             phys = layout.rotated_index(index, self.key_count, rotation)
             self.deck.set_key_image(phys, PILHelper.to_native_format(self.deck, image))
 
+    def _keypad_face(self, spec: ActionSpec) -> tuple[str, str]:
+        """Label and colour for a keypad key.
+
+        Digit and Clear/Cancel keys show their static label. The Enter key
+        doubles as the feedback surface: it shows masked dots for the entered
+        code (never the digits themselves) or a transient status such as an
+        error, so a user without a screen still sees their progress.
+        """
+        if spec.keypad_key == KEYPAD_ENTER:
+            if self.pin_status:
+                return self.pin_status, "#7f1d1d"
+            if self.pin_buffer.is_empty():
+                return spec.label, spec.color
+            return self.pin_buffer.masked(), spec.color
+        return spec.label, spec.color
+
     def _key_size(self) -> tuple[int, int]:
         w, h = self.deck.key_image_format()["size"]
         return w, h
@@ -207,6 +250,56 @@ class Controller:
                 log.error("Action failed: %s", e)
         fut.add_done_callback(_on_done)
 
+    def _enter_keypad(self) -> None:
+        """Switch the deck into PIN keypad mode with a fresh, empty buffer."""
+        self.keypad_mode = True
+        self.keypad_page_idx = 0
+        self.pin_buffer.clear()
+        self.pin_status = ""
+        self._draw_page()
+
+    def _exit_keypad(self) -> None:
+        """Leave keypad mode and return to the normal layout."""
+        self.keypad_mode = False
+        self.pin_buffer.clear()
+        self.pin_status = ""
+        self._draw_page()
+
+    async def _keypad_press(self, keypad_key: str) -> None:
+        """Handle one keypad key. Digits accumulate; controls act immediately."""
+        # Any press clears a lingering error so the next attempt starts clean.
+        self.pin_status = ""
+        if keypad_key.isdigit():
+            self.pin_buffer.digit(keypad_key)
+            self._draw_page()
+            return
+        if keypad_key == KEYPAD_CLEAR:
+            self.pin_buffer.backspace()
+            self._draw_page()
+            return
+        if keypad_key == KEYPAD_CANCEL:
+            self._exit_keypad()
+            return
+        if keypad_key == KEYPAD_ENTER:
+            await self._submit_pin()
+            return
+
+    async def _submit_pin(self) -> None:
+        """Submit the buffered PIN. Return to normal on success, else show error."""
+        if self.pin_buffer.is_empty() or self.client is None:
+            self.pin_status = "Empty"
+            self._draw_page()
+            return
+        ok = await actions.submit_pin(
+            self.client, self.config.base_url, self.pin_buffer.value
+        )
+        if ok:
+            self._exit_keypad()
+        else:
+            self.pin_buffer.clear()
+            self.pin_status = "Wrong"
+            self._draw_page()
+
     def _timer_press(self, name: str, long_press: bool = False) -> None:
         if name not in self.timers:
             self.timers[name] = TimerState()
@@ -232,6 +325,8 @@ class Controller:
             ha_base_url=self.config.ha_base_url,
             ha_token=self.config.ha_token,
             ha_entity_refresh=self._refresh_ha_entities,
+            keypad_enter=self._enter_keypad,
+            keypad_press=self._keypad_press,
         )
         try:
             msg = await actions.run_action(spec, ctx, long_press=long_press)
@@ -270,11 +365,17 @@ class Controller:
         return pct
 
     def _page_next(self) -> None:
-        self.page = (self.page + 1) % len(self.pages)
+        if self.keypad_mode:
+            self.keypad_page_idx = (self.keypad_page_idx + 1) % len(self.keypad_pages)
+        else:
+            self.page = (self.page + 1) % len(self.pages)
         self._draw_page()
 
     def _page_prev(self) -> None:
-        self.page = (self.page - 1) % len(self.pages)
+        if self.keypad_mode:
+            self.keypad_page_idx = (self.keypad_page_idx - 1) % len(self.keypad_pages)
+        else:
+            self.page = (self.page - 1) % len(self.pages)
         self._draw_page()
 
     async def _navigate(self, path: str) -> bool:

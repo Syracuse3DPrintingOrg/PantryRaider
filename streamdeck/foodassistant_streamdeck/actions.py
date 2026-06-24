@@ -100,6 +100,111 @@ class TimerState:
         return False
 
 
+# Largest PIN the buffer will hold. Generous enough for any reasonable unlock
+# code; extra presses past this are ignored rather than silently truncating a
+# longer code into a different one.
+PIN_MAX_LEN: int = 12
+
+
+class PinBuffer:
+    """Accumulates a numeric PIN entered on the deck keypad.
+
+    The buffer never exposes the entered digits for rendering; callers ask for
+    ``masked()`` (a row of dots) or ``length()`` so the actual code is never
+    drawn on a key face. ``digit`` appends, ``backspace`` removes the last
+    digit, and ``clear`` empties the whole buffer. ``value`` is only read when
+    the controller submits the code over HTTP.
+    """
+
+    def __init__(self, max_len: int = PIN_MAX_LEN) -> None:
+        self._digits: list[str] = []
+        self._max_len = max(1, int(max_len))
+
+    def digit(self, ch: str) -> None:
+        """Append a single digit. Non-digits and overflow are ignored."""
+        if len(ch) == 1 and ch.isdigit() and len(self._digits) < self._max_len:
+            self._digits.append(ch)
+
+    def backspace(self) -> None:
+        if self._digits:
+            self._digits.pop()
+
+    def clear(self) -> None:
+        self._digits.clear()
+
+    def length(self) -> int:
+        return len(self._digits)
+
+    def is_empty(self) -> bool:
+        return not self._digits
+
+    @property
+    def value(self) -> str:
+        """The raw entered PIN. Only the submit path should read this."""
+        return "".join(self._digits)
+
+    def masked(self) -> str:
+        """A face-safe representation: one dot per entered digit."""
+        return "•" * len(self._digits)
+
+
+# Logical keys on the on-deck keypad. Digit keys carry the digit itself; the two
+# editing keys use these sentinel names.
+KEYPAD_CLEAR = "clear"
+KEYPAD_ENTER = "enter"
+KEYPAD_CANCEL = "cancel"
+
+
+def keypad_specs() -> dict[str, ActionSpec]:
+    """Build the ActionSpecs used on the keypad page.
+
+    Digits 0-9 plus a clear/backspace, an enter/submit, and a cancel that drops
+    back to the normal layout. These are generated rather than stored in the
+    static ACTIONS registry so the keypad never appears as a bindable key in a
+    user's config.
+    """
+    specs: dict[str, ActionSpec] = {}
+    for d in "0123456789":
+        specs[f"keypad_{d}"] = ActionSpec(
+            name=f"keypad_{d}", label=d, color="#1e293b",
+            kind="keypad", keypad_key=d,
+        )
+    specs[f"keypad_{KEYPAD_CLEAR}"] = ActionSpec(
+        name=f"keypad_{KEYPAD_CLEAR}", label="Clear", color="#7f1d1d",
+        kind="keypad", keypad_key=KEYPAD_CLEAR,
+    )
+    specs[f"keypad_{KEYPAD_ENTER}"] = ActionSpec(
+        name=f"keypad_{KEYPAD_ENTER}", label="Enter", color="#166534",
+        kind="keypad", keypad_key=KEYPAD_ENTER,
+    )
+    specs[f"keypad_{KEYPAD_CANCEL}"] = ActionSpec(
+        name=f"keypad_{KEYPAD_CANCEL}", label="Cancel", color="#334155",
+        kind="keypad", keypad_key=KEYPAD_CANCEL,
+    )
+    return specs
+
+
+async def submit_pin(client: Any, base_url: str, pin: str) -> bool:
+    """Submit a PIN to the app's login endpoint. Returns True on success.
+
+    The app authenticates with a password (which may be a numeric PIN) posted
+    to ``/ui/login`` as a form field. A successful login answers with a redirect
+    to the dashboard (status < 400 without following it); a wrong code answers
+    401. Network or service errors return False so the deck shows an error state
+    rather than crashing.
+    """
+    base = base_url.rstrip("/")
+    try:
+        r = await client.post(
+            f"{base}/ui/login",
+            data={"password": pin},
+            follow_redirects=False,
+        )
+        return r.status_code < 400
+    except Exception:  # noqa: BLE001 - surface as failure, never crash
+        return False
+
+
 _WEATHER_CONDITION_CODES: dict[int, str] = {
     113: "Sunny", 116: "Partly\nCloudy", 119: "Cloudy", 122: "Overcast",
     143: "Mist", 176: "Patchy\nRain", 179: "Patchy\nSnow",
@@ -266,6 +371,7 @@ class ActionSpec:
     target_path: str = ""    # for kind=="nav": app path to open in the kiosk
     ha_entity_id: str = ""   # for kind=="ha_entity": HA entity to show/toggle
     ha_service: str = ""     # for kind=="ha_entity": HA service to call on press
+    keypad_key: str = ""     # for kind=="keypad": digit or clear/enter/cancel
     description: str = ""
     icon: str = ""           # Bootstrap Icons glyph name (without the "bi-"
                              # prefix) drawn above the label; see ACTION_ICONS.
@@ -418,6 +524,14 @@ ACTIONS: dict[str, ActionSpec] = {
         color="#334155",
         kind="system",
         description="Show the previous page of keys.",
+    ),
+    "pin": ActionSpec(
+        name="pin",
+        label="Unlock",
+        color="#1d4ed8",
+        kind="pin",
+        description="Switch the deck into a numeric keypad to unlock the "
+        "PIN-locked app, then return to the normal layout.",
     ),
     "timer_1": ActionSpec(
         name="timer_1",
@@ -574,6 +688,12 @@ class ActionContext:
     ha_entity_refresh: Callable[[], Awaitable[None]] = field(
         default=lambda: __import__("asyncio").sleep(0)
     )
+    # Enter the on-deck PIN keypad (kind=="pin").
+    keypad_enter: Callable[[], None] = field(default=lambda: None)
+    # Handle a keypad key press (kind=="keypad"); arg is the keypad_key value.
+    keypad_press: Callable[[str], Awaitable[None]] = field(
+        default=lambda _k: __import__("asyncio").sleep(0)
+    )
 
 
 async def run_action(spec: ActionSpec, ctx: ActionContext, long_press: bool = False) -> str:
@@ -625,6 +745,14 @@ async def run_action(spec: ActionSpec, ctx: ActionContext, long_press: bool = Fa
     if spec.kind == "timer":
         ctx.timer_press(spec.name, long_press)
         return f"{spec.name} {'reset' if long_press else '+1min'}"
+
+    if spec.kind == "pin":
+        ctx.keypad_enter()
+        return "keypad"
+
+    if spec.kind == "keypad":
+        await ctx.keypad_press(spec.keypad_key)
+        return f"keypad {spec.keypad_key}"
 
     if spec.kind == "weather":
         await ctx.weather_refresh()

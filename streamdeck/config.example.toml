@@ -44,6 +44,10 @@ rotation = 0
 #   inventory   open the inventory dashboard on the attached display
 #   cook        open the recipe suggestions page on the attached display
 #   brightness  cycle deck brightness
+#   pin         turn the deck into a numeric keypad to unlock the PIN-locked
+#               app, then return to the normal layout (handy with no keyboard
+#               or touchscreen). Entered digits are shown masked, never as the
+#               actual code.
 keys = [
   "expiring",
   "pending",

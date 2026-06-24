@@ -10,7 +10,14 @@ from __future__ import annotations
 
 from typing import Optional
 
-from .actions import ACTIONS, ActionSpec
+from .actions import (
+    ACTIONS,
+    KEYPAD_CANCEL,
+    KEYPAD_CLEAR,
+    KEYPAD_ENTER,
+    ActionSpec,
+    keypad_specs,
+)
 
 # Physical grid for each known deck size, handy for docs and previews.
 GRID: dict[int, tuple[int, int]] = {
@@ -81,6 +88,70 @@ def slot_for_physical(phys: int, key_count: int, rotation: int) -> int:
     else:  # 270
         vr, vc = p_cols - 1 - pc, pr
     return vr * d_cols + vc
+
+
+def build_keypad_pages(key_count: int) -> list[list[Optional[ActionSpec]]]:
+    """Lay out a numeric PIN keypad across one or more deck-sized pages.
+
+    The pad always offers digits 0-9, a Clear/backspace key, an Enter/submit
+    key, and a Cancel key that returns to the normal layout. When the whole pad
+    fits on the deck it is a single page: on the wide XL grid (8x4) the digits
+    fall in a phone-style 3x3 block with the controls below; otherwise the pad
+    is laid out in reading order. A deck too small to hold the pad at once (the
+    6-key Mini) spills onto further pages, with the final slot of each page
+    becoming a wrapping page-cycle key, exactly like ``build_pages``.
+
+    Returns a list of pages, each a flat list of exactly ``key_count`` slots
+    (ActionSpec or None).
+    """
+    if key_count < 1:
+        raise ValueError("key_count must be positive")
+
+    ks = keypad_specs()
+    clear = ks[f"keypad_{KEYPAD_CLEAR}"]
+    enter = ks[f"keypad_{KEYPAD_ENTER}"]
+    cancel = ks[f"keypad_{KEYPAD_CANCEL}"]
+    digit = {d: ks[f"keypad_{d}"] for d in "0123456789"}
+
+    cols, rows = GRID.get(key_count, (key_count, 1))
+
+    # The full pad in reading order: digits 1-9, then Clear, 0, Enter, Cancel.
+    full: list[ActionSpec] = [digit[d] for d in "123456789"]
+    full += [clear, digit["0"], enter, cancel]
+
+    if cols >= 3 and rows >= 4:
+        # Phone-style block on a roomy grid (XL): 1-9 in a 3x3, Clear/0/Enter on
+        # the fourth row, Cancel in the top-right spare cell.
+        page: list[Optional[ActionSpec]] = [None] * key_count
+        order = [
+            "1", "2", "3",
+            "4", "5", "6",
+            "7", "8", "9",
+            KEYPAD_CLEAR, "0", KEYPAD_ENTER,
+        ]
+        for i, token in enumerate(order):
+            r, c = divmod(i, 3)
+            page[r * cols + c] = digit.get(token) or ks[f"keypad_{token}"]
+        page[cols - 1] = cancel
+        return [page]
+
+    if len(full) <= key_count:
+        # Single page, reading order, padded with blanks.
+        page = list(full)
+        page += [None] * (key_count - len(page))
+        return [page]
+
+    # Too small for the whole pad: paginate with a wrapping page-cycle key in
+    # the last slot of every page.
+    usable = key_count - 1
+    pages: list[list[Optional[ActionSpec]]] = []
+    for start in range(0, len(full), usable):
+        chunk = full[start : start + usable]
+        page = list(chunk)
+        page += [None] * (usable - len(page))
+        page.append(ACTIONS["page_next"])
+        pages.append(page)
+    return pages
 
 
 def _specs(names: list[str]) -> list[ActionSpec]:
