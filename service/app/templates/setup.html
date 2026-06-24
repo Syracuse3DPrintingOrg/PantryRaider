@@ -786,6 +786,38 @@
             <div class="test-result" id="upstream-result"></div>
           </div>
 
+          {% set _ls = s.satellite_last_sync or {} %}
+          <div class="section-card">
+            <div class="section-title"><i class="bi bi-activity text-info"></i> Sync Status</div>
+            <p class="text-secondary small">Health of the last pull from the main server. Use Sync Now to refresh on demand. The satellite also re-syncs on its own every {{ s.satellite_sync_minutes }} minutes.</p>
+            <div id="sync-status">
+              {% if _ls.get('at') %}
+              <div class="d-flex align-items-center mb-2">
+                {% if _ls.get('ok') %}
+                <span class="badge bg-success me-2"><i class="bi bi-check-circle me-1"></i>Succeeded</span>
+                {% else %}
+                <span class="badge bg-danger me-2"><i class="bi bi-x-circle me-1"></i>Failed</span>
+                {% endif %}
+                <span class="text-secondary small">Last sync: <span class="sync-time" data-iso="{{ _ls.get('at') }}">{{ _ls.get('at') }}</span></span>
+              </div>
+              {% if _ls.get('ok') %}
+              <div class="small mb-1">Applied {{ _ls.get('applied') | length }} setting(s){% if _ls.get('defaults') %}, {{ _ls.get('defaults') }} expiry default(s){% endif %}.</div>
+                {% if _ls.get('applied') %}
+                <div class="small text-secondary">Fields: <code>{{ _ls.get('applied') | join(', ') }}</code></div>
+                {% endif %}
+              {% else %}
+              <div class="small text-danger">{{ _ls.get('error') or 'Sync failed.' }}</div>
+              {% endif %}
+              {% else %}
+              <div class="text-secondary small">No sync has run yet on this device.</div>
+              {% endif %}
+            </div>
+            <button class="btn btn-outline-info btn-sm mt-3" onclick="syncFromUpstream()">
+              <i class="bi bi-arrow-repeat me-1"></i>Sync Now
+            </button>
+            <div class="test-result" id="sync-now-result"></div>
+          </div>
+
           <div class="section-card">
             <div class="section-title"><i class="bi bi-keypad text-info"></i> Kiosk PIN
               <span class="badge bg-secondary badge-req">Optional</span></div>
@@ -2761,10 +2793,56 @@ async function testRemote() {
   }
 }
 
+// Show an ISO-8601 UTC timestamp in the visitor's local time, e.g. for the
+// satellite Sync Status panel. Returns the raw string if it cannot be parsed.
+function fmtSyncTime(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return iso;
+  return d.toLocaleString();
+}
+
+// Render any sync-time stamps already on the page into local time.
+function _initSyncTimes() {
+  document.querySelectorAll('.sync-time[data-iso]').forEach((el) => {
+    el.textContent = fmtSyncTime(el.getAttribute('data-iso'));
+  });
+}
+
+// Redraw the Sync Status panel from a last_sync summary returned by the server.
+function renderSyncStatus(ls) {
+  const box = document.getElementById('sync-status');
+  if (!box || !ls || !ls.at) return;
+  const esc = (s) => String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const badge = ls.ok
+    ? '<span class="badge bg-success me-2"><i class="bi bi-check-circle me-1"></i>Succeeded</span>'
+    : '<span class="badge bg-danger me-2"><i class="bi bi-x-circle me-1"></i>Failed</span>';
+  let body = '';
+  if (ls.ok) {
+    const applied = ls.applied || [];
+    let line = 'Applied ' + applied.length + ' setting(s)';
+    if (ls.defaults) line += ', ' + ls.defaults + ' expiry default(s)';
+    body = '<div class="small mb-1">' + line + '.</div>';
+    if (applied.length) {
+      body += '<div class="small text-secondary">Fields: <code>' + esc(applied.join(', ')) + '</code></div>';
+    }
+  } else {
+    body = '<div class="small text-danger">' + esc(ls.error || 'Sync failed.') + '</div>';
+  }
+  box.innerHTML =
+    '<div class="d-flex align-items-center mb-2">' + badge +
+    '<span class="text-secondary small">Last sync: <span class="sync-time">' +
+    esc(fmtSyncTime(ls.at)) + '</span></span></div>' + body;
+}
+
 // Satellite: save the upstream link, then pull backend config + defaults.
 async function syncFromUpstream() {
   const out = document.getElementById('upstream-result');
-  if (out) { out.className = 'test-result text-secondary'; out.textContent = 'Syncing…'; }
+  const now = document.getElementById('sync-now-result');
+  for (const el of [out, now]) {
+    if (el) { el.className = 'test-result text-secondary'; el.textContent = 'Syncing…'; }
+  }
   try {
     const r = await fetch('setup/satellite/sync', {
       method: 'POST',
@@ -2775,12 +2853,18 @@ async function syncFromUpstream() {
       }),
     });
     const d = await r.json();
-    if (out) {
-      out.className = 'test-result ' + (d.ok ? 'text-success' : 'text-danger');
-      out.textContent = d.ok ? d.message : (d.error || 'Sync failed.');
+    const msg = d.ok ? d.message : (d.error || 'Sync failed.');
+    for (const el of [out, now]) {
+      if (el) {
+        el.className = 'test-result ' + (d.ok ? 'text-success' : 'text-danger');
+        el.textContent = msg;
+      }
     }
+    if (d.last_sync) renderSyncStatus(d.last_sync);
   } catch (e) {
-    if (out) { out.className = 'test-result text-danger'; out.textContent = String(e); }
+    for (const el of [out, now]) {
+      if (el) { el.className = 'test-result text-danger'; el.textContent = String(e); }
+    }
   }
 }
 
@@ -3908,6 +3992,7 @@ async function loadHardwareDetect() {
 document.addEventListener('DOMContentLoaded', checkApStatus);
 document.addEventListener('DOMContentLoaded', loadHardwareDetect);
 document.addEventListener('DOMContentLoaded', _updateGrocyOpenLink);
+document.addEventListener('DOMContentLoaded', _initSyncTimes);
 </script>
 
 <script>

@@ -13,12 +13,32 @@ from __future__ import annotations
 
 import logging
 import socket
+from datetime import datetime, timezone
 
 import httpx
 
 from ..config import settings, SATELLITE_PULL_FIELDS, APP_VERSION
 
 logger = logging.getLogger("foodassistant.satellite")
+
+
+def _record_last_sync(result: dict) -> None:
+    """Persist a compact summary of a pull so the setup page can show its health.
+
+    Stored under the ``satellite_last_sync`` setting (a small dict). Best-effort:
+    a failure to persist must not turn an otherwise-successful sync into a crash.
+    """
+    summary = {
+        "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "ok": bool(result.get("ok")),
+        "applied": list(result.get("applied", [])),
+        "defaults": int(result.get("defaults", 0)),
+        "error": result.get("error"),
+    }
+    try:
+        settings.save({"satellite_last_sync": summary})
+    except Exception as exc:
+        logger.warning("satellite sync: could not record last-sync status: %s", exc)
 
 
 def _local_ip() -> str:
@@ -83,8 +103,19 @@ def sync_from_upstream(timeout: float = 8.0) -> dict:
 
     Returns a small status dict: {"ok": bool, "applied": [...], "defaults": N,
     "command": str|None, "error": str|None}. Never raises on a network/HTTP
-    failure.
+    failure. Each genuine pull attempt is recorded in the persisted
+    ``satellite_last_sync`` setting so the setup page can show sync health.
     """
+    result = _do_sync_from_upstream(timeout)
+    # Skip the "not a satellite" guard: it is not a real pull attempt and only
+    # fires in non-satellite or test contexts, so it should not overwrite the
+    # last genuine sync status shown in the UI.
+    if result.get("error") != "not a satellite":
+        _record_last_sync(result)
+    return result
+
+
+def _do_sync_from_upstream(timeout: float = 8.0) -> dict:
     if not settings.is_satellite():
         return {"ok": False, "error": "not a satellite", "applied": [], "defaults": 0, "command": None}
     base = (settings.remote_server_url or "").rstrip("/")

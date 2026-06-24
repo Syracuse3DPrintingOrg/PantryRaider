@@ -186,13 +186,21 @@ async def satellite_sync(payload: SatelliteSyncPayload):
 
     from ..services.satellite import sync_from_upstream
     result = await run_in_threadpool(sync_from_upstream)
+    # The recorded last-sync summary (timestamp, ok flag, applied fields) lets
+    # the page redraw its Sync Status panel without a full reload.
+    last = settings.satellite_last_sync if isinstance(settings.satellite_last_sync, dict) else {}
     if result.get("ok"):
         return {
             "ok": True,
             "message": f"Synced {len(result['applied'])} settings and "
                        f"{result['defaults']} expiry defaults from the server.",
+            "last_sync": last,
         }
-    return {"ok": False, "error": result.get("error", "Sync failed.")}
+    return {
+        "ok": False,
+        "error": result.get("error", "Sync failed."),
+        "last_sync": last,
+    }
 
 
 class TestProviderPayload(BaseModel):

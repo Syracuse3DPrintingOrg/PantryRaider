@@ -93,7 +93,7 @@ _SAVEABLE = [
     "has_streamdeck", "streamdeck_key_count", "display_touch",
     "display_idle_timeout", "streamdeck_idle_timeout", "streamdeck_key_overrides",
     "deployment_mode", "remote_server_url", "upstream_api_key", "kiosk_pin", "kiosk_readonly_when_locked",
-    "satellite_sync_minutes", "device_id",
+    "satellite_sync_minutes", "satellite_last_sync", "device_id",
     "secret_key", "auth_password", "totp_secret", "api_key", "auth_required",
     "rclone_remote", "rclone_schedule_hours",
     "tunnel_mode", "tunnel_token", "tunnel_url",
@@ -407,6 +407,12 @@ class Settings(BaseSettings):
     # Satellite only: how often to re-pull backend config from the main server,
     # in minutes. 0 disables the periodic refresh (boot + manual sync only).
     satellite_sync_minutes: int = 15
+
+    # Satellite only: result of the most recent pull from the main server, used
+    # to show sync health in the setup page. Keys: "at" (ISO-8601 UTC string),
+    # "ok" (bool), "applied" (list of field names), "defaults" (int),
+    # "error" (str or None). Empty dict means no sync has run yet.
+    satellite_last_sync: dict = {}
 
     # Stable per-device identifier. Auto-generated on first run and persisted so
     # a satellite presents the same identity across reboots and IP changes, and
