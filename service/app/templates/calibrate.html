@@ -49,6 +49,24 @@
     { label: 'bottom-left',  tx: 0.05, ty: 0.95 },
   ];
 
+  // The compositor (wlroots) applies the output transform to touch input as
+  // well as the display, so a calibration done in the visible (rotated) frame
+  // would be rotated a second time at runtime. The libinput matrix runs before
+  // the output transform, so we fit it to the pre-transform target: the inverse
+  // of wlroots' apply_output_transform.
+  //   T_90(x,y)  = (y, 1-x)      ->  inv: (u,v) -> (1-v, u)
+  //   T_180(x,y) = (1-x, 1-y)    ->  inv: (u,v) -> (1-u, 1-v)
+  //   T_270(x,y) = (1-y, x)      ->  inv: (u,v) -> (v, 1-u)
+  const ROTATION = parseInt({{ rotation | default(0) | tojson }}, 10) || 0;
+  function preTransform(tx, ty) {
+    switch (ROTATION) {
+      case 90:  return [1 - ty, tx];
+      case 180: return [1 - tx, 1 - ty];
+      case 270: return [ty, 1 - tx];
+      default:  return [tx, ty];
+    }
+  }
+
   let es = null;
   let step = 0;
   let samples = [];
@@ -144,7 +162,8 @@
         const nx = (d.x - ranges.x_min) / xr;
         const ny = (d.y - ranges.y_min) / yr;
         const c = CORNERS[step];
-        samples.push([nx, ny, c.tx, c.ty]);
+        const [fx, fy] = preTransform(c.tx, c.ty);
+        samples.push([nx, ny, fx, fy]);
         step++;
         if (step < CORNERS.length) {
           showCorner(step);

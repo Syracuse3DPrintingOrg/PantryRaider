@@ -1006,12 +1006,27 @@ async def calibrate_touch_pending():
 
 @router.get("/calibrate/touch/page", response_class=HTMLResponse)
 async def calibrate_touch_page(request: Request):
-    """Fullscreen calibration page the kiosk navigates to. Clears the flag."""
+    """Fullscreen calibration page the kiosk navigates to. Clears the flag.
+
+    The active output rotation is passed in so the page can compensate for it:
+    wlroots applies the output transform to touch input as well as the display,
+    so the calibration matrix (applied before that transform) must be fit in the
+    pre-transform space.
+    """
     try:
         _CAL_FLAG.unlink()
     except OSError:
         pass
-    return templates.TemplateResponse("calibrate.html", {"request": request})
+    rotation = 0
+    try:
+        async with httpx.AsyncClient(timeout=4.0) as c:
+            data = (await c.get(f"{_HOST_BRIDGE}/display/rotation")).json()
+        if data.get("ok"):
+            rotation = int(data.get("rotation", 0) or 0)
+    except Exception:
+        rotation = 0
+    return templates.TemplateResponse(
+        "calibrate.html", {"request": request, "rotation": rotation})
 
 
 @router.get("/calibrate/touch/events")
