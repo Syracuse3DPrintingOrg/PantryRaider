@@ -144,7 +144,16 @@
     })();
   </script>
 
-  <div class="container-fluid px-4">
+  {% if pin_readonly %}
+  <div class="alert alert-warning alert-dismissible d-flex align-items-center mb-0 rounded-0 py-2 px-3" role="alert"
+       style="position:fixed;top:56px;left:0;right:0;z-index:1040;">
+    <i class="bi bi-lock-fill me-2"></i>
+    <span>Locked &mdash; viewing read-only.</span>
+    <a href="ui/pin" class="btn btn-sm btn-warning ms-3">Tap to log in</a>
+    <button type="button" class="btn-close ms-auto" data-bs-dismiss="alert"></button>
+  </div>
+  {% endif %}
+  <div class="container-fluid px-4" {% if pin_readonly %}style="margin-top:3rem"{% endif %}>
     {% if message %}
     <div class="flash">
       <div class="alert alert-{{ message_type or 'success' }} alert-dismissible fade show" role="alert">

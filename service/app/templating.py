@@ -18,6 +18,8 @@ def theme_context(request: Request) -> dict:
                         settings change applies on the next page load.
     ``theme_overlay``: a second CSS href loaded after the main stylesheet
                         (used by overlay themes like Synthwave), or None.
+    ``pin_readonly`` : True when the user is browsing in read-only mode because
+                        kiosk_readonly_when_locked is set and no PIN session exists.
     """
     info = theme_info(settings.ui_theme)
     return {
@@ -31,6 +33,7 @@ def theme_context(request: Request) -> dict:
         "is_pi": is_raspberry_pi(),
         "features": settings.features(),
         "deployment_mode": settings.deployment_mode,
+        "pin_readonly": getattr(request.state, "pin_readonly", False),
     }
 
 

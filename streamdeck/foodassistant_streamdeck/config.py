@@ -61,6 +61,9 @@ class Config:
     ha_slots: list = field(default_factory=list)
     # How often to refresh HA entity states (seconds). 0 = only on press.
     ha_poll_seconds: int = 30
+    # Idle timeout in minutes. 0 = disabled. After this many minutes without
+    # a key press the deck is blanked; any key press wakes it.
+    idle_timeout_minutes: int = 0
 
     def validated(self) -> "Config":
         """Drop unknown action names and clamp numbers into sane ranges."""
@@ -73,6 +76,7 @@ class Config:
             self.rotation = 0
         self.ha_base_url = self.ha_base_url.rstrip("/")
         self.ha_poll_seconds = max(0, int(self.ha_poll_seconds))
+        self.idle_timeout_minutes = max(0, int(self.idle_timeout_minutes))
         return self
 
 
@@ -118,7 +122,7 @@ def _apply(cfg: Config, data: dict) -> None:
         if isinstance(data.get(name), str):
             setattr(cfg, name, data[name])
     for name in ("brightness", "poll_seconds", "soon_days", "rotation",
-                 "weather_poll_minutes", "ha_poll_seconds"):
+                 "weather_poll_minutes", "ha_poll_seconds", "idle_timeout_minutes"):
         if isinstance(data.get(name), int):
             setattr(cfg, name, data[name])
 

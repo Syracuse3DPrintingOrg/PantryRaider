@@ -139,7 +139,11 @@ async def require_pin(request: Request, call_next):
     """Optional numeric PIN gate for the kiosk UI on a satellite. It only guards
     the browser UI (/ui and the root redirect), leaving /setup reachable so the
     PIN can be changed or cleared without SSH. The unlock screen lives at
-    /ui/pin and stores a session flag once the code matches."""
+    /ui/pin and stores a session flag once the code matches.
+
+    When kiosk_readonly_when_locked is True, unauthenticated GET requests are
+    allowed through (read-only browsing), while write methods (POST/PUT/PATCH/
+    DELETE) from unauthenticated users are rejected with 403."""
     if not settings.pin_lock_active():
         return await call_next(request)
     path = request.url.path
@@ -149,6 +153,11 @@ async def require_pin(request: Request, call_next):
         return await call_next(request)
     if request.session.get("pin_ok"):
         return await call_next(request)
+    if settings.kiosk_readonly_when_locked:
+        if request.method == "GET":
+            request.state.pin_readonly = True
+            return await call_next(request)
+        return JSONResponse({"detail": "Locked"}, status_code=403)
     return ingress_redirect(request, "/ui/pin")
 
 

@@ -91,6 +91,14 @@ class Controller:
         except ValueError:
             self._bright_idx = len(BRIGHTNESS_STEPS) // 2
 
+        # Idle-blank state. _last_activity is reset on every key press.
+        # _idle_blanked is True while the deck is blanked due to inactivity.
+        # _wake_keys tracks which physical keys were pressed while blanked so
+        # their release events can be swallowed without triggering actions.
+        self._last_activity: float = time.monotonic()
+        self._idle_blanked: bool = False
+        self._wake_keys: set[int] = set()
+
     # -- lifecycle ---------------------------------------------------------
 
     async def run(self) -> None:
@@ -112,7 +120,7 @@ class Controller:
                 self.key_count,
                 len(self.pages),
             )
-            await self._poll_forever()
+            await asyncio.gather(self._poll_forever(), self._idle_loop())
 
     def close(self) -> None:
         try:
@@ -229,10 +237,22 @@ class Controller:
         if pressed:
             # Record when this key went down so we can measure hold duration.
             self._key_down_time[key] = time.monotonic()
+            # Any press counts as activity, resetting the idle timer.
+            self._last_activity = time.monotonic()
+            # If the deck is blanked, mark this key as a wake key and restore.
+            if self._idle_blanked:
+                self._wake_keys.add(key)
+                asyncio.run_coroutine_threadsafe(
+                    self._wake_from_idle(), self.loop
+                )
             return
         # Key released: determine short vs long press.
         down_at = self._key_down_time.pop(key, None)
         long_press = down_at is not None and (time.monotonic() - down_at) >= 0.5
+        # If this key woke the deck from idle, swallow the action.
+        if key in self._wake_keys:
+            self._wake_keys.discard(key)
+            return
         # `key` is the physical index pressed. Invert the draw-time mapping to
         # recover the visual slot, so the action matches what the user sees.
         slot = self._visual_slot(key)
@@ -336,6 +356,26 @@ class Controller:
             log.warning("action %s failed: %s", spec.name, e)
 
     # -- effects exposed to actions ---------------------------------------
+
+    async def _wake_from_idle(self) -> None:
+        """Restore the current page after the deck was blanked by the idle timer."""
+        self._idle_blanked = False
+        self.deck.set_brightness(BRIGHTNESS_STEPS[self._bright_idx])
+        self._draw_page()
+
+    async def _idle_loop(self) -> None:
+        """Blank the deck after streamdeck_idle_timeout minutes without a key press."""
+        while True:
+            await asyncio.sleep(10)
+            timeout_mins = self.config.idle_timeout_minutes
+            if timeout_mins <= 0 or self._idle_blanked:
+                continue
+            idle_secs = time.monotonic() - self._last_activity
+            if idle_secs >= timeout_mins * 60:
+                log.info("Stream Deck idle for %.0fs -- blanking", idle_secs)
+                self._idle_blanked = True
+                self.deck.set_brightness(0)
+                self.deck.reset()
 
     async def _refresh(self) -> None:
         await self._poll_once()

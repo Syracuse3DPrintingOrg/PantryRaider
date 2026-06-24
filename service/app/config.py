@@ -90,7 +90,8 @@ _SAVEABLE = [
     "staple_items", "cook_ai_context", "perishable_days", "expiring_soon_days", "suggest_per_tier",
     "nav_order", "nav_hidden", "custom_storage_categories", "ui_theme", "ui_scale", "display_rotation",
     "has_streamdeck", "streamdeck_key_count", "display_touch",
-    "deployment_mode", "remote_server_url", "upstream_api_key", "kiosk_pin",
+    "display_idle_timeout", "streamdeck_idle_timeout",
+    "deployment_mode", "remote_server_url", "upstream_api_key", "kiosk_pin", "kiosk_readonly_when_locked",
     "satellite_sync_minutes", "device_id",
     "secret_key", "auth_password", "totp_secret", "api_key", "auth_required",
     "rclone_remote", "rclone_schedule_hours",
@@ -265,6 +266,13 @@ class Settings(BaseSettings):
     streamdeck_key_count: int = 0
     display_touch: bool = False
 
+    # Idle timeouts (minutes). 0 = disabled. display_idle_timeout puts the
+    # kiosk display to sleep after N minutes without user interaction.
+    # streamdeck_idle_timeout blanks the Stream Deck after N minutes without
+    # a key press.
+    display_idle_timeout: int = 0
+    streamdeck_idle_timeout: int = 0
+
     # Deployment mode chosen in the wizard (one of DEPLOYMENT_MODES). Empty
     # until the user picks one. "pi_remote" is a SATELLITE: it runs the full
     # app but installs no local Grocy/Mealie stack. It pulls all backend config
@@ -281,6 +289,10 @@ class Settings(BaseSettings):
     # access control), so this is a lightweight, touchscreen-friendly lock for
     # the local screen. Empty means no PIN gate.
     kiosk_pin: str = ""
+    # When True and the kiosk is PIN-locked, allow unauthenticated users to
+    # browse read-only (GET requests pass through without a PIN). POST/PUT/
+    # PATCH/DELETE from unauthenticated users are rejected with 403.
+    kiosk_readonly_when_locked: bool = False
 
     def pin_lock_active(self) -> bool:
         """True when the numeric kiosk PIN should gate the UI (satellite only)."""
