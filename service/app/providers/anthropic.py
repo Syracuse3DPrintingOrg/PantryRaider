@@ -14,9 +14,16 @@ _HEALTH_CACHE_TTL = 3600  # seconds: avoid hammering the API on every /health po
 
 
 class AnthropicProvider(VisionProvider):
-    def __init__(self, api_key: str, model: str = "claude-opus-4-8"):
+    def __init__(self, api_key: str, model: str = "claude-opus-4-8",
+                 extra_keys: list[str] | None = None):
+        self.api_key = api_key
         self.client = AsyncAnthropic(api_key=api_key)
         self.model = model
+        # Spare keys kept for fallback. The primary key drives every call today;
+        # rotation across these on an auth/rate-limit error is the one remaining
+        # step (the Anthropic SDK raises AuthenticationError / RateLimitError,
+        # which a wrapper around _generate could catch to rebuild self.client).
+        self.extra_keys = [k for k in (extra_keys or []) if k and k != api_key]
         self._health_ok: bool | None = None
         self._health_ts: float = 0.0
 

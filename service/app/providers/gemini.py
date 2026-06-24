@@ -124,8 +124,15 @@ _HEALTH_CACHE_TTL = 3600  # seconds: avoid hammering the API on every /health po
 
 
 class GeminiProvider(VisionProvider):
-    def __init__(self, api_key: str, model: str = "gemini-2.5-flash"):
+    def __init__(self, api_key: str, model: str = "gemini-2.5-flash",
+                 extra_keys: list[str] | None = None):
         genai.configure(api_key=api_key)
+        self.api_key = api_key
+        # Spare keys kept for fallback. genai.configure sets a process-global
+        # key, so rotating here would clobber other instances; the primary key
+        # is used for every call today. Stored so a future rotation point (e.g.
+        # a per-call genai client) can reach them.
+        self.extra_keys = [k for k in (extra_keys or []) if k and k != api_key]
         self.model_name = model
         self.model = genai.GenerativeModel(
             model,

@@ -86,6 +86,38 @@
 {%- endmacro %}
 
 
+{# Multi-entry list of additional API keys for one provider. The primary key
+   is entered above via secret_input; these are spares the app falls back to.
+   Stored keys are shown as locked "saved" rows (value __KEEP__:<index>) so the
+   real secret is never sent to the page; the user removes or adds rows. #}
+{% macro extra_keys(provider) -%}
+{% set count = extra_key_counts.get(provider, 0) %}
+<div class="mb-3">
+  <label class="form-label">Additional {{ provider|capitalize }} API keys
+    <span class="text-secondary small">(optional fallback)</span></label>
+  <div class="extra-keys" data-provider="{{ provider }}">
+    {% for i in range(count) %}
+    <div class="input-group mb-2 extra-key-row">
+      <input type="text" class="form-control font-monospace extra-key-input"
+             value="__KEEP__:{{ i }}" data-keep="1" readonly
+             placeholder="•••• saved spare key">
+      <button class="btn btn-outline-danger" type="button"
+              onclick="this.closest('.extra-key-row').remove()" title="Remove key">
+        <i class="bi bi-trash3"></i>
+      </button>
+    </div>
+    {% endfor %}
+  </div>
+  <button class="btn btn-outline-secondary btn-sm" type="button"
+          onclick="addExtraKey('{{ provider }}')">
+    <i class="bi bi-plus-lg me-1"></i>Add another key
+  </button>
+  <div class="form-text">Extra keys are tried in order when the primary key is
+    rate-limited or rejected.</div>
+</div>
+{%- endmacro %}
+
+
 {# FIRST-TIME WIZARD  (shown when configured=False) #}
 {% if not configured %}
 <div class="wiz-wrap" id="wizard-root">
@@ -901,6 +933,7 @@
                 <label class="form-label">Model</label>
                 <input type="text" class="form-control" id="gemini_model" value="{{ s.gemini_model }}">
               </div>
+              {{ extra_keys('gemini') }}
             </div>
             <div class="provider-fields" id="fields-openai">
               <div class="mb-3">
@@ -911,6 +944,7 @@
                 <label class="form-label">Model <span class="text-secondary small">(must be vision-capable)</span></label>
                 <input type="text" class="form-control" id="openai_model" value="{{ s.openai_model }}">
               </div>
+              {{ extra_keys('openai') }}
             </div>
             <div class="provider-fields" id="fields-anthropic">
               <div class="mb-3">
@@ -922,6 +956,7 @@
                 <input type="text" class="form-control" id="anthropic_model" value="{{ s.anthropic_model }}">
                 <div class="form-text">claude-opus-4-8 is the most capable; claude-haiku-4-5 the budget option.</div>
               </div>
+              {{ extra_keys('anthropic') }}
             </div>
             <div class="provider-fields" id="fields-ollama">
               <div class="mb-3">
@@ -1680,6 +1715,34 @@ function secretVal(id) {
   return el.value.trim();
 }
 
+// Append an empty additional-key row for a provider's fallback list.
+function addExtraKey(provider) {
+  const box = document.querySelector(`.extra-keys[data-provider="${provider}"]`);
+  if (!box) return;
+  const row = document.createElement('div');
+  row.className = 'input-group mb-2 extra-key-row';
+  row.innerHTML =
+    '<input type="text" class="form-control font-monospace extra-key-input" ' +
+    'placeholder="paste a spare API key">' +
+    '<button class="btn btn-outline-danger" type="button" title="Remove key" ' +
+    'onclick="this.closest(\'.extra-key-row\').remove()"><i class="bi bi-trash3"></i></button>';
+  box.appendChild(row);
+}
+
+// Build {provider: [keys]} from the additional-key rows. Untouched saved rows
+// keep their __KEEP__:<index> placeholder so secrets are never echoed.
+function collectExtraKeys() {
+  const out = {};
+  document.querySelectorAll('.extra-keys').forEach(box => {
+    const provider = box.dataset.provider;
+    const keys = [...box.querySelectorAll('.extra-key-input')]
+      .map(i => i.value.trim()).filter(Boolean);
+    if (keys.length) out[provider] = keys;
+    else out[provider] = [];
+  });
+  return out;
+}
+
 function addCatRow() {
   const tpl = `<div class="cat-row border rounded p-2">
     <div class="row g-2 align-items-end">
@@ -2073,6 +2136,9 @@ function buildPayload() {
     openai_model:    val('openai_model') || 'gpt-4o-mini',
     anthropic_api_key: secretVal('anthropic_api_key'),
     anthropic_model: val('anthropic_model') || 'claude-opus-4-8',
+    // Only sent from the settings form (the wizard has no extra-key rows), so
+    // first-time setup leaves stored extras untouched.
+    ai_extra_keys: document.querySelector('.extra-keys') ? collectExtraKeys() : undefined,
     scanner_type:       val('scanner_type') || '',
     barcode_enrichment: val('barcode_enrichment') || 'llm',
     barcode_llm_fallback: document.getElementById('barcode_llm_fallback')?.checked || false,

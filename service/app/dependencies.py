@@ -42,15 +42,18 @@ def _build_provider(name: str, model: str | None = None) -> VisionProvider:
         from .providers.openai import OpenAIProvider
         if not settings.openai_api_key:
             raise RuntimeError("OPENAI_API_KEY is not set")
-        return OpenAIProvider(settings.openai_api_key, model or settings.openai_model)
+        return OpenAIProvider(settings.openai_api_key, model or settings.openai_model,
+                              extra_keys=settings._extra_keys("openai"))
 
     if name == "anthropic":
         from .providers.anthropic import AnthropicProvider
         if not settings.anthropic_api_key:
             raise RuntimeError("ANTHROPIC_API_KEY is not set")
-        return AnthropicProvider(settings.anthropic_api_key, model or settings.anthropic_model)
+        return AnthropicProvider(settings.anthropic_api_key, model or settings.anthropic_model,
+                                 extra_keys=settings._extra_keys("anthropic"))
 
     from .providers.gemini import GeminiProvider
     if not settings.gemini_api_key:
         raise RuntimeError("GEMINI_API_KEY is not set")
-    return GeminiProvider(settings.gemini_api_key, model or settings.gemini_model)
+    return GeminiProvider(settings.gemini_api_key, model or settings.gemini_model,
+                          extra_keys=settings._extra_keys("gemini"))

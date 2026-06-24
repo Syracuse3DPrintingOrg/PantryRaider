@@ -29,6 +29,45 @@ _SECRET_FIELDS = [
 _CLEAR = "__CLEAR__"
 
 
+# Extra-key rows that were left untouched in the UI come back as this sentinel
+# instead of the real (masked) value, so saved keys are never echoed to the
+# browser. "__KEEP__:2" means "keep the stored extra key at index 2".
+_KEEP_PREFIX = "__KEEP__:"
+
+
+def _merge_extra_keys(submitted) -> dict | None:
+    """Resolve the submitted extra-key map against what is already stored.
+
+    Returns a clean {provider: [keys]} dict, or None when nothing was sent
+    (so the caller leaves the stored extras untouched). Placeholders of the
+    form "__KEEP__:<index>" are replaced with the matching stored key; blanks
+    and duplicates are dropped.
+    """
+    if not isinstance(submitted, dict):
+        return None
+    stored = settings.ai_extra_keys if isinstance(settings.ai_extra_keys, dict) else {}
+    result: dict = {}
+    for provider, rows in submitted.items():
+        if not isinstance(rows, list):
+            continue
+        prev = [k for k in stored.get(provider, []) if isinstance(k, str)]
+        clean: list[str] = []
+        for row in rows:
+            if not isinstance(row, str):
+                continue
+            val = row.strip()
+            if val.startswith(_KEEP_PREFIX):
+                try:
+                    val = prev[int(val[len(_KEEP_PREFIX):])]
+                except (ValueError, IndexError):
+                    continue
+            if val and val not in clean:
+                clean.append(val)
+        if clean:
+            result[provider] = clean
+    return result
+
+
 def _safe_error(e: Exception | str, *secrets: str) -> str:
     """Error text with any known secrets blanked (URLs can embed API keys)."""
     msg = str(e)
@@ -48,6 +87,9 @@ class SetupPayload(BaseModel):
     openai_model: str = "gpt-4o-mini"
     anthropic_api_key: str = ""
     anthropic_model: str = "claude-opus-4-8"
+    # Extra API keys per provider, e.g. {"gemini": ["key2", "key3"]}. When
+    # absent the stored extras are left untouched (see save handler).
+    ai_extra_keys: dict[str, list[str]] | None = None
     barcode_enrichment: str = "llm"
     enrich_provider: str = ""
     enrich_model: str = ""
@@ -239,6 +281,11 @@ async def setup_page(request: Request):
         "configured": settings.is_configured(),
         # booleans only: never the stored secrets themselves
         "has": {f: bool(getattr(settings, f, "")) for f in _SECRET_FIELDS},
+        # count of stored extra keys per provider (values never sent to the page)
+        "extra_key_counts": {
+            p: len([k for k in (settings.ai_extra_keys.get(p, []) if isinstance(settings.ai_extra_keys, dict) else []) if k])
+            for p in ("gemini", "openai", "anthropic")
+        },
         "tabs": all_tabs(),
         "version": APP_VERSION,
         "custom_categories": custom_categories(),
@@ -307,6 +354,9 @@ async def save_setup(payload: SetupPayload):
             data.pop(f, None)        # blank = keep existing value
         elif data.get(f) == _CLEAR:
             data[f] = ""             # explicit clear
+    data["ai_extra_keys"] = _merge_extra_keys(data.get("ai_extra_keys"))
+    if data["ai_extra_keys"] is None:
+        data.pop("ai_extra_keys", None)   # absent = keep stored extras
     if data.get("display_rotation") not in DISPLAY_ROTATIONS:
         data["display_rotation"] = _DEFAULT_DISPLAY_ROTATION
     # Drop an unknown deployment mode rather than persisting a broken value;

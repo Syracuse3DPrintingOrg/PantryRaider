@@ -80,6 +80,7 @@ _SAVEABLE = [
     "ollama_base_url", "ollama_model",
     "openai_api_key", "openai_model",
     "anthropic_api_key", "anthropic_model",
+    "ai_extra_keys",
     "scanner_type",
     "barcode_enrichment", "barcode_llm_fallback", "barcode_autocheck_shopping", "enrich_provider", "enrich_model",
     "grocy_base_url", "grocy_api_key", "grocy_public_url",
@@ -117,7 +118,7 @@ SATELLITE_PULL_FIELDS = [
 # Settings that hold credentials. These are redacted from backups unless the
 # user explicitly opts in, and never rendered back into the setup page.
 SECRET_SETTING_KEYS = [
-    "gemini_api_key", "openai_api_key", "anthropic_api_key",
+    "gemini_api_key", "openai_api_key", "anthropic_api_key", "ai_extra_keys",
     "grocy_api_key", "mealie_api_key",
     "themealdb_api_key", "spoonacular_api_key",
     "auth_password", "totp_secret", "api_key", "secret_key", "kiosk_pin",
@@ -142,6 +143,13 @@ class Settings(BaseSettings):
 
     anthropic_api_key: str = ""
     anthropic_model: str = "claude-opus-4-8"
+
+    # Additional API keys per cloud provider, beyond the primary key stored in
+    # <provider>_api_key above. Maps provider name -> ordered list of extra
+    # keys, e.g. {"gemini": ["AIza...second", "AIza...third"]}. The primary key
+    # is always tried first; the extras give the app spare keys to fall back to
+    # when one is rate-limited or revoked. Set in the setup wizard.
+    ai_extra_keys: dict = {}
 
     # How barcodes are scanned: "usb" = USB/BT HID keyboard-wedge, "camera" =
     # Pi camera / scan engine, "" = not set (user picks on Add Food page).
@@ -317,12 +325,30 @@ class Settings(BaseSettings):
     tunnel_url: str = ""
 
     def provider_key(self, provider: str) -> str:
-        """API key for a cloud provider name; '' for local/unknown providers."""
+        """Primary API key for a cloud provider; '' for local/unknown providers."""
         return {
             "gemini": self.gemini_api_key,
             "openai": self.openai_api_key,
             "anthropic": self.anthropic_api_key,
         }.get(provider, "ollama-no-key-needed" if provider == "ollama" else "")
+
+    def provider_keys(self, provider: str) -> list[str]:
+        """Ordered list of usable API keys for a provider: the primary key
+        first, then any extras from ai_extra_keys. Blanks and duplicates are
+        dropped. Returns [] for providers with no key (e.g. an unset cloud
+        provider); ollama returns its sentinel so callers can treat it like
+        any other provider.
+        """
+        keys: list[str] = []
+        for k in [self.provider_key(provider), *self._extra_keys(provider)]:
+            k = (k or "").strip()
+            if k and k not in keys:
+                keys.append(k)
+        return keys
+
+    def _extra_keys(self, provider: str) -> list[str]:
+        raw = self.ai_extra_keys.get(provider, []) if isinstance(self.ai_extra_keys, dict) else []
+        return [k for k in raw if isinstance(k, str)]
 
     def ai_configured(self) -> bool:
         """True when a vision provider key is present and usable."""

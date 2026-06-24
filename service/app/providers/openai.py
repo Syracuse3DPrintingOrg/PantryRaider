@@ -12,10 +12,19 @@ from ..models.food import AnalysisResult
 
 class OpenAIProvider(VisionProvider):
     def __init__(self, api_key: str, model: str = "gpt-4o-mini",
-                 base_url: str = "https://api.openai.com/v1"):
+                 base_url: str = "https://api.openai.com/v1",
+                 extra_keys: list[str] | None = None):
         self.api_key = api_key
         self.model = model
         self.base_url = base_url.rstrip("/")
+        # Spare keys to fall back to when the primary is rate-limited (429) or
+        # rejected (401). The primary is always tried first; a working spare is
+        # promoted to primary so later calls skip the dead key.
+        self.extra_keys = [k for k in (extra_keys or []) if k and k != api_key]
+
+    @property
+    def _keys(self) -> list[str]:
+        return [self.api_key, *self.extra_keys]
 
     async def _generate(self, prompt: str, image_data: bytes = None,
                         mime_type: str = None, max_tokens: int = 4096) -> str:
@@ -33,14 +42,31 @@ class OpenAIProvider(VisionProvider):
             "max_tokens": max_tokens,
             "response_format": {"type": "json_object"},
         }
+        keys = self._keys
+        last_error: Exception | None = None
         async with httpx.AsyncClient(timeout=120.0) as client:
-            r = await client.post(
-                f"{self.base_url}/chat/completions",
-                headers={"Authorization": f"Bearer {self.api_key}"},
-                json=payload,
-            )
-            r.raise_for_status()
-            return r.json()["choices"][0]["message"]["content"]
+            for idx, key in enumerate(keys):
+                r = await client.post(
+                    f"{self.base_url}/chat/completions",
+                    headers={"Authorization": f"Bearer {key}"},
+                    json=payload,
+                )
+                # Only an auth/quota failure is worth retrying on another key.
+                if r.status_code in (401, 429) and idx + 1 < len(keys):
+                    last_error = httpx.HTTPStatusError(
+                        f"HTTP {r.status_code}", request=r.request, response=r)
+                    continue
+                r.raise_for_status()
+                self._promote(key)
+                return r.json()["choices"][0]["message"]["content"]
+        raise last_error if last_error else RuntimeError("No OpenAI API key configured")
+
+    def _promote(self, key: str) -> None:
+        """Make the key that just worked the primary so the next call uses it."""
+        if key != self.api_key and key in self.extra_keys:
+            self.extra_keys.remove(key)
+            self.extra_keys.insert(0, self.api_key)
+            self.api_key = key
 
     async def analyze_food(self, image_data: bytes, mime_type: str) -> AnalysisResult:
         raw = await self._generate(_FOOD_PROMPT, image_data, mime_type, max_tokens=1024)
