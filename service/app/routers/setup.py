@@ -743,6 +743,29 @@ async def mealie_status():
         return {"ok": False, "error": str(e)}
 
 
+_LOG_NAMES = {"mealie", "kiosk", "streamdeck"}
+
+
+@router.get("/logs/{name}")
+async def install_logs(name: str):
+    """Tail of an install/start log (mealie / kiosk / streamdeck), via the bridge.
+
+    Mirrors the /mealie/status proxy: the setup UI polls this while a start or
+    install is in flight to show live output. Returns {ok, name, running,
+    lines}. Unknown names and bridge errors are reported, never raised.
+    """
+    if not is_raspberry_pi():
+        return {"ok": False, "error": "Not available on this platform."}
+    if name not in _LOG_NAMES:
+        return {"ok": False, "error": "unknown log name"}
+    try:
+        async with httpx.AsyncClient(timeout=6.0) as c:
+            r = (await c.get(f"{_HOST_BRIDGE}/logs/{name}")).json()
+        return r
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
 @router.get("/hardware/status")
 async def hardware_status():
     """Display / Stream Deck presence and service state, via the Pi host bridge."""

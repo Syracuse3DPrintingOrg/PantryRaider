@@ -528,12 +528,13 @@
     <button class="btn btn-outline-info btn-sm" type="button" onclick="startMealie(this)">
       <i class="bi bi-play me-1"></i>Start Mealie on this device
     </button>
-    <a class="btn btn-outline-secondary btn-sm" id="wiz-mealie-open" href="{{ suggested_mealie_url or '#' }}" target="_blank">
+    <a class="btn btn-outline-secondary btn-sm disabled" id="wiz-mealie-open" href="{{ suggested_mealie_url or '#' }}" target="_blank" aria-disabled="true">
       <i class="bi bi-box-arrow-up-right me-1"></i>Open Mealie
     </a>
   </div>
   <div class="test-result mb-2" id="mealie-start-result"></div>
-  <p class="text-secondary small">Start Mealie, open it in a new tab, sign in as admin, go to User Profile, and create an API token. Paste the token below.</p>
+  <pre class="install-log d-none bg-body-tertiary border rounded p-2 small mb-2" data-log="mealie"></pre>
+  <p class="text-secondary small" id="mealie-token-hint">Start Mealie, open it in a new tab, sign in as admin, go to User Profile, and create an API token. Paste the token below.</p>
   {% endif %}
   <div class="mb-3">
     <label class="form-label">Mealie URL <span class="text-secondary small">(internal, for API calls)</span></label>
@@ -1043,6 +1044,7 @@
               </a>
               {% endif %}
               <div class="test-result mt-1" id="mealie-start-result"></div>
+              <pre class="install-log d-none bg-body-tertiary border rounded p-2 small mt-2 mb-0" data-log="mealie"></pre>
             </div>
             {% endif %}
             <div class="mb-3">
@@ -1486,6 +1488,7 @@ docker compose up -d</code></pre>
               <i class="bi bi-download me-1"></i>Install kiosk service
             </button>
             <div class="test-result mt-2" id="kiosk-install-result"></div>
+            <pre class="install-log d-none bg-body-tertiary border rounded p-2 small mt-2 mb-0" data-log="kiosk"></pre>
           </div>
 
           <div class="section-card mb-3">
@@ -1610,6 +1613,7 @@ docker compose up -d</code></pre>
               <i class="bi bi-download me-1"></i>Install Stream Deck service
             </button>
             <div class="test-result mb-2" id="streamdeck-install-result"></div>
+            <pre class="install-log d-none bg-body-tertiary border rounded p-2 small mb-2" data-log="streamdeck"></pre>
             <div class="d-flex gap-2 flex-wrap">
               <button type="button" class="btn btn-outline-info btn-sm" onclick="saveStreamDeckSettings()">
                 <i class="bi bi-check-lg me-1"></i>Save Stream Deck settings
@@ -1924,6 +1928,48 @@ async function postJson(url, body) {
   return r.json();
 }
 
+// Live install/start log tailing (FoodAssistant-59z).
+// Each install action has one or more <pre class="install-log" data-log="NAME">
+// panels (there can be two, one per setup view). Fetch the bridge log tail and
+// render it into every matching panel, auto-scrolling to the newest line.
+async function _refreshInstallLog(name) {
+  const panels = document.querySelectorAll('.install-log[data-log="' + name + '"]');
+  if (!panels.length) return {ok: false};
+  let data;
+  try {
+    data = await fetch('setup/logs/' + name).then(x => x.json());
+  } catch (e) {
+    return {ok: false};
+  }
+  const lines = (data && Array.isArray(data.lines)) ? data.lines : [];
+  const text = lines.length ? lines.join('\n') : '(waiting for output…)';
+  panels.forEach(p => {
+    p.classList.remove('d-none');
+    const atBottom = p.scrollTop + p.clientHeight >= p.scrollHeight - 4;
+    p.textContent = text;
+    if (atBottom) p.scrollTop = p.scrollHeight;
+  });
+  return data || {ok: false};
+}
+
+// Poll the log every ~1.5s while a step is in flight. `isDone()` returns true
+// once the caller's own status poll says the work finished, which stops the
+// log loop after one final refresh so the last output stays on screen.
+function _startLogPolling(name, isDone) {
+  let stopped = false;
+  const tick = async () => {
+    if (stopped) return;
+    await _refreshInstallLog(name);
+    if (isDone()) {
+      await _refreshInstallLog(name);
+      return;
+    }
+    setTimeout(tick, 1500);
+  };
+  tick();
+  return () => { stopped = true; };
+}
+
 async function testGrocy() {
   setResult('grocy-result', true, 'Testing…');
   const d = await postJson('setup/test/grocy',
@@ -1931,17 +1977,71 @@ async function testGrocy() {
   setResult('grocy-result', d.ok, d.ok ? d.message : d.error);
 }
 
+// Reveal/enable every "Open Mealie" link once Mealie actually serves HTTP.
+function _enableMealieLinks() {
+  ['wiz-mealie-open', 'mealie-open-link', 'mealie-url-open'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) { el.classList.remove('disabled'); el.removeAttribute('aria-disabled'); }
+  });
+  document.querySelectorAll('#mealie-token-hint').forEach(el => el.classList.remove('d-none'));
+}
+
+const _sleep = ms => new Promise(r => setTimeout(r, ms));
+
+// Start Mealie, then poll its status until it actually answers HTTP before
+// claiming success. The bridge runs the image pull/up in the background, so on
+// first run this can take a minute; we keep a progress state and live log
+// visible until state == "running", then reveal the Open Mealie link
+// (FoodAssistant-28z + 59z).
 async function startMealie(btn) {
   const orig = btn.innerHTML;
   btn.disabled = true;
   btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Starting...';
+  let running = false;
+  const stopLog = _startLogPolling('mealie', () => running);
   try {
     const r = await fetch('setup/mealie/start', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'});
     const d = await r.json();
-    setResult('mealie-start-result', d.ok, d.ok ? 'Mealie started. Open it to create an API token, then paste it below.' : (d.error || 'Failed.'));
+    if (!d.ok) {
+      setResult('mealie-start-result', false, d.error || 'Failed to start Mealie.');
+      return;
+    }
+    if (d.state === 'running') {
+      running = true;
+      setResult('mealie-start-result', true, 'Mealie is running. Open it to create an API token, then paste it below.');
+      _enableMealieLinks();
+      return;
+    }
+    setResult('mealie-start-result', true, 'Starting Mealie (this can take a minute on first run)…');
+    // Poll status every ~2s. Mealie reports "running" only once it serves HTTP.
+    for (let i = 0; i < 150 && !running; i++) {
+      await _sleep(2000);
+      let s;
+      try {
+        s = await fetch('setup/mealie/status').then(x => x.json());
+      } catch (e) {
+        continue;
+      }
+      if (!s || s.ok === false) continue;
+      if (s.state === 'running') {
+        running = true;
+        setResult('mealie-start-result', true, 'Mealie is running. Open it to create an API token, then paste it below.');
+        _enableMealieLinks();
+      } else if (s.state === 'not-installed') {
+        running = true;
+        setResult('mealie-start-result', false, 'Mealie stopped before it started serving. Check the log above and try again.');
+      }
+      // state === "starting": keep waiting, the log panel shows progress.
+    }
+    if (!running) {
+      running = true;
+      setResult('mealie-start-result', false, 'Mealie is taking longer than expected. Check the log above; it may still come up.');
+    }
   } catch(e) {
+    running = true;
     setResult('mealie-start-result', false, e.message);
   } finally {
+    stopLog();
     btn.disabled = false;
     btn.innerHTML = orig;
   }
@@ -3266,6 +3366,23 @@ async function _installHw(name, btn, resultId) {
     const d = await r.json();
     if (d.ok) {
       setResult(resultId, true, 'Installation started. This page will update when the service is running.');
+      // Tail the install log until the bridge reports the step is no longer
+      // running (FoodAssistant-59z), then refresh hardware status once more.
+      let done = false;
+      const stopLog = _startLogPolling(name, () => done);
+      (async () => {
+        for (let i = 0; i < 240 && !done; i++) {
+          await _sleep(2000);
+          let s;
+          try {
+            s = await fetch('setup/logs/' + name).then(x => x.json());
+          } catch (e) { continue; }
+          if (s && s.running === false) done = true;
+        }
+        done = true;
+        stopLog();
+        loadHardwareStatus();
+      })();
       loadHardwareStatus();
     } else {
       setResult(resultId, false, d.error || 'Failed to start installation.');

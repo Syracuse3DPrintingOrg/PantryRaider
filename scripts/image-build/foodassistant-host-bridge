@@ -22,6 +22,7 @@ GET  /streamdeck/actions     list assignable deck actions (for the web editor)
 POST /kiosk/restart        restart the kiosk browser (apply scale/rotation)
 GET  /mealie/status        Mealie state: not-installed / starting / running
 POST /mealie/start         start Mealie in the background (docker compose --profile with-mealie up -d)
+GET  /logs/<name>          tail of an install/start log (name in mealie/kiosk/streamdeck)
 GET  /hardware/status      display/Stream Deck presence + service/install state
 POST /kiosk/install        provision the kiosk service (display attached later)
 POST /streamdeck/install   provision the Stream Deck service (attached later)
@@ -53,6 +54,51 @@ _FIRSTBOOT_CANDIDATES = [
 # ("kiosk"/"streamdeck" installs, "mealie" start). Each value is a Popen whose
 # poll() tells us whether the work is still in flight.
 _INSTALL_PROCS = {}
+
+# Log files the background steps stream their stdout/stderr into. The setup UI
+# tails these (via GET /logs/<name>) to show live install/start output. The
+# Mealie start writes the first path; the kiosk/streamdeck installs use the
+# foodassistant-<name>-install.log pattern that _provision() opens.
+_LOG_PATHS = {
+    "mealie": "/var/log/foodassistant-mealie-start.log",
+    "kiosk": "/var/log/foodassistant-kiosk-install.log",
+    "streamdeck": "/var/log/foodassistant-streamdeck-install.log",
+}
+
+# Cap the bytes we read off the tail of a log so a long-running install cannot
+# return a multi-megabyte body to the polling UI.
+_LOG_TAIL_BYTES = 8192
+
+
+def _tail_log(name, max_bytes=_LOG_TAIL_BYTES):
+    """Return the last max_bytes of the named log as a list of lines.
+
+    Safe by design: an unknown name, a missing file, or any read error yields
+    an empty list rather than raising, so the polling endpoint never 500s just
+    because a step has not created its log yet.
+    """
+    path = _LOG_PATHS.get(name)
+    if not path:
+        return []
+    try:
+        with open(path, "rb") as f:
+            try:
+                f.seek(0, os.SEEK_END)
+                size = f.tell()
+                f.seek(max(0, size - max_bytes))
+            except OSError:
+                # Not seekable for some reason; fall back to a plain read.
+                f.seek(0)
+            data = f.read()
+        text = data.decode("utf-8", "replace")
+        # Drop a leading partial line when we seeked into the middle of one.
+        if len(data) >= max_bytes and "\n" in text:
+            text = text.split("\n", 1)[1]
+        return [ln for ln in text.splitlines() if ln.strip()]
+    except OSError:
+        return []
+    except Exception:
+        return []
 
 
 def _http_serving(url, timeout=3):
@@ -291,6 +337,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._get_rotation()
         elif self.path == "/mealie/status":
             self._mealie_status()
+        elif self.path.startswith("/logs/"):
+            self._logs(self.path[len("/logs/"):])
         elif self.path == "/hardware/status":
             self._hardware_status()
         elif self.path == "/streamdeck/config":
@@ -635,6 +683,27 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._send(200, {"ok": True, "started": True, "state": "starting"})
         except Exception as e:
             self._send(500, {"ok": False, "error": str(e)})
+
+    def _logs(self, name):
+        # Tail of an install/start log so the setup UI can show live output.
+        # Strip any trailing slash/query and never raise: an unknown name or a
+        # log that does not exist yet just returns an empty line list.
+        name = name.split("?", 1)[0].strip("/")
+        if name not in _LOG_PATHS:
+            self._send(404, {"ok": False, "error": "unknown log name"})
+            return
+        try:
+            lines = _tail_log(name)
+            self._send(200, {
+                "ok": True,
+                "name": name,
+                "running": _installing(name),
+                "lines": lines,
+            })
+        except Exception as e:
+            # Defensive: _tail_log already swallows errors, but keep the
+            # endpoint from ever bubbling an exception to the client.
+            self._send(200, {"ok": True, "name": name, "running": False, "lines": [], "error": str(e)})
 
     def _hardware_status(self):
         self._send(200, {

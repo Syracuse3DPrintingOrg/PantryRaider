@@ -114,6 +114,46 @@ def test_http_serving_false_on_5xx(monkeypatch):
     assert bridge._http_serving("http://127.0.0.1:9285/") is False
 
 
+# Install/start log tailing (FoodAssistant-59z)
+
+
+def test_tail_log_unknown_name_returns_empty():
+    assert bridge._tail_log("nope") == []
+
+
+def test_tail_log_missing_file_returns_empty(monkeypatch, tmp_path):
+    monkeypatch.setitem(bridge._LOG_PATHS, "mealie", str(tmp_path / "absent.log"))
+    assert bridge._tail_log("mealie") == []
+
+
+def test_tail_log_reads_lines_and_drops_blank(monkeypatch, tmp_path):
+    p = tmp_path / "mealie.log"
+    p.write_text("pulling image\n\nstarting container\n")
+    monkeypatch.setitem(bridge._LOG_PATHS, "mealie", str(p))
+    assert bridge._tail_log("mealie") == ["pulling image", "starting container"]
+
+
+def test_tail_log_caps_bytes_and_drops_partial_first_line(monkeypatch, tmp_path):
+    p = tmp_path / "kiosk.log"
+    # Three lines; cap below the full size so we seek into the middle of line 1.
+    p.write_text("AAAAAAAAAA\nBBBBBBBBBB\nCCCCCCCCCC\n")
+    monkeypatch.setitem(bridge._LOG_PATHS, "kiosk", str(p))
+    lines = bridge._tail_log("kiosk", max_bytes=20)
+    # The partial leading line is dropped; only whole trailing lines remain.
+    assert "AAAAAAAAAA" not in lines
+    assert lines[-1] == "CCCCCCCCCC"
+
+
+def test_tail_log_handles_non_utf8(monkeypatch, tmp_path):
+    p = tmp_path / "sd.log"
+    p.write_bytes(b"ok line\n\xff\xfe bad bytes\n")
+    monkeypatch.setitem(bridge._LOG_PATHS, "streamdeck", str(p))
+    # Decodes with replacement instead of raising.
+    lines = bridge._tail_log("streamdeck")
+    assert lines[0] == "ok line"
+    assert len(lines) == 2
+
+
 # Wi-Fi parsing helpers (FoodAssistant-cqw)
 
 
