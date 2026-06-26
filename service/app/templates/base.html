@@ -2,7 +2,8 @@
 <html lang="en" data-bs-theme="{{ theme_mode }}"
       data-ui-scale="{{ ui_scale_factor | default(1.0) }}"
       data-display-rotation="{{ display_rotation | default(0) }}"
-      data-rotation-mode="{{ 'compositor' if is_pi else 'css' }}">
+      data-rotation-mode="{{ 'compositor' if is_pi else 'css' }}"
+      data-is-pi="{{ '1' if is_pi else '0' }}">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -72,6 +73,9 @@
   </script>
   <!-- Applies scale + orientation on the attached kiosk display only -->
   <script src="static/js/kiosk-display.js"></script>
+  <!-- Pi only: auto-enable kiosk mode when a display is attached, unless the
+       user has made an explicit choice (FoodAssistant-h437) -->
+  <script src="static/js/kiosk-auto.js"></script>
   <!-- USB-keyboard navigation: number keys jump to nav tabs, "?" shows help -->
   <script src="static/js/keyboard-nav.js"></script>
   <!-- Kiosk only: report activity so the host bridge wakes the display/deck -->
@@ -100,6 +104,29 @@
         max-height: calc(100vh - 60px);
         overflow-y: auto;
       }
+    }
+    /* Small-screen kiosk cluster (FoodAssistant-7j5b).
+       q6ql — simpler nav on a narrow panel (the 800x480 pi_remote/pi_hosted
+       kiosk and similar). Below 820px the secondary top-level tabs fold away and
+       their copies inside the #moreMenu overflow dropdown appear instead, so the
+       bar keeps only the essentials (Inventory, Expiring, Add, Pending, Shopping)
+       while every page stays reachable from the kebab menu. Larger screens are
+       untouched, so the desktop/phone experience does not regress.
+       The ui_scale -> zoom mapping used by kiosk-display.js was audited and is
+       correct (not inverted); nothing here changes those scale factors. */
+    @media (max-width: 820px) {
+      .navbar-nav .nav-secondary { display: none; }
+      .nav-overflow-item { display: list-item !important; }
+      /* Larger touch targets for the essentials that remain on the bar. */
+      .navbar-nav .nav-essential .nav-link { padding: 0.6rem 0.85rem; }
+      /* muwj — auto-simplify the page on a small viewport: tighter gutters,
+         single-column rows, and trimmed non-critical chrome so content fits an
+         800x480 panel without horizontal scroll. CSS-only and scoped to the
+         breakpoint, so desktop/phone layout is unaffected. */
+      #pageContent { padding-left: 0.75rem !important; padding-right: 0.75rem !important; }
+      #pageContent .row > [class*="col-"] { flex: 0 0 100%; max-width: 100%; }
+      #pageContent .card { margin-bottom: 0.5rem; }
+      .float-nav { display: none !important; }
     }
     /* On-screen floating navigation menu (FoodAssistant-bzuu). A compact column
        of icon buttons docked to a screen corner, draggable by its handle. */
@@ -215,9 +242,16 @@
         <span class="navbar-toggler-icon"></span>
       </button>
       <div class="collapse navbar-collapse" id="nav">
+        {# Small-screen nav simplification (FoodAssistant-q6ql). Essential tabs
+           (Inventory, Expiring, Add, Pending, Shopping) carry .nav-essential and
+           stay visible on a narrow panel; the rest carry .nav-secondary and are
+           hidden by the @media (max-width: 820px) block below, where they reappear
+           as links inside the #moreMenu overflow dropdown. On larger screens the
+           full row shows and the small-screen overflow copies stay hidden, so the
+           Bootstrap navbar-expand-lg collapse keeps working unchanged. #}
         <ul class="navbar-nav me-auto">
           {% for tab in nav_tabs() if tab.key not in ['about', 'defaults'] %}
-          <li class="nav-item">
+          <li class="nav-item {{ 'nav-essential' if tab.key in ['inventory', 'expiring', 'add', 'pending', 'shopping'] else 'nav-secondary' }}">
             <a class="nav-link {% if active == tab.key %}active{% endif %}" href="{{ tab.href }}">
               <i class="bi {{ tab.icon }} me-1"></i>{{ tab.label }}
               {%- if tab.key == 'pending' %}
@@ -263,6 +297,17 @@
               <i class="bi bi-three-dots-vertical"></i>
             </a>
             <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="moreMenu">
+              {# Small-screen overflow copies of the secondary tabs (q6ql). Hidden
+                 by default; the @media (max-width: 820px) block reveals them so a
+                 narrow panel reaches every destination from the kebab menu. #}
+              {% for tab in nav_tabs() if tab.key not in ['inventory', 'expiring', 'add', 'pending', 'shopping', 'about', 'defaults'] %}
+              <li class="nav-overflow-item d-none">
+                <a class="dropdown-item {% if active == tab.key %}active{% endif %}" href="{{ tab.href }}">
+                  <i class="bi {{ tab.icon }} me-2"></i>{{ tab.label }}
+                </a>
+              </li>
+              {% endfor %}
+              <li class="nav-overflow-item d-none"><hr class="dropdown-divider"></li>
               <li><a class="dropdown-item {% if active == 'setup' %}active{% endif %}" href="setup"><i class="bi bi-gear me-2"></i>Settings</a></li>
               <li class="kiosk-hide"><a class="dropdown-item {% if active == 'defaults' %}active{% endif %}" href="ui/defaults"><i class="bi bi-table me-2"></i>Defaults</a></li>
               <li class="kiosk-hide"><a class="dropdown-item {% if active == 'about' %}active{% endif %}" href="ui/about"><i class="bi bi-info-circle me-2"></i>About</a></li>
@@ -386,6 +431,11 @@
     function toggleKioskMode() {
       var active = localStorage.getItem('kioskMode') === 'true';
       localStorage.setItem('kioskMode', active ? 'false' : 'true');
+      // Mark this as an explicit user choice so the Pi display auto-enable
+      // (kiosk-auto.js, FoodAssistant-h437) never overrides it in either
+      // direction, and drop the auto marker since the user is now in control.
+      localStorage.setItem('kioskExplicit', 'true');
+      localStorage.removeItem('kioskAuto');
       location.reload();
     }
   </script>

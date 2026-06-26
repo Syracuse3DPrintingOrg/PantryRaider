@@ -132,3 +132,28 @@ textarea {
   min-width: 44px;
   min-height: 44px;
 }
+
+/* ── Auto-simplify layout (FoodAssistant-muwj) ──────────────────────────────────
+ * In kiosk mode (this stylesheet only loads when kioskMode is set) tighten the
+ * page chrome and prefer a single column so dense pages fit the small attached
+ * panel without horizontal scrolling. This mirrors the small-viewport media
+ * query in base.html but is keyed on kiosk mode, so it also applies on a kiosk
+ * whose reported viewport is wider than the breakpoint.
+ *
+ * NOTE: the ui_scale -> zoom factor mapping (kiosk-display.js, applied from the
+ * data-ui-scale attribute) was audited and is correct, NOT inverted. Nothing in
+ * this file changes those scale factors or their labels. */
+#pageContent {
+  padding-left: 0.75rem !important;
+  padding-right: 0.75rem !important;
+}
+#pageContent .row > [class*="col-"] {
+  flex: 0 0 100%;
+  max-width: 100%;
+}
+#pageContent .card {
+  margin-bottom: 0.5rem;
+}
+.float-nav {
+  display: none !important;
+}

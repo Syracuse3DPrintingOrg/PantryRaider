@@ -391,6 +391,34 @@ def test_floating_nav_renders_on_page(client):
     assert 'data-position="top-right"' in r.text
 
 
+def test_small_screen_nav_markup_present(client):
+    """Small-screen nav simplification (FoodAssistant-q6ql).
+
+    The navbar tags essential vs secondary tabs and renders overflow copies of
+    the secondary tabs inside the #moreMenu dropdown; the CSS media query toggles
+    them on a narrow panel. Assert the server-rendered hooks exist so the CSS has
+    something to act on.
+    """
+    page = client.get("/ui/").text
+    # Essentials carry .nav-essential; other tabs carry .nav-secondary.
+    assert "nav-essential" in page
+    assert "nav-secondary" in page
+    # Secondary tabs also appear as hidden overflow copies in the kebab menu.
+    assert "nav-overflow-item" in page
+
+
+def test_kiosk_auto_enable_hooks_present(client):
+    """Pi display auto-enable (FoodAssistant-h437).
+
+    The page exposes the is_pi flag as data-is-pi on <html> and loads the
+    auto-enable script; the script itself respects an explicit user choice and is
+    a no-op off-Pi (JS-side, not unit-tested here).
+    """
+    page = client.get("/ui/").text
+    assert "data-is-pi=" in page
+    assert "kiosk-auto.js" in page
+
+
 def test_current_recipe_endpoints(client):
     """Set / get / scale / clear the active recipe over HTTP (FoodAssistant-879b)."""
     # Empty to start (other tests may have left state, so clear first).
