@@ -4169,6 +4169,9 @@ async function _sdRenderGrid() {
       palette.appendChild(row);
     }
   }
+
+  // Mirror any configured overrides onto their target cells.
+  _sdPaintOverridesOnGrid();
 }
 
 function _sdCollectKeys() {
@@ -4176,6 +4179,57 @@ function _sdCollectKeys() {
   const keys = _sdKeys.slice();
   while (keys.length && keys[keys.length - 1] === 'blank') keys.pop();
   return keys;
+}
+
+// Default tile colours per override type, mirroring _OVERRIDE_DEFAULT_COLORS
+// and _OVERRIDE_DEFAULT_ICONS in streamdeck/actions.py so the grid preview
+// matches what the deck will actually render.
+const _SD_OVERRIDE_PREVIEW = {
+  ha_action: {color: '#475569', icon: 'house', label: 'HA'},
+  timer: {color: '#0d9488', icon: 'stopwatch', label: 'Timer'},
+  weather: {color: '#1e40af', icon: 'cloud-sun', label: 'Weather'},
+};
+
+// Paint each configured override onto its target grid cell so the grid mirrors
+// the overrides in place (live preview). The underlying layout cells are left
+// intact; this only overlays the override's colour, label, and a small marker
+// so slot numbering is less error-prone. Called after the grid is (re)drawn and
+// whenever an override row is edited.
+function _sdPaintOverridesOnGrid() {
+  const grid = document.getElementById('streamdeck-grid');
+  if (!grid) return;
+  const cells = grid.querySelectorAll('[data-idx]');
+  // Drop any prior overlay so removed or re-slotted overrides do not linger.
+  for (const cell of cells) {
+    const prev = cell.querySelector('.sd-ov-overlay');
+    if (prev) prev.remove();
+    if (cell.dataset.ovColor) {
+      cell.style.background = cell.dataset.ovBase || cell.style.background;
+      delete cell.dataset.ovColor;
+    }
+  }
+  for (const o of _sdCollectOverrides()) {
+    const cell = grid.querySelector(`[data-idx="${o.slot}"]`);
+    if (!cell) continue;
+    const preset = _SD_OVERRIDE_PREVIEW[o.type] || {color: '#374151', icon: '', label: 'Custom'};
+    let color = preset.color;
+    let icon = o.icon || preset.icon;
+    let label = o.label || preset.label;
+    if (o.type === 'ha_action' && o.color_off) color = o.color_off;
+    if (o.type === 'weather' && o.forecast) { color = '#0e7490'; icon = icon || 'thermometer-half'; if (!o.label) label = 'Forecast'; }
+    if (!cell.dataset.ovBase) cell.dataset.ovBase = cell.style.background;
+    cell.dataset.ovColor = color;
+    cell.style.background = color;
+    const overlay = document.createElement('div');
+    overlay.className = 'sd-ov-overlay';
+    overlay.style.cssText = 'position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;pointer-events:none;';
+    const iconCls = icon ? 'bi bi-' + String(icon).replace(/^bi-/, '') : '';
+    overlay.innerHTML =
+      (iconCls ? `<i class="${iconCls}" style="color:#fff;font-size:0.95rem;line-height:1;"></i>` : '') +
+      `<span style="color:#fff;font-size:0.6rem;line-height:1.1;text-align:center;word-break:break-word;padding:0 3px;">${escapeHtml(label)}</span>` +
+      `<span style="position:absolute;top:2px;left:3px;font-size:0.5rem;color:rgba(255,255,255,0.85);" title="Custom override"><i class="bi bi-pencil-fill"></i></span>`;
+    cell.appendChild(overlay);
+  }
 }
 
 // Advanced per-key override rows. Each row is a small inline editor whose
@@ -4186,6 +4240,15 @@ const _SD_OVERRIDE_TYPES = [
   {value: 'weather', label: 'Weather tile'},
 ];
 
+// Curated Bootstrap Icons glyphs (names without the "bi-" prefix) offered in
+// the HA action icon picker. Hand-picked to cover the common smart-home keys;
+// a free-text entry remains available for anything not listed.
+const _SD_HA_ICONS = [
+  'house', 'lightbulb', 'toggle-on', 'power', 'plug', 'fan', 'thermometer-half',
+  'door-open', 'lock', 'tv', 'speaker', 'music-note-beamed', 'bell',
+  'fire', 'snow', 'droplet', 'shield-lock', 'star',
+];
+
 function _sdOverrideRow(o) {
   o = o || {};
   const row = document.createElement('div');
@@ -4193,6 +4256,11 @@ function _sdOverrideRow(o) {
   const typeOpts = _SD_OVERRIDE_TYPES.map(t =>
     `<option value="${t.value}"${o.type === t.value ? ' selected' : ''}>${escapeHtml(t.label)}</option>`
   ).join('');
+  // Unique ids so multiple rows do not collide on datalist/checkbox ids.
+  const uid = 'sdov' + (_sdOverrideRow._seq = (_sdOverrideRow._seq || 0) + 1);
+  const iconListId = uid + '-icons';
+  const forecastId = uid + '-fc';
+  const iconOpts = _SD_HA_ICONS.map(g => `<option value="${escapeHtml(g)}">`).join('');
   row.innerHTML = `
     <div class="row g-2 align-items-end">
       <div class="col-auto" style="max-width:110px">
@@ -4208,7 +4276,7 @@ function _sdOverrideRow(o) {
         <input type="text" class="form-control form-control-sm sd-ov-label" placeholder="Optional" value="${escapeHtml(o.label || '')}">
       </div>
       <div class="col-auto">
-        <button type="button" class="btn btn-outline-danger btn-sm" title="Remove" onclick="this.closest('.sd-override-row').remove()">
+        <button type="button" class="btn btn-outline-danger btn-sm" title="Remove" onclick="this.closest('.sd-override-row').remove(); _sdPaintOverridesOnGrid();">
           <i class="bi bi-trash"></i>
         </button>
       </div>
@@ -4222,6 +4290,19 @@ function _sdOverrideRow(o) {
         <label class="form-label small mb-1">Service (optional)</label>
         <input type="text" class="form-control form-control-sm sd-ov-service" placeholder="script.goodnight" value="${escapeHtml(o.service || '')}">
       </div>
+      <div class="col-auto" style="max-width:130px">
+        <label class="form-label small mb-1">On colour</label>
+        <input type="color" class="form-control form-control-color form-control-sm sd-ov-color-on" value="${escapeHtml(o.color_on || '#15803d')}" title="Background when the entity is on">
+      </div>
+      <div class="col-auto" style="max-width:130px">
+        <label class="form-label small mb-1">Off colour</label>
+        <input type="color" class="form-control form-control-color form-control-sm sd-ov-color-off" value="${escapeHtml(o.color_off || '#475569')}" title="Background when the entity is off">
+      </div>
+      <div class="col">
+        <label class="form-label small mb-1">Icon</label>
+        <input type="text" class="form-control form-control-sm sd-ov-icon" list="${iconListId}" placeholder="house" value="${escapeHtml(o.icon || '')}">
+        <datalist id="${iconListId}">${iconOpts}</datalist>
+      </div>
     </div>
     <div class="row g-2 mt-1 sd-ov-fields-timer">
       <div class="col-auto" style="max-width:160px">
@@ -4229,10 +4310,16 @@ function _sdOverrideRow(o) {
         <input type="number" min="0" class="form-control form-control-sm sd-ov-minutes" value="${o.minutes != null ? o.minutes : 5}">
       </div>
     </div>
-    <div class="row g-2 mt-1 sd-ov-fields-weather">
+    <div class="row g-2 mt-1 sd-ov-fields-weather align-items-end">
       <div class="col-md-6">
         <label class="form-label small mb-1">Location</label>
         <input type="text" class="form-control form-control-sm sd-ov-location" placeholder="City, zip, or lat,lon (empty = auto)" value="${escapeHtml(o.location || '')}">
+      </div>
+      <div class="col-auto">
+        <div class="form-check">
+          <input class="form-check-input sd-ov-forecast" type="checkbox" id="${forecastId}"${o.forecast ? ' checked' : ''}>
+          <label class="form-check-label small" for="${forecastId}">Show forecast (high/low) instead of current</label>
+        </div>
       </div>
     </div>`;
   const typeSel = row.querySelector('.sd-ov-type');
@@ -4242,8 +4329,14 @@ function _sdOverrideRow(o) {
       const block = row.querySelector('.sd-ov-fields-' + tt.value);
       if (block) block.classList.toggle('d-none', tt.value !== t);
     }
+    _sdPaintOverridesOnGrid();
   };
   typeSel.addEventListener('change', sync);
+  // Repaint the live grid preview whenever any override field changes so the
+  // targeted cell mirrors the override as it is edited (input covers text and
+  // colour pickers; change covers the forecast checkbox and selects).
+  row.addEventListener('input', () => _sdPaintOverridesOnGrid());
+  row.addEventListener('change', () => _sdPaintOverridesOnGrid());
   sync();
   return row;
 }
@@ -4251,6 +4344,7 @@ function _sdOverrideRow(o) {
 function _sdAddOverrideRow(o) {
   const wrap = document.getElementById('streamdeck-overrides');
   if (wrap) wrap.appendChild(_sdOverrideRow(o));
+  _sdPaintOverridesOnGrid();
 }
 
 function _sdRenderOverrides(list) {
@@ -4258,6 +4352,7 @@ function _sdRenderOverrides(list) {
   if (!wrap) return;
   wrap.innerHTML = '';
   for (const o of (Array.isArray(list) ? list : [])) _sdAddOverrideRow(o);
+  _sdPaintOverridesOnGrid();
 }
 
 function _sdCollectOverrides() {
@@ -4277,11 +4372,18 @@ function _sdCollectOverrides() {
       if (!entity_id && !service) continue;
       if (entity_id) entry.entity_id = entity_id;
       if (service) entry.service = service;
+      const color_on = row.querySelector('.sd-ov-color-on')?.value || '';
+      const color_off = row.querySelector('.sd-ov-color-off')?.value || '';
+      const icon = row.querySelector('.sd-ov-icon')?.value.trim() || '';
+      if (color_on) entry.color_on = color_on;
+      if (color_off) entry.color_off = color_off;
+      if (icon) entry.icon = icon;
     } else if (type === 'timer') {
       entry.minutes = parseInt(row.querySelector('.sd-ov-minutes')?.value || '0', 10) || 0;
     } else if (type === 'weather') {
       const location = row.querySelector('.sd-ov-location')?.value.trim() || '';
       if (location) entry.location = location;
+      if (row.querySelector('.sd-ov-forecast')?.checked) entry.forecast = true;
     } else {
       continue;
     }

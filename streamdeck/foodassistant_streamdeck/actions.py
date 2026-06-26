@@ -596,6 +596,10 @@ class ActionSpec:
     description: str = ""
     icon: str = ""           # Bootstrap Icons glyph name (without the "bi-"
                              # prefix) drawn above the label; see ACTION_ICONS.
+    color_on: str = ""       # for kind=="ha_entity" overrides: optional on-state
+                             # background; empty falls back to the HA default.
+    color_off: str = ""      # for kind=="ha_entity" overrides: optional off-state
+                             # background; empty falls back to the HA default.
 
 
 # Single source of truth for key iconography. Each action maps to the same
@@ -915,9 +919,16 @@ def override_to_spec(slot: int, override: dict) -> Optional[ActionSpec]:
             entity_id = service
         if not label:
             label = (entity_id or service).split(".", 1)[-1].replace("_", " ").title()
+        # Optional per-override on/off background colours. Empty strings leave
+        # the controller free to fall back to the stock HA on/off palette.
+        color_on = str(override.get("color_on", "")).strip()
+        color_off = str(override.get("color_off", "")).strip()
+        if color_off:
+            color = color_off
         return ActionSpec(
             name=name, label=label, color=color, kind="ha_entity",
             ha_entity_id=entity_id, ha_service=service, icon=icon,
+            color_on=color_on, color_off=color_off,
         )
 
     if otype == "timer":
@@ -932,12 +943,42 @@ def override_to_spec(slot: int, override: dict) -> Optional[ActionSpec]:
 
     if otype == "weather":
         location = str(override.get("location", override.get("source", ""))).strip()
+        # A weather override can render either the current-conditions tile
+        # (default) or a paired high/low forecast tile for the same location.
+        # The forecast variant mirrors the global "forecast" key but draws from
+        # this override's own per-location WeatherState. A full paired-slot
+        # layout (one current key plus an auto-placed forecast key) is deferred;
+        # for now each override picks one face via the "forecast" flag, which is
+        # the smallest coherent version of the feature.
+        if _truthy(override.get("forecast")):
+            fc_icon = str(override.get("icon", "")).strip() or "thermometer-half"
+            fc_color = override.get("color") or "#0e7490"
+            return ActionSpec(
+                name=name, label=label or "Forecast", color=fc_color,
+                kind="forecast", weather_location=location, icon=fc_icon,
+            )
         return ActionSpec(
             name=name, label=label or "Weather", color=color, kind="weather",
             weather_location=location, icon=icon,
         )
 
     return None
+
+
+def _truthy(value: Any) -> bool:
+    """Loosely interpret a JSON/TOML flag as a boolean.
+
+    Accepts real booleans plus the common string spellings ("true", "1",
+    "yes", "on") so a forecast flag survives a round-trip through settings.json
+    or config.toml regardless of how it was serialised.
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        return value.strip().lower() in {"true", "1", "yes", "on"}
+    return False
 
 
 def overrides_to_specs(overrides: list, key_count: int) -> dict:

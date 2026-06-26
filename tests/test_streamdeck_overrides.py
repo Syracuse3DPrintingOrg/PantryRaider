@@ -82,6 +82,87 @@ def test_weather_override_accepts_source_alias():
     assert spec.weather_location == "90210"
 
 
+# -- ha_action colours + icon (FoodAssistant-8nn) --------------------------
+
+
+def test_ha_action_threads_color_on_off_and_icon():
+    spec = actions.override_to_spec(
+        2, {"slot": 2, "type": "ha_action", "entity_id": "light.kitchen",
+            "color_on": "#ff0000", "color_off": "#00ff00", "icon": "lightbulb"}
+    )
+    assert spec is not None
+    assert spec.color_on == "#ff0000"
+    assert spec.color_off == "#00ff00"
+    assert spec.icon == "lightbulb"
+    # The static base colour follows the supplied off colour so an un-fetched
+    # key already shows the user's chosen off background.
+    assert spec.color == "#00ff00"
+
+
+def test_ha_action_without_colours_leaves_them_blank_for_default_fallback():
+    spec = actions.override_to_spec(
+        0, {"type": "ha_action", "entity_id": "switch.fan"}
+    )
+    assert spec is not None
+    assert spec.color_on == ""
+    assert spec.color_off == ""
+    # An empty icon falls back to the override default glyph.
+    assert spec.icon == "house"
+
+
+def test_ha_action_chosen_colours_drive_ha_entity_state():
+    # The colours an ha override carries must reach HaEntityState so the live
+    # key uses them instead of the stock HA palette.
+    spec = actions.override_to_spec(
+        1, {"type": "ha_action", "entity_id": "light.kitchen",
+            "color_on": "#abcabc", "color_off": "#123123"}
+    )
+    state = actions.HaEntityState(
+        spec.ha_entity_id, color_on=spec.color_on, color_off=spec.color_off
+    )
+    state._state = "on"
+    state._fetched_at = 1.0
+    assert state.color("#000000") == "#abcabc"
+    state._state = "off"
+    assert state.color("#000000") == "#123123"
+
+
+# -- weather forecast variant (FoodAssistant-8nn) --------------------------
+
+
+def test_weather_override_forecast_flag_builds_forecast_spec():
+    spec = actions.override_to_spec(
+        5, {"slot": 5, "type": "weather", "location": "Boston",
+            "forecast": True, "label": "Home Hi/Lo"}
+    )
+    assert spec is not None
+    assert spec.kind == "forecast"
+    assert spec.weather_location == "Boston"
+    assert spec.label == "Home Hi/Lo"
+    assert spec.icon == "thermometer-half"
+
+
+def test_weather_override_forecast_default_label_and_truthy_strings():
+    for flag in (True, "true", "1", "yes", "on"):
+        spec = actions.override_to_spec(0, {"type": "weather", "forecast": flag})
+        assert spec.kind == "forecast", flag
+        assert spec.label == "Forecast"
+    # Falsey spellings keep the current-conditions tile.
+    for flag in (False, "", "false", "0", "no"):
+        spec = actions.override_to_spec(0, {"type": "weather", "forecast": flag})
+        assert spec.kind == "weather", flag
+
+
+def test_forecast_override_renders_high_low_label():
+    # A forecast override drives WeatherState's forecast rendering, mirroring the
+    # global forecast key.
+    spec = actions.override_to_spec(0, {"type": "weather", "forecast": True})
+    w = actions.WeatherState(location=spec.weather_location, units="f")
+    w._forecast_days = [{"hi": "70", "lo": "50", "tag": "Today"}]
+    w._fetched_at = 1.0
+    assert w.forecast_label(spec.label) == "Today\nH70 L50"
+
+
 def test_default_and_unknown_types_return_none():
     assert actions.override_to_spec(0, {"type": "default"}) is None
     assert actions.override_to_spec(0, {"type": "nonsense"}) is None

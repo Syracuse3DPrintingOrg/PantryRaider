@@ -128,13 +128,23 @@ class Controller:
         # overrides get an HaEntityState so the key reflects live entity state.
         self.override_weather: dict[str, WeatherState] = {}
         for spec in self.key_overrides.values():
-            if spec.kind == "weather":
+            # Both the current-conditions ("weather") and high/low ("forecast")
+            # override faces draw from a per-location WeatherState so each tile
+            # can target its own place rather than sharing the global widget.
+            if spec.kind in ("weather", "forecast"):
                 self.override_weather[spec.name] = WeatherState(
                     location=spec.weather_location or config.weather_location,
                     units=config.weather_units,
                 )
             elif spec.kind == "ha_entity" and spec.ha_entity_id:
-                self.ha_entities[spec.name] = HaEntityState(spec.ha_entity_id)
+                # Honour any per-override on/off colours; empty strings fall back
+                # to the stock HA palette baked into HaEntityState's defaults.
+                kwargs: dict[str, str] = {}
+                if spec.color_on:
+                    kwargs["color_on"] = spec.color_on
+                if spec.color_off:
+                    kwargs["color_off"] = spec.color_off
+                self.ha_entities[spec.name] = HaEntityState(spec.ha_entity_id, **kwargs)
 
         try:
             self._bright_idx = BRIGHTNESS_STEPS.index(
@@ -314,8 +324,12 @@ class Controller:
                     alert = False
                     count = None
                 elif spec.kind == "forecast":
-                    label = self.weather.forecast_label(spec.label)
-                    color = self.weather.forecast_color(base_color)
+                    # A forecast override draws its high/low from its own
+                    # per-location WeatherState; the stock forecast key (no
+                    # override registered) keeps sharing the global widget.
+                    w = self.override_weather.get(spec.name, self.weather)
+                    label = w.forecast_label(spec.label)
+                    color = w.forecast_color(base_color)
                     alert = False
                     count = None
                 elif spec.kind == "ha_entity":
@@ -596,13 +610,12 @@ class Controller:
         self._draw_page()
 
     def _forecast_cycle(self, name: str) -> None:
-        """Advance the forecast key to its next day and redraw.
+        """Advance the pressed forecast key to its next day and redraw.
 
-        The forecast key always draws from the shared widget (override keys are
-        weather-type only), so ``name`` is accepted for parity with the weather
-        cycle but the shared state is what advances.
+        A forecast override draws from its own per-location WeatherState; the
+        stock forecast key falls back to the shared widget.
         """
-        self.weather.cycle_forecast_day()
+        self._weather_for(name).cycle_forecast_day()
         self._draw_page()
 
     async def _handle(self, spec: ActionSpec, long_press: bool = False) -> None:
