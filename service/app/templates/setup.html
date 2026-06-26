@@ -1579,6 +1579,19 @@
               </button>
             </div>
             <div class="mb-2">
+              <label class="form-label small mb-1">Restore from a backup zip</label>
+              <div class="input-group input-group-sm" style="max-width:520px">
+                <input type="file" class="form-control" id="restore-file" accept=".zip">
+                <button class="btn btn-outline-warning" onclick="restoreBackup(this)">
+                  <i class="bi bi-upload me-1"></i>Restore
+                </button>
+              </div>
+              <div class="form-text">Rewrites this app's data (settings, database, staples) from the zip. The
+                current data is copied aside first, and a redacted backup keeps the API keys you already have.
+                Grocy and Mealie data are not touched here. Reload the page after a restore.</div>
+              <div class="test-result mt-1" id="restore-result"></div>
+            </div>
+            <div class="mb-2">
               <label class="form-label">Rclone Remote Path <span class="text-secondary small">(optional)</span></label>
               <input type="text" class="form-control font-monospace" id="rclone_remote"
                      placeholder="s3:mybucket/foodassistant  or  gdrive:backups/food"
@@ -2940,6 +2953,42 @@ async function pushToRemote(btn) {
     setTimeout(() => { btn.innerHTML = orig; btn.className = btn.className.replace('btn-outline-success','btn-outline-secondary'); btn.disabled = false; }, 3000);
   } catch(e) {
     alert('Push failed: ' + e.message);
+    btn.innerHTML = orig;
+    btn.disabled = false;
+  }
+}
+
+async function restoreBackup(btn) {
+  const input = document.getElementById('restore-file');
+  const result = document.getElementById('restore-result');
+  const f = input?.files?.[0];
+  if (!f) {
+    if (result) result.innerHTML = '<span class="text-warning">Choose a backup zip first.</span>';
+    return;
+  }
+  if (!confirm('Restore from "' + f.name + '"? This replaces the current settings and '
+      + 'database. The current data is copied aside first, but you should reload the page after.')) {
+    return;
+  }
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Restoring…';
+  if (result) result.innerHTML = '';
+  try {
+    const fd = new FormData();
+    fd.append('file', f);
+    const r = await fetch('admin/restore', { method: 'POST', body: fd });
+    const d = await r.json();
+    if (!r.ok || !d.ok) throw new Error(d.detail || 'Restore failed.');
+    let msg = 'Restored ' + d.restored_files + ' file(s).';
+    if (d.secrets_preserved) msg += ' Kept ' + d.secrets_preserved + ' existing secret(s).';
+    msg += ' Reload to see the restored settings.';
+    if (result) result.innerHTML = '<span class="text-success"><i class="bi bi-check-circle me-1"></i>'
+      + msg + '</span>';
+  } catch (e) {
+    if (result) result.innerHTML = '<span class="text-danger"><i class="bi bi-x-circle me-1"></i>'
+      + e.message + '</span>';
+  } finally {
     btn.innerHTML = orig;
     btn.disabled = false;
   }

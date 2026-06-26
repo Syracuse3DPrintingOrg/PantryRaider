@@ -1,13 +1,14 @@
-"""Admin utilities: backup download, rclone remote push, system status."""
+"""Admin utilities: backup download/restore, rclone remote push, system status."""
 import asyncio
 import io
 import json
 import logging
+import shutil
 import zipfile
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, UploadFile, File
 from fastapi.responses import StreamingResponse
 
 from ..config import settings, SECRET_SETTING_KEYS, APP_VERSION, GITHUB_REPO
@@ -127,6 +128,141 @@ def _build_zip(include_secrets: bool = False) -> tuple[bytes, str]:
                     zf.write(f, arc_name)
     suffix = "" if include_secrets else "-redacted"
     return buf.getvalue(), f"foodassistant-backup-{date.today()}{suffix}.zip"
+
+
+# The top-level directory the backup zip nests everything under (see _build_zip).
+_BACKUP_PREFIX = "foodassistant-data"
+
+
+def _safe_members(zf: zipfile.ZipFile, data_dir: Path) -> list[tuple[str, Path]]:
+    """Resolve archive members to their destinations under data_dir, safely.
+
+    Returns (arcname, dest_path) pairs for the regular files that live under the
+    expected "foodassistant-data/" prefix and stay inside data_dir once resolved.
+    Anything else (directories, absolute paths, or "../" escapes that would write
+    outside data_dir) is skipped, so a tampered archive cannot drop files
+    elsewhere on the host (zip-slip).
+    """
+    base = data_dir.resolve()
+    out: list[tuple[str, Path]] = []
+    for info in zf.infolist():
+        if info.is_dir():
+            continue
+        name = info.filename.replace("\\", "/")
+        parts = name.split("/")
+        if not parts or parts[0] != _BACKUP_PREFIX:
+            continue
+        rel = "/".join(parts[1:])
+        if not rel:
+            continue
+        dest = (base / rel).resolve()
+        if dest != base and base not in dest.parents:
+            continue  # path escapes data_dir; refuse it
+        out.append((info.filename, dest))
+    return out
+
+
+def _restore_zip(zip_bytes: bytes) -> dict:
+    """Restore app data from a backup zip produced by _build_zip.
+
+    Validates the archive, snapshots the current data dir aside (so a bad restore
+    is recoverable), extracts the members, then keeps any currently-stored secret
+    that the backup left blank (a redacted backup blanks secrets, and we never
+    want a restore to wipe a working credential). Finally it reloads the live
+    settings and disposes the database engine so the restored DB is picked up.
+    Returns a summary dict.
+    """
+    try:
+        zf = zipfile.ZipFile(io.BytesIO(zip_bytes))
+    except zipfile.BadZipFile:
+        raise HTTPException(400, "That file is not a valid zip backup.")
+
+    data_dir = Path(settings.data_dir)
+    members = _safe_members(zf, data_dir)
+    if not members:
+        raise HTTPException(
+            400,
+            "This zip does not look like a FoodAssistant backup "
+            "(no 'foodassistant-data/' contents).",
+        )
+
+    # Snapshot the current data aside before overwriting anything.
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    snapshot = data_dir.parent / f"{data_dir.name}.pre-restore-{stamp}"
+    if data_dir.exists():
+        shutil.copytree(data_dir, snapshot, dirs_exist_ok=True)
+
+    # Remember the secrets we currently hold so a redacted backup cannot blank them.
+    current_secrets = {k: getattr(settings, k, "") for k in SECRET_SETTING_KEYS}
+
+    restored = 0
+    for arcname, dest in members:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        with zf.open(arcname) as src, open(dest, "wb") as out:
+            shutil.copyfileobj(src, out)
+        restored += 1
+
+    # Merge restored settings with the secret-preserve-on-blank rule, then apply.
+    secrets_preserved = 0
+    sf = data_dir / "settings.json"
+    if sf.exists():
+        try:
+            loaded = json.loads(sf.read_text())
+        except Exception:
+            loaded = {}
+        for k in SECRET_SETTING_KEYS:
+            if not loaded.get(k) and current_secrets.get(k):
+                loaded[k] = current_secrets[k]
+                secrets_preserved += 1
+        sf.write_text(json.dumps(loaded, indent=2))
+        try:
+            sf.chmod(0o600)
+        except OSError:
+            pass
+        settings.apply(loaded)
+
+    # Drop any open handle to the old defaults DB so the restored file is used.
+    try:
+        from ..database import engine
+        engine.dispose()
+    except Exception:
+        logger.warning("Could not dispose DB engine after restore", exc_info=True)
+
+    # Re-cache providers and Mealie data against the restored settings.
+    try:
+        from ..dependencies import reset_providers
+        reset_providers()
+    except Exception:
+        pass
+    try:
+        from ..services.mealie import reset_cache, reset_staple_cache
+        reset_cache()
+        reset_staple_cache()
+    except Exception:
+        pass
+
+    return {
+        "ok": True,
+        "restored_files": restored,
+        "secrets_preserved": secrets_preserved,
+        "snapshot": str(snapshot) if data_dir.exists() else "",
+    }
+
+
+@router.post("/restore")
+async def restore_backup(file: UploadFile = File(...)):
+    """Restore FoodAssistant app data from an uploaded backup zip.
+
+    The counterpart to GET /admin/backup: it rewrites this app's data directory
+    (settings.json, the defaults database, staples) from the archive. Grocy and
+    Mealie data live in separate containers and are not touched here; use
+    scripts/restore.sh on the host for a full snapshot. The current data dir is
+    copied aside first, and a redacted backup keeps the secrets already stored.
+    """
+    zip_bytes = await file.read()
+    if not zip_bytes:
+        raise HTTPException(400, "No file was uploaded.")
+    return _restore_zip(zip_bytes)
 
 
 @router.post("/backup/remote")
