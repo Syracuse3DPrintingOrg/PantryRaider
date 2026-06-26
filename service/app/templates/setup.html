@@ -835,10 +835,6 @@
             <i class="bi bi-cloud-arrow-down me-2"></i>Backup &amp; Updates
           </button>
         </div>
-        <button class="btn btn-primary w-100 mt-3" onclick="saveAll()" id="saveBtn">
-          <i class="bi bi-check-lg me-1"></i>Save All
-        </button>
-        <div id="save-result" class="mt-2 text-center small"></div>
       </div>
     </div>
 
@@ -944,6 +940,11 @@
             <div class="section-title"><i class="bi bi-info-circle text-secondary"></i> About satellite mode</div>
             <p class="text-secondary small">Backend settings and expiry defaults are managed on the main server and mirrored here read-only. Edit them there, then Sync. This device keeps its own display, Stream Deck, and security settings.</p>
           </div>
+
+          <button type="button" class="btn btn-outline-info btn-sm" onclick="savePaneUpstream(this)">
+            <i class="bi bi-check-lg me-1"></i>Save Main Server
+          </button>
+          <div class="test-result mt-2" id="upstream-save-result"></div>
         </div>
         {% endif %}
 
@@ -997,6 +998,12 @@
               <i class="bi bi-plug me-1"></i>Test Connection
             </button>
             <div class="test-result" id="grocy-result"></div>
+            <div class="mt-2">
+              <button type="button" class="btn btn-outline-info btn-sm" onclick="savePaneGrocy(this)">
+                <i class="bi bi-check-lg me-1"></i>Save Grocy
+              </button>
+              <div class="test-result mt-2" id="grocy-save-result"></div>
+            </div>
           </div>
 
           <div class="section-card">
@@ -1163,6 +1170,11 @@
             </button>
             <div class="test-result" id="enrich-result"></div>
           </div>
+
+          <button type="button" class="btn btn-outline-info btn-sm" onclick="savePaneAi(this)">
+            <i class="bi bi-check-lg me-1"></i>Save AI
+          </button>
+          <div class="test-result mt-2" id="ai-save-result"></div>
         </div>
 
         <!-- Recipes -->
@@ -1289,6 +1301,11 @@
               </div>
             </div>
           </div>
+
+          <button type="button" class="btn btn-outline-info btn-sm" onclick="savePaneRecipes(this)">
+            <i class="bi bi-check-lg me-1"></i>Save Recipes
+          </button>
+          <div class="test-result mt-2" id="recipes-save-result"></div>
         </div>
 
         <!-- Interface -->
@@ -1323,6 +1340,11 @@
               aren't configured (e.g. Mealie pages) hide automatically. Pages stay reachable by direct URL.</p>
             <div class="vstack gap-1" id="nav-editor"></div>
           </div>
+
+          <button type="button" class="btn btn-outline-info btn-sm" onclick="savePaneInterface(this)">
+            <i class="bi bi-check-lg me-1"></i>Save Theme &amp; Navigation
+          </button>
+          <div class="test-result mt-2 mb-3" id="interface-save-result"></div>
 
           <div class="section-card">
             <div class="section-title"><i class="bi bi-grip-vertical text-success"></i> On-screen navigation menu</div>
@@ -1443,6 +1465,11 @@
               <li>Connection-test errors have key material redacted before display.</li>
             </ul>
           </div>
+
+          <button type="button" class="btn btn-outline-info btn-sm" onclick="savePaneSecurity(this)">
+            <i class="bi bi-check-lg me-1"></i>Save Security
+          </button>
+          <div class="test-result mt-2" id="security-save-result"></div>
         </div>
 
         <!-- Remote Access -->
@@ -1569,6 +1596,12 @@
               <i class="bi bi-plug me-1"></i>Test Remote
             </button>
             <div class="test-result" id="rclone-result"></div>
+            <div class="mt-2">
+              <button type="button" class="btn btn-outline-info btn-sm" onclick="savePaneData(this)">
+                <i class="bi bi-check-lg me-1"></i>Save Backup Settings
+              </button>
+              <div class="test-result mt-2" id="data-save-result"></div>
+            </div>
           </div>
 
           <div class="section-card">
@@ -1662,6 +1695,11 @@ docker compose up -d</code></pre>
               <p class="text-secondary small">Camera scanning runs in the browser — make sure this site has camera permission.</p>
             </div>
           </div>
+
+          <button type="button" class="btn btn-outline-info btn-sm" onclick="savePaneHardware(this)">
+            <i class="bi bi-check-lg me-1"></i>Save Hardware
+          </button>
+          <div class="test-result mt-2" id="hardware-save-result"></div>
         </div>
 
         {% if is_pi %}
@@ -2631,26 +2669,18 @@ async function applyDisplay() {
   }
 }
 
-// Save (settings form — configured=True path)
-async function saveAll() {
-  const btn = document.getElementById('saveBtn');
+// Per-section save (settings form). Posts only this section's fields; the
+// server uses model_dump(exclude_unset=True), so untouched settings are kept.
+// Drops keys whose element is absent (value undefined) so we never blank a
+// field that does not render on this device.
+async function savePane(fields, btn, resultId) {
+  const el = document.getElementById(resultId);
+  const orig = btn.innerHTML;
   btn.disabled = true;
   btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Saving…';
-
-  const payload = buildPayload();
-
-  // Secure by default: block save if auth is required but no password is set or stored.
-  if (payload.auth_required && !HAS_AUTH_PASSWORD
-      && (!payload.auth_password || payload.auth_password === '__CLEAR__')) {
-    document.getElementById('save-result').innerHTML =
-      '<span class="text-danger"><i class="bi bi-x-circle-fill me-1"></i>Set a UI password, ' +
-      'or turn off "Require authentication" if an outer layer handles it.</span>';
-    btn.disabled = false;
-    btn.innerHTML = '<i class="bi bi-check-lg me-1"></i>Save All';
-    document.querySelector('[data-bs-target="#pane-security"]')?.click();
-    return;
-  }
-
+  if (el) el.innerHTML = '<span class="text-secondary">Saving...</span>';
+  const payload = {};
+  Object.keys(fields).forEach(k => { if (fields[k] !== undefined) payload[k] = fields[k]; });
   try {
     const r = await fetch('setup/save', {
       method: 'POST',
@@ -2658,17 +2688,122 @@ async function saveAll() {
       body: JSON.stringify(payload),
     });
     const d = await r.json();
-    if (d.ok) {
-      window.location.href = 'ui/';
-    } else {
-      throw new Error(d.detail || 'Unknown error');
-    }
+    if (!d.ok) throw new Error(d.detail || 'Unknown error');
+    if (el) el.innerHTML = '<span class="text-success"><i class="bi bi-check-circle me-1"></i>Saved.</span>';
   } catch (e) {
-    document.getElementById('save-result').innerHTML =
-      `<span class="text-danger"><i class="bi bi-x-circle-fill me-1"></i>${e.message}</span>`;
+    if (el) el.innerHTML = `<span class="text-danger"><i class="bi bi-x-circle-fill me-1"></i>${e.message}</span>`;
+  } finally {
     btn.disabled = false;
-    btn.innerHTML = '<i class="bi bi-check-lg me-1"></i>Save All';
+    btn.innerHTML = orig;
   }
+}
+
+// Helper: read a checkbox only when it exists, else undefined (so it is dropped).
+function chk(id) { const e = document.getElementById(id); return e ? e.checked : undefined; }
+// Helper: read a value only when the element exists, else undefined.
+function optVal(id) { return document.getElementById(id) ? val(id) : undefined; }
+
+function savePaneUpstream(btn) {
+  return savePane({
+    remote_server_url: optVal('remote_server_url'),
+    upstream_api_key:  document.getElementById('upstream_api_key') ? secretVal('upstream_api_key') : undefined,
+    extra_api_keys:    document.querySelector('.satellite-extra-keys') ? collectSatelliteKeys() : undefined,
+  }, btn, 'upstream-save-result');
+}
+
+function savePaneGrocy(btn) {
+  return savePane({
+    grocy_base_url:   optVal('grocy_base_url'),
+    grocy_api_key:    document.getElementById('grocy_api_key') ? secretVal('grocy_api_key') : undefined,
+    grocy_public_url: optVal('grocy_public_url'),
+    device_hostname:  optVal('device_hostname'),
+  }, btn, 'grocy-save-result');
+}
+
+function savePaneAi(btn) {
+  return savePane({
+    vision_provider:   optVal('vision_provider'),
+    gemini_api_key:    document.getElementById('gemini_api_key') ? secretVal('gemini_api_key') : undefined,
+    gemini_model:      document.getElementById('gemini_model') ? (val('gemini_model') || 'gemini-2.5-flash') : undefined,
+    ollama_base_url:   optVal('ollama_base_url'),
+    ollama_model:      document.getElementById('ollama_model') ? (val('ollama_model') || 'llava:7b') : undefined,
+    openai_api_key:    document.getElementById('openai_api_key') ? secretVal('openai_api_key') : undefined,
+    openai_model:      document.getElementById('openai_model') ? (val('openai_model') || 'gpt-4o-mini') : undefined,
+    anthropic_api_key: document.getElementById('anthropic_api_key') ? secretVal('anthropic_api_key') : undefined,
+    anthropic_model:   document.getElementById('anthropic_model') ? (val('anthropic_model') || 'claude-opus-4-8') : undefined,
+    ai_extra_keys:     document.querySelector('.extra-keys') ? collectExtraKeys() : undefined,
+    barcode_enrichment: optVal('barcode_enrichment'),
+    barcode_llm_fallback: chk('barcode_llm_fallback'),
+    enrich_provider:   optVal('enrich_provider'),
+    enrich_model:      optVal('enrich_model'),
+  }, btn, 'ai-save-result');
+}
+
+function savePaneRecipes(btn) {
+  return savePane({
+    mealie_base_url:   optVal('mealie_base_url'),
+    mealie_api_key:    document.getElementById('mealie_api_key') ? secretVal('mealie_api_key') : undefined,
+    mealie_public_url: optVal('mealie_public_url'),
+    barcode_autocheck_shopping: chk('barcode_autocheck_shopping'),
+    recipe_source:     optVal('recipe_source'),
+    themealdb_api_key: document.getElementById('themealdb_api_key') ? secretVal('themealdb_api_key') : undefined,
+    spoonacular_api_key: document.getElementById('spoonacular_api_key') ? secretVal('spoonacular_api_key') : undefined,
+    staple_items:      optVal('staple_items'),
+    cook_ai_context:   optVal('cook_ai_context'),
+    perishable_days:   document.getElementById('perishable_days') ? num('perishable_days', 14) : undefined,
+    expiring_soon_days: document.getElementById('expiring_soon_days') ? num('expiring_soon_days', 5) : undefined,
+    suggest_per_tier:  document.getElementById('suggest_per_tier') ? num('suggest_per_tier', 8) : undefined,
+  }, btn, 'recipes-save-result');
+}
+
+function savePaneInterface(btn) {
+  return savePane({
+    ui_theme:    optVal('ui_theme'),
+    ui_scale:    optVal('ui_scale'),
+    nav_order:   navState.map(t => t.key).join(','),
+    nav_hidden:  navState.filter(t => t.hidden).map(t => t.key).join(','),
+  }, btn, 'interface-save-result');
+}
+
+function savePaneSecurity(btn) {
+  const auth_required = document.getElementById('auth_required')?.checked ?? true;
+  const auth_password = document.getElementById('auth_password') ? secretVal('auth_password') : undefined;
+  // Secure by default: block save if auth is required but no password is set or stored.
+  if (auth_required && !HAS_AUTH_PASSWORD
+      && (!auth_password || auth_password === '__CLEAR__')) {
+    const el = document.getElementById('security-save-result');
+    if (el) el.innerHTML =
+      '<span class="text-danger"><i class="bi bi-x-circle-fill me-1"></i>Set a UI password, ' +
+      'or turn off "Require authentication" if an outer layer handles it.</span>';
+    document.querySelector('[data-bs-target="#pane-security"]')?.click();
+    document.getElementById('auth_password')?.focus();
+    return;
+  }
+  return savePane({
+    auth_required: auth_required,
+    auth_password: auth_password,
+    api_key:       document.getElementById('api_key') ? secretVal('api_key') : undefined,
+    kiosk_pin:     document.getElementById('kiosk_pin') ? secretVal('kiosk_pin') : undefined,
+    kiosk_readonly_when_locked: chk('kiosk_readonly_when_locked'),
+  }, btn, 'security-save-result');
+}
+
+// The Remote Access (tunnel) pane has no standalone Save: its persisted fields
+// (tunnel_mode, tunnel_token) are written by Connect/Disconnect via tunnel/start
+// and tunnel/stop, which also start or stop the tunnel container.
+
+function savePaneData(btn) {
+  return savePane({
+    rclone_remote:         optVal('rclone_remote'),
+    rclone_schedule_hours: document.getElementById('rclone_schedule_hours') ? num('rclone_schedule_hours', 0) : undefined,
+  }, btn, 'data-save-result');
+}
+
+function savePaneHardware(btn) {
+  return savePane({
+    scanner_type:           optVal('scanner_type'),
+    barcode_global_capture: chk('barcode_global_capture'),
+  }, btn, 'hardware-save-result');
 }
 
 // Build the full settings payload from form fields — shared by wizard and settings form.

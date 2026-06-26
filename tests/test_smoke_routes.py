@@ -175,6 +175,29 @@ def test_setup_save_persists_streamdeck_fields(client):
     ]
 
 
+def test_setup_save_subset_leaves_others_untouched(client):
+    # Per-section Save buttons post only their own fields. The server uses
+    # model_dump(exclude_unset=True), so an unrelated stored setting must keep
+    # its value when a different section saves (FoodAssistant-53ik).
+    from app.config import settings
+
+    # Seed a known unrelated value via a prior full-ish save.
+    client.post("/setup/save", json={"staple_items": "anchovy, capers"})
+    assert settings.staple_items == "anchovy, capers"
+
+    # Save only the Grocy section.
+    r = client.post("/setup/save", json={"grocy_base_url": "http://grocy.subset"})
+    assert r.status_code == 200
+    assert settings.grocy_base_url == "http://grocy.subset"
+
+    # The unrelated staple_items value survives in memory and on disk.
+    assert settings.staple_items == "anchovy, capers"
+    import json
+    saved = json.loads((Path(settings.data_dir) / "settings.json").read_text())
+    assert saved["grocy_base_url"] == "http://grocy.subset"
+    assert saved["staple_items"] == "anchovy, capers"
+
+
 def test_streamdeck_profiles_crud(client):
     """Profile save/list/delete roundtrip (FoodAssistant-aqa)."""
     # Clear any profiles left by other tests sharing this DB
