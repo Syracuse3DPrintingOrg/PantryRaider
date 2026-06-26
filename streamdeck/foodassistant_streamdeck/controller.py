@@ -358,6 +358,15 @@ class Controller:
                     color = base_color
                     alert = False
                     count = None
+                elif spec.kind in ("shopping_add", "macro"):
+                    # Quick-add and macro override keys are stateless faces: they
+                    # show their configured label and colour and do their work on
+                    # press (dispatched through actions.run_action), so there is
+                    # no live count or alert to compute here.
+                    label = spec.label
+                    color = base_color
+                    alert = False
+                    count = None
                 else:
                     count = (
                         self.status.get(spec.status_field)

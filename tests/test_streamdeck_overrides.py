@@ -163,6 +163,66 @@ def test_forecast_override_renders_high_low_label():
     assert w.forecast_label(spec.label) == "Today\nH70 L50"
 
 
+# -- shopping_add + macro overrides (FoodAssistant-2w6o) -------------------
+
+
+def test_override_types_includes_shopping_add_and_macro():
+    assert "shopping_add" in actions.OVERRIDE_TYPES
+    assert "macro" in actions.OVERRIDE_TYPES
+
+
+def test_shopping_add_override_carries_item_and_kind():
+    spec = actions.override_to_spec(
+        2, {"slot": 2, "type": "shopping_add", "item": "Milk"}
+    )
+    assert spec is not None
+    assert spec.kind == "shopping_add"
+    assert spec.item == "Milk"
+    # Label defaults to the item name and the icon to the cart-plus glyph.
+    assert spec.label == "Milk"
+    assert spec.icon == "cart-plus"
+
+
+def test_shopping_add_override_truncates_long_label_keeps_full_item():
+    spec = actions.override_to_spec(
+        0, {"type": "shopping_add", "item": "Extra Virgin Olive Oil"}
+    )
+    assert spec is not None
+    # The stored item keeps the full name (it is what gets posted), while the
+    # on-face label is truncated to stay glanceable.
+    assert spec.item == "Extra Virgin Olive Oil"
+    assert len(spec.label) <= actions.SHOPPING_ADD_LABEL_MAX
+
+
+def test_shopping_add_override_without_item_is_skipped():
+    assert actions.override_to_spec(0, {"type": "shopping_add"}) is None
+    assert actions.override_to_spec(0, {"type": "shopping_add", "item": "  "}) is None
+
+
+def test_macro_override_carries_action_list_and_kind():
+    spec = actions.override_to_spec(
+        3, {"slot": 3, "type": "macro", "actions": ["brightness", "cook"]}
+    )
+    assert spec is not None
+    assert spec.kind == "macro"
+    assert spec.macro_actions == ("brightness", "cook")
+    assert spec.label == "Macro"
+    assert spec.icon == "collection-play"
+
+
+def test_macro_override_accepts_comma_separated_string():
+    spec = actions.override_to_spec(
+        0, {"type": "macro", "actions": "brightness, cook , add"}
+    )
+    assert spec is not None
+    assert spec.macro_actions == ("brightness", "cook", "add")
+
+
+def test_macro_override_without_actions_is_skipped():
+    assert actions.override_to_spec(0, {"type": "macro"}) is None
+    assert actions.override_to_spec(0, {"type": "macro", "actions": []}) is None
+
+
 def test_default_and_unknown_types_return_none():
     assert actions.override_to_spec(0, {"type": "default"}) is None
     assert actions.override_to_spec(0, {"type": "nonsense"}) is None

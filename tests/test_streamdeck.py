@@ -363,6 +363,90 @@ def test_cooked_action_dispatches_and_refreshes():
     assert refreshed["n"] == 1
 
 
+# -- shopping_add + macro overrides (FoodAssistant-2w6o) -------------------
+
+
+def test_add_shopping_item_posts_to_default_list():
+    client = _FakeClient(
+        get_map={"/mealie/shopping": _Resp(200, {"list": {"id": "L1"}})},
+        post_map={"/mealie/shopping/items": _Resp(200, {"ok": True, "id": "i1"})},
+    )
+    face = asyncio.run(actions.add_shopping_item(client, "http://x", "Milk"))
+    assert face == "Added"
+    assert ("POST", "http://x/mealie/shopping/items") in client.calls
+
+
+def test_add_shopping_item_no_list_does_not_post():
+    client = _FakeClient(get_map={"/mealie/shopping": _Resp(200, {"list": None})})
+    face = asyncio.run(actions.add_shopping_item(client, "http://x", "Milk"))
+    assert face == "No list"
+    assert all(c[0] != "POST" for c in client.calls)
+
+
+def test_add_shopping_item_tolerates_errors():
+    # No matching endpoints: the GET 404s, so the add fails without crashing.
+    face = asyncio.run(actions.add_shopping_item(_FakeClient(), "http://x", "Milk"))
+    assert face == "Failed"
+
+
+def test_shopping_add_action_posts_item_and_refreshes():
+    client = _FakeClient(
+        get_map={"/mealie/shopping": _Resp(200, {"list": {"id": "L1"}})},
+        post_map={"/mealie/shopping/items": _Resp(200, {"ok": True})},
+    )
+    spec = actions.override_to_spec(0, {"type": "shopping_add", "item": "Eggs"})
+    ctx, refreshed = _ctx(client)
+    msg = asyncio.run(actions.run_action(spec, ctx))
+    assert msg == "Added"
+    assert refreshed["n"] == 1
+    # The configured item is what was posted.
+    posted = [c for c in client.calls if c[0] == "POST"]
+    assert posted and posted[0][1].endswith("/mealie/shopping/items")
+
+
+def test_macro_runs_each_child_action_in_order():
+    ran = []
+
+    def record_brightness():
+        ran.append("brightness")
+        return 80
+
+    ctx, _ = _ctx(_FakeClient())
+    # Swap in recorders so we can observe order without real side effects.
+    ctx.cycle_brightness = record_brightness
+    ctx.page_next = lambda: ran.append("page_next")
+    spec = actions.override_to_spec(
+        0, {"type": "macro", "actions": ["brightness", "page_next"]}
+    )
+    msg = asyncio.run(actions.run_action(spec, ctx))
+    assert msg == "Ran 2"
+    assert ran == ["brightness", "page_next"]
+
+
+def test_macro_skips_nested_macro_and_unknown_names():
+    ran = []
+    ctx, _ = _ctx(_FakeClient())
+    ctx.cycle_brightness = lambda: (ran.append("brightness") or 80)
+    # Register a temporary nested macro in the ACTIONS registry so resolve()
+    # finds it; the macro handler must skip it rather than recurse.
+    nested = actions.ActionSpec(
+        name="nested_macro", label="Nested", color="#000000", kind="macro",
+        macro_actions=("brightness",),
+    )
+    actions.ACTIONS["nested_macro"] = nested
+    try:
+        spec = actions.override_to_spec(
+            0, {"type": "macro",
+                "actions": ["brightness", "nested_macro", "does_not_exist"]}
+        )
+        msg = asyncio.run(actions.run_action(spec, ctx))
+    finally:
+        del actions.ACTIONS["nested_macro"]
+    # Only the one resolvable, non-macro child ran.
+    assert msg == "Ran 1"
+    assert ran == ["brightness"]
+
+
 # -- action handlers -------------------------------------------------------
 
 

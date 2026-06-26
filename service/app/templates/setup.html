@@ -4249,6 +4249,8 @@ const _SD_OVERRIDE_PREVIEW = {
   ha_action: {color: '#475569', icon: 'house', label: 'HA'},
   timer: {color: '#0d9488', icon: 'stopwatch', label: 'Timer'},
   weather: {color: '#1e40af', icon: 'cloud-sun', label: 'Weather'},
+  shopping_add: {color: '#0f766e', icon: 'cart-plus', label: 'Add'},
+  macro: {color: '#6d28d9', icon: 'collection-play', label: 'Macro'},
 };
 
 // Paint each configured override onto its target grid cell so the grid mirrors
@@ -4278,6 +4280,8 @@ function _sdPaintOverridesOnGrid() {
     let label = o.label || preset.label;
     if (o.type === 'ha_action' && o.color_off) color = o.color_off;
     if (o.type === 'weather' && o.forecast) { color = '#0e7490'; icon = icon || 'thermometer-half'; if (!o.label) label = 'Forecast'; }
+    if (o.type === 'shopping_add' && !o.label && o.item) label = o.item;
+    if (o.type === 'macro' && !o.label && Array.isArray(o.actions) && o.actions.length) label = o.actions.length + ' steps';
     if (!cell.dataset.ovBase) cell.dataset.ovBase = cell.style.background;
     cell.dataset.ovColor = color;
     cell.style.background = color;
@@ -4299,6 +4303,8 @@ const _SD_OVERRIDE_TYPES = [
   {value: 'ha_action', label: 'Home Assistant action'},
   {value: 'timer', label: 'Countdown timer'},
   {value: 'weather', label: 'Weather tile'},
+  {value: 'shopping_add', label: 'Quick-add shopping item'},
+  {value: 'macro', label: 'Macro (run actions in sequence)'},
 ];
 
 // Curated Bootstrap Icons glyphs (names without the "bi-" prefix) offered in
@@ -4321,7 +4327,14 @@ function _sdOverrideRow(o) {
   const uid = 'sdov' + (_sdOverrideRow._seq = (_sdOverrideRow._seq || 0) + 1);
   const iconListId = uid + '-icons';
   const forecastId = uid + '-fc';
+  const macroListId = uid + '-macro';
   const iconOpts = _SD_HA_ICONS.map(g => `<option value="${escapeHtml(g)}">`).join('');
+  // Offer the loaded action catalog (minus blank and macro keys, which a macro
+  // cannot usefully run) as autocomplete suggestions for the macro field.
+  const macroOpts = (Array.isArray(_sdCatalog) ? _sdCatalog : [])
+    .filter(a => a.name !== 'blank' && a.kind !== 'macro')
+    .map(a => `<option value="${escapeHtml(a.name)}">${escapeHtml(a.label || a.name)}</option>`)
+    .join('');
   row.innerHTML = `
     <div class="row g-2 align-items-end">
       <div class="col-auto" style="max-width:110px">
@@ -4381,6 +4394,21 @@ function _sdOverrideRow(o) {
           <input class="form-check-input sd-ov-forecast" type="checkbox" id="${forecastId}"${o.forecast ? ' checked' : ''}>
           <label class="form-check-label small" for="${forecastId}">Show forecast (high/low) instead of current</label>
         </div>
+      </div>
+    </div>
+    <div class="row g-2 mt-1 sd-ov-fields-shopping_add">
+      <div class="col-md-8">
+        <label class="form-label small mb-1">Item</label>
+        <input type="text" class="form-control form-control-sm sd-ov-item" placeholder="Milk" value="${escapeHtml(o.item || '')}">
+        <div class="form-text">Pressing the key adds this product to the Mealie shopping list.</div>
+      </div>
+    </div>
+    <div class="row g-2 mt-1 sd-ov-fields-macro">
+      <div class="col-12">
+        <label class="form-label small mb-1">Actions</label>
+        <input type="text" class="form-control form-control-sm sd-ov-actions" list="${macroListId}" placeholder="brightness, cook" value="${escapeHtml(Array.isArray(o.actions) ? o.actions.join(', ') : (o.actions || ''))}">
+        <datalist id="${macroListId}">${macroOpts}</datalist>
+        <div class="form-text">Comma-separated action names, run in order on a single press. Other macros are skipped.</div>
       </div>
     </div>`;
   const typeSel = row.querySelector('.sd-ov-type');
@@ -4445,6 +4473,15 @@ function _sdCollectOverrides() {
       const location = row.querySelector('.sd-ov-location')?.value.trim() || '';
       if (location) entry.location = location;
       if (row.querySelector('.sd-ov-forecast')?.checked) entry.forecast = true;
+    } else if (type === 'shopping_add') {
+      const item = row.querySelector('.sd-ov-item')?.value.trim() || '';
+      if (!item) continue;
+      entry.item = item;
+    } else if (type === 'macro') {
+      const actions = (row.querySelector('.sd-ov-actions')?.value || '')
+        .split(',').map(s => s.trim()).filter(Boolean);
+      if (actions.length < 1) continue;
+      entry.actions = actions;
     } else {
       continue;
     }

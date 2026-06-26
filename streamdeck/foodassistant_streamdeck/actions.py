@@ -642,6 +642,11 @@ class ActionSpec:
                              # background; empty falls back to the HA default.
     color_off: str = ""      # for kind=="ha_entity" overrides: optional off-state
                              # background; empty falls back to the HA default.
+    item: str = ""           # for kind=="shopping_add" overrides: the product
+                             # name to quick-add to the Mealie shopping list.
+    macro_actions: tuple = ()  # for kind=="macro" overrides: ordered action names
+                             # to run in sequence. A tuple keeps the frozen
+                             # dataclass hashable.
 
 
 # Single source of truth for key iconography. Each action maps to the same
@@ -1013,19 +1018,29 @@ def resolve(name: str) -> Optional[ActionSpec]:
 # Override key types exposed in the setup UI, mapped to the ActionSpec kind the
 # controller already knows how to render and dispatch. "default" is a sentinel
 # that leaves the slot's stock action in place (used to clear an override).
-OVERRIDE_TYPES: tuple[str, ...] = ("ha_action", "timer", "weather", "default")
+OVERRIDE_TYPES: tuple[str, ...] = (
+    "ha_action", "timer", "weather", "shopping_add", "macro", "default"
+)
 
 _OVERRIDE_DEFAULT_COLORS = {
     "ha_action": _HA_STATE_COLOR_OFF,
     "timer": "#0d9488",
     "weather": "#1e40af",
+    "shopping_add": "#0f766e",
+    "macro": "#6d28d9",
 }
 
 _OVERRIDE_DEFAULT_ICONS = {
     "ha_action": "house",
     "timer": "stopwatch",
     "weather": "cloud-sun",
+    "shopping_add": "cart-plus",
+    "macro": "collection-play",
 }
+
+# Longest item name a shopping_add key shows on its face before truncation, so a
+# long product name stays glanceable on a single key.
+SHOPPING_ADD_LABEL_MAX: int = 12
 
 
 def override_to_spec(slot: int, override: dict) -> Optional[ActionSpec]:
@@ -1105,6 +1120,44 @@ def override_to_spec(slot: int, override: dict) -> Optional[ActionSpec]:
         return ActionSpec(
             name=name, label=label or "Weather", color=color, kind="weather",
             weather_location=location, icon=icon,
+        )
+
+    if otype == "shopping_add":
+        # A quick-add key carries the product name to push onto the Mealie
+        # shopping list. Without an item there is nothing to add, so the slot
+        # keeps its stock action.
+        item = str(override.get("item", "")).strip()
+        if not item:
+            return None
+        if not label:
+            label = clean_timer_label(item, SHOPPING_ADD_LABEL_MAX) or "Add"
+        return ActionSpec(
+            name=name, label=label, color=color, kind="shopping_add",
+            item=item, icon=icon,
+        )
+
+    if otype == "macro":
+        # A macro key runs several existing actions in order. The names are
+        # validated lazily at press time (resolve() lookup), so an unknown name
+        # is simply skipped rather than rejecting the whole override here. A
+        # macro with no usable names still maps so the key reads as configured.
+        raw = override.get("actions", [])
+        names: list[str] = []
+        if isinstance(raw, (list, tuple)):
+            for entry in raw:
+                entry = str(entry).strip()
+                if entry:
+                    names.append(entry)
+        elif isinstance(raw, str):
+            for entry in raw.split(","):
+                entry = entry.strip()
+                if entry:
+                    names.append(entry)
+        if not names:
+            return None
+        return ActionSpec(
+            name=name, label=label or "Macro", color=color, kind="macro",
+            macro_actions=tuple(names), icon=icon,
         )
 
     return None
@@ -1261,6 +1314,38 @@ async def mark_current_recipe_cooked(client: Any, base_url: str) -> str:
             consumed = len((r.json() or {}).get("consumed") or [])
             return f"Cooked {consumed}" if consumed else "Cooked"
         return "Failed"
+    except Exception:  # noqa: BLE001
+        return "Failed"
+
+
+async def add_shopping_item(client: Any, base_url: str, item: str) -> str:
+    """Quick-add a favourite item to the Mealie shopping list. Returns a face.
+
+    The app's POST /mealie/shopping/items needs the target list id, so this
+    first reads /mealie/shopping to discover the default list (the same list the
+    web UI shows), then posts the item note onto it. Returns "Added" on success,
+    "No list" when Mealie has no shopping list, and "Failed" on any error, so a
+    press always degrades to a readable face rather than crashing the controller.
+    """
+    item = str(item or "").strip()
+    if not item:
+        return "Empty"
+    base = base_url.rstrip("/")
+    try:
+        r = await client.get(f"{base}/mealie/shopping")
+        if r.status_code != 200:
+            return "Failed"
+        list_id = ((r.json() or {}).get("list") or {}).get("id") or ""
+    except Exception:  # noqa: BLE001 - never crash a press
+        return "Failed"
+    if not list_id:
+        return "No list"
+    try:
+        r = await client.post(
+            f"{base}/mealie/shopping/items",
+            json={"list_id": list_id, "note": item, "quantity": 1.0},
+        )
+        return "Added" if r.status_code == 200 else "Failed"
     except Exception:  # noqa: BLE001
         return "Failed"
 
@@ -1427,5 +1512,28 @@ async def run_action(spec: ActionSpec, ctx: ActionContext, long_press: bool = Fa
             return f"{entity_id} -> {service} ({r.status_code})"
         except Exception as e:  # noqa: BLE001
             return f"ha error: {e}"
+
+    if spec.kind == "shopping_add":
+        face = await add_shopping_item(ctx.client, base, spec.item)
+        await ctx.refresh()
+        return face
+
+    if spec.kind == "macro":
+        # Run each named child action in order, reusing the same dispatcher so
+        # the macro behaves exactly as pressing those keys one after another.
+        # A name that does not resolve is skipped; a nested macro is skipped too
+        # so a macro can never trigger another macro (no recursion loops). The
+        # first child that raises stops the run, surfaced as a clear face.
+        ran = 0
+        for child_name in spec.macro_actions:
+            child = resolve(child_name)
+            if child is None or child.kind == "macro":
+                continue
+            try:
+                await run_action(child, ctx, long_press=long_press)
+            except Exception as e:  # noqa: BLE001 - stop on the first hard error
+                return f"macro error: {e}"
+            ran += 1
+        return f"Ran {ran}"
 
     return ""
