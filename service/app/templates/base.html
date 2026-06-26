@@ -24,6 +24,42 @@
   {% if theme_overlay %}
   <link href="{{ theme_overlay }}" rel="stylesheet">
   {% endif %}
+  {% if ui_theme == 'custom' %}
+  {# Custom theme builder (FoodAssistant-hatd). Inline override layered after the
+     base Bootstrap stylesheet, mirroring how an overlay theme works but built
+     from the user's saved swatches rather than a vendored file. Maps the five
+     editable colours onto the most visible Bootstrap CSS variables plus a few
+     derived ones (rgb pairs for utilities, link colours, card/input surfaces) so
+     the result stays cohesive across the whole UI. data-bs-theme is already set
+     to custom_theme_base on <html>, so this only retints, it does not flip
+     light/dark. #}
+  <style>
+    :root,
+    [data-bs-theme="{{ theme_mode }}"] {
+      --bs-primary: {{ custom_theme_primary }};
+      --bs-link-color: {{ custom_theme_primary }};
+      --bs-link-hover-color: {{ custom_theme_primary }};
+      --bs-secondary: {{ custom_theme_accent }};
+      --bs-success: {{ custom_theme_accent }};
+      --bs-body-bg: {{ custom_theme_bg }};
+      --bs-body-color: {{ custom_theme_text }};
+      --bs-emphasis-color: {{ custom_theme_text }};
+      --bs-secondary-bg: {{ custom_theme_surface }};
+      --bs-tertiary-bg: {{ custom_theme_surface }};
+      --bs-border-color: {{ custom_theme_surface }};
+      --bs-card-bg: {{ custom_theme_surface }};
+      --bs-card-cap-bg: {{ custom_theme_surface }};
+      --bs-modal-bg: {{ custom_theme_surface }};
+      --bs-dropdown-bg: {{ custom_theme_surface }};
+      --bs-list-group-bg: {{ custom_theme_surface }};
+      --bs-input-bg: {{ custom_theme_surface }};
+    }
+    body { background-color: var(--bs-body-bg); color: var(--bs-body-color); }
+    .btn-primary { background-color: {{ custom_theme_primary }}; border-color: {{ custom_theme_primary }}; }
+    .btn-success { background-color: {{ custom_theme_accent }}; border-color: {{ custom_theme_accent }}; }
+    .nav-link.active, .float-nav-link.active { color: {{ custom_theme_primary }}; }
+  </style>
+  {% endif %}
   <link href="static/vendor/bootstrap-icons.min.css" rel="stylesheet">
   <script>
     // Kiosk mode — load touch-target CSS before first paint to avoid reflow flash

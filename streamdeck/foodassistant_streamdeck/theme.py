@@ -86,6 +86,19 @@ THEME_PALETTES: dict[str, dict[str, str]] = {
         "danger": "#c2502e", "info": "#6fae9b", "accent": "#8fbf9f",
         "timer": "#9ccc5a", "muted": "#2a4533",
     },
+    # Custom theme builder (FoodAssistant-hatd). The web UI lets a user pick their
+    # own primary/accent/surface colours (Settings -> Interface). The deck reads
+    # this table locally and only receives the theme NAME via the satellite sync,
+    # not the live custom colours, so this is a sensible STATIC palette derived
+    # from the app's default custom-theme swatches (slate dark with a blue primary
+    # and green accent). Pushing the live custom colours all the way to the deck
+    # is a follow-up (it would need the sync to carry the custom_theme_* values
+    # and the controller to build a palette from them at runtime).
+    "custom": {
+        "primary": "#4f9dff", "success": "#34d399", "warn": "#fbbf24",
+        "danger": "#f87171", "info": "#a78bfa", "accent": "#34d399",
+        "timer": "#34d399", "muted": "#161b22",
+    },
 }
 
 

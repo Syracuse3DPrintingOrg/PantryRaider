@@ -163,6 +163,14 @@ class SetupPayload(BaseModel):
     nav_order: str = ""
     nav_hidden: str = ""
     ui_theme: str = _DEFAULT_THEME
+    # Custom theme builder swatches (FoodAssistant-hatd). Declared so they
+    # round-trip through /save (BaseModel drops undeclared fields).
+    custom_theme_base: str = "dark"
+    custom_theme_primary: str = "#4f9dff"
+    custom_theme_accent: str = "#34d399"
+    custom_theme_bg: str = "#0d1117"
+    custom_theme_surface: str = "#161b22"
+    custom_theme_text: str = "#e6edf3"
     ui_scale: str = _DEFAULT_UI_SCALE
     display_rotation: int = _DEFAULT_DISPLAY_ROTATION
     display_type: str = _DEFAULT_DISPLAY_TYPE

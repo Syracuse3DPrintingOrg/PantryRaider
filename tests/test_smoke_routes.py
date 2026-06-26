@@ -199,6 +199,50 @@ def test_setup_save_subset_leaves_others_untouched(client):
     assert saved["staple_items"] == "anchovy, capers"
 
 
+def test_custom_theme_persists_and_renders(client):
+    """Custom theme builder (FoodAssistant-hatd).
+
+    Saving the palette persists every custom_theme_* field, rendering a page
+    with ui_theme="custom" emits the swatches as inline Bootstrap CSS variables,
+    and theme_info/context reports the chosen light/dark base mode.
+    """
+    import json
+    from app.config import settings, theme_info
+
+    palette = {
+        "ui_theme": "custom",
+        "custom_theme_base": "light",
+        "custom_theme_primary": "#ff5733",
+        "custom_theme_accent": "#33ff57",
+        "custom_theme_bg": "#fafafa",
+        "custom_theme_surface": "#eeeeee",
+        "custom_theme_text": "#101010",
+    }
+    r = client.post("/setup/save", json=palette)
+    assert r.status_code == 200
+
+    # Applied to the live settings object and persisted to disk.
+    for k, v in palette.items():
+        assert getattr(settings, k) == v
+    saved = json.loads((Path(settings.data_dir) / "settings.json").read_text())
+    for k, v in palette.items():
+        assert saved[k] == v
+
+    # theme_info reports the chosen base mode for the custom theme.
+    assert theme_info("custom")["mode"] == "light"
+
+    # A rendered page carries data-bs-theme=light and the inline custom vars.
+    page = client.get("/ui/").text
+    assert 'data-bs-theme="light"' in page
+    assert "--bs-primary: #ff5733;" in page
+    assert "--bs-body-bg: #fafafa;" in page
+    assert "--bs-body-color: #101010;" in page
+    assert "--bs-tertiary-bg: #eeeeee;" in page
+
+    # Restore the default theme so later tests render the dark default.
+    client.post("/setup/save", json={"ui_theme": "dark"})
+
+
 def test_streamdeck_profiles_crud(client):
     """Profile save/list/delete roundtrip (FoodAssistant-aqa)."""
     # Clear any profiles left by other tests sharing this DB

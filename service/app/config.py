@@ -12,7 +12,7 @@ from .hardware import is_raspberry_pi
 
 # Single source of truth for the app version (shown in the UI, used by the
 # update checker, and reported by FastAPI). Bump on each tagged release.
-APP_VERSION = "0.6.24"
+APP_VERSION = "0.6.25"
 
 # GitHub repo used by the in-app update checker.
 GITHUB_REPO = "Syracuse3DPrinting/FoodAssistant"
@@ -38,6 +38,13 @@ THEMES = {
                    "overlay": "static/vendor/themes/midnight.css"},
     "forest":     {"label": "Forest (soft green dark)", "mode": "dark", "stylesheet": None,
                    "overlay": "static/vendor/themes/forest.css"},
+    # The custom theme has no static stylesheet or overlay file: its colours come
+    # from the user-edited swatches stored in Settings (custom_theme_*). base.html
+    # emits an inline <style> from those values, layered after base Bootstrap, so
+    # it behaves like an overlay built from settings rather than a vendored file.
+    # "mode" here is a placeholder; the live mode follows custom_theme_base and is
+    # resolved in theme_context (see resolve_theme()).
+    "custom":     {"label": "Custom",                 "mode": "dark",  "stylesheet": None, "overlay": None},
 }
 _DEFAULT_THEME = "dark"
 
@@ -132,8 +139,17 @@ AI_MODELS = {
 
 
 def theme_info(name: str) -> dict:
-    """Resolve a theme name to its descriptor, falling back to the default."""
-    return THEMES.get(name, THEMES[_DEFAULT_THEME])
+    """Resolve a theme name to its descriptor, falling back to the default.
+
+    For the "custom" theme the returned ``mode`` follows the stored
+    ``custom_theme_base`` ("light"/"dark") so data-bs-theme matches the chosen
+    base, rather than the placeholder mode in the THEMES table.
+    """
+    info = dict(THEMES.get(name, THEMES[_DEFAULT_THEME]))
+    if name == "custom":
+        base = getattr(settings, "custom_theme_base", "dark")
+        info["mode"] = base if base in ("light", "dark") else "dark"
+    return info
 
 
 def ui_scale_factor(name: str) -> float:
@@ -153,7 +169,10 @@ _SAVEABLE = [
     "device_hostname",
     "recipe_source", "themealdb_api_key", "spoonacular_api_key",
     "staple_items", "cook_ai_context", "perishable_days", "expiring_soon_days", "suggest_per_tier",
-    "nav_order", "nav_hidden", "custom_storage_categories", "ui_theme", "ui_scale", "display_rotation",
+    "nav_order", "nav_hidden", "custom_storage_categories", "ui_theme",
+    "custom_theme_base", "custom_theme_primary", "custom_theme_accent",
+    "custom_theme_bg", "custom_theme_surface", "custom_theme_text",
+    "ui_scale", "display_rotation",
     "display_type",
     "has_streamdeck", "streamdeck_key_count", "display_touch",
     "display_idle_timeout", "streamdeck_idle_timeout", "streamdeck_key_overrides",
@@ -449,8 +468,24 @@ class Settings(BaseSettings):
     nav_order: str = ""
     nav_hidden: str = ""
 
-    # UI colour theme. One of the keys in THEMES (dark | light | bootswatch).
+    # UI colour theme. One of the keys in THEMES (dark | light | bootswatch | custom).
     ui_theme: str = _DEFAULT_THEME
+
+    # Custom theme builder (FoodAssistant-hatd). When ui_theme == "custom" the
+    # app emits an inline stylesheet from these swatches instead of loading a
+    # vendored theme file. custom_theme_base picks the Bootstrap light/dark base
+    # the overrides layer onto (so data-bs-theme matches). The five colours map
+    # onto the most visible Bootstrap variables: primary (buttons/links/active),
+    # accent (secondary accent), bg (page background), surface (cards/inputs/
+    # tertiary chrome) and text (body text). A small curated set, not full
+    # freeform, so any combination stays cohesive. Defaults are a tasteful slate
+    # dark palette that mirrors the stock dark theme.
+    custom_theme_base: str = "dark"
+    custom_theme_primary: str = "#4f9dff"
+    custom_theme_accent: str = "#34d399"
+    custom_theme_bg: str = "#0d1117"
+    custom_theme_surface: str = "#161b22"
+    custom_theme_text: str = "#e6edf3"
 
     # UI scale. One of the keys in UI_SCALES; applied as a document zoom on the
     # kiosk display only, so the interface fits a small or large hardware panel

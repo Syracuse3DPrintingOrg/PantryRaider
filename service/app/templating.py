@@ -27,6 +27,16 @@ def theme_context(request: Request) -> dict:
         "theme_mode": info["mode"],
         "theme_css": info["stylesheet"],
         "theme_overlay": info.get("overlay"),
+        # Custom theme builder (FoodAssistant-hatd). Exposed on every render so
+        # base.html can emit an inline <style> from the stored swatches when
+        # ui_theme == "custom". Harmless for other themes (base.html only reads
+        # them in that branch).
+        "custom_theme_base": settings.custom_theme_base,
+        "custom_theme_primary": settings.custom_theme_primary,
+        "custom_theme_accent": settings.custom_theme_accent,
+        "custom_theme_bg": settings.custom_theme_bg,
+        "custom_theme_surface": settings.custom_theme_surface,
+        "custom_theme_text": settings.custom_theme_text,
         "ui_scale": settings.ui_scale,
         "ui_scale_factor": ui_scale_factor(settings.ui_scale),
         "display_rotation": settings.display_rotation,
