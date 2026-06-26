@@ -264,6 +264,14 @@ async def about_page(request: Request):
     })
 
 
+@router.get("/ai-declarations", response_class=HTMLResponse)
+async def ai_declarations_page(request: Request):
+    return templates.TemplateResponse(request, "ai-declarations.html", {
+        "request": request,
+        "active": "ai-declarations",
+    })
+
+
 @router.post("/defaults/{default_id}/delete")
 def delete_default(request: Request, default_id: int, db: Session = Depends(get_db)):
     row = db.query(ExpiryDefault).filter(ExpiryDefault.id == default_id).first()

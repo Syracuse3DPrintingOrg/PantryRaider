@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}AI Declarations: FoodAssistant{% endblock %}
+
+{% block content %}
+<div class="mt-3 mb-4">
+  <h4><i class="bi bi-robot me-2"></i>AI Declarations</h4>
+  <p class="text-secondary">An honest note about how AI tools were used to build FoodAssistant.</p>
+</div>
+
+<div class="row g-3">
+  <div class="col-lg-8">
+    <div class="card">
+      <div class="card-body">
+        <h5 class="card-title">How AI was used</h5>
+        <p class="card-text">Large language models were used as a tool during development, the same
+          way a developer uses an editor, a search engine, or a linter. They helped draft code, suggest
+          fixes, and speed up routine work.</p>
+        <p class="card-text">The end program is mainly the result of real human work. Design decisions,
+          architecture, and the choices about what to build and how it should behave were made by a person.
+          The code was reviewed, edited, and validated with thorough testing on real hardware (Raspberry Pi
+          appliances, real scanners, and live Grocy and Mealie instances), not just generated and shipped.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-8">
+    <div class="card border-warning">
+      <div class="card-body">
+        <h5 class="card-title"><i class="bi bi-shield-exclamation text-warning me-2"></i>A note on security</h5>
+        <p class="card-text">Use caution when installing software on your network, and review what you run
+          before you run it. That is good practice for any project, with or without AI involvement. FoodAssistant
+          is open source, so you can read the code, check the dependencies, and decide for yourself.</p>
+        <p class="card-text mb-0">If you find a problem or have a question about how something works, the source
+          is on <a href="https://github.com/Syracuse3DPrinting/FoodAssistant" target="_blank" rel="noopener">GitHub</a>.</p>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
