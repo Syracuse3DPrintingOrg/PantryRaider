@@ -808,7 +808,11 @@ def test_weather_config_loaded(tmp_path):
     assert cfg.weather_poll_minutes == 30
 
 
-def test_weather_refresh_via_context():
+def test_weather_press_cycles_not_refetches():
+    # A weather press now cycles the visible stat rather than re-fetching; the
+    # data refreshes on its own timer. Confirm the cycle hook fires and the
+    # network refresh is left alone.
+    cycled = []
     refreshed = []
 
     async def fake_weather_refresh():
@@ -826,9 +830,200 @@ def test_weather_refresh_via_context():
         page_next=lambda: None,
         page_prev=lambda: None,
         weather_refresh=fake_weather_refresh,
+        weather_cycle=lambda name: cycled.append(name),
     )
     asyncio.run(actions.run_action(actions.ACTIONS["weather"], ctx))
-    assert refreshed, "weather_refresh should have been called"
+    assert cycled == ["weather"]
+    assert refreshed == []
+
+
+# -- weather stat / forecast day cycle (FoodAssistant-3vz, -l2b) -----------
+
+
+def _fetched_weather(units="f"):
+    """A WeatherState carrying a fake successful fetch, ready to cycle.
+
+    Pokes the parsed fields refresh() would set so the pure cycle logic can be
+    exercised without any network.
+    """
+    import time as _time
+
+    w = actions.WeatherState(location="", units=units)
+    w._label = "72°F Sunny"
+    w._color = "#1e40af"
+    w._cond = {
+        "temp_F": "72", "temp_C": "22",
+        "FeelsLikeF": "75", "FeelsLikeC": "24",
+        "humidity": "53",
+        "windspeedMiles": "8", "windspeedKmph": "13",
+    }
+    w._forecast_days = [
+        {"hi": "75", "lo": "55", "tag": "Today"},
+        {"hi": "80", "lo": "60", "tag": "Tmrw"},
+        {"hi": "70", "lo": "50", "tag": "Day 3"},
+    ]
+    w._fc_label = "H75 L55"
+    w._fetched_at = _time.monotonic()
+    return w
+
+
+def test_weather_stat_index_zero_matches_legacy_default():
+    # Index 0 must render exactly the old temp+condition label and colour, so an
+    # un-pressed deck looks identical to the pre-cycle behaviour.
+    w = _fetched_weather()
+    assert w._stat_idx == 0
+    assert w.current_stat_label("Weather") == "72°F Sunny"
+    assert w.current_stat_label("Weather") == w.label("Weather")
+    assert w.current_stat_color("#000") == "#1e40af"
+
+
+def test_weather_cycle_advances_and_labels_differ():
+    w = _fetched_weather()
+    seen = [w.current_stat_label("Weather")]
+    for _ in range(w.stat_count - 1):
+        w.cycle_stat()
+        seen.append(w.current_stat_label("Weather"))
+    # Every stat in the cycle renders a distinct label.
+    assert len(set(seen)) == w.stat_count
+    # The named stats are present.
+    joined = "\n".join(seen)
+    assert "Feels" in joined
+    assert "Humid" in joined
+    assert "Wind" in joined
+
+
+def test_weather_cycle_wraps_around_to_default():
+    w = _fetched_weather()
+    for _ in range(w.stat_count):
+        w.cycle_stat()
+    # A full lap returns to index 0 and the stock label.
+    assert w._stat_idx == 0
+    assert w.current_stat_label("Weather") == "72°F Sunny"
+
+
+def test_weather_cycle_units_celsius_uses_metric_fields():
+    w = _fetched_weather(units="c")
+    w.cycle_stat()                       # feels-like
+    assert "24" in w.current_stat_label("Weather")
+    w.cycle_stat()                       # humidity
+    w.cycle_stat()                       # wind
+    label = w.current_stat_label("Weather")
+    assert "13" in label and "kph" in label
+
+
+def test_weather_cycle_idle_uses_base_label():
+    # Before any fetch, cycling still works but the label falls back to base.
+    w = actions.WeatherState()
+    w.cycle_stat()
+    assert w.current_stat_label("Weather") == "Weather"
+
+
+def test_forecast_day_count_and_cycle_wraps():
+    w = _fetched_weather()
+    assert w.forecast_day_count == 3
+    first = w.current_forecast_label("Forecast")
+    w.cycle_forecast_day()
+    second = w.current_forecast_label("Forecast")
+    assert first != second
+    w.cycle_forecast_day()
+    w.cycle_forecast_day()               # back to day 0
+    assert w._day_idx == 0
+    assert w.current_forecast_label("Forecast") == first
+
+
+def test_forecast_label_for_each_day_differs():
+    w = _fetched_weather()
+    labels = [w.forecast_label_for(i) for i in range(w.forecast_day_count)]
+    assert len(set(labels)) == 3
+    assert "Today" in labels[0]
+    assert "Tmrw" in labels[1]
+
+
+def test_forecast_index_zero_matches_legacy_default():
+    w = _fetched_weather()
+    # The day-0 forecast carries the same high/low the old single-day label did.
+    assert "H75 L55" in w.current_forecast_label("Forecast")
+    assert w.forecast_label("Forecast") == w.current_forecast_label("Forecast")
+
+
+def test_weather_reset_to_default_returns_both_cycles():
+    w = _fetched_weather()
+    w.cycle_stat()
+    w.cycle_forecast_day()
+    assert w._stat_idx != 0 or w._day_idx != 0
+    assert w.last_interaction > 0
+    w.reset_to_default()
+    assert w._stat_idx == 0
+    assert w._day_idx == 0
+    assert w.last_interaction == 0.0
+
+
+def test_should_auto_reset_boundary():
+    # Just inside the window: not yet. At/just past the window: reset.
+    win = actions.WEATHER_AUTO_RESET_SECS
+    last = 1000.0
+    assert actions.should_auto_reset(last + win - 0.01, last, win) is False
+    assert actions.should_auto_reset(last + win, last, win) is True
+    assert actions.should_auto_reset(last + win + 5, last, win) is True
+
+
+def test_should_auto_reset_never_when_at_default():
+    # last_interaction of 0 means the key is already on its default index, so it
+    # must never trigger a reset regardless of how much time has passed.
+    assert actions.should_auto_reset(99999.0, 0.0) is False
+
+
+def test_cycle_stamps_last_interaction():
+    import time as _time
+    w = _fetched_weather()
+    assert w.last_interaction == 0.0
+    before = _time.monotonic()
+    w.cycle_stat()
+    assert w.last_interaction >= before
+
+
+def test_weather_press_cycles_stat_via_context():
+    cycled = []
+
+    async def noop():
+        pass
+
+    ctx = actions.ActionContext(
+        client=None,
+        base_url="http://x",
+        refresh=noop,
+        navigate=lambda _: noop(),
+        cycle_brightness=lambda: 80,
+        page_next=lambda: None,
+        page_prev=lambda: None,
+        weather_cycle=lambda name: cycled.append(("weather", name)),
+        forecast_cycle=lambda name: cycled.append(("forecast", name)),
+    )
+    msg = asyncio.run(actions.run_action(actions.ACTIONS["weather"], ctx))
+    assert msg == "weather stat cycled"
+    assert cycled == [("weather", "weather")]
+
+
+def test_forecast_press_cycles_day_via_context():
+    cycled = []
+
+    async def noop():
+        pass
+
+    ctx = actions.ActionContext(
+        client=None,
+        base_url="http://x",
+        refresh=noop,
+        navigate=lambda _: noop(),
+        cycle_brightness=lambda: 80,
+        page_next=lambda: None,
+        page_prev=lambda: None,
+        weather_cycle=lambda name: cycled.append(("weather", name)),
+        forecast_cycle=lambda name: cycled.append(("forecast", name)),
+    )
+    msg = asyncio.run(actions.run_action(actions.ACTIONS["forecast"], ctx))
+    assert msg == "forecast day cycled"
+    assert cycled == [("forecast", "forecast")]
 
 
 # -- HA entity -------------------------------------------------------------
@@ -1509,6 +1704,30 @@ def test_config_loads_theme(tmp_path):
     p.write_text('theme = "cyborg"\n')
     cfg = config.load(p)
     assert cfg.theme == "cyborg"
+
+
+def test_every_app_theme_has_a_deck_palette():
+    # Every web UI theme must either carry a Stream Deck palette or be the
+    # default "dark" theme, which deliberately keeps the per-action colours.
+    # Importing the app config keeps this honest if a theme is added there but
+    # the deck palette is forgotten (FoodAssistant-ap8m).
+    import sys
+    from pathlib import Path
+
+    service_dir = Path(__file__).resolve().parent.parent / "service"
+    sys.path.insert(0, str(service_dir))
+    try:
+        from app.config import THEMES
+    except Exception:  # pragma: no cover - app deps not installed in this env
+        pytest.skip("app package not importable")
+
+    allowed_missing = {"dark"}
+    for name in THEMES:
+        if name in allowed_missing:
+            continue
+        assert name in theme.THEME_PALETTES, (
+            f"app theme {name!r} has no THEME_PALETTES entry"
+        )
 
 
 # -- shared activity / cross-wake (FoodAssistant-otiy) ----------------------

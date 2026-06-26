@@ -233,12 +233,40 @@ _WEATHER_CONDITION_CODES: dict[int, str] = {
 }
 
 
+# How long the weather and forecast keys stay on a non-default stat or day
+# after the last press before the idle loop returns them to index 0. Short
+# enough that a glance-and-leave deck looks stock again within a few breaths,
+# long enough to read a couple of stats in one sitting.
+WEATHER_AUTO_RESET_SECS: float = 30.0
+
+
+def should_auto_reset(now: float, last_interaction: float,
+                      window_secs: float = WEATHER_AUTO_RESET_SECS) -> bool:
+    """True when ``window_secs`` have elapsed since the last cycle press.
+
+    Pure boundary helper so the idle reset is unit-testable without sleeping.
+    ``last_interaction`` of 0 (never cycled away from the default) never
+    triggers a reset, and the comparison is inclusive at the window edge so a
+    press exactly ``window_secs`` old is treated as just expired.
+    """
+    if last_interaction <= 0:
+        return False
+    return (now - last_interaction) >= window_secs
+
+
 class WeatherState:
     """Fetches and caches current weather from wttr.in (no API key required).
 
     ``location`` is any city name, zip code, or lat,lon string. When empty,
     wttr.in auto-detects the location from the requester's IP address.
     ``units`` is 'f' (Fahrenheit) or 'c' (Celsius).
+
+    The weather key cycles through a list of stat renderers (current temp plus
+    condition at index 0, then feels-like, humidity, and wind) and the forecast
+    key cycles through the cached forecast days (today at index 0). Both indices
+    sit at 0 by default so an un-pressed deck renders exactly as before; a press
+    advances the matching index and stamps ``last_interaction`` so the idle loop
+    can return it to the default after ``WEATHER_AUTO_RESET_SECS``.
     """
 
     def __init__(self, location: str = "", units: str = "f") -> None:
@@ -250,21 +278,127 @@ class WeatherState:
         self._error: bool = False
         self._fc_label: str = "Forecast"
         self._fc_color: str = "#0e7490"
+        # Parsed current-condition fields kept for the per-stat renderers. They
+        # stay empty until the first successful fetch, at which point label()
+        # and the stat renderers begin using them.
+        self._cond: dict[str, str] = {}
+        # Per-day forecast rows, each a small dict the forecast renderers read.
+        self._forecast_days: list[dict[str, str]] = []
+        # Cycle indices. 0 is the default in both cases, so an un-pressed deck
+        # looks identical to the pre-cycle behaviour.
+        self._stat_idx: int = 0
+        self._day_idx: int = 0
+        # Monotonic timestamp of the last cycle press, or 0 while at the default.
+        self.last_interaction: float = 0.0
 
     def age_seconds(self) -> float:
         return time.monotonic() - self._fetched_at
 
+    # -- weather stat cycle (pure) ----------------------------------------
+
+    def _stat_temp(self) -> tuple[str, str]:
+        """Default stat: current temp and condition, matching the old label."""
+        return self._label, self._color
+
+    def _stat_feels_like(self) -> tuple[str, str]:
+        key = "FeelsLikeF" if self.units == "f" else "FeelsLikeC"
+        unit_sym = "F" if self.units == "f" else "C"
+        val = self._cond.get(key, "?")
+        return f"Feels\n{val}°{unit_sym}", "#3730a3"
+
+    def _stat_humidity(self) -> tuple[str, str]:
+        val = self._cond.get("humidity", "?")
+        return f"Humid\n{val}%", "#155e75"
+
+    def _stat_wind(self) -> tuple[str, str]:
+        if self.units == "f":
+            val = self._cond.get("windspeedMiles", "?")
+            unit = "mph"
+        else:
+            val = self._cond.get("windspeedKmph", "?")
+            unit = "kph"
+        return f"Wind\n{val}\n{unit}", "#1e40af"
+
+    # Ordered stat renderers. Index 0 is the stock temp+condition view.
+    @property
+    def _stat_renderers(self):
+        return (
+            self._stat_temp,
+            self._stat_feels_like,
+            self._stat_humidity,
+            self._stat_wind,
+        )
+
+    @property
+    def stat_count(self) -> int:
+        return len(self._stat_renderers)
+
+    def cycle_stat(self) -> int:
+        """Advance to the next weather stat, wrapping around. Returns the index."""
+        self._stat_idx = (self._stat_idx + 1) % self.stat_count
+        self.last_interaction = time.monotonic()
+        return self._stat_idx
+
+    def current_stat_label(self, base_label: str) -> str:
+        if not self._fetched_at:
+            return base_label
+        return self._stat_renderers[self._stat_idx % self.stat_count]()[0]
+
+    def current_stat_color(self, base_color: str) -> str:
+        if not self._fetched_at:
+            return self._color
+        return self._stat_renderers[self._stat_idx % self.stat_count]()[1]
+
+    # -- forecast day cycle (pure) ----------------------------------------
+
+    @property
+    def forecast_day_count(self) -> int:
+        """Number of cached forecast days (at least 1 once fetched)."""
+        return max(1, len(self._forecast_days))
+
+    def cycle_forecast_day(self) -> int:
+        """Advance to the next forecast day, wrapping around. Returns the index."""
+        self._day_idx = (self._day_idx + 1) % self.forecast_day_count
+        self.last_interaction = time.monotonic()
+        return self._day_idx
+
+    def forecast_label_for(self, index: int) -> str:
+        """High/low label for the day at ``index`` (0 == today), with a tag."""
+        if not self._forecast_days:
+            return self._fc_label
+        day = self._forecast_days[index % len(self._forecast_days)]
+        hi = day.get("hi", "?")
+        lo = day.get("lo", "?")
+        tag = day.get("tag", "")
+        body = f"H{hi} L{lo}"
+        return f"{tag}\n{body}" if tag else body
+
+    def current_forecast_label(self, base_label: str) -> str:
+        if not self._fetched_at:
+            return base_label
+        return self.forecast_label_for(self._day_idx)
+
+    # -- legacy single-day accessors (index 0, unchanged behaviour) -------
+
     def label(self, base_label: str) -> str:
-        return self._label if self._fetched_at else base_label
+        return self.current_stat_label(base_label)
 
     def color(self, base_color: str) -> str:
-        return self._color
+        return self.current_stat_color(base_color)
 
     def forecast_label(self, base_label: str) -> str:
-        return self._fc_label if self._fetched_at else base_label
+        return self.current_forecast_label(base_label)
 
     def forecast_color(self, base_color: str) -> str:
         return self._fc_color
+
+    # -- idle reset (pure) -------------------------------------------------
+
+    def reset_to_default(self) -> None:
+        """Return both cycles to their default index and clear the timer."""
+        self._stat_idx = 0
+        self._day_idx = 0
+        self.last_interaction = 0.0
 
     async def refresh(self) -> None:
         try:
@@ -281,6 +415,7 @@ class WeatherState:
                 return
             data = r.json()
             cond = data["current_condition"][0]
+            self._cond = cond
             temp_key = "temp_F" if self.units == "f" else "temp_C"
             temp = cond.get(temp_key, "?")
             unit_sym = "F" if self.units == "f" else "C"
@@ -290,13 +425,23 @@ class WeatherState:
             self._color = "#1e40af"
             self._error = False
             try:
-                today = data["weather"][0]
                 hi_key = "maxtempF" if self.units == "f" else "maxtempC"
                 lo_key = "mintempF" if self.units == "f" else "mintempC"
-                hi = today.get(hi_key, "?")
-                lo = today.get(lo_key, "?")
-                self._fc_label = f"H{hi} L{lo}"
-                self._fc_color = "#0e7490"
+                # Cache every returned day so the forecast key can cycle through
+                # them; tag the first three with friendly names (the rest, if
+                # any, fall back to the bare date).
+                tags = ("Today", "Tmrw", "Day 3")
+                days: list[dict[str, str]] = []
+                for i, day in enumerate(data.get("weather", [])):
+                    days.append({
+                        "hi": str(day.get(hi_key, "?")),
+                        "lo": str(day.get(lo_key, "?")),
+                        "tag": tags[i] if i < len(tags) else str(day.get("date", "")),
+                    })
+                self._forecast_days = days
+                if days:
+                    self._fc_label = f"H{days[0]['hi']} L{days[0]['lo']}"
+                    self._fc_color = "#0e7490"
             except Exception:
                 self._fc_label = "Forecast"
         except Exception:
@@ -802,6 +947,11 @@ class ActionContext:
     weather_refresh: Callable[[], Awaitable[None]] = field(
         default=lambda: __import__("asyncio").sleep(0)
     )
+    # Advance the weather stat / forecast day cycle for a pressed widget key.
+    # The arg is the pressed spec's name so per-key override widgets cycle their
+    # own WeatherState. Default no-ops keep unit contexts that omit them valid.
+    weather_cycle: Callable[[str], None] = field(default=lambda _name: None)
+    forecast_cycle: Callable[[str], None] = field(default=lambda _name: None)
     ha_base_url: str = ""
     ha_token: str = ""
     ha_entity_refresh: Callable[[], Awaitable[None]] = field(
@@ -874,12 +1024,15 @@ async def run_action(spec: ActionSpec, ctx: ActionContext, long_press: bool = Fa
         return f"keypad {spec.keypad_key}"
 
     if spec.kind == "weather":
-        await ctx.weather_refresh()
-        return "weather refreshed"
+        # A press cycles to the next stat (temp, feels-like, humidity, wind);
+        # the data itself is refreshed on its own timer, not on every tap.
+        ctx.weather_cycle(spec.name)
+        return "weather stat cycled"
 
     if spec.kind == "forecast":
-        await ctx.weather_refresh()
-        return "forecast refreshed"
+        # A press advances to the next forecast day, wrapping around.
+        ctx.forecast_cycle(spec.name)
+        return "forecast day cycled"
 
     if spec.kind == "ha_entity":
         entity_id = spec.ha_entity_id

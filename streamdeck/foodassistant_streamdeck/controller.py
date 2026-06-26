@@ -492,6 +492,25 @@ class Controller:
                 return spec.timer_minutes
         return 0
 
+    def _weather_for(self, name: str) -> WeatherState:
+        """The WeatherState a widget key draws from (per-key override or shared)."""
+        return self.override_weather.get(name, self.weather)
+
+    def _weather_cycle(self, name: str) -> None:
+        """Advance the pressed weather key to its next stat and redraw."""
+        self._weather_for(name).cycle_stat()
+        self._draw_page()
+
+    def _forecast_cycle(self, name: str) -> None:
+        """Advance the forecast key to its next day and redraw.
+
+        The forecast key always draws from the shared widget (override keys are
+        weather-type only), so ``name`` is accepted for parity with the weather
+        cycle but the shared state is what advances.
+        """
+        self.weather.cycle_forecast_day()
+        self._draw_page()
+
     async def _handle(self, spec: ActionSpec, long_press: bool = False) -> None:
         ctx = ActionContext(
             client=self.client,
@@ -503,6 +522,8 @@ class Controller:
             page_prev=self._page_prev,
             timer_press=self._timer_press,
             weather_refresh=self._refresh_weather,
+            weather_cycle=self._weather_cycle,
+            forecast_cycle=self._forecast_cycle,
             ha_base_url=self.config.ha_base_url,
             ha_token=self.config.ha_token,
             ha_entity_refresh=self._refresh_ha_entities,
@@ -524,12 +545,32 @@ class Controller:
         self.deck.set_brightness(BRIGHTNESS_STEPS[self._bright_idx])
         self._draw_page()
 
+    def _reset_weather_cycles_if_idle(self) -> None:
+        """Return any cycled weather/forecast key to its default after a quiet
+        spell, so a glance-and-leave deck looks stock again.
+
+        Independent of the idle-blank timeout: even with blanking disabled, a
+        weather stat or forecast day the user paged to should drift back to the
+        default once no one has touched it for ``WEATHER_AUTO_RESET_SECS``. Only
+        redraws when something actually reset, so the common idle tick stays
+        cheap.
+        """
+        now = time.monotonic()
+        changed = False
+        for w in (self.weather, *self.override_weather.values()):
+            if actions.should_auto_reset(now, w.last_interaction):
+                w.reset_to_default()
+                changed = True
+        if changed:
+            self._draw_page()
+
     async def _idle_loop_once(self) -> None:
         """Check idle state and blank the deck if the timeout has elapsed.
 
         This is the per-tick body extracted for testability. The main
         _idle_loop calls this repeatedly on a 10-second interval.
         """
+        self._reset_weather_cycles_if_idle()
         timeout_mins = self.config.idle_timeout_minutes
         if timeout_mins <= 0 or self._idle_blanked:
             return
