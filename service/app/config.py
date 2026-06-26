@@ -309,17 +309,34 @@ class Settings(BaseSettings):
     # never depends on the device being named "foodassistant".
     device_hostname: str = ""
 
+    def _server_host_url(self, port: int) -> str:
+        """A LAN browser URL for a backend that lives on the main server.
+
+        On a satellite, Grocy and Mealie run on the main server, not on this
+        device, so browser links must point at the server's host (taken from
+        remote_server_url) on the backend's port, never this device's own mDNS
+        hostname. Returns '' if the server host cannot be determined.
+        """
+        from urllib.parse import urlparse
+        host = urlparse((self.remote_server_url or "").rstrip("/")).hostname
+        return f"http://{host}:{port}" if host else ""
+
     def grocy_link_url(self) -> str:
         """URL for browser-facing Grocy links (public address if set, else base).
 
         When no public URL is set and the base URL is localhost, rewrites to the
         device hostname (<hostname>.local, or the LAN IP as a fallback) so links
-        work from other devices on the LAN regardless of the current IP.
+        work from other devices on the LAN regardless of the current IP. On a
+        satellite, Grocy runs on the main server, so links resolve to the
+        server's host instead of this device.
         """
-        url = (self.grocy_public_url or self.grocy_base_url).rstrip("/")
-        if not self.grocy_public_url:
-            url = _mdns_rewrite(url, 9383)
-        return url
+        if self.grocy_public_url:
+            return self.grocy_public_url.rstrip("/")
+        if self.is_satellite():
+            url = self._server_host_url(9383)
+            if url:
+                return url
+        return _mdns_rewrite(self.grocy_base_url.rstrip("/"), 9383)
 
     # Mealie recipe manager (optional): enables the Recipes, Meal Plan and
     # Shopping List pages. base_url is for API calls (LAN/docker address);
@@ -335,12 +352,18 @@ class Settings(BaseSettings):
         """URL for browser-facing links (public address if set, else base).
 
         When no public URL is set and the base URL is localhost, rewrites to the
-        mDNS hostname so links work from other devices on the LAN.
+        mDNS hostname so links work from other devices on the LAN. On a
+        satellite, Mealie runs on the main server, so links resolve to the
+        server's host instead of this device (which is why an "Open Mealie"
+        button used to point at this device's own foodassistant.local).
         """
-        url = (self.mealie_public_url or self.mealie_base_url).rstrip("/")
-        if not self.mealie_public_url:
-            url = _mdns_rewrite(url, 9285)
-        return url
+        if self.mealie_public_url:
+            return self.mealie_public_url.rstrip("/")
+        if self.is_satellite():
+            url = self._server_host_url(9285)
+            if url:
+                return url
+        return _mdns_rewrite(self.mealie_base_url.rstrip("/"), 9285)
 
     # External recipe suggestions: themealdb | spoonacular | off.
     # TheMealDB's public test key "1" is free; a premium (supporter) key or
