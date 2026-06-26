@@ -10,6 +10,9 @@ All notable changes to FoodAssistant are recorded here. The format is based on
 
 ## [Unreleased]
 
+### Added
+- **Version bump tooling.** `scripts/bump-version.sh [patch|minor|major]` edits the single source-of-truth `APP_VERSION`, and `scripts/install-git-hooks.sh` installs a pre-commit hook that auto-bumps the patch on each commit so every commit changes at least the patch number. The hook stays out of the way during rebases, merges, beads-only commits, and explicit minor/major bumps.
+
 ## [0.6.0] - 2026-06-26
 
 This is the first version under the project's pre-1.0 scheme. Earlier `1.x`

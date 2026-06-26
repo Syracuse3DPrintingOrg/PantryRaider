@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+# Auto-bump the patch version on each commit so every commit changes at least
+# the patch number (major.minor.patch). Installed into the active pre-commit
+# hook by scripts/install-git-hooks.sh, where it runs alongside the beads hook.
+#
+# It deliberately does nothing (exit 0) in cases where an automatic bump would
+# be wrong or surprising:
+#   - during a rebase, merge, cherry-pick, or revert (replays must not inflate)
+#   - when the staged changes already touch the APP_VERSION line (an explicit
+#     patch/minor/major bump was made by hand or by scripts/bump-version.sh)
+#   - when the staged changes are entirely under .beads/ (tracker bookkeeping)
+#   - when nothing is staged
+#
+# To cut a minor or major release, bump first, then commit:
+#   scripts/bump-version.sh minor && git add service/app/config.py && git commit ...
+# This hook sees the version already changed and stays out of the way.
+set -euo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
+GIT_DIR="$(git rev-parse --git-dir 2>/dev/null)" || exit 0
+
+# Skip replay/merge states: each replayed commit would otherwise re-bump.
+for marker in rebase-merge rebase-apply MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD; do
+  if [ -e "$GIT_DIR/$marker" ]; then
+    exit 0
+  fi
+done
+
+# Files staged for this commit (added/copied/modified/renamed).
+staged="$(git diff --cached --name-only --diff-filter=ACMR)"
+[ -z "$staged" ] && exit 0
+
+# Skip commits that only touch the beads tracker (automated exports, etc.).
+if [ -z "$(printf '%s\n' "$staged" | grep -v '^\.beads/' || true)" ]; then
+  exit 0
+fi
+
+# If the commit already changes APP_VERSION, respect that and do not re-bump.
+if git diff --cached -U0 -- service/app/config.py 2>/dev/null \
+    | grep -Eq '^\+APP_VERSION *= *"[0-9]+\.[0-9]+\.[0-9]+"'; then
+  exit 0
+fi
+
+# Bump the patch and stage the change so it rides in this commit.
+out="$("$REPO_ROOT/scripts/bump-version.sh" patch)" || exit 0
+git add "$REPO_ROOT/service/app/config.py" 2>/dev/null || true
+echo "version: auto-bumped patch ($out)" >&2
+exit 0

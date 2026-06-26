@@ -72,6 +72,21 @@ This protocol applies when ending a Beads implementation workflow. It is subordi
 - GitHub interactions in cloud sessions go through the GitHub MCP integration
   (no `gh` CLI available there); `gh` may be used on local machines.
 
+## Versioning
+
+- `APP_VERSION` in `service/app/config.py` is the single source of truth
+  (major.minor.patch). The project is pre-1.0: `1.0.0` is reserved for the
+  first public release, so stay in `0.x` until then.
+- **Every commit changes at least the patch number.** Run
+  `scripts/install-git-hooks.sh` once per clone to install a pre-commit hook
+  that auto-bumps the patch; it chains onto the beads hook and skips rebases,
+  merges, and beads-only commits. Re-run the installer if a beads hook update
+  rewrites the managed hook.
+- For a minor or major release, bump first so the hook stays out of the way:
+  `scripts/bump-version.sh minor && git add service/app/config.py`. Move the
+  CHANGELOG `[Unreleased]` items under the new version header and tag from
+  `APP_VERSION` (`git tag -a v$(scripts/bump-version.sh --current)`).
+
 ## What This Is
 
 Self-hosted food spoilage tracker: FastAPI service (port 9284) backed by
