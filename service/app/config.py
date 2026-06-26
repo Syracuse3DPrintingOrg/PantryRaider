@@ -34,10 +34,10 @@ _DEFAULT_THEME = "dark"
 # tiny HDMI panel, a countertop touchscreen, or a large monitor without editing
 # CSS. Selected in Settings (Interface) and the setup wizard.
 UI_SCALES = {
-    "small":  {"label": "Small",       "factor": 0.85},
-    "normal": {"label": "Normal",      "factor": 1.0},
-    "large":  {"label": "Large",       "factor": 1.2},
-    "xlarge": {"label": "Extra large", "factor": 1.4},
+    "small":  {"label": "Small (more fits, smaller text)",      "factor": 0.85},
+    "normal": {"label": "Normal",                               "factor": 1.0},
+    "large":  {"label": "Large (bigger text and buttons)",      "factor": 1.2},
+    "xlarge": {"label": "Extra large (small touchscreens)",     "factor": 1.4},
 }
 _DEFAULT_UI_SCALE = "normal"
 
