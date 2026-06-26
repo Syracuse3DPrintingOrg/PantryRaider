@@ -30,7 +30,7 @@ POST /kiosk/install        provision the kiosk service (display attached later)
 POST /streamdeck/install   provision the Stream Deck service (attached later)
 GET  /ap/status            whether the fallback AP is active {active: bool}
 POST /ap/disable           stop hostapd+dnsmasq and remove the AP flag file
-POST /update               git pull + venv pip + service restart (Pi Remote OTA)
+POST /update               git pull + redeploy app and Stream Deck + restart (Pi Remote OTA)
 GET  /activity             shared activity/display state (polled by the deck)
 POST /activity             report user activity; wakes the display  {source?}
 POST /display/blank        blank the kiosk display now
@@ -1240,16 +1240,20 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._send(500, {"ok": False, "error": str(e)})
 
     def _update(self):
-        # Pull the latest source and restart the FoodAssistant service by
-        # delegating to the foodassistant-update helper. The bridge runs as
-        # root, so it can write under /opt and restart the unit (the app
-        # service cannot: its caps are bound to CAP_NET_BIND_SERVICE).
+        # Pull the latest source and redeploy by delegating to the
+        # foodassistant-update helper. The bridge runs as root, so it can write
+        # under /opt and restart the units (the app service cannot: its caps are
+        # bound to CAP_NET_BIND_SERVICE).
         #
-        # The helper prints a human log to stdout and ends with a single JSON
-        # line {ok, error, before, after, restarted}. We parse that last line
-        # and pass the full text back as "log" so the setup UI can show it. A
-        # pull that fails leaves the service untouched (the helper guarantees
-        # this); we never restart from here directly.
+        # The helper redeploys both the web app and the Stream Deck package,
+        # reinstalls venv deps only when requirements changed, and restarts
+        # whichever services it refreshed. It is idempotent and safe to re-run
+        # after a manual pull. It prints a human log to stdout and ends with a
+        # single JSON line {ok, error, before, after, restarted, service_synced,
+        # streamdeck_synced, deps_installed}. We parse that last line and pass
+        # the full text back as "log" so the setup UI can show it. A pull that
+        # fails to fast-forward leaves the checkout untouched (the helper still
+        # redeploys the current HEAD); we never restart from here directly.
         helper = "/usr/local/bin/foodassistant-update"
         if not os.path.exists(helper):
             self._send(500, {"ok": False, "error": "update helper not installed"})

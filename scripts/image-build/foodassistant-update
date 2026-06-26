@@ -1,24 +1,38 @@
 #!/usr/bin/env bash
 # FoodAssistant over-the-air update helper (Pi Remote / venv deployments).
 # ======================================================================
-# Pulls the latest source into the on-device git checkout, reinstalls Python
-# dependencies into the venv when requirements.txt changed, refreshes the
-# deployed app copy, and restarts the FoodAssistant service.
+# Pulls the latest source into the on-device git checkout, then (re)deploys the
+# running copies from it: the web app under APP_DIR, the Stream Deck controller
+# package under SD_DST, and the venv dependencies when requirements.txt changed.
+# Finally it restarts whichever services it actually refreshed.
 #
 # It is invoked by the host bridge (POST /update), which runs as root, so it
 # can write under /opt and restart systemd units. It prints a short human log
 # to stdout and, as its LAST line, a single JSON object the bridge parses and
 # relays to the web UI. Every exit path emits that JSON line.
 #
-# Safety: if `git pull` fails the service is NOT restarted; the failure is
-# reported and the checkout is left as it was. Idempotent: a pull that brings
-# in nothing is a clean no-op ("already up to date").
+# Design notes:
+#   - The deploy is idempotent and re-runnable. It does NOT gate on whether the
+#     pull moved HEAD, so a manual `git pull` done beforehand no longer defeats
+#     it: it always re-syncs the deployed copies from the current checkout.
+#   - The pull is best effort. `git pull --ff-only` never leaves a half-merged
+#     tree, so a failed pull (offline, no upstream, or already pulled by hand)
+#     is logged and we go on to deploy whatever HEAD is checked out.
+#   - Dependency installs are gated on a content hash of requirements.txt vs the
+#     deployed copy, not on the pull, so a manual pull still triggers pip when
+#     the requirements actually changed, and an unchanged tree skips the slow
+#     Pi pip step.
+#   - Both the web app AND the Stream Deck package are redeployed. The deck copy
+#     was previously never refreshed, so deck code changes never reached devices.
 #
-# Layout on a Pi Remote device (see firstboot.sh deploy_remote_service):
-#   REPO_DIR  - git checkout that is the update source (pulled here)
-#   APP_DIR   - deployed app copy the service actually runs from
-#   VENV_DIR  - Python venv holding the service's dependencies
-#   SERVICE   - the systemd unit to restart after a successful update
+# Layout on a Pi Remote device (see firstboot.sh deploy_remote_service and
+# install_streamdeck):
+#   REPO_DIR   - git checkout that is the update source (pulled here)
+#   APP_DIR    - deployed app copy the web service runs from
+#   VENV_DIR   - Python venv holding the service + Stream Deck dependencies
+#   SERVICE    - the web UI systemd unit to restart after an app refresh
+#   SD_DST     - deployed Stream Deck package the deck service runs from
+#   SD_SERVICE - the Stream Deck systemd unit to restart after a deck refresh
 set -uo pipefail
 
 # Candidate locations for the git checkout, in priority order. The first that
@@ -28,16 +42,23 @@ REPO_CANDIDATES="${REPO_DIR:-} /opt/foodassistant-src /home/foodassistant/FoodAs
 APP_DIR="${APP_DIR:-/opt/foodassistant/service}"
 VENV_DIR="${VENV_DIR:-/opt/foodassistant/venv}"
 SERVICE="${SERVICE:-foodassistant-remote.service}"
+SD_DST="${SD_DST:-/opt/foodassistant/foodassistant_streamdeck}"
+SD_SERVICE="${SD_SERVICE:-foodassistant-streamdeck.service}"
 
 # Plain stdout log lines (the bridge tails stdout for a human summary too).
 log() { printf '%s\n' "$*"; }
 
 # Emit the final JSON result line and exit. A python one-liner does the JSON
 # encoding so log text with quotes/newlines is escaped correctly (no
-# hand-rolled JSON). The process exit code mirrors ok (0 on success).
+# hand-rolled JSON). The process exit code mirrors ok (0 on success). The
+# service_synced / streamdeck_synced / deps_installed fields let the UI show
+# exactly what changed; older callers that only read ok/error/before/after/
+# restarted keep working since those keys are unchanged.
 _result() {
-  local ok="$1" error="$2" before="$3" after="$4" restarted="$5"
+  local ok="$1" error="$2" before="$3" after="$4" restarted="$5" \
+        service_synced="${6:-0}" streamdeck_synced="${7:-0}" deps="${8:-0}"
   OK="$ok" ERR="$error" BEFORE="$before" AFTER="$after" RESTARTED="$restarted" \
+  SVC="$service_synced" SD="$streamdeck_synced" DEPS="$deps" \
   python3 -c '
 import json, os
 print(json.dumps({
@@ -46,9 +67,27 @@ print(json.dumps({
     "before": os.environ.get("BEFORE", ""),
     "after": os.environ.get("AFTER", ""),
     "restarted": os.environ.get("RESTARTED", "") == "1",
+    "service_synced": os.environ.get("SVC", "") == "1",
+    "streamdeck_synced": os.environ.get("SD", "") == "1",
+    "deps_installed": os.environ.get("DEPS", "") == "1",
 }))'
   if [ "$ok" = "1" ]; then exit 0; fi
   exit 1
+}
+
+# Restart a unit only if it is actually installed. Returns 0 when it restarted.
+_restart_unit() {
+  local unit="$1"
+  if ! systemctl list-unit-files "$unit" >/dev/null 2>&1; then
+    log "Unit $unit is not installed; skipping restart."
+    return 1
+  fi
+  if systemctl restart "$unit"; then
+    log "Restarted $unit"
+    return 0
+  fi
+  log "WARN: failed to restart $unit"
+  return 1
 }
 
 # Find the git checkout.
@@ -66,52 +105,113 @@ log "Using git checkout at $REPO"
 before="$(git -C "$REPO" rev-parse --short HEAD 2>/dev/null || echo unknown)"
 log "Current commit: $before"
 
-# Record requirements.txt before the pull so we can tell whether deps changed.
-req_before=""
-[ -f "$REPO/service/requirements.txt" ] && req_before="$(sha1sum "$REPO/service/requirements.txt" 2>/dev/null | cut -d' ' -f1)"
-
+# Best effort fast-forward. A failed pull is not fatal: --ff-only is atomic, so
+# the worst case is we redeploy the commit that is already checked out, which is
+# exactly what we want after a manual pull or when offline.
 log "Fetching and fast-forwarding..."
-if ! pull_out="$(git -C "$REPO" pull --ff-only 2>&1)"; then
-  log "git pull failed:"
+if pull_out="$(git -C "$REPO" pull --ff-only 2>&1)"; then
   log "$pull_out"
-  # Do NOT restart the service on a failed pull; report and stop.
-  _result 0 "git pull failed: ${pull_out}" "$before" "$before" 0
+else
+  log "git pull did not fast-forward (continuing with the current checkout):"
+  log "$pull_out"
 fi
-log "$pull_out"
 
 after="$(git -C "$REPO" rev-parse --short HEAD 2>/dev/null || echo unknown)"
-log "New commit: $after"
+log "Checkout now at: $after"
 
-if [ "$before" = "$after" ]; then
-  log "Already up to date; nothing to install or restart."
-  _result 1 "" "$before" "$after" 0
-fi
+restarted=0
+svc_synced=0
+sd_synced=0
+deps=0
 
-# Reinstall requirements only when they changed (a Pi pip install is slow).
-req_after=""
-[ -f "$REPO/service/requirements.txt" ] && req_after="$(sha1sum "$REPO/service/requirements.txt" 2>/dev/null | cut -d' ' -f1)"
-if [ -n "$req_after" ] && [ "$req_before" != "$req_after" ] && [ -x "$VENV_DIR/bin/pip" ]; then
-  log "requirements.txt changed; installing into venv..."
-  if ! "$VENV_DIR/bin/pip" install --quiet -r "$REPO/service/requirements.txt"; then
-    log "pip install failed; service NOT restarted."
-    _result 0 "Dependency install failed; left running the old version." "$before" "$after" 0
+# --- Web app service --------------------------------------------------------
+svc_src="$REPO/service"
+if [ -d "$svc_src" ]; then
+  # Reinstall venv deps only when the deployed requirements differ from the
+  # source (covers both a first deploy and any requirements.txt change). We
+  # compare the DEPLOYED copy rather than the pre/post-pull commit so a manual
+  # pull still installs when needed and a no-op run stays fast.
+  src_req="$svc_src/requirements.txt"
+  dst_req="$APP_DIR/requirements.txt"
+  need_pip=0
+  if [ -f "$src_req" ]; then
+    if [ ! -f "$dst_req" ]; then
+      need_pip=1
+    else
+      sa="$(sha1sum "$src_req" 2>/dev/null | cut -d' ' -f1)"
+      da="$(sha1sum "$dst_req" 2>/dev/null | cut -d' ' -f1)"
+      [ "$sa" != "$da" ] && need_pip=1
+    fi
+  fi
+  if [ "$need_pip" = "1" ] && [ -x "$VENV_DIR/bin/pip" ]; then
+    log "requirements changed; installing into venv at $VENV_DIR"
+    if "$VENV_DIR/bin/pip" install --quiet -r "$src_req"; then
+      deps=1
+    else
+      log "pip install failed; leaving the running version in place."
+      _result 0 "Dependency install failed; the old version is still running." "$before" "$after" 0 0 0 0
+    fi
+  else
+    log "requirements unchanged; skipping pip install."
+  fi
+
+  # Refresh the deployed app copy (the service runs from APP_DIR, separate from
+  # the git checkout so a pull never half-swaps files under a running process).
+  if [ -d "$APP_DIR" ]; then
+    log "Syncing service app into $APP_DIR"
+    if cp -a "$svc_src/." "$APP_DIR/"; then
+      svc_synced=1
+    else
+      log "WARN: could not sync $APP_DIR"
+    fi
+  else
+    log "App dir $APP_DIR does not exist; skipping service sync."
   fi
 else
-  log "requirements.txt unchanged; skipping pip install."
+  log "No service/ in the checkout; skipping app sync."
 fi
 
-# Refresh the deployed app copy (the service runs from APP_DIR, separate from
-# the git checkout so a pull never half-swaps files under a running process).
-if [ -d "$REPO/service" ] && [ -d "$APP_DIR" ]; then
-  log "Refreshing app copy at $APP_DIR"
-  cp -a "$REPO/service/." "$APP_DIR/" || log "WARN: could not refresh $APP_DIR"
-fi
-
-log "Restarting $SERVICE"
-if systemctl restart "$SERVICE"; then
-  log "Service restarted."
-  _result 1 "" "$before" "$after" 1
+# --- Stream Deck controller -------------------------------------------------
+sd_src="$REPO/streamdeck/foodassistant_streamdeck"
+if [ -d "$sd_src" ]; then
+  sd_parent="$(dirname "$SD_DST")"
+  if [ -d "$sd_parent" ]; then
+    log "Syncing Stream Deck package into $SD_DST"
+    # Replace any prior copy outright. Copying into an existing target dir nests
+    # the package one level too deep (SD_DST/foodassistant_streamdeck), which
+    # leaves __main__.py unreachable and breaks `python -m`.
+    rm -rf "$SD_DST"
+    if cp -a "$sd_src" "$SD_DST"; then
+      # Manual installs have landed with mode 700 and broken the service; make
+      # the tree world-readable, then hand it to whoever runs the deck service.
+      chmod -R a+rX "$SD_DST" 2>/dev/null || true
+      sd_owner="$(stat -c %U "$VENV_DIR" 2>/dev/null || true)"
+      if [ -n "$sd_owner" ]; then
+        chown -R "$sd_owner" "$SD_DST" 2>/dev/null || true
+      fi
+      sd_synced=1
+    else
+      log "WARN: could not sync $SD_DST"
+    fi
+  else
+    log "Stream Deck parent dir $sd_parent does not exist; skipping deck sync."
+  fi
 else
-  log "Service restart failed."
-  _result 0 "Updated to ${after} but the service restart failed; check: systemctl status ${SERVICE}" "$before" "$after" 0
+  log "No streamdeck package in the checkout; skipping deck sync."
 fi
+
+# --- Restart the services we actually refreshed -----------------------------
+if [ "$svc_synced" = "1" ] || [ "$deps" = "1" ]; then
+  _restart_unit "$SERVICE" && restarted=1
+fi
+if [ "$sd_synced" = "1" ]; then
+  _restart_unit "$SD_SERVICE" && restarted=1
+fi
+
+if [ "$svc_synced" = "0" ] && [ "$sd_synced" = "0" ]; then
+  log "Nothing to deploy (no service or Stream Deck source found)."
+  _result 0 "Nothing to deploy; no app or Stream Deck source found on this device." "$before" "$after" "$restarted" "$svc_synced" "$sd_synced" "$deps"
+fi
+
+log "Update complete (service=$svc_synced streamdeck=$sd_synced deps=$deps restarted=$restarted)."
+_result 1 "" "$before" "$after" "$restarted" "$svc_synced" "$sd_synced" "$deps"
