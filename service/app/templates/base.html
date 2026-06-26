@@ -128,6 +128,10 @@
       #pageContent { padding-left: 0.75rem !important; padding-right: 0.75rem !important; }
       #pageContent .row > [class*="col-"] { flex: 0 0 100%; max-width: 100%; }
       #pageContent .card { margin-bottom: 0.5rem; }
+      /* Let content panels flow into the page so the whole page scrolls as one
+         surface; a nested scroll box (e.g. the inventory list at 60vh) otherwise
+         traps a finger flick and only a thin strip scrolls the page. */
+      .panel-body { max-height: none !important; overflow: visible !important; }
       /* The floating nav is the best touch-navigation surface on a small panel
          (fixed, large targets, no hamburger), so it is NOT hidden here. It is
          auto-enabled in kiosk mode by floating-nav.js. */

@@ -154,6 +154,16 @@ textarea {
 #pageContent .card {
   margin-bottom: 0.5rem;
 }
+/* Let content panels flow into the page instead of scrolling inside their own
+ * fixed-height box. On a touch kiosk a nested scroll area (for example the
+ * inventory list capped at 60vh) traps the flick, leaving only a thin strip to
+ * scroll the whole page. Neutralising the inner cap makes the PAGE the single
+ * scroll surface, which is what a finger expects. Modals, dropdowns, the
+ * settings side menu, and log boxes keep their own scrolling (different rules). */
+.panel-body {
+  max-height: none !important;
+  overflow: visible !important;
+}
 
 /* ── Reclaim vertical space + smooth touch scrolling ────────────────────────
  * A wall panel is short (often 480px tall), so the fixed top bar is costly.
