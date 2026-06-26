@@ -553,27 +553,27 @@
         <p class="text-secondary small">A USB or Bluetooth scanner plugged into any device — this server, a Pi host, or a Pi Remote — works on the Add Food page automatically, all at the same time, alongside the in-browser camera scanner. This setting is just a hint for which method you reach for first; nothing here turns the others off.</p>
         <div class="mb-3">
           <label class="form-label">Scanner type</label>
-          <select class="form-select" id="scanner_type" onchange="scannerTypeChanged()">
+          <select class="form-select" id="wiz-scanner_type" onchange="wizScannerTypeChanged()">
             <option value=""    {{ 'selected' if not s.scanner_type else '' }}>Not set (pick on Add Food page)</option>
             <option value="usb" {{ 'selected' if s.scanner_type == 'usb' else '' }}>USB / Bluetooth HID (keyboard wedge)</option>
             <option value="camera" {{ 'selected' if s.scanner_type == 'camera' else '' }}>Camera / built-in scan module</option>
           </select>
         </div>
-        <div id="scanner-usb-hint" class="d-none">
+        <div id="wiz-scanner-usb-hint" class="d-none">
           <p class="text-secondary small">USB and Bluetooth HID scanners emit barcodes as keystrokes. No drivers needed — plug in and scan.
             Test below: click the field and scan a barcode.</p>
           <div class="input-group mb-2">
             <span class="input-group-text"><i class="bi bi-upc"></i></span>
-            <input type="text" class="form-control font-monospace" id="scanner-test-input"
+            <input type="text" class="form-control font-monospace" id="wiz-scanner-test-input"
                    placeholder="Scan a barcode here…" autocomplete="off" spellcheck="false"
-                   oninput="scannerTestInput(this.value)" onkeydown="if(event.key==='Enter'){scannerTestEnter(this.value);this.select();}">
+                   oninput="wizScannerTestInput(this.value)" onkeydown="if(event.key==='Enter'){wizScannerTestEnter(this.value);this.select();}">
           </div>
-          <div class="test-result" id="scanner-test-result"></div>
+          <div class="test-result" id="wiz-scanner-test-result"></div>
           <p class="form-text mt-2">Running a Waveshare scan-engine module on a kiosk? See the
             <a href="https://github.com/Syracuse3DPrinting/FoodAssistant/blob/main/docs/hardware/waveshare-barcode-scanner.md" target="_blank" rel="noopener">hands-free setup codes</a>
             to make it scan on sight without the button.</p>
         </div>
-        <div id="scanner-camera-hint" class="d-none">
+        <div id="wiz-scanner-camera-hint" class="d-none">
           <p class="text-secondary small">Camera scanning runs in the browser on the Add Food page — no server-side setup needed.
             Make sure your browser has camera permission for this site.</p>
         </div>
@@ -803,6 +803,9 @@
             <i class="bi bi-hdd-stack me-2"></i>Satellite Devices
           </button>
           {% endif %}
+          <button class="nav-link d-flex align-items-center" data-bs-toggle="pill" data-bs-target="#pane-hardware" type="button">
+            <i class="bi bi-upc-scan me-2"></i>Hardware
+          </button>
           {% if is_pi %}
           <div class="nav-link text-secondary px-2 mt-2 mb-0" style="font-size:0.7rem;letter-spacing:.06em;text-transform:uppercase;">Appliance</div>
           <button class="nav-link d-flex align-items-center" data-bs-toggle="pill" data-bs-target="#pane-display" type="button" onclick="loadDisplayStatus(); loadHardwareStatus()">
@@ -979,43 +982,6 @@
             </button>
             <div class="test-result" id="grocy-result"></div>
           </div>
-
-          {% if not features.satellite %}
-          <div class="section-card">
-            <div class="section-title"><i class="bi bi-upc-scan text-success"></i> Barcode Scanner</div>
-            <p class="text-secondary small">A USB or Bluetooth scanner plugged into any device (this server, a Pi host, or a Pi Remote) works on the Add Food page automatically, all at once, alongside the in-browser camera scanner. USB and Bluetooth HID scanners act as keyboard wedges, so no drivers are needed. This setting is just a hint for which method to reach for first; it does not turn the others off.</p>
-            <div class="mb-3">
-              <label class="form-label">Scanner type</label>
-              <select class="form-select" id="scanner_type" onchange="scannerTypeChanged()">
-                <option value=""    {{ 'selected' if not s.scanner_type else '' }}>Not set (pick on Add Food page)</option>
-                <option value="usb" {{ 'selected' if s.scanner_type == 'usb' else '' }}>USB / Bluetooth HID (keyboard wedge)</option>
-                <option value="camera" {{ 'selected' if s.scanner_type == 'camera' else '' }}>Camera / built-in scan module</option>
-              </select>
-            </div>
-            <div class="form-check form-switch mb-3">
-              <input class="form-check-input" type="checkbox" role="switch" id="barcode_global_capture"
-                     {{ 'checked' if s.barcode_global_capture else '' }}>
-              <label class="form-check-label" for="barcode_global_capture">Scan from any page</label>
-              <div class="form-text">When on, a barcode scanned on any screen is saved to Pending and the app jumps to Add Food. When off, scanning only works on the Add Food page.</div>
-            </div>
-            <div id="scanner-usb-hint" class="{{ '' if s.scanner_type == 'usb' else 'd-none' }}">
-              <p class="text-secondary small mb-2">Plug in the scanner and test below — click the field and scan a barcode.</p>
-              <div class="input-group mb-2">
-                <span class="input-group-text"><i class="bi bi-upc"></i></span>
-                <input type="text" class="form-control font-monospace" id="scanner-test-input"
-                       placeholder="Scan a barcode here…" autocomplete="off" spellcheck="false"
-                       oninput="scannerTestInput(this.value)" onkeydown="if(event.key==='Enter'){scannerTestEnter(this.value);this.select();}">
-              </div>
-              <div class="test-result" id="scanner-test-result"></div>
-              <p class="form-text mt-2">Running a Waveshare scan-engine module on a kiosk? See the
-                <a href="https://github.com/Syracuse3DPrinting/FoodAssistant/blob/main/docs/hardware/waveshare-barcode-scanner.md" target="_blank" rel="noopener">hands-free setup codes</a>
-                to make it scan on sight without the button.</p>
-            </div>
-            <div id="scanner-camera-hint" class="{{ '' if s.scanner_type == 'camera' else 'd-none' }}">
-              <p class="text-secondary small">Camera scanning runs in the browser — make sure this site has camera permission.</p>
-            </div>
-          </div>
-          {% endif %}
 
           <div class="section-card">
             <div class="section-title"><i class="bi bi-grid-3x3-gap text-info"></i> Custom Storage Categories</div>
@@ -1335,43 +1301,6 @@
              effect on a headless server or a phone/laptop browser, so they are
              intentionally not duplicated into this generic Interface menu. #}
 
-          {% if features.satellite %}
-          <div class="section-card">
-            <div class="section-title"><i class="bi bi-upc-scan text-success"></i> Barcode Scanner</div>
-            <p class="text-secondary small">A USB or Bluetooth scanner plugged into this Pi Remote works on the Add Food page automatically, alongside the in-browser camera scanner and any scanner attached to the main server. They all work at the same time. USB and Bluetooth HID scanners act as keyboard wedges, so no drivers are needed. This setting is just a hint for which method to reach for first; it does not turn the others off.</p>
-            <div class="mb-3">
-              <label class="form-label">Scanner type</label>
-              <select class="form-select" id="scanner_type" onchange="scannerTypeChanged()">
-                <option value=""    {{ 'selected' if not s.scanner_type else '' }}>Not set (pick on Add Food page)</option>
-                <option value="usb" {{ 'selected' if s.scanner_type == 'usb' else '' }}>USB / Bluetooth HID (keyboard wedge)</option>
-                <option value="camera" {{ 'selected' if s.scanner_type == 'camera' else '' }}>Camera / built-in scan module</option>
-              </select>
-            </div>
-            <div class="form-check form-switch mb-3">
-              <input class="form-check-input" type="checkbox" role="switch" id="barcode_global_capture"
-                     {{ 'checked' if s.barcode_global_capture else '' }}>
-              <label class="form-check-label" for="barcode_global_capture">Scan from any page</label>
-              <div class="form-text">When on, a barcode scanned on any screen is saved to Pending and the app jumps to Add Food. When off, scanning only works on the Add Food page.</div>
-            </div>
-            <div id="scanner-usb-hint" class="{{ '' if s.scanner_type == 'usb' else 'd-none' }}">
-              <p class="text-secondary small mb-2">Plug in the scanner and test below — click the field and scan a barcode.</p>
-              <div class="input-group mb-2">
-                <span class="input-group-text"><i class="bi bi-upc"></i></span>
-                <input type="text" class="form-control font-monospace" id="scanner-test-input"
-                       placeholder="Scan a barcode here…" autocomplete="off" spellcheck="false"
-                       oninput="scannerTestInput(this.value)" onkeydown="if(event.key==='Enter'){scannerTestEnter(this.value);this.select();}">
-              </div>
-              <div class="test-result" id="scanner-test-result"></div>
-              <p class="form-text mt-2">Running a Waveshare scan-engine module on a kiosk? See the
-                <a href="https://github.com/Syracuse3DPrinting/FoodAssistant/blob/main/docs/hardware/waveshare-barcode-scanner.md" target="_blank" rel="noopener">hands-free setup codes</a>
-                to make it scan on sight without the button.</p>
-            </div>
-            <div id="scanner-camera-hint" class="{{ '' if s.scanner_type == 'camera' else 'd-none' }}">
-              <p class="text-secondary small">Camera scanning runs in the browser — make sure this site has camera permission.</p>
-            </div>
-          </div>
-          {% endif %}
-
           <div class="section-card">
             <div class="section-title"><i class="bi bi-layout-sidebar text-success"></i> Navigation Tabs</div>
             <p class="text-secondary small">Re-order tabs and hide the ones you don't use. Tabs for services that
@@ -1644,6 +1573,46 @@ docker compose up -d</code></pre>
           </div>
         </div>
         {% endif %}
+
+        <!-- Hardware: barcode scanner (all devices) -->
+        <div class="tab-pane fade" id="pane-hardware">
+          <p class="pane-intro">Physical input devices connected to this machine.</p>
+
+          <div class="section-card">
+            <div class="section-title"><i class="bi bi-upc-scan text-success"></i> Barcode Scanner</div>
+            <p class="text-secondary small">A USB or Bluetooth scanner plugged into any device (this server, a Pi host, or a Pi Remote) works on the Add Food page automatically, all at once, alongside the in-browser camera scanner. USB and Bluetooth HID scanners act as keyboard wedges, so no drivers are needed. This setting is just a hint for which method to reach for first; it does not turn the others off.</p>
+            <div class="mb-3">
+              <label class="form-label">Scanner type</label>
+              <select class="form-select" id="scanner_type" onchange="scannerTypeChanged()">
+                <option value=""    {{ 'selected' if not s.scanner_type else '' }}>Not set (pick on Add Food page)</option>
+                <option value="usb" {{ 'selected' if s.scanner_type == 'usb' else '' }}>USB / Bluetooth HID (keyboard wedge)</option>
+                <option value="camera" {{ 'selected' if s.scanner_type == 'camera' else '' }}>Camera / built-in scan module</option>
+              </select>
+            </div>
+            <div class="form-check form-switch mb-3">
+              <input class="form-check-input" type="checkbox" role="switch" id="barcode_global_capture"
+                     {{ 'checked' if s.barcode_global_capture else '' }}>
+              <label class="form-check-label" for="barcode_global_capture">Scan from any page</label>
+              <div class="form-text">When on, a barcode scanned on any screen is saved to Pending and the app jumps to Add Food. When off, scanning only works on the Add Food page.</div>
+            </div>
+            <div id="scanner-usb-hint" class="{{ '' if s.scanner_type == 'usb' else 'd-none' }}">
+              <p class="text-secondary small mb-2">Plug in the scanner and test below — click the field and scan a barcode.</p>
+              <div class="input-group mb-2">
+                <span class="input-group-text"><i class="bi bi-upc"></i></span>
+                <input type="text" class="form-control font-monospace" id="scanner-test-input"
+                       placeholder="Scan a barcode here…" autocomplete="off" spellcheck="false"
+                       oninput="scannerTestInput(this.value)" onkeydown="if(event.key==='Enter'){scannerTestEnter(this.value);this.select();}">
+              </div>
+              <div class="test-result" id="scanner-test-result"></div>
+              <p class="form-text mt-2">Running a Waveshare scan-engine module on a kiosk? See the
+                <a href="https://github.com/Syracuse3DPrinting/FoodAssistant/blob/main/docs/hardware/waveshare-barcode-scanner.md" target="_blank" rel="noopener">hands-free setup codes</a>
+                to make it scan on sight without the button.</p>
+            </div>
+            <div id="scanner-camera-hint" class="{{ '' if s.scanner_type == 'camera' else 'd-none' }}">
+              <p class="text-secondary small">Camera scanning runs in the browser — make sure this site has camera permission.</p>
+            </div>
+          </div>
+        </div>
 
         {% if is_pi %}
 
@@ -2440,7 +2409,6 @@ function scannerTypeChanged() {
 var _scannerIdleTimer = null;
 
 function scannerTestInput(v) {
-  // Clears stale result when the user starts typing / scanning
   if (v.length < 6) setResult('scanner-test-result', true, '');
   // Not every scanner is configured to send a trailing Enter/CR. Confirm on a
   // short idle once enough characters have arrived, so a wedge that just types
@@ -2457,6 +2425,31 @@ function scannerTestEnter(v) {
     setResult('scanner-test-result', true, 'Barcode received: ' + v);
   } else {
     setResult('scanner-test-result', false, 'Input looks unexpected — check scanner is in HID mode.');
+  }
+}
+
+function wizScannerTypeChanged() {
+  var v = document.getElementById('wiz-scanner_type').value;
+  document.getElementById('wiz-scanner-usb-hint').classList.toggle('d-none', v !== 'usb');
+  document.getElementById('wiz-scanner-camera-hint').classList.toggle('d-none', v !== 'camera');
+  if (v !== 'usb') {
+    var inp = document.getElementById('wiz-scanner-test-input');
+    if (inp) inp.value = '';
+    setResult('wiz-scanner-test-result', true, '');
+  }
+}
+
+function wizScannerTestInput(v) {
+  if (v.length < 6) setResult('wiz-scanner-test-result', true, '');
+}
+
+function wizScannerTestEnter(v) {
+  v = v.trim();
+  if (!v) return;
+  if (/^[\x20-\x7E]{6,}$/.test(v)) {
+    setResult('wiz-scanner-test-result', true, 'Barcode received: ' + v);
+  } else {
+    setResult('wiz-scanner-test-result', false, 'Input looks unexpected — check scanner is in HID mode.');
   }
 }
 
@@ -2620,7 +2613,7 @@ function buildPayload() {
     // first-time setup leaves stored extras untouched.
     ai_extra_keys: document.querySelector('.extra-keys') ? collectExtraKeys() : undefined,
     extra_api_keys: document.querySelector('.satellite-extra-keys') ? collectSatelliteKeys() : undefined,
-    scanner_type:       val('scanner_type') || '',
+    scanner_type:       (document.getElementById('scanner_type') || document.getElementById('wiz-scanner_type'))?.value || '',
     barcode_global_capture: document.getElementById('barcode_global_capture') ? document.getElementById('barcode_global_capture').checked : true,
     barcode_enrichment: val('barcode_enrichment') || 'llm',
     barcode_llm_fallback: document.getElementById('barcode_llm_fallback')?.checked || false,
