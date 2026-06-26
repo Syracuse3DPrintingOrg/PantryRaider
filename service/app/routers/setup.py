@@ -121,6 +121,7 @@ class SetupPayload(BaseModel):
     # Extra API keys per provider, e.g. {"gemini": ["key2", "key3"]}. When
     # absent the stored extras are left untouched (see save handler).
     ai_extra_keys: dict[str, list[str]] | None = None
+    scanner_type: str = ""
     barcode_enrichment: str = "llm"
     enrich_provider: str = ""
     enrich_model: str = ""

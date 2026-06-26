@@ -61,7 +61,8 @@
             <h6 class="card-title">Enter Barcode Manually</h6>
             <div class="input-group">
               <input type="text" id="barcodeInput" class="form-control" placeholder="e.g. 049000028935"
-                     inputmode="numeric" pattern="[0-9]*">
+                     inputmode="numeric" pattern="[0-9]*"
+                     onkeydown="if(event.key==='Enter'){event.preventDefault();lookupBarcode();}">
               <button class="btn btn-primary" onclick="lookupBarcode()">
                 <i class="bi bi-search me-1"></i>Look Up
               </button>
@@ -221,6 +222,39 @@ if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
     document.getElementById('startScanBtn').classList.add('d-none');
   });
 }
+
+// Global keyboard-wedge capture. USB and Bluetooth HID barcode scanners type
+// the code as a fast burst of keystrokes ending in Enter. Capture that burst
+// anywhere on this page (not just when the manual field is focused) so a
+// scanner attached to any instance — server, pi host, or a pi remote — works
+// the same way, all at once. Only a rapid burst is treated as a scan, so
+// ordinary typing into a field is never hijacked.
+(function () {
+  var buf = '';
+  var last = 0;
+  var GAP_MS = 50;   // real keystrokes are slower than a scanner's output
+  document.addEventListener('keydown', function (e) {
+    if (e.ctrlKey || e.altKey || e.metaKey) return;
+    var ae = document.activeElement;
+    var inField = ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.tagName === 'SELECT');
+    var now = Date.now();
+    if (now - last > GAP_MS) buf = '';   // a gap starts a fresh burst
+    last = now;
+    if (e.key === 'Enter') {
+      if (!inField && buf.length >= 6) {
+        var input = document.getElementById('barcodeInput');
+        if (input) {
+          input.value = buf;
+          lookupBarcode();
+          e.preventDefault();
+        }
+      }
+      buf = '';
+      return;
+    }
+    if (e.key.length === 1) buf += e.key;
+  });
+})();
 
 async function decodeBarcodePhoto(input) {
   const file = input.files[0];

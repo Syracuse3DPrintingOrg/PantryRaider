@@ -527,7 +527,7 @@
         <i class="bi bi-chevron-down ms-auto"></i>
       </button>
       <div class="collapse mt-3" id="scanner-collapse">
-        <p class="text-secondary small">Choose how barcodes are read. You can also scan from the Add Food page without any setup.</p>
+        <p class="text-secondary small">A USB or Bluetooth scanner plugged into any device — this server, a Pi host, or a Pi Remote — works on the Add Food page automatically, all at the same time, alongside the in-browser camera scanner. This setting is just a hint for which method you reach for first; nothing here turns the others off.</p>
         <div class="mb-3">
           <label class="form-label">Scanner type</label>
           <select class="form-select" id="scanner_type" onchange="scannerTypeChanged()">
@@ -949,8 +949,7 @@
           {% if not features.satellite %}
           <div class="section-card">
             <div class="section-title"><i class="bi bi-upc-scan text-success"></i> Barcode Scanner</div>
-            <p class="text-secondary small">Choose how barcodes are read. USB and Bluetooth HID scanners work as keyboard
-              wedges — no drivers needed. Camera scanning runs in the browser on the Add Food page.</p>
+            <p class="text-secondary small">A USB or Bluetooth scanner plugged into any device (this server, a Pi host, or a Pi Remote) works on the Add Food page automatically, all at once, alongside the in-browser camera scanner. USB and Bluetooth HID scanners act as keyboard wedges, so no drivers are needed. This setting is just a hint for which method to reach for first; it does not turn the others off.</p>
             <div class="mb-3">
               <label class="form-label">Scanner type</label>
               <select class="form-select" id="scanner_type" onchange="scannerTypeChanged()">
@@ -1322,7 +1321,7 @@
           {% if features.satellite %}
           <div class="section-card">
             <div class="section-title"><i class="bi bi-upc-scan text-success"></i> Barcode Scanner</div>
-            <p class="text-secondary small">Choose how barcodes are read on this device. USB and Bluetooth HID scanners work as keyboard wedges — no drivers needed. Camera scanning runs in the browser on the Add Food page.</p>
+            <p class="text-secondary small">A USB or Bluetooth scanner plugged into this Pi Remote works on the Add Food page automatically, alongside the in-browser camera scanner and any scanner attached to the main server. They all work at the same time. USB and Bluetooth HID scanners act as keyboard wedges, so no drivers are needed. This setting is just a hint for which method to reach for first; it does not turn the others off.</p>
             <div class="mb-3">
               <label class="form-label">Scanner type</label>
               <select class="form-select" id="scanner_type" onchange="scannerTypeChanged()">
@@ -2315,12 +2314,20 @@ function scannerTypeChanged() {
   }
 }
 
+var _scannerIdleTimer = null;
+
 function scannerTestInput(v) {
   // Clears stale result when the user starts typing / scanning
   if (v.length < 6) setResult('scanner-test-result', true, '');
+  // Not every scanner is configured to send a trailing Enter/CR. Confirm on a
+  // short idle once enough characters have arrived, so a wedge that just types
+  // the digits still passes the test without an explicit Enter suffix.
+  if (_scannerIdleTimer) clearTimeout(_scannerIdleTimer);
+  _scannerIdleTimer = setTimeout(function () { scannerTestEnter(v); }, 250);
 }
 
 function scannerTestEnter(v) {
+  if (_scannerIdleTimer) { clearTimeout(_scannerIdleTimer); _scannerIdleTimer = null; }
   v = v.trim();
   if (!v) return;
   if (/^[\x20-\x7E]{6,}$/.test(v)) {
