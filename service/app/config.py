@@ -12,7 +12,7 @@ from .hardware import is_raspberry_pi
 
 # Single source of truth for the app version (shown in the UI, used by the
 # update checker, and reported by FastAPI). Bump on each tagged release.
-APP_VERSION = "0.6.16"
+APP_VERSION = "0.6.17"
 
 # GitHub repo used by the in-app update checker.
 GITHUB_REPO = "Syracuse3DPrinting/FoodAssistant"
@@ -32,6 +32,12 @@ THEMES = {
                    "stylesheet": "static/vendor/themes/flatly.min.css", "overlay": None},
     "synthwave":  {"label": "Synthwave (neon dark)", "mode": "dark", "stylesheet": None,
                    "overlay": "static/vendor/themes/synthwave.css"},
+    "solarized":  {"label": "Solarized (warm light)", "mode": "light", "stylesheet": None,
+                   "overlay": "static/vendor/themes/solarized.css"},
+    "midnight":   {"label": "Midnight (high-contrast dark)", "mode": "dark", "stylesheet": None,
+                   "overlay": "static/vendor/themes/midnight.css"},
+    "forest":     {"label": "Forest (soft green dark)", "mode": "dark", "stylesheet": None,
+                   "overlay": "static/vendor/themes/forest.css"},
 }
 _DEFAULT_THEME = "dark"
 

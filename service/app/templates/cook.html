@@ -34,6 +34,7 @@
 
     <!-- Complexity -->
     <div class="pref-row">
+      <input type="checkbox" class="pref-toggle" id="on-complexity" title="Include this factor" checked>
       <span class="end-label">Trash Panda 🦝</span>
       <input type="range" class="pref-slider" id="pref-complexity" min="1" max="5" value="3">
       <span class="end-label right">Michelin Star ⭐</span>
@@ -42,6 +43,7 @@
 
     <!-- Spice -->
     <div class="pref-row">
+      <input type="checkbox" class="pref-toggle" id="on-spice" title="Include this factor" checked>
       <span class="end-label">Midwest Mayo 🫙</span>
       <input type="range" class="pref-slider" id="pref-spice" min="1" max="5" value="3">
       <span class="end-label right">Asian Fury 🌶️</span>
@@ -50,6 +52,7 @@
 
     <!-- Time -->
     <div class="pref-row">
+      <input type="checkbox" class="pref-toggle" id="on-time" title="Include this factor" checked>
       <span class="end-label">Microwave Minutes ⚡</span>
       <input type="range" class="pref-slider" id="pref-time" min="1" max="5" value="3">
       <span class="end-label right">All Day Affair ☕</span>
@@ -58,6 +61,7 @@
 
     <!-- Portions -->
     <div class="pref-row">
+      <input type="checkbox" class="pref-toggle" id="on-portions" title="Include this factor" checked>
       <span class="end-label">Solo Snack 🙋</span>
       <input type="range" class="pref-slider" id="pref-portions" min="1" max="5" value="3">
       <span class="end-label right">Feed the Horde 🏟️</span>
@@ -229,10 +233,22 @@
 }
 .pref-row {
   display: grid;
-  grid-template-columns: 7rem 1fr 7rem;
+  grid-template-columns: 1.1rem 7rem 1fr 7rem;
   align-items: center;
   gap: 0.5rem;
   margin-bottom: 0.25rem;
+}
+.pref-row .pref-toggle {
+  accent-color: var(--bs-primary);
+  cursor: pointer;
+  margin: 0;
+}
+.pref-row.disabled .end-label {
+  opacity: 0.4;
+}
+input[type=range].pref-slider:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 .pref-row .end-label {
   font-size: 0.75rem;
@@ -334,10 +350,16 @@ const MEALIE_URL = {{ mealie_url | tojson }};
 
 // Preference state
 let cVal = 3, sVal = 3, tVal = 3, pVal = 3;
+// Per-factor on/off: unchecking keeps the slider value but excludes the
+// factor from the suggestion request. All on by default.
+let prefOn = {complexity: true, spice: true, time: true, portions: true};
 let activeDiets = new Set();
 let activeCuisines = new Set();
 let prefsOpen = false;
 let prefsDebounce = null;
+
+const PREF_SLIDER_IDS = {complexity: 'pref-complexity', spice: 'pref-spice',
+                         time: 'pref-time', portions: 'pref-portions'};
 
 const COMPLEXITY_LABELS = {1:'Instant Ramen', 2:'Home Cook', 3:'Getting Fancy', 4:'Chef Mode', 5:'Michelin Star'};
 const SPICE_LABELS      = {1:'Zero Heat', 2:'A Little Kick', 3:'Flavor Town', 4:'Send Help 🥵', 5:'Inferno'};
@@ -356,9 +378,19 @@ function updatePrefLabels() {
   document.getElementById('lbl-spice').textContent      = SPICE_LABELS[sVal];
   document.getElementById('lbl-time').textContent       = TIME_LABELS[tVal];
   document.getElementById('lbl-portions').textContent   = PORTIONS_LABELS[pVal];
+  const anyDisabled = Object.values(prefOn).some(on => !on);
   const nonDefault = cVal !== 3 || sVal !== 3 || tVal !== 3 || pVal !== 3
-    || activeDiets.size > 0 || activeCuisines.size > 0;
+    || anyDisabled || activeDiets.size > 0 || activeCuisines.size > 0;
   document.getElementById('prefs-active-badge').classList.toggle('d-none', !nonDefault);
+}
+
+function applyPrefToggle(factor) {
+  // Grey out and disable the slider when its factor is off, without touching
+  // the slider's value so the choice is preserved.
+  const on = prefOn[factor];
+  const slider = document.getElementById(PREF_SLIDER_IDS[factor]);
+  slider.disabled = !on;
+  slider.closest('.pref-row').classList.toggle('disabled', !on);
 }
 
 function toggleDiet(el) {
@@ -392,6 +424,7 @@ function toggleCuisine(el) {
 function savePrefs() {
   localStorage.setItem('cookPrefs', JSON.stringify({
     complexity: cVal, spice: sVal, time: tVal, portions: pVal,
+    enabled: {...prefOn},
     diets: [...activeDiets], cuisines: [...activeCuisines],
   }));
 }
@@ -405,6 +438,10 @@ function loadPrefs() {
     sVal = p.spice     || 3;
     tVal = p.time      || 3;
     pVal = p.portions  || 3;
+    const en = p.enabled || {};
+    for (const f of Object.keys(prefOn)) {
+      prefOn[f] = en[f] !== false;   // default on for older saved blobs
+    }
     activeDiets = new Set(p.diets || []);
     activeCuisines = new Set(p.cuisines || []);
   } catch (_) {}
@@ -412,6 +449,10 @@ function loadPrefs() {
   document.getElementById('pref-spice').value      = sVal;
   document.getElementById('pref-time').value       = tVal;
   document.getElementById('pref-portions').value   = pVal;
+  for (const f of Object.keys(prefOn)) {
+    document.getElementById('on-' + f).checked = prefOn[f];
+    applyPrefToggle(f);
+  }
   document.querySelectorAll('.diet-pill').forEach(el => {
     el.classList.toggle('active', activeDiets.has(el.dataset.diet));
   });
@@ -423,12 +464,17 @@ function loadPrefs() {
 
 function resetPrefs() {
   cVal = 3; sVal = 3; tVal = 3; pVal = 3;
+  prefOn = {complexity: true, spice: true, time: true, portions: true};
   activeDiets = new Set();
   activeCuisines = new Set();
   document.getElementById('pref-complexity').value = 3;
   document.getElementById('pref-spice').value      = 3;
   document.getElementById('pref-time').value       = 3;
   document.getElementById('pref-portions').value   = 3;
+  for (const f of Object.keys(prefOn)) {
+    document.getElementById('on-' + f).checked = true;
+    applyPrefToggle(f);
+  }
   document.querySelectorAll('.diet-pill').forEach(el => el.classList.remove('active'));
   document.querySelectorAll('.cuisine-pill').forEach(el => el.classList.remove('active'));
   savePrefs();
@@ -442,11 +488,12 @@ function scheduleRefresh() {
 }
 
 function buildPrefsString() {
-  const complexity = ['very simple and quick', 'simple', null, 'complex', 'very sophisticated and complex'][cVal - 1];
-  const spice      = ['absolutely no spice or heat', 'mild heat', null, 'hot and spicy', 'extremely spicy, lots of chili'][sVal - 1];
+  // Disabled factors are excluded entirely (treated as "no preference").
+  const complexity = prefOn.complexity ? ['very simple and quick', 'simple', null, 'complex', 'very sophisticated and complex'][cVal - 1] : null;
+  const spice      = prefOn.spice ? ['absolutely no spice or heat', 'mild heat', null, 'hot and spicy', 'extremely spicy, lots of chili'][sVal - 1] : null;
   const timeMap    = {1: 'ready in 15 minutes or less', 2: 'ready in 30 minutes or less', 4: 'up to 2 hours cooking time', 5: null};
-  const time       = timeMap[tVal];
-  const portions   = {1: '1-2 servings', 2: '2-3 servings', 4: '8-10 servings', 5: '12 or more servings'}[pVal];
+  const time       = prefOn.time ? timeMap[tVal] : null;
+  const portions   = prefOn.portions ? {1: '1-2 servings', 2: '2-3 servings', 4: '8-10 servings', 5: '12 or more servings'}[pVal] : null;
   const diets      = [...activeDiets].join(', ');
   const cuisines   = [...activeCuisines].join(', ');
   const parts = [];
@@ -460,11 +507,14 @@ function buildPrefsString() {
 }
 
 function buildPrefsParams() {
+  // Disabled factors are omitted so the server applies no filter for them
+  // (complexity/spice/portions steer the AI only; time filters the external
+  // search). Omitting matches each param's "no preference" default.
   const p = new URLSearchParams();
-  p.set('complexity', cVal);
-  p.set('spice', sVal);
-  p.set('max_time', {1:15, 2:30, 3:0, 4:120, 5:0}[tVal] || 0);
-  p.set('portions', pVal);
+  if (prefOn.complexity) p.set('complexity', cVal);
+  if (prefOn.spice)      p.set('spice', sVal);
+  if (prefOn.time)       p.set('max_time', {1:15, 2:30, 3:0, 4:120, 5:0}[tVal] || 0);
+  if (prefOn.portions)   p.set('portions', pVal);
   if (activeDiets.size) p.set('dietary', [...activeDiets].join(','));
   if (activeCuisines.size) p.set('cuisine', [...activeCuisines].join(','));
   return p;
@@ -477,6 +527,17 @@ function buildPrefsParams() {
     if (id === 'pref-spice')      sVal = +this.value;
     if (id === 'pref-time')       tVal = +this.value;
     if (id === 'pref-portions')   pVal = +this.value;
+    updatePrefLabels();
+    savePrefs();
+    scheduleRefresh();
+  });
+});
+
+// Wire up per-factor on/off checkboxes
+Object.keys(prefOn).forEach(factor => {
+  document.getElementById('on-' + factor).addEventListener('change', function() {
+    prefOn[factor] = this.checked;
+    applyPrefToggle(factor);
     updatePrefLabels();
     savePrefs();
     scheduleRefresh();
