@@ -107,22 +107,24 @@
     if (!content) return;
     clearPadding();
     var rect = nav.getBoundingClientRect();
+    // Set the reservation with !important so it beats kiosk.css's gutter rules
+    // (which are !important and would otherwise let the menu overlap content,
+    // most visibly in vertical mode where it pads the same left/right side).
     if (orient === 'horizontal') {
-      var v = (corner.indexOf('top') === 0) ? 'paddingTop' : 'paddingBottom';
-      content.style[v] = Math.ceil(rect.height + GAP_PX) + 'px';
+      var v = (corner.indexOf('top') === 0) ? 'padding-top' : 'padding-bottom';
+      content.style.setProperty(v, Math.ceil(rect.height + GAP_PX) + 'px', 'important');
     } else {
-      var h = (corner.indexOf('left') !== -1) ? 'paddingLeft' : 'paddingRight';
-      content.style[h] = Math.ceil(rect.width + GAP_PX) + 'px';
+      var h = (corner.indexOf('left') !== -1) ? 'padding-left' : 'padding-right';
+      content.style.setProperty(h, Math.ceil(rect.width + GAP_PX) + 'px', 'important');
     }
   }
 
   function clearPadding() {
     var content = document.getElementById('pageContent');
     if (!content) return;
-    content.style.paddingTop = '';
-    content.style.paddingBottom = '';
-    content.style.paddingLeft = '';
-    content.style.paddingRight = '';
+    ['padding-top', 'padding-bottom', 'padding-left', 'padding-right'].forEach(function (p) {
+      content.style.removeProperty(p);
+    });
   }
 
   function nearestCorner(cx, cy) {

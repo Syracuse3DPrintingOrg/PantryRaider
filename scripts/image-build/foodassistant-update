@@ -44,6 +44,9 @@ VENV_DIR="${VENV_DIR:-/opt/foodassistant/venv}"
 SERVICE="${SERVICE:-foodassistant-remote.service}"
 SD_DST="${SD_DST:-/opt/foodassistant/foodassistant_streamdeck}"
 SD_SERVICE="${SD_SERVICE:-foodassistant-streamdeck.service}"
+# The kiosk browser caches the loaded page, so after redeploying the app we
+# restart it (when present) to reload fresh CSS/JS. Absent on headless installs.
+KIOSK_SERVICE="${KIOSK_SERVICE:-foodassistant-kiosk.service}"
 
 # Plain stdout log lines (the bridge tails stdout for a human summary too).
 log() { printf '%s\n' "$*"; }
@@ -200,12 +203,29 @@ else
   log "No streamdeck package in the checkout; skipping deck sync."
 fi
 
+# Keep the installed helper scripts current so future runs use the latest
+# version. A plain git pull does not refresh /usr/local/bin, and overwriting the
+# running script in place is safe (the open inode keeps executing). This closes
+# the loop so the operator never has to reinstall the helper by hand again.
+for _h in foodassistant-update foodassistant-restore; do
+  _hsrc="$REPO/scripts/image-build/$_h"
+  if [ -f "$_hsrc" ]; then
+    install -m 755 "$_hsrc" "/usr/local/bin/$_h" 2>/dev/null \
+      && log "Refreshed /usr/local/bin/$_h" || true
+  fi
+done
+
 # --- Restart the services we actually refreshed -----------------------------
 if [ "$svc_synced" = "1" ] || [ "$deps" = "1" ]; then
   _restart_unit "$SERVICE" && restarted=1
 fi
 if [ "$sd_synced" = "1" ]; then
   _restart_unit "$SD_SERVICE" && restarted=1
+fi
+# Reload the on-screen kiosk so the new app code actually shows. The browser
+# would otherwise keep serving the page it loaded before the deploy.
+if [ "$svc_synced" = "1" ]; then
+  _restart_unit "$KIOSK_SERVICE" && restarted=1
 fi
 
 if [ "$svc_synced" = "0" ] && [ "$sd_synced" = "0" ]; then

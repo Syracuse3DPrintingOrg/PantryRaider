@@ -67,23 +67,25 @@
     if (localStorage.getItem('kioskMode') === 'true') {
       var _kl = document.createElement('link');
       _kl.rel = 'stylesheet';
-      _kl.href = 'static/css/kiosk.css';
+      _kl.href = 'static/css/kiosk.css?v={{ app_version }}';
       document.head.appendChild(_kl);
     }
   </script>
+  <!-- ?v={{ app_version }} busts the browser cache on every update so a kiosk
+       picks up new CSS/JS instead of serving stale copies. -->
   <!-- Applies scale + orientation on the attached kiosk display only -->
-  <script src="static/js/kiosk-display.js"></script>
+  <script src="static/js/kiosk-display.js?v={{ app_version }}"></script>
   <!-- Pi only: auto-enable kiosk mode when a display is attached, unless the
        user has made an explicit choice (FoodAssistant-h437) -->
-  <script src="static/js/kiosk-auto.js"></script>
+  <script src="static/js/kiosk-auto.js?v={{ app_version }}"></script>
   <!-- USB-keyboard navigation: number keys jump to nav tabs, "?" shows help -->
-  <script src="static/js/keyboard-nav.js"></script>
+  <script src="static/js/keyboard-nav.js?v={{ app_version }}"></script>
   <!-- Kiosk only: report activity so the host bridge wakes the display/deck -->
-  <script src="static/js/kiosk-idle.js"></script>
+  <script src="static/js/kiosk-idle.js?v={{ app_version }}"></script>
   <!-- On-screen floating navigation menu: corner placement + drag to reposition -->
-  <script src="static/js/floating-nav.js"></script>
+  <script src="static/js/floating-nav.js?v={{ app_version }}"></script>
   <!-- Floating timer window: shows running server-side timers; defers to a deck -->
-  <script src="static/js/timer-window.js"></script>
+  <script src="static/js/timer-window.js?v={{ app_version }}"></script>
   <style>
     body { padding-top: 60px; }
     .navbar-brand { font-weight: 700; letter-spacing: -0.5px; }
@@ -145,7 +147,6 @@
       box-shadow: 0 0.4rem 1rem rgba(0, 0, 0, 0.35);
       opacity: 0.92;
       user-select: none;
-      touch-action: none;
     }
     .float-nav.dragging { opacity: 0.75; transition: none; }
     /* Horizontal orientation lays the icons out in a row instead of a column
@@ -162,6 +163,9 @@
       color: var(--bs-secondary-color, #adb5bd);
       padding: 0.1rem 0;
       line-height: 1;
+      /* Only the handle locks gestures (for dragging); the rest of the bar lets
+         a flick scroll the page through it, so the menu never traps scrolling. */
+      touch-action: none;
     }
     .float-nav-handle:active { cursor: grabbing; }
     .float-nav-link {
@@ -273,6 +277,13 @@
             <a class="nav-link" href="#" id="kioskToggle" title="Toggle kiosk (touch) mode"
                onclick="toggleKioskMode(); return false;">
               <i class="bi bi-tablet" id="kioskIcon"></i>
+            </a>
+          </li>
+          <!-- Dedicated Settings button, always visible in the bar (not only in
+               the overflow menu) so it is one tap away on a touch kiosk. -->
+          <li class="nav-item">
+            <a class="nav-link {% if active == 'setup' %}active{% endif %}" href="setup" title="Settings">
+              <i class="bi bi-gear"></i>
             </a>
           </li>
           {% for g in auto_hidden_groups() %}
