@@ -1642,6 +1642,25 @@
                 Grocy and Mealie data are not touched here. Reload the page after a restore.</div>
               <div class="test-result mt-1" id="restore-result"></div>
             </div>
+            {% if is_pi %}
+            <div class="mb-2 border-top border-secondary pt-3">
+              <label class="form-label small mb-1"><i class="bi bi-hdd-stack me-1"></i>Full restore (Grocy + Mealie)</label>
+              <div class="input-group input-group-sm" style="max-width:560px">
+                <input type="text" class="form-control font-monospace" id="full-restore-source"
+                       placeholder="/path/to/foodassistant-YYYYMMDD.tar.gz  or  rclone:remote:bucket/snapshot.tar.gz">
+                <button class="btn btn-outline-danger" onclick="fullRestore(this)">
+                  <i class="bi bi-hdd-stack me-1"></i>Restore
+                </button>
+              </div>
+              <div class="form-text">Restores the <strong>entire stack snapshot</strong> made by
+                <code>scripts/backup.sh</code> (this app's data, Grocy inventory, and Mealie). Give a device path,
+                or <code>rclone:remote:path</code> to pull from the configured remote first. This
+                <strong>stops the container stack and replaces all data</strong>; the current data is moved aside
+                (<code>.pre-restore-&lt;stamp&gt;</code>, nothing deleted) and the stack restarts. Distinct from the
+                app-data Restore above.</div>
+              <div class="test-result mt-1" id="full-restore-result"></div>
+            </div>
+            {% endif %}
             <div class="mb-2">
               <label class="form-label">Rclone Remote Path <span class="text-secondary small">(optional)</span></label>
               <input type="text" class="form-control font-monospace" id="rclone_remote"
@@ -3125,6 +3144,40 @@ async function restoreBackup(btn) {
     let msg = 'Restored ' + d.restored_files + ' file(s).';
     if (d.secrets_preserved) msg += ' Kept ' + d.secrets_preserved + ' existing secret(s).';
     msg += ' Reload to see the restored settings.';
+    if (result) result.innerHTML = '<span class="text-success"><i class="bi bi-check-circle me-1"></i>'
+      + msg + '</span>';
+  } catch (e) {
+    if (result) result.innerHTML = '<span class="text-danger"><i class="bi bi-x-circle me-1"></i>'
+      + e.message + '</span>';
+  } finally {
+    btn.innerHTML = orig;
+    btn.disabled = false;
+  }
+}
+
+async function fullRestore(btn) {
+  const input = document.getElementById('full-restore-source');
+  const result = document.getElementById('full-restore-result');
+  const source = (input?.value || '').trim();
+  if (!source) {
+    if (result) result.innerHTML = '<span class="text-warning">Enter a device path or rclone:remote path first.</span>';
+    return;
+  }
+  if (!confirm('Full-stack restore from:\n\n' + source + '\n\nThis STOPS the whole container stack '
+      + '(Grocy and Mealie included) and REPLACES all data. The current data is moved aside first '
+      + '(nothing is deleted) and the stack restarts. Continue?')) {
+    return;
+  }
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Restoring…';
+  if (result) result.innerHTML = '<span class="text-secondary">Restoring the full stack; this can take a few minutes…</span>';
+  try {
+    const d = await postJson('setup/restore', { source: source });
+    if (!d.ok) throw new Error(d.error || 'Restore failed.');
+    let msg = 'Restored ' + ((d.restored_dirs || []).join(', ') || 'snapshot') + '.';
+    if (d.snapshot) msg += ' Previous data kept in .pre-restore-' + d.snapshot + '.';
+    msg += d.restarted ? ' Stack restarted.' : ' WARNING: the stack may not have restarted — check the device.';
     if (result) result.innerHTML = '<span class="text-success"><i class="bi bi-check-circle me-1"></i>'
       + msg + '</span>';
   } catch (e) {

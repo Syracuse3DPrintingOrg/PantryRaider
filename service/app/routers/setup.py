@@ -1112,6 +1112,37 @@ async def update_software():
         return JSONResponse({"ok": False, "error": str(e)})
 
 
+class _RestoreReq(BaseModel):
+    source: str = ""
+
+
+@router.post("/restore")
+async def restore_full_stack(req: _RestoreReq):
+    """Full Grocy + Mealie + app snapshot restore, via the host bridge.
+
+    Only meaningful on a Pi appliance: the restore stops and restarts the whole
+    docker stack and swaps the bind-mounted data dirs, which only the host
+    bridge (running as root) can do. We do NOT accept a browser upload of the
+    (large) snapshot; instead the body's {source} is either an absolute path to
+    a .tar.gz already on the device, or "rclone:<remote-path>" to pull from the
+    configured rclone remote first. The bridge runs foodassistant-restore
+    synchronously and returns {ok, error, source, restored_dirs, snapshot,
+    restarted, log}; the helper sets the current data aside (.pre-restore-<stamp>,
+    never deleted) and tries to restart on any mid-restore failure so the device
+    is never left down. Stopping, pulling, unpacking and restarting can take a
+    while on a Pi, so the proxy timeout is generous.
+    """
+    if not is_raspberry_pi():
+        return JSONResponse(
+            {"ok": False, "error": "Full-stack restore is only available on this appliance."})
+    try:
+        async with httpx.AsyncClient(timeout=920.0) as c:
+            r = await c.post(f"{_HOST_BRIDGE}/restore", json={"source": req.source})
+        return r.json()
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)})
+
+
 @router.get("/streamdeck/config")
 async def streamdeck_config_get():
     """Proxy GET config from host bridge.

@@ -502,3 +502,54 @@ def test_record_activity_noop_when_awake(monkeypatch):
     woke = bridge._record_activity()
     assert woke is False
     assert calls == []  # no power command when already awake
+
+
+# --- Full-stack restore source helpers (FoodAssistant-h18b) ----------------
+
+def test_classify_restore_source_absolute_path():
+    assert bridge._classify_restore_source("/srv/foodassistant-20260626.tar.gz") == (
+        "path", "/srv/foodassistant-20260626.tar.gz"
+    )
+
+
+def test_classify_restore_source_strips_whitespace():
+    assert bridge._classify_restore_source("  /a/b.tar.gz  ") == ("path", "/a/b.tar.gz")
+
+
+def test_classify_restore_source_rclone_prefix():
+    assert bridge._classify_restore_source("rclone:remote:bucket/snap.tar.gz") == (
+        "rclone", "remote:bucket/snap.tar.gz"
+    )
+
+
+def test_classify_restore_source_rclone_trims_remote():
+    assert bridge._classify_restore_source("rclone:  remote:x  ") == ("rclone", "remote:x")
+
+
+def test_classify_restore_source_rclone_empty_is_invalid():
+    kind, _ = bridge._classify_restore_source("rclone:")
+    assert kind == "invalid"
+
+
+def test_classify_restore_source_empty_is_invalid():
+    kind, _ = bridge._classify_restore_source("")
+    assert kind == "invalid"
+    kind, _ = bridge._classify_restore_source("   ")
+    assert kind == "invalid"
+
+
+def test_classify_restore_source_relative_is_invalid():
+    kind, _ = bridge._classify_restore_source("backups/snap.tar.gz")
+    assert kind == "invalid"
+
+
+def test_rclone_pull_cmd_default_binary():
+    assert bridge._rclone_pull_cmd("remote:x", "/tmp/out.tar.gz") == [
+        "rclone", "copyto", "remote:x", "/tmp/out.tar.gz"
+    ]
+
+
+def test_rclone_pull_cmd_custom_binary():
+    assert bridge._rclone_pull_cmd("remote:x", "/tmp/out.tar.gz", rclone="/usr/bin/rclone") == [
+        "/usr/bin/rclone", "copyto", "remote:x", "/tmp/out.tar.gz"
+    ]

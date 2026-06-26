@@ -31,6 +31,7 @@ POST /streamdeck/install   provision the Stream Deck service (attached later)
 GET  /ap/status            whether the fallback AP is active {active: bool}
 POST /ap/disable           stop hostapd+dnsmasq and remove the AP flag file
 POST /update               git pull + redeploy app and Stream Deck + restart (Pi Remote OTA)
+POST /restore              full-stack snapshot restore (stop stack, swap data, restart)  {source}
 GET  /activity             shared activity/display state (polled by the deck)
 POST /activity             report user activity; wakes the display  {source?}
 POST /display/blank        blank the kiosk display now
@@ -269,6 +270,45 @@ def _compose_env():
         _, repo_dir = _find_firstboot()
         env["REPO_DIR"] = repo_dir or "/home/foodassistant/FoodAssistant"
     return env
+
+
+# --- Full-stack restore source handling (FoodAssistant-h18b) --------------
+# The restore helper (/usr/local/bin/foodassistant-restore) accepts a snapshot
+# that is either already on the device (an absolute path) or pulled first from
+# the configured rclone remote (an "rclone:" prefixed source). These pure
+# helpers classify the source string and build the rclone pull command so they
+# can be unit-tested without root or docker.
+
+# rclone.conf lives in the install data dir, the same path the app container
+# uses for RCLONE_CONFIG (admin.py writes it there).
+_RCLONE_CONFIG = f"{INSTALL_DIR}/data/rclone.conf"
+
+
+def _classify_restore_source(source):
+    """Classify a restore source string.
+
+    Returns a (kind, value) tuple:
+      ("path", "/abs/path.tar.gz")  an absolute path on the device
+      ("rclone", "remote:bucket/x") an object to pull from the rclone remote
+      ("invalid", reason)           anything else (empty, relative, bad rclone)
+    """
+    s = (source or "").strip()
+    if not s:
+        return ("invalid", "Source is required.")
+    if s.startswith("rclone:"):
+        remote = s[len("rclone:"):].strip()
+        if not remote:
+            return ("invalid", "rclone source has no remote path.")
+        return ("rclone", remote)
+    if s.startswith("/"):
+        return ("path", s)
+    return ("invalid", "Source must be an absolute path or an rclone:remote path.")
+
+
+def _rclone_pull_cmd(remote, dest, rclone="rclone"):
+    """Build the rclone command (argv list) that copies a remote object to a
+    local destination file. The caller sets RCLONE_CONFIG in the environment."""
+    return [rclone, "copyto", remote, dest]
 
 
 def _service_active(unit):
@@ -739,6 +779,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._ap_disable()
         elif self.path == "/update":
             self._update()
+        elif self.path == "/restore":
+            self._restore()
         elif self.path == "/activity":
             self._activity_post()
         elif self.path == "/display/blank":
@@ -1287,6 +1329,62 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._send(200 if result.get("ok") else 500, result)
         except subprocess.TimeoutExpired:
             self._send(500, {"ok": False, "error": "update timed out"})
+        except Exception as e:
+            self._send(500, {"ok": False, "error": str(e)})
+
+    def _restore(self):
+        # Restore the FULL stack snapshot (Grocy + Mealie + app data) by
+        # delegating to the foodassistant-restore helper. The bridge runs as
+        # root, so it can stop/start the docker stack and swap the data dirs;
+        # the app container cannot. This mirrors _update: we validate the body,
+        # run the helper synchronously, parse its LAST stdout line as JSON, and
+        # relay it with the full text as "log".
+        #
+        # Design (the bead's open question): we do NOT accept a browser upload
+        # of the large snapshot. The body's {source} is either an absolute path
+        # to a .tar.gz already on the device, or "rclone:<remote-path>" to pull
+        # from the configured rclone remote first. The helper itself also
+        # resolves rclone sources, but we validate the shape here so a bad
+        # source fails fast with a clear error and never reaches the stack.
+        helper = "/usr/local/bin/foodassistant-restore"
+        if not os.path.exists(helper):
+            self._send(500, {"ok": False, "error": "restore helper not installed"})
+            return
+        body = self._body()
+        kind, value = _classify_restore_source(body.get("source", ""))
+        if kind == "invalid":
+            self._send(400, {"ok": False, "error": value})
+            return
+        try:
+            env = dict(os.environ)
+            env.setdefault("INSTALL_DIR", INSTALL_DIR)
+            env.setdefault("RCLONE_CONFIG", _RCLONE_CONFIG)
+            # Stopping the stack, pulling a possibly-large snapshot, unpacking,
+            # and restarting can take a while on a Pi, so keep the timeout
+            # generous (the proxy's timeout is matched to this).
+            r = subprocess.run(
+                [helper, body.get("source", "").strip()],
+                capture_output=True, text=True, timeout=900, env=env,
+            )
+            out = (r.stdout or "").strip()
+            result = {}
+            if out:
+                last = out.splitlines()[-1].strip()
+                try:
+                    result = json.loads(last)
+                except ValueError:
+                    result = {}
+            if not result:
+                self._send(500, {
+                    "ok": False,
+                    "error": (r.stderr or out or "restore helper produced no output").strip(),
+                    "log": out,
+                })
+                return
+            result["log"] = out
+            self._send(200 if result.get("ok") else 500, result)
+        except subprocess.TimeoutExpired:
+            self._send(500, {"ok": False, "error": "restore timed out"})
         except Exception as e:
             self._send(500, {"ok": False, "error": str(e)})
 
