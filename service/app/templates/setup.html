@@ -3039,6 +3039,10 @@ async function applyDisplay() {
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({ui_scale, display_rotation}),
     });
+    // Restart the kiosk browser so the attached display picks up the new scale
+    // and orientation without a reboot, even when this change is made from a
+    // separate phone or laptop (FoodAssistant-1njb). Best-effort and Pi-only.
+    fetch('setup/kiosk/restart', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'}).catch(() => {});
     location.reload();
   } catch (e) {
     if (hint) hint.textContent = 'Save failed, try Save All.';
