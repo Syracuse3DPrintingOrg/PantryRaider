@@ -600,13 +600,14 @@ function actions(s, tier) {
   const missing = (s.unmatched_ingredients || []).length;
   const btns = [];
   if (s.source === 'themealdb' || s.source === 'spoonacular') {
+    // Plain Save is always offered so saving never forces a shopping-list edit;
+    // in the shopping tier we add Save + list alongside it (FoodAssistant-j278).
+    btns.push(`<button class="btn btn-sm btn-outline-info" onclick="importExternal('${s.external_id}', '${s.source}', false, this)"
+      title="Save this recipe into Mealie"><i class="bi bi-download me-1"></i>Save</button>`);
     if (tier === 'shopping') {
       btns.push(`<button class="btn btn-sm btn-outline-warning" onclick="importExternal('${s.external_id}', '${s.source}', true, this)"
         title="Save to Mealie and add ${missing} missing ingredients to the shopping list">
         <i class="bi bi-cart-plus me-1"></i>Save + list</button>`);
-    } else {
-      btns.push(`<button class="btn btn-sm btn-outline-info" onclick="importExternal('${s.external_id}', '${s.source}', false, this)"
-        title="Save this recipe into Mealie"><i class="bi bi-download me-1"></i>Save</button>`);
     }
   } else {
     btns.push(`<button class="btn btn-sm btn-outline-primary" onclick="cookThis('${s.slug}', this)"

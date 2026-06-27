@@ -109,6 +109,9 @@
         <button class="btn btn-info" id="pv-save" onclick="saveFromPreview(this)">
           <i class="bi bi-download me-1"></i>Save to Mealie
         </button>
+        <button class="btn btn-primary" id="pv-cook" onclick="cookFromPreview(this)">
+          <i class="bi bi-fire me-1"></i>Cook
+        </button>
       </div>
     </div>
   </div>
@@ -247,6 +250,10 @@ function recipeRow(r) {
                   onclick="saveExternal('${r.external_id}', '${r.source}', this)">
             <i class="bi bi-download me-1"></i>Save
           </button>
+          <button class="btn btn-sm btn-outline-primary" title="Save it and make it the Current Recipe"
+                  onclick="cookExternal('${r.external_id}', '${r.source}', this)">
+            <i class="bi bi-fire me-1"></i>Cook
+          </button>
         </div>
       </div>
     </div>`;
@@ -314,6 +321,11 @@ async function openPreview(externalId, source) {
   saveBtn.className = 'btn btn-info';
   saveBtn.innerHTML = '<i class="bi bi-download me-1"></i>Save to Mealie';
   saveBtn.onclick = () => saveFromPreview(saveBtn);
+  const cookBtn = document.getElementById('pv-cook');
+  cookBtn.classList.remove('d-none');   // external recipe: cooking is available
+  cookBtn.disabled = true;
+  cookBtn.innerHTML = '<i class="bi bi-fire me-1"></i>Cook';
+  cookBtn.onclick = () => cookFromPreview(cookBtn);
   new bootstrap.Modal(document.getElementById('previewModal')).show();
   try {
     const params = new URLSearchParams({external_id: externalId, source});
@@ -336,12 +348,21 @@ async function openPreview(externalId, source) {
     if (d.source_url) link.href = d.source_url;
     show('pv-loading', false); show('pv-body', true);
     document.getElementById('pv-save').disabled = false;
+    document.getElementById('pv-cook').disabled = false;
   } catch (e) {
     show('pv-loading', false);
     const err = document.getElementById('pv-error');
     err.textContent = 'Could not load recipe: ' + e.message;
     err.classList.remove('d-none');
   }
+}
+
+// Cook from the preview modal: save the previewed external recipe, then make it
+// the Current Recipe (FoodAssistant-j278). Only external recipes carry an
+// external_id, so this button is shown for those and hidden for LLM previews.
+async function cookFromPreview(btn) {
+  if (!previewRecipe || previewRecipe._llm) return;
+  await cookExternal(previewRecipe.external_id, previewRecipe.source, btn);
 }
 
 async function saveFromPreview(btn) {
@@ -380,6 +401,36 @@ async function saveFromPreview(btn) {
     btn.disabled = false;
     btn.innerHTML = orig;
     alert('Save failed: ' + e.message);
+  }
+}
+
+// Save an external (web) recipe into Mealie, then make it the Current Recipe and
+// open that page (FoodAssistant-j278). Saving-to-cook is intentional: the web
+// recipe has to live in Mealie before it can be the active recipe, so we import
+// it (no shopping-list changes) and use the returned slug to set the current
+// recipe. Any failure restores the button rather than leaving it spinning.
+async function cookExternal(externalId, source, btn) {
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+  try {
+    const r = await fetch('mealie/recipes/import-external', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({external_id: externalId, source, add_missing_to_list: false}),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || r.statusText);
+    const r2 = await fetch('current-recipe/from-mealie', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({slug: d.slug}),
+    });
+    const d2 = await r2.json();
+    if (!r2.ok) throw new Error(d2.detail || r2.statusText);
+    window.location.href = 'ui/current-recipe';
+  } catch (e) {
+    btn.disabled = false;
+    btn.innerHTML = orig;
+    alert('Could not cook this recipe: ' + e.message);
   }
 }
 
@@ -554,6 +605,8 @@ async function generateFromSearch() {
   saveBtn.className = 'btn btn-info';
   saveBtn.innerHTML = '<i class="bi bi-download me-1"></i>Save to Mealie';
   saveBtn.onclick = () => saveFromPreview(saveBtn);
+  // LLM-generated previews have no external_id/slug to cook from; hide Cook.
+  document.getElementById('pv-cook').classList.add('d-none');
   show('pv-loading'); hide('pv-body'); hide('pv-error');
   new bootstrap.Modal(document.getElementById('previewModal')).show();
   btn.disabled = false;
