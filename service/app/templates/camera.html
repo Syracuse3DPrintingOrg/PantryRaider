@@ -47,14 +47,26 @@
 {% block scripts %}
 {% if cameras %}
 <script>
-  // Camera feeds rendered from app settings (FoodAssistant-oewn). An .m3u8
-  // stream uses a <video> element (native HLS where the browser supports it);
-  // anything else (typically an MJPEG endpoint) uses an <img>. An onerror on the
-  // element shows a friendly "unavailable" panel instead of a broken icon.
+  // Camera feeds rendered from app settings. Three display modes:
+  //   - HLS (.m3u8 stream): a <video> element (native HLS where supported).
+  //   - Home Assistant (and any snapshot-only camera): a refreshing <img> driven
+  //     by the snapshot proxy. HA's MJPEG stream is unreliable inside an <img>
+  //     (and the token cannot go in the URL), so a periodic still is the robust,
+  //     proven path, the same one the Stream Deck uses.
+  //   - Direct MJPEG (a manual stream URL): a plain <img> on the stream.
+  // An onerror shows a friendly "unavailable" panel instead of a broken icon.
   const CAMERAS = {{ cameras|tojson }};
   const videoEl = document.getElementById('cameraVideo');
   const imgEl = document.getElementById('cameraImg');
   const errEl = document.getElementById('cameraError');
+  // How often the refreshing-snapshot mode pulls a new still, in milliseconds.
+  const SNAPSHOT_INTERVAL_MS = 1500;
+  let snapTimer = null;
+  let snapOk = false;
+
+  function _stopSnapshot() {
+    if (snapTimer) { clearInterval(snapTimer); snapTimer = null; }
+  }
 
   function _hideAll() {
     videoEl.classList.add('d-none');
@@ -67,8 +79,22 @@
     errEl.classList.remove('d-none');
   }
 
+  function _startSnapshot(src) {
+    // Cache-bust each load so the browser fetches a fresh frame. The first load
+    // proves reachability; later failures keep the last good frame on screen.
+    snapOk = false;
+    const tick = () => {
+      const sep = src.includes('?') ? '&' : '?';
+      imgEl.src = `${src}${sep}_=${Date.now()}`;
+    };
+    imgEl.classList.remove('d-none');
+    tick();
+    snapTimer = setInterval(tick, SNAPSHOT_INTERVAL_MS);
+  }
+
   function selectCamera(index) {
     const cam = CAMERAS[index];
+    _stopSnapshot();
     if (!cam) { _showError(); return; }
     // Stop any previous img/video load before switching source.
     imgEl.removeAttribute('src');
@@ -77,16 +103,22 @@
     videoEl.load();
     _hideAll();
 
-    const url = (cam.stream_src || '').trim();
-    if (!url) { _showError(); return; }
+    const stream = (cam.stream_src || '').trim();
+    const snapshot = (cam.snapshot_src || '').trim();
 
-    if (url.toLowerCase().split('?')[0].endsWith('.m3u8')) {
-      videoEl.src = url;
+    if (stream && stream.toLowerCase().split('?')[0].endsWith('.m3u8')) {
+      videoEl.src = stream;
       videoEl.classList.remove('d-none');
       videoEl.play().catch(() => { /* autoplay may be blocked; controls remain */ });
-    } else {
-      imgEl.src = url;
+    } else if (cam.is_ha && snapshot) {
+      _startSnapshot(snapshot);
+    } else if (stream) {
+      imgEl.src = stream;
       imgEl.classList.remove('d-none');
+    } else if (snapshot) {
+      _startSnapshot(snapshot);
+    } else {
+      _showError();
     }
 
     // Update the switcher active state.
@@ -95,7 +127,13 @@
     });
   }
 
-  imgEl.addEventListener('error', _showError);
+  imgEl.addEventListener('load', () => { snapOk = true; });
+  imgEl.addEventListener('error', () => {
+    // In refreshing-snapshot mode, only show the error panel if no frame has
+    // ever loaded; once a frame is up, a transient miss keeps the last one.
+    if (snapTimer && snapOk) return;
+    _showError();
+  });
   videoEl.addEventListener('error', _showError);
 
   // Start on the first configured camera.
