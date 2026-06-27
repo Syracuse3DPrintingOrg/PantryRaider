@@ -77,7 +77,7 @@
     videoEl.load();
     _hideAll();
 
-    const url = (cam.stream_url || '').trim();
+    const url = (cam.stream_src || '').trim();
     if (!url) { _showError(); return; }
 
     if (url.toLowerCase().split('?')[0].endsWith('.m3u8')) {

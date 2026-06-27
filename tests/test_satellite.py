@@ -373,8 +373,8 @@ def test_merge_streamdeck_settings_overlays_ha_and_cameras():
     assert merged["ha_base_url"] == "http://ha.local:8123"
     assert merged["ha_token"] == "secret-llat"
     assert merged["ha_slots"][0]["entity_id"] == "light.kitchen"
-    # The deck only needs name + snapshot_url; extra keys are dropped.
-    assert merged["cameras"] == [{"name": "Door", "snapshot_url": "http://x/snap.jpg"}]
+    # The deck needs name + snapshot_url + ha_entity; other keys are dropped.
+    assert merged["cameras"] == [{"name": "Door", "snapshot_url": "http://x/snap.jpg", "ha_entity": ""}]
     assert base == {"rotation": 0}  # original not mutated
 
 

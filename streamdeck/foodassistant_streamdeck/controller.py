@@ -718,28 +718,41 @@ class Controller:
 
     # -- camera ------------------------------------------------------------
 
-    def _camera_url_for(self, name: str = "") -> str:
-        """Snapshot URL of the camera called ``name``, or the first when blank.
+    def _camera_entry_for(self, name: str = "") -> Optional[dict]:
+        """The camera dict called ``name``, or the first usable one when blank.
 
         ``config.cameras`` is a list of dicts pushed by the app. A non-empty
-        ``name`` matches a camera by its name (case-insensitive); if it does not
-        match, or is blank, the first camera with a snapshot URL is used so a key
-        bound to a since-removed camera still shows something. "" when none.
-        """
+        ``name`` matches by camera name (case-insensitive); if it does not match,
+        or is blank, the first camera with a snapshot URL or an HA entity is used
+        so a key bound to a since-removed camera still shows something."""
         cams = getattr(self.config, "cameras", None) or []
         want = name.strip().lower()
         if want:
             for cam in cams:
                 if isinstance(cam, dict) and str(cam.get("name", "")).strip().lower() == want:
-                    url = str(cam.get("snapshot_url", "")).strip()
-                    if url:
-                        return url
+                    return cam
         for cam in cams:
-            if isinstance(cam, dict):
-                url = str(cam.get("snapshot_url", "")).strip()
-                if url:
-                    return url
-        return ""
+            if isinstance(cam, dict) and (cam.get("snapshot_url") or cam.get("ha_entity")):
+                return cam
+        return None
+
+    def _camera_target(self, name: str = "") -> tuple[str, Optional[dict]]:
+        """Return (snapshot_url, headers) for the chosen camera, or ("", None).
+
+        Home Assistant cameras resolve to a bearer-authenticated URL (HA rejects
+        the token in the query string); other cameras use their stored URL."""
+        cam = self._camera_entry_for(name)
+        if not cam:
+            return "", None
+        return actions.camera_snapshot_target(
+            cam,
+            getattr(self.config, "ha_base_url", "") or "",
+            getattr(self.config, "ha_token", "") or "",
+        )
+
+    def _camera_url_for(self, name: str = "") -> str:
+        """Snapshot URL (the cache key) for the camera called ``name``."""
+        return self._camera_target(name)[0]
 
     def _first_camera_url(self) -> str:
         """Snapshot URL of the first configured camera, or "" when none."""
@@ -750,16 +763,19 @@ class Controller:
         entry = self._camera_cache.get(url)
         return entry[0] if entry else None
 
-    async def _camera_snapshot(self, url: str = "", max_age: float = 0.0) -> Optional[bytes]:
+    async def _camera_snapshot(self, url: str = "", max_age: float = 0.0,
+                               headers: Optional[dict] = None) -> Optional[bytes]:
         """Fetch a camera snapshot JPEG, cached per URL. None on failure.
 
-        ``url`` is the snapshot endpoint (empty resolves to the first camera).
-        Reuses the cached frame when it is younger than ``max_age`` seconds (0
-        forces a fresh fetch) so the draw loop does not hammer the camera. Any
-        network or service error returns None and leaves the cache untouched, so
-        a transient hiccup keeps showing the last good frame rather than blanking.
+        ``url`` is the snapshot endpoint (empty resolves to the first camera) and
+        ``headers`` carries any auth (HA cameras need a bearer header). Reuses the
+        cached frame when it is younger than ``max_age`` seconds (0 forces a fresh
+        fetch) so the draw loop does not hammer the camera. Any network or service
+        error returns None and leaves the cache untouched, so a transient hiccup
+        keeps showing the last good frame rather than blanking.
         """
-        url = url or self._first_camera_url()
+        if not url:
+            url, headers = self._camera_target("")
         if not url or self.client is None:
             return None
         if max_age > 0:
@@ -767,7 +783,7 @@ class Controller:
             if entry is not None and (time.monotonic() - entry[1]) < max_age:
                 return entry[0]
         try:
-            r = await self.client.get(url, timeout=4.0)
+            r = await self.client.get(url, timeout=4.0, headers=headers or None)
             if r.status_code == 200 and r.content:
                 self._camera_cache[url] = (r.content, time.monotonic())
                 return r.content
@@ -775,15 +791,17 @@ class Controller:
             pass
         return None
 
-    def _shown_camera_urls(self) -> list[str]:
-        """Distinct snapshot URLs for the single-key camera faces on this page."""
-        urls: list[str] = []
+    def _shown_camera_targets(self) -> list[tuple[str, Optional[dict]]]:
+        """Distinct (url, headers) for the single-key camera faces on this page."""
+        targets: list[tuple[str, Optional[dict]]] = []
+        seen: set[str] = set()
         for spec in self._current():
             if spec is not None and spec.kind == "camera":
-                url = self._camera_url_for(getattr(spec, "camera_name", "") or "")
-                if url and url not in urls:
-                    urls.append(url)
-        return urls
+                url, headers = self._camera_target(getattr(spec, "camera_name", "") or "")
+                if url and url not in seen:
+                    seen.add(url)
+                    targets.append((url, headers))
+        return targets
 
     async def _refresh_camera_snapshot(self) -> None:
         """Refresh the cached snapshots for the camera faces on this page, on poll.
@@ -792,13 +810,13 @@ class Controller:
         deck without one never pays for the fetch and two keys on different
         cameras each refresh. Redraws when any new frame arrives so the faces stay
         current between presses."""
-        urls = self._shown_camera_urls()
-        if not urls:
+        targets = self._shown_camera_targets()
+        if not targets:
             return
         changed = False
-        for url in urls:
+        for url, headers in targets:
             before = self._cached_snapshot(url)
-            snap = await self._camera_snapshot(url, max_age=0.0)
+            snap = await self._camera_snapshot(url, max_age=0.0, headers=headers)
             if snap is not None and snap is not before:
                 changed = True
         if changed:
@@ -867,9 +885,8 @@ class Controller:
         rows, cols = self.deck.key_layout()
         key_size = self.deck.key_image_format()["size"]
         try:
-            snap = await self._camera_snapshot(
-                self._camera_url_for(self._camera_full_name), max_age=0.0
-            )
+            _url, _headers = self._camera_target(self._camera_full_name)
+            snap = await self._camera_snapshot(_url, max_age=0.0, headers=_headers)
             if snap is None:
                 self._set_full_deck_tiles(
                     render.message_across_deck(rows, cols, key_size, "No camera")

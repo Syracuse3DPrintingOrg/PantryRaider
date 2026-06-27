@@ -4789,6 +4789,7 @@ function _sdCameraRow(cam) {
   div.querySelector('.sd-cam-name').value = cam.name || '';
   div.querySelector('.sd-cam-stream').value = cam.stream_url || '';
   div.querySelector('.sd-cam-snapshot').value = cam.snapshot_url || '';
+  div.querySelector('.sd-cam-entity').value = cam.ha_entity || '';
   return div;
 }
 
@@ -4860,11 +4861,13 @@ async function _sdDiscoverCameras(btn) {
       if (out) out.innerHTML = '<span class="text-secondary small">No camera entities found on Home Assistant.</span>';
       return;
     }
-    const have = new Set(_sdCollectCameras().map(c => (c.snapshot_url || '').split('?')[0]));
+    // Dedup by entity id: an HA camera is bound by its entity, and the server
+    // proxies it with the bearer token, so the URLs are not stored.
+    const have = new Set(_sdCollectCameras().map(c => c.ha_entity).filter(Boolean));
     const list = document.createElement('div');
     list.className = 'list-group';
     cams.forEach(cam => {
-      const already = have.has((cam.snapshot_url || '').split('?')[0]);
+      const already = have.has(cam.entity_id);
       const item = document.createElement('div');
       item.className = 'list-group-item d-flex justify-content-between align-items-center py-1';
       const label = document.createElement('span');
@@ -4876,7 +4879,7 @@ async function _sdDiscoverCameras(btn) {
       add.innerHTML = already ? '<i class="bi bi-check2"></i> Added' : '<i class="bi bi-plus-lg"></i> Add';
       add.disabled = already;
       add.onclick = () => {
-        _sdAddCameraRow({name: cam.name, stream_url: cam.stream_url, snapshot_url: cam.snapshot_url});
+        _sdAddCameraRow({name: cam.name, ha_entity: cam.entity_id});
         add.disabled = true;
         add.className = 'btn btn-sm btn-outline-secondary';
         add.innerHTML = '<i class="bi bi-check2"></i> Added';
@@ -4903,8 +4906,13 @@ function _sdCollectCameras() {
     const name = row.querySelector('.sd-cam-name')?.value.trim() || '';
     const stream_url = row.querySelector('.sd-cam-stream')?.value.trim() || '';
     const snapshot_url = row.querySelector('.sd-cam-snapshot')?.value.trim() || '';
-    if (!name && !stream_url && !snapshot_url) continue;
-    out.push({name, stream_url, snapshot_url});
+    const ha_entity = row.querySelector('.sd-cam-entity')?.value.trim() || '';
+    if (!name && !stream_url && !snapshot_url && !ha_entity) continue;
+    const entry = {name, stream_url, snapshot_url};
+    // An HA entity binds the camera to Home Assistant; the server proxies it with
+    // the bearer token, so no stream/snapshot URL needs to be stored or correct.
+    if (ha_entity) entry.ha_entity = ha_entity;
+    out.push(entry);
   }
   return out;
 }

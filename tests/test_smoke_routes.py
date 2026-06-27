@@ -100,6 +100,52 @@ def test_get_page_renders(client, path):
     assert "<html" in r.text.lower() or "<!doctype" in r.text.lower()
 
 
+def test_camera_snapshot_proxy_adds_bearer(client, monkeypatch):
+    # An HA camera is fetched server-side with a bearer header and handed back as
+    # an image, so the browser never needs the token (which HA rejects in a query).
+    from app.config import settings
+    import app.routers.ui as ui
+
+    monkeypatch.setattr(settings, "streamdeck_ha_base_url", "http://ha.local:8123", raising=False)
+    monkeypatch.setattr(settings, "streamdeck_ha_token", "tok", raising=False)
+    monkeypatch.setattr(settings, "streamdeck_cameras",
+                        [{"name": "Door", "ha_entity": "camera.door"}], raising=False)
+
+    seen = {}
+
+    class _Resp:
+        status_code = 200
+        content = b"\xff\xd8jpegbytes"
+        headers = {"content-type": "image/jpeg"}
+
+    class _FakeClient:
+        def __init__(self, *a, **k):
+            pass
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *a):
+            return False
+        async def get(self, url, headers=None, **k):
+            seen["url"] = url
+            seen["headers"] = headers
+            return _Resp()
+
+    import httpx
+    monkeypatch.setattr(httpx, "AsyncClient", _FakeClient)
+
+    r = client.get("/ui/camera/0/snapshot")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("image/jpeg")
+    assert r.content == b"\xff\xd8jpegbytes"
+    assert seen["url"] == "http://ha.local:8123/api/camera_proxy/camera.door"
+    assert seen["headers"] == {"Authorization": "Bearer tok"}
+
+
+def test_camera_snapshot_proxy_unknown_index(client):
+    r = client.get("/ui/camera/999/snapshot")
+    assert r.status_code == 404
+
+
 def test_root_redirects_to_ui(client):
     r = client.get("/", follow_redirects=False)
     assert r.status_code in (303, 307)

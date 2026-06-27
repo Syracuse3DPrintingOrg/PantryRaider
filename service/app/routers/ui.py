@@ -1,6 +1,6 @@
 import secrets
 from fastapi import APIRouter, Depends, Form, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from sqlalchemy.orm import Session
 from typing import Optional
 
@@ -284,11 +284,87 @@ async def timers_page(request: Request):
 
 @router.get("/camera", response_class=HTMLResponse)
 async def camera_page(request: Request):
+    from ..services.cameras import camera_sources
     return templates.TemplateResponse(request, "camera.html", {
         "request": request,
         "active": "camera",
-        "cameras": settings.streamdeck_cameras,
+        "cameras": camera_sources(settings.streamdeck_cameras),
     })
+
+
+@router.get("/camera/{idx}/snapshot")
+async def camera_snapshot(idx: int):
+    """Proxy a still frame for camera ``idx``.
+
+    Home Assistant cameras are fetched server-side with the bearer token (a
+    browser cannot send that header), then handed back as an image. Manual
+    cameras redirect to their own snapshot URL, which the browser can fetch.
+    """
+    import httpx
+    from fastapi.responses import Response, RedirectResponse
+    from ..services.cameras import ha_feed
+    cams = settings.streamdeck_cameras or []
+    if idx < 0 or idx >= len(cams):
+        return JSONResponse({"detail": "Unknown camera."}, status_code=404)
+    entry = cams[idx]
+    url, headers = ha_feed(entry, "snapshot")
+    if url:
+        try:
+            async with httpx.AsyncClient(timeout=8.0) as c:
+                r = await c.get(url, headers=headers)
+        except Exception as e:
+            return JSONResponse({"detail": f"Camera unreachable: {e}"}, status_code=502)
+        if r.status_code != 200:
+            return JSONResponse({"detail": f"Camera returned HTTP {r.status_code}."}, status_code=502)
+        media = r.headers.get("content-type", "image/jpeg")
+        return Response(content=r.content, media_type=media)
+    direct = (entry.get("snapshot_url") or "").strip() if isinstance(entry, dict) else ""
+    if direct:
+        return RedirectResponse(direct)
+    return JSONResponse({"detail": "Camera has no snapshot."}, status_code=404)
+
+
+@router.get("/camera/{idx}/stream")
+async def camera_stream(idx: int):
+    """Proxy the live MJPEG stream for camera ``idx``.
+
+    The upstream multipart stream is relayed as-is so an ``<img>`` keeps
+    updating. Home Assistant cameras carry the bearer header server-side; manual
+    cameras redirect to their own stream URL.
+    """
+    import httpx
+    from fastapi.responses import StreamingResponse, RedirectResponse
+    from starlette.background import BackgroundTask
+    from ..services.cameras import ha_feed
+    cams = settings.streamdeck_cameras or []
+    if idx < 0 or idx >= len(cams):
+        return JSONResponse({"detail": "Unknown camera."}, status_code=404)
+    entry = cams[idx]
+    url, headers = ha_feed(entry, "stream")
+    if url:
+        client = httpx.AsyncClient(timeout=None)
+        try:
+            req = client.build_request("GET", url, headers=headers)
+            upstream = await client.send(req, stream=True)
+        except Exception as e:
+            await client.aclose()
+            return JSONResponse({"detail": f"Camera unreachable: {e}"}, status_code=502)
+        if upstream.status_code != 200:
+            await upstream.aclose()
+            await client.aclose()
+            return JSONResponse({"detail": f"Camera returned HTTP {upstream.status_code}."}, status_code=502)
+
+        async def _close():
+            await upstream.aclose()
+            await client.aclose()
+
+        media = upstream.headers.get("content-type", "multipart/x-mixed-replace")
+        return StreamingResponse(upstream.aiter_raw(), media_type=media,
+                                 background=BackgroundTask(_close))
+    direct = (entry.get("stream_url") or "").strip() if isinstance(entry, dict) else ""
+    if direct:
+        return RedirectResponse(direct)
+    return JSONResponse({"detail": "Camera has no stream."}, status_code=404)
 
 
 @router.get("/weather", response_class=HTMLResponse)

@@ -126,7 +126,8 @@ def _merge_streamdeck_settings(config: dict, location: str, units: str, theme: s
     merged["ha_token"] = ha_token
     merged["ha_slots"] = ha_slots or []
     merged["cameras"] = [
-        {"name": c.get("name", ""), "snapshot_url": c.get("snapshot_url", "")}
+        {"name": c.get("name", ""), "snapshot_url": c.get("snapshot_url", ""),
+         "ha_entity": c.get("ha_entity", "")}
         for c in (cameras or []) if isinstance(c, dict)
     ]
     return merged

@@ -2671,15 +2671,38 @@ def test_camera_url_for_selects_named_camera():
     import types
     from foodassistant_streamdeck.controller import Controller
 
-    fake = types.SimpleNamespace(config=types.SimpleNamespace(cameras=[
+    c = Controller.__new__(Controller)
+    c.config = types.SimpleNamespace(cameras=[
         {"name": "Front", "snapshot_url": "http://a/snap"},
         {"name": "Garage", "snapshot_url": "http://b/snap"},
-    ]))
+    ], ha_base_url="", ha_token="")
     # Named match (case-insensitive), blank -> first, unknown -> first fallback.
-    assert Controller._camera_url_for(fake, "Garage") == "http://b/snap"
-    assert Controller._camera_url_for(fake, "garage") == "http://b/snap"
-    assert Controller._camera_url_for(fake, "") == "http://a/snap"
-    assert Controller._camera_url_for(fake, "Nope") == "http://a/snap"
+    assert c._camera_url_for("Garage") == "http://b/snap"
+    assert c._camera_url_for("garage") == "http://b/snap"
+    assert c._camera_url_for("") == "http://a/snap"
+    assert c._camera_url_for("Nope") == "http://a/snap"
     # No cameras at all -> empty string, never raises.
-    empty = types.SimpleNamespace(config=types.SimpleNamespace(cameras=[]))
-    assert Controller._camera_url_for(empty, "x") == ""
+    empty = Controller.__new__(Controller)
+    empty.config = types.SimpleNamespace(cameras=[], ha_base_url="", ha_token="")
+    assert empty._camera_url_for("x") == ""
+
+
+def test_camera_snapshot_target_uses_bearer_for_ha():
+    # An ha_entity resolves to a bearer-authenticated HA URL (no token in query).
+    url, headers = actions.camera_snapshot_target(
+        {"name": "Door", "ha_entity": "camera.front_door"},
+        "http://ha.local:8123", "tok",
+    )
+    assert url == "http://ha.local:8123/api/camera_proxy/camera.front_door"
+    assert headers == {"Authorization": "Bearer tok"}
+    # A legacy token-baked URL is recovered to the same bearer form.
+    url2, headers2 = actions.camera_snapshot_target(
+        {"name": "Door", "snapshot_url": "http://ha.local:8123/api/camera_proxy/camera.front_door?token=LLAT"},
+        "http://ha.local:8123", "tok",
+    )
+    assert url2 == "http://ha.local:8123/api/camera_proxy/camera.front_door"
+    assert headers2 == {"Authorization": "Bearer tok"}
+    # A plain camera keeps its URL and sends no auth header.
+    url3, headers3 = actions.camera_snapshot_target(
+        {"name": "Cam", "snapshot_url": "http://192.168.1.5/snap.jpg"}, "", "")
+    assert url3 == "http://192.168.1.5/snap.jpg" and headers3 is None

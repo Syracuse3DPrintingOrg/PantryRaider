@@ -1360,6 +1360,54 @@ def override_to_spec(slot: int, override: dict) -> Optional[ActionSpec]:
     return None
 
 
+def _entity_from_camera_proxy(url: str) -> tuple[str, str]:
+    """Recover (entity_id, ha_base) from an HA camera_proxy URL, or ("", "").
+
+    Lets a camera saved before entity-based proxying (its snapshot URL had the
+    token baked in) still be fetched with a bearer header instead.
+    """
+    if not url or "/api/camera_proxy" not in url:
+        return "", ""
+    from urllib.parse import urlparse
+    try:
+        parsed = urlparse(url)
+    except Exception:
+        return "", ""
+    parts = parsed.path.split("/")
+    entity = ""
+    for i, seg in enumerate(parts):
+        if seg in ("camera_proxy", "camera_proxy_stream") and i + 1 < len(parts):
+            entity = parts[i + 1]
+            break
+    if not entity:
+        return "", ""
+    base = f"{parsed.scheme}://{parsed.netloc}" if parsed.scheme and parsed.netloc else ""
+    return entity, base
+
+
+def camera_snapshot_target(cam: dict, ha_base: str, ha_token: str) -> tuple[str, Optional[dict]]:
+    """Resolve a camera dict to (snapshot_url, headers) the deck can fetch.
+
+    Home Assistant cameras (an ``ha_entity``, or a legacy ``/api/camera_proxy``
+    URL) are fetched from HA with an ``Authorization: Bearer`` header, since HA
+    rejects the long-lived token in the query string. Everything else uses the
+    stored ``snapshot_url`` with no extra headers. Pure, so it is unit-testable.
+    """
+    if not isinstance(cam, dict):
+        return "", None
+    base = (ha_base or "").rstrip("/")
+    entity = str(cam.get("ha_entity", "")).strip()
+    snap = str(cam.get("snapshot_url", "")).strip()
+    if not entity and "/api/camera_proxy" in snap:
+        entity, parsed_base = _entity_from_camera_proxy(snap)
+        if not base:
+            base = parsed_base
+    if entity and base and ha_token:
+        from urllib.parse import quote
+        return f"{base}/api/camera_proxy/{quote(entity, safe='')}", {"Authorization": f"Bearer {ha_token}"}
+    return snap, None
+
+
 def _truthy(value: Any) -> bool:
     """Loosely interpret a JSON/TOML flag as a boolean.
 

@@ -1204,7 +1204,8 @@ async def streamdeck_config_set(request: Request):
                 payload["config"]["ha_token"] = settings.streamdeck_ha_token
                 payload["config"]["ha_slots"] = settings.streamdeck_ha_slots
                 payload["config"]["cameras"] = [
-                    {"name": c.get("name", ""), "snapshot_url": c.get("snapshot_url", "")}
+                    {"name": c.get("name", ""), "snapshot_url": c.get("snapshot_url", ""),
+                     "ha_entity": c.get("ha_entity", "")}
                     for c in settings.streamdeck_cameras if isinstance(c, dict)
                 ]
                 if settings.is_satellite():
