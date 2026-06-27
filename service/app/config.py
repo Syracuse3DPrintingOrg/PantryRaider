@@ -12,7 +12,7 @@ from .hardware import is_raspberry_pi
 
 # Single source of truth for the app version (shown in the UI, used by the
 # update checker, and reported by FastAPI). Bump on each tagged release.
-APP_VERSION = "0.6.42"
+APP_VERSION = "0.6.43"
 
 # GitHub repo used by the in-app update checker.
 GITHUB_REPO = "Syracuse3DPrinting/FoodAssistant"
@@ -182,7 +182,7 @@ _SAVEABLE = [
     "streamdeck_weather_location", "streamdeck_weather_units",
     "streamdeck_key_style", "streamdeck_icon_color",
     "floating_nav_position", "floating_nav_orientation", "floating_nav_autohide_streamdeck",
-    "deployment_mode", "remote_server_url", "upstream_api_key", "kiosk_pin", "kiosk_readonly_when_locked",
+    "deployment_mode", "remote_server_url", "remote_server_ip", "upstream_api_key", "kiosk_pin", "kiosk_readonly_when_locked",
     "satellite_sync_minutes", "satellite_last_sync", "device_id",
     "secret_key", "auth_password", "totp_secret", "api_key", "extra_api_keys", "auth_required",
     "rclone_remote", "rclone_schedule_hours",
@@ -572,6 +572,11 @@ class Settings(BaseSettings):
     # that pull. Unused in the other modes.
     remote_server_url: str = ""
     upstream_api_key: str = ""
+    # Satellite only: last known-good LAN IP of the main server, cached on each
+    # successful sync. Used as a fallback when the configured .local hostname
+    # stops resolving (mDNS down on the network), so the satellite stays wired
+    # to its server (FoodAssistant-xwn0). Written only when the IP changes.
+    remote_server_ip: str = ""
     # Satellite only: an optional numeric PIN that gates the kiosk UI. A
     # satellite turns the UI password off by default (the main server owns
     # access control), so this is a lightweight, touchscreen-friendly lock for

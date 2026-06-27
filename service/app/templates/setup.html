@@ -861,7 +861,9 @@
                   <i class="bi bi-search me-1"></i>Scan LAN
                 </button>
               </div>
-              <div class="form-text">Full address of the main server, no trailing slash. Example: <code>http://192.168.1.10:9284</code></div>
+              <div class="form-text">Full address of the main server, no trailing slash. Example: <code>http://192.168.1.10:9284</code>.
+                A numeric IP is the most reliable. If you use a <code>.local</code> name and your network does not resolve mDNS,
+                this device caches the server's IP after the first successful sync and falls back to it automatically.</div>
               <div id="settings-scan-result" class="small mt-1"></div>
             </div>
             <div class="mb-3">

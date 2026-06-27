@@ -14,6 +14,7 @@ from __future__ import annotations
 import logging
 import socket
 from datetime import datetime, timezone
+from urllib.parse import urlparse, urlunparse
 
 import httpx
 
@@ -207,6 +208,49 @@ def sync_from_upstream(timeout: float = 8.0) -> dict:
     return result
 
 
+def _swap_host(url: str, host: str) -> str:
+    """Return url with its hostname replaced by host, keeping scheme/port/path.
+
+    Used to retry the satellite sync against the server's cached IP when its
+    .local name stops resolving. Pure, so it is unit-testable."""
+    p = urlparse(url)
+    port = f":{p.port}" if p.port else ""
+    return urlunparse((p.scheme, f"{host}{port}", p.path, p.params, p.query, p.fragment))
+
+
+def _is_ip_literal(host: str) -> bool:
+    """True when host is already a bare IPv4/IPv6 address (no DNS needed)."""
+    for family in (socket.AF_INET, socket.AF_INET6):
+        try:
+            socket.inet_pton(family, host)
+            return True
+        except OSError:
+            continue
+    return False
+
+
+def _resolve_host(host: str) -> str:
+    """Resolve a hostname to an IPv4 address, or '' if it cannot be resolved."""
+    if not host or _is_ip_literal(host):
+        return host
+    try:
+        return socket.gethostbyname(host)
+    except OSError:
+        return ""
+
+
+def _sync_candidates(url: str, host: str, cached_ip: str) -> list[str]:
+    """The URLs to try, in order: the configured one first, then an IP-based
+    fallback built from the cached server IP when the configured host is a name
+    that differs from that IP. Keeps mDNS as the primary path but survives it
+    going down on the network (FoodAssistant-xwn0)."""
+    candidates = [url]
+    cached_ip = (cached_ip or "").strip()
+    if cached_ip and host and host != cached_ip and not _is_ip_literal(host):
+        candidates.append(_swap_host(url, cached_ip))
+    return candidates
+
+
 def _do_sync_from_upstream(timeout: float = 8.0) -> dict:
     if not settings.is_satellite():
         return {"ok": False, "error": "not a satellite", "applied": [], "defaults": 0, "command": None}
@@ -225,11 +269,18 @@ def _do_sync_from_upstream(timeout: float = 8.0) -> dict:
         "X-Device-Version": APP_VERSION,
         "X-Device-Ip": _local_ip(),
     }
-    try:
-        resp = httpx.get(url, headers=headers, timeout=timeout)
-    except Exception as exc:  # network error: keep prior config
-        logger.warning("satellite sync: cannot reach %s: %s", url, exc)
-        return {"ok": False, "error": f"cannot reach server: {exc}", "applied": [], "defaults": 0, "command": None}
+    host = urlparse(base).hostname or ""
+    resp = None
+    last_exc = None
+    for cand in _sync_candidates(url, host, settings.remote_server_ip):
+        try:
+            resp = httpx.get(cand, headers=headers, timeout=timeout)
+            break
+        except Exception as exc:  # try the next candidate (e.g. cached IP)
+            last_exc = exc
+            logger.warning("satellite sync: cannot reach %s: %s", cand, exc)
+    if resp is None:  # every candidate failed: keep prior config
+        return {"ok": False, "error": f"cannot reach server: {last_exc}", "applied": [], "defaults": 0, "command": None}
 
     if resp.status_code != 200:
         detail = ""
@@ -239,6 +290,17 @@ def _do_sync_from_upstream(timeout: float = 8.0) -> dict:
             detail = resp.text[:200]
         logger.warning("satellite sync: server returned %s: %s", resp.status_code, detail)
         return {"ok": False, "error": f"server {resp.status_code}: {detail}", "applied": [], "defaults": 0, "command": None}
+
+    # Cache the server's current IP for use as a fallback the next time its
+    # .local name does not resolve. Resolve the configured host while mDNS is
+    # working (a literal IP resolves to itself); only persist when it changed,
+    # so a healthy sync does not rewrite settings.json every cycle.
+    fresh_ip = _resolve_host(host)
+    if fresh_ip and fresh_ip != (settings.remote_server_ip or ""):
+        try:
+            settings.save({"remote_server_ip": fresh_ip})
+        except Exception as exc:  # non-fatal: the fallback just stays stale
+            logger.warning("satellite sync: could not cache server IP: %s", exc)
 
     data = resp.json()
     applied = _apply_config(data.get("config", {}))

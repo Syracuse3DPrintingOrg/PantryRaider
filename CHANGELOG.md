@@ -38,6 +38,7 @@ All notable changes to FoodAssistant are recorded here. The format is based on
 - **Cook icon unified.** Cook uses a flame icon consistently across the web UI and the Stream Deck.
 
 ### Fixed
+- **Satellites survive a flaky mDNS.** A Pi Remote caches its main server's LAN IP on each successful sync and falls back to it automatically when the configured `.local` name stops resolving, so the satellite stays wired to its server on networks that block or drop multicast DNS. Device discovery (the Scan LAN button) was already IP-based, and the co-hosted Grocy/Mealie browser links already prefer the LAN IP.
 - **Over-the-air Pi updates now refresh the Stream Deck too.** The update helper redeploys both the web app and the Stream Deck controller package (previously only the app), reinstalls Python dependencies only when they changed, restarts both services, and is safe to re-run after a manual `git pull`.
 
 ## [0.6.0] - 2026-06-26

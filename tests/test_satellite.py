@@ -485,3 +485,78 @@ def test_satellite_config_endpoint_includes_profiles(client, monkeypatch):
     body = r.json()
     assert "streamdeck_profiles" in body
     assert isinstance(body["streamdeck_profiles"], list)
+
+
+# -- mDNS-resilient sync: IP fallback (FoodAssistant-xwn0) -------------------
+
+
+def test_swap_host_keeps_scheme_port_path():
+    from app.services.satellite import _swap_host
+    assert _swap_host(
+        "http://server.local:9284/api/config/satellite", "192.168.1.50"
+    ) == "http://192.168.1.50:9284/api/config/satellite"
+
+
+def test_is_ip_literal():
+    from app.services.satellite import _is_ip_literal
+    assert _is_ip_literal("192.168.1.50") is True
+    assert _is_ip_literal("::1") is True
+    assert _is_ip_literal("server.local") is False
+
+
+def test_sync_candidates_adds_ip_fallback_only_when_useful():
+    from app.services.satellite import _sync_candidates
+    url = "http://server.local:9284/api/config/satellite"
+    # A name host plus a cached IP yields the IP fallback as a second candidate.
+    assert _sync_candidates(url, "server.local", "192.168.1.50") == [
+        url, "http://192.168.1.50:9284/api/config/satellite"
+    ]
+    # No cached IP, or the host is already that IP, means no extra candidate.
+    assert _sync_candidates(url, "server.local", "") == [url]
+    ip_url = "http://192.168.1.50:9284/x"
+    assert _sync_candidates(ip_url, "192.168.1.50", "192.168.1.50") == [ip_url]
+
+
+def test_sync_falls_back_to_cached_ip_when_mdns_fails(satellite_mode, monkeypatch):
+    """When the .local host does not resolve, the sync retries the cached IP."""
+    from app.services import satellite as sat
+    import httpx
+
+    monkeypatch.setattr(settings, "remote_server_url", "http://server.local:9284")
+    monkeypatch.setattr(settings, "remote_server_ip", "192.168.1.50")
+    payload = {"ok": True, "config": {}, "expiry_defaults": [], "command": None}
+    calls = []
+
+    def fake_get(url, **kwargs):
+        calls.append(url)
+        if "server.local" in url:
+            raise httpx.ConnectError("name resolution failed")
+        return _FakeResponse(200, payload)
+
+    with patch.object(sat.httpx, "get", side_effect=fake_get), \
+            patch.object(sat, "_apply_defaults", return_value=0), \
+            patch.object(sat, "_resolve_host", return_value=""), \
+            patch("app.dependencies.reset_providers"):
+        out = sat.sync_from_upstream()
+
+    assert out["ok"] is True
+    assert any("server.local" in u for u in calls)        # tried mDNS first
+    assert any("192.168.1.50" in u for u in calls)        # then the cached IP
+
+
+def test_sync_caches_resolved_server_ip(satellite_mode, monkeypatch):
+    """A successful sync caches the freshly resolved server IP for next time."""
+    from app.services import satellite as sat
+
+    monkeypatch.setattr(settings, "remote_server_url", "http://server.local:9284")
+    monkeypatch.setattr(settings, "remote_server_ip", "")
+    payload = {"ok": True, "config": {}, "expiry_defaults": [], "command": None}
+
+    with patch.object(sat.httpx, "get", return_value=_FakeResponse(200, payload)), \
+            patch.object(sat, "_apply_defaults", return_value=0), \
+            patch.object(sat, "_resolve_host", return_value="10.0.0.9"), \
+            patch("app.dependencies.reset_providers"):
+        out = sat.sync_from_upstream()
+
+    assert out["ok"] is True
+    assert settings.remote_server_ip == "10.0.0.9"
