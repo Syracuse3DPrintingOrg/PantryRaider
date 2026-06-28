@@ -650,7 +650,8 @@ def test_generate_recipe_threads_custom_prompt(client, monkeypatch):
                     json={"name": "Chili", "custom_prompt": "extra spicy, no beans"})
     assert r.status_code == 200
     assert captured["name"] == "Chili"
-    assert captured["extra"] == "extra spicy, no beans"
+    assert "extra spicy, no beans" in captured["extra"]
+    assert "USER NOTE" in captured["extra"]
 
     # Omitting the custom prompt yields an empty instruction (default prompt).
     r = client.post("/mealie/recipes/generate", json={"name": "Soup"})

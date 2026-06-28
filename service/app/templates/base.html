@@ -111,6 +111,20 @@
         max-height: calc(100vh - 60px);
         overflow-y: auto;
       }
+      /* Keep the main menu visible on a phone instead of folding it behind the
+         hamburger. The primary nav sits outside the collapse and lays out as a
+         single horizontal row that scrolls sideways if the tabs overflow, so the
+         essentials are always one tap away. The hamburger now reveals only the
+         utility controls (QR, kiosk, settings, overflow, sign out). */
+      .navbar .nav-primary {
+        min-width: 0;
+        overflow-x: auto;
+        flex-wrap: nowrap;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+      }
+      .navbar .nav-primary::-webkit-scrollbar { display: none; }
+      .navbar .nav-primary .nav-link { white-space: nowrap; }
     }
     /* Small-screen kiosk cluster (FoodAssistant-7j5b).
        q6ql — simpler nav on a narrow panel (the 800x480 pi_remote/pi_hosted
@@ -255,30 +269,33 @@
   <nav class="navbar navbar-expand-lg bg-body-tertiary border-bottom fixed-top">
     <div class="container-fluid">
       <a class="navbar-brand" href="ui/"><i class="bi bi-fridge me-2"></i>FoodAssistant</a>
+      {# Primary navigation lives OUTSIDE the collapse so the main menu items stay
+         visible on a phone instead of hiding behind the hamburger (the toggler
+         now only reveals the utility controls). On small screens the row lays out
+         horizontally and scrolls if it overflows (see the @media block below).
+
+         Small-screen nav simplification (FoodAssistant-q6ql). Essential tabs
+         (Inventory, Expiring, Add, Pending, Shopping) carry .nav-essential and
+         stay visible on a narrow panel; the rest carry .nav-secondary and are
+         hidden by the @media (max-width: 820px) block below, where they reappear
+         as links inside the #moreMenu overflow dropdown. #}
+      <ul class="navbar-nav nav-primary me-auto flex-row flex-nowrap">
+        {% for tab in nav_tabs() if tab.key not in ['about', 'defaults'] %}
+        <li class="nav-item {{ 'nav-essential' if tab.key in ['inventory', 'expiring', 'add', 'pending', 'shopping'] else 'nav-secondary' }}">
+          <a class="nav-link {% if active == tab.key %}active{% endif %}" href="{{ tab.href }}">
+            <i class="bi {{ tab.icon }} me-1"></i>{{ tab.label }}
+            {%- if tab.key == 'pending' %}
+            <span class="badge rounded-pill text-bg-warning d-none" id="pending-nav-badge">0</span>
+            {%- endif %}
+          </a>
+        </li>
+        {% endfor %}
+      </ul>
       <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#nav" aria-controls="nav" aria-expanded="false" aria-label="Toggle navigation">
         <span class="navbar-toggler-icon"></span>
       </button>
-      <div class="collapse navbar-collapse" id="nav">
-        {# Small-screen nav simplification (FoodAssistant-q6ql). Essential tabs
-           (Inventory, Expiring, Add, Pending, Shopping) carry .nav-essential and
-           stay visible on a narrow panel; the rest carry .nav-secondary and are
-           hidden by the @media (max-width: 820px) block below, where they reappear
-           as links inside the #moreMenu overflow dropdown. On larger screens the
-           full row shows and the small-screen overflow copies stay hidden, so the
-           Bootstrap navbar-expand-lg collapse keeps working unchanged. #}
-        <ul class="navbar-nav me-auto">
-          {% for tab in nav_tabs() if tab.key not in ['about', 'defaults'] %}
-          <li class="nav-item {{ 'nav-essential' if tab.key in ['inventory', 'expiring', 'add', 'pending', 'shopping'] else 'nav-secondary' }}">
-            <a class="nav-link {% if active == tab.key %}active{% endif %}" href="{{ tab.href }}">
-              <i class="bi {{ tab.icon }} me-1"></i>{{ tab.label }}
-              {%- if tab.key == 'pending' %}
-              <span class="badge rounded-pill text-bg-warning d-none" id="pending-nav-badge">0</span>
-              {%- endif %}
-            </a>
-          </li>
-          {% endfor %}
-        </ul>
-        <ul class="navbar-nav">
+      <div class="collapse navbar-collapse flex-grow-0" id="nav">
+        <ul class="navbar-nav ms-auto">
           <li class="nav-item">
             <button class="nav-link btn btn-link" data-bs-toggle="modal" data-bs-target="#qrModal" title="Phone QR code">
               <i class="bi bi-qr-code"></i>
