@@ -26,7 +26,7 @@ What FoodAssistant adds on top:
 - **Home Assistant integration** -- REST sensors, barcode scanner automations via keyboard_remote, and a Lovelace inventory dashboard
 - **Recipe suggestions from what you have** -- ranks your Mealie recipe library by how much of each recipe is already in stock; items expiring soon float to the top
 
-**Try it:** there's a self-contained [interactive demo](https://foodassistant-demo.pages.dev) (no backend, runs in your browser) that walks through the inventory, scanning, recipe suggestions, cameras, the unit converter, and the Stream Deck. It is published to Cloudflare Pages and redeploys on every change (see [`docs/demo/README.md`](docs/demo/README.md)); you can also open `docs/demo/index.html` locally.
+**Try it:** there's a self-contained [interactive demo](docs/demo/index.html) (no backend, runs in your browser) that walks through the inventory, scanning, recipe suggestions, cameras, the unit converter, and the Stream Deck. It is deployed to Cloudflare and redeploys on every push (see [`docs/demo/README.md`](docs/demo/README.md)); you can also open `docs/demo/index.html` locally.
 
 We stand on the shoulders of giants. See [About & Credits](/ui/about) in the app for the full list.
 

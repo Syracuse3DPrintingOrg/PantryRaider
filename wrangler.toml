@@ -1,0 +1,15 @@
+# Cloudflare Workers config for the static interactive demo.
+#
+# This deploys docs/demo (a self-contained, no-backend HTML demo) as a Workers
+# Static Assets site. The Cloudflare dashboard's "Workers Builds" Git
+# integration runs `npx wrangler deploy`, which reads this file; there is no
+# build step and no Worker script, just the static directory.
+#
+# After the first deploy the site is at
+# https://foodassistant-demo.<your-subdomain>.workers.dev (you can add a custom
+# domain in the dashboard later).
+name = "foodassistant-demo"
+compatibility_date = "2025-06-01"
+
+[assets]
+directory = "./docs/demo"
