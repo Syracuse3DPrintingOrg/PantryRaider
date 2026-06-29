@@ -1450,6 +1450,21 @@ install_rotation_helper() {
   else
     warn "foodassistant-apply-rotation not found; live rotation will not apply"
   fi
+  # The compositor-aware display blank/wake helper (FoodAssistant-8khi). The
+  # host bridge prefers it over vcgencmd so blanking does not drop a cage kiosk
+  # to the console. Best-effort: a missing helper just means the bridge falls
+  # back to vcgencmd/xset.
+  local power_src=""
+  for candidate in "$ASSET_DIR/foodassistant-display-power" \
+                   "$REPO_DIR/scripts/image-build/foodassistant-display-power"; do
+    [ -f "$candidate" ] && power_src="$candidate" && break
+  done
+  if [ -n "$power_src" ]; then
+    install -m 755 "$power_src" /usr/local/bin/foodassistant-display-power
+    log "Installed /usr/local/bin/foodassistant-display-power"
+  else
+    warn "foodassistant-display-power not found; display blanking will use vcgencmd"
+  fi
 }
 
 # Install the foodassistant-update helper to /usr/local/bin so the host bridge's

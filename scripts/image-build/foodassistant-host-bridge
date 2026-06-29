@@ -131,11 +131,18 @@ def _display_power_commands(on, which=shutil.which):
     """Ordered candidate command vectors to switch the display on/off.
 
     The caller tries each until one succeeds. Kept pure (the tool probe is
-    injected) so the selection is unit-testable. vcgencmd cuts HDMI power on a
-    Pi regardless of the compositor, so it is preferred; xset covers an X11
-    fallback.
+    injected) so the selection is unit-testable.
+
+    The compositor-aware helper is preferred (FoodAssistant-8khi): on a cage
+    kiosk, vcgencmd cuts the panel below the compositor, dropping it to the
+    console with no clean recovery until reboot. foodassistant-display-power
+    toggles the output through wlr-randr so cage stays in control. vcgencmd and
+    xset remain as fallbacks for setups without the compositor helper (e.g. a
+    bare X11 display or when the kiosk is not running).
     """
     cmds = []
+    if which("foodassistant-display-power"):
+        cmds.append(["foodassistant-display-power", "on" if on else "off"])
     if which("vcgencmd"):
         cmds.append(["vcgencmd", "display_power", "1" if on else "0"])
     if which("xset"):

@@ -455,17 +455,28 @@ def test_should_blank_threshold():
 
 
 def test_display_power_commands_prefers_vcgencmd():
-    # Only vcgencmd present.
+    # Only vcgencmd present (no compositor helper).
     cmds = bridge._display_power_commands(False, which=lambda n: n == "vcgencmd")
     assert cmds == [["vcgencmd", "display_power", "0"]]
     cmds_on = bridge._display_power_commands(True, which=lambda n: n == "vcgencmd")
     assert cmds_on == [["vcgencmd", "display_power", "1"]]
 
 
+def test_display_power_commands_prefers_compositor_helper():
+    # The compositor-aware helper must come first so blanking does not drop a
+    # cage kiosk to the console (FoodAssistant-8khi).
+    cmds = bridge._display_power_commands(False, which=lambda n: True)
+    assert cmds[0] == ["foodassistant-display-power", "off"]
+    cmds_on = bridge._display_power_commands(True, which=lambda n: True)
+    assert cmds_on[0] == ["foodassistant-display-power", "on"]
+
+
 def test_display_power_commands_orders_vcgencmd_then_xset():
     cmds = bridge._display_power_commands(False, which=lambda n: True)
-    assert cmds[0][0] == "vcgencmd"
+    assert ["vcgencmd", "display_power", "0"] in cmds
     assert ["xset", "dpms", "force", "off"] in cmds
+    # Compositor helper precedes the firmware/X11 fallbacks.
+    assert cmds.index(["foodassistant-display-power", "off"]) < cmds.index(["vcgencmd", "display_power", "0"])
 
 
 def test_display_power_commands_empty_when_no_tools():
