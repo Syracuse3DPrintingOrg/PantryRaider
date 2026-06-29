@@ -1220,7 +1220,15 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 cwd="/opt/foodassistant", capture_output=True, text=True, timeout=10
             )
             if r.returncode == 0 and r.stdout.strip():
-                self._send(200, {"ok": True, "actions": json.loads(r.stdout)})
+                dump = json.loads(r.stdout)
+                # The dump is an object {"actions": [...], "default_keys": {...}};
+                # an older streamdeck build emitted a bare actions list, so cope
+                # with both shapes here.
+                if isinstance(dump, list):
+                    payload = {"ok": True, "actions": dump}
+                else:
+                    payload = {"ok": True, **dump}
+                self._send(200, payload)
             else:
                 self._send(500, {"ok": False, "error": (r.stderr or "no output").strip()})
         except Exception as e:

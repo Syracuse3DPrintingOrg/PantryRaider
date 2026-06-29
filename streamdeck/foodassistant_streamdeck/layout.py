@@ -12,6 +12,7 @@ from typing import Optional
 
 from .actions import (
     ACTIONS,
+    DEFAULT_ORDER,
     KEYPAD_CANCEL,
     KEYPAD_CLEAR,
     KEYPAD_ENTER,
@@ -193,6 +194,26 @@ def apply_overrides(
             continue
         pages[page_idx][pos] = spec
     return pages
+
+
+def default_key_names(key_count: int) -> list[str]:
+    """Flat per-slot action names for the stock layout on a ``key_count`` deck.
+
+    Drives the web grid editor so a fresh editor opens pre-populated with the
+    same default arrangement the controller renders when no ``keys`` are
+    configured. Built from ``build_pages(DEFAULT_ORDER, key_count)`` (the very
+    layout the controller uses) so there is one source of truth: the pages are
+    flattened into a single list, a None slot becomes the explicit "blank"
+    sentinel, and each ActionSpec becomes its action name. The list runs across
+    pages in the same order ``apply_overrides`` counts slots, so editor slot N
+    lines up with override slot N.
+    """
+    pages = build_pages(list(DEFAULT_ORDER), key_count)
+    names: list[str] = []
+    for page in pages:
+        for slot in page:
+            names.append(slot.name if slot is not None else "blank")
+    return names
 
 
 def build_pages(

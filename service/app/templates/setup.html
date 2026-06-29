@@ -4329,6 +4329,11 @@ async function setKmsRotation(reboot) {
 // Stream Deck visual key-grid editor
 const SD_GRID = { 6: {cols:3, rows:2}, 15: {cols:5, rows:3}, 32: {cols:8, rows:4} };
 let _sdCatalog = null;       // [{name,label,kind,group,color,description}]
+// Default key arrangement per deck size, keyed by key count as a string
+// ("6"/"15"/"32"), e.g. {"15": ["expiring","pending",...]}. Sourced from the
+// streamdeck layout module via /streamdeck/actions so the editor pre-populates
+// a fresh grid with the same defaults the controller renders.
+let _sdDefaultKeys = null;
 let _sdKeys = [];            // flat, deck-index order; "blank" for empty
 let _sdDragSrc = null;       // {type:'grid'|'palette', idx?:number, name:string}
 
@@ -4336,7 +4341,11 @@ async function _sdLoadCatalog() {
   if (_sdCatalog) return _sdCatalog;
   try {
     const r = await fetch('setup/streamdeck/actions').then(x => x.json());
-    if (r.ok && Array.isArray(r.actions)) { _sdCatalog = r.actions; return _sdCatalog; }
+    if (r.ok && Array.isArray(r.actions)) {
+      _sdCatalog = r.actions;
+      if (r.default_keys && typeof r.default_keys === 'object') _sdDefaultKeys = r.default_keys;
+      return _sdCatalog;
+    }
   } catch (e) { /* fall through to fallback */ }
   // Fallback list so the editor still renders if the bridge is unreachable.
   _sdCatalog = [
@@ -4366,6 +4375,28 @@ async function _sdLoadCatalog() {
     {name:'page_prev',label:'Back',kind:'system',group:'System',color:'#334155'},
   ];
   return _sdCatalog;
+}
+
+// Minimal stock order used only when /streamdeck/actions could not supply the
+// server's per-size default_keys (e.g. the bridge was unreachable). It mirrors
+// the head of DEFAULT_ORDER in streamdeck/actions.py so a fresh editor is still
+// pre-populated rather than blank; the server-sourced defaults take precedence
+// whenever they are available, so this is not the source of truth.
+const _SD_FALLBACK_DEFAULT_ORDER = [
+  'expiring', 'pending', 'ready', 'shopping_count', 'commit', 'add',
+  'inventory', 'cook', 'recipes', 'mealplan', 'shopping', 'meal_today',
+  'cooked', 'timer_1', 'timer_2', 'timer_3', 'timer_eggs', 'timer_pasta',
+  'timer_rice', 'timers_view', 'convert', 'clock', 'weather', 'forecast',
+  'health', 'camera', 'screen_off', 'brightness',
+];
+
+// The default key arrangement (flat, deck-index order) for a deck of ``count``
+// keys: the server-supplied list when present, else the fallback order trimmed
+// to fit. Returns a fresh copy so callers can mutate it freely.
+function _sdDefaultKeysFor(count) {
+  const fromServer = _sdDefaultKeys && _sdDefaultKeys[String(count)];
+  if (Array.isArray(fromServer)) return fromServer.slice();
+  return _SD_FALLBACK_DEFAULT_ORDER.slice(0, count);
 }
 
 function _sdActionByName(name) {
@@ -5622,7 +5653,16 @@ async function loadHardwareStatus() {
           const brEl = document.getElementById('streamdeck_brightness');
           if (brEl) brEl.value = cfg.brightness.toString();
         }
-        _sdKeys = Array.isArray(cfg.keys) ? cfg.keys.slice() : [];
+        // Make sure the catalog (and its server-sourced default_keys) is loaded
+        // before we decide the grid contents, so a config with no saved keys can
+        // be pre-populated with the stock arrangement instead of a blank grid.
+        await _sdLoadCatalog();
+        if (Array.isArray(cfg.keys) && cfg.keys.length) {
+          _sdKeys = cfg.keys.slice();
+        } else {
+          const count = parseInt(document.getElementById('streamdeck_key_count')?.value || '15', 10);
+          _sdKeys = _sdDefaultKeysFor(count);
+        }
         await _sdRenderGrid();
         if (cfg.weather_location !== undefined) {
           const wlEl = document.getElementById('streamdeck_weather_location');
@@ -5638,7 +5678,14 @@ async function loadHardwareStatus() {
     } catch (e) {
       console.warn("Could not load streamdeck config:", e);
     }
-    if (!_sdKeys.length) { await _sdRenderGrid(); }
+    // If the config could not be loaded (or carried no keys), still open the
+    // editor pre-populated with the stock arrangement rather than a blank grid.
+    if (!_sdKeys.length) {
+      await _sdLoadCatalog();
+      const count = parseInt(document.getElementById('streamdeck_key_count')?.value || '15', 10);
+      _sdKeys = _sdDefaultKeysFor(count);
+      await _sdRenderGrid();
+    }
 
     // Keep polling while either install is in flight.
     if ((r.kiosk && r.kiosk.installing) || (r.streamdeck && r.streamdeck.installing)) {

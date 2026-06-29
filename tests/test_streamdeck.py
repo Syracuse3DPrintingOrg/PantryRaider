@@ -109,6 +109,27 @@ def test_build_pages_rejects_bad_size():
         layout.build_pages(["pending"], 0)
 
 
+def test_default_key_names_matches_build_pages():
+    # The web editor pre-populates its grid from this flattened default layout,
+    # which must be exactly build_pages(DEFAULT_ORDER) walked across pages so
+    # editor slot N lines up with the slot the controller renders.
+    for kc in layout.supported_key_counts():
+        pages = layout.build_pages(list(actions.DEFAULT_ORDER), kc)
+        expected = [
+            slot.name if slot is not None else "blank"
+            for page in pages for slot in page
+        ]
+        assert layout.default_key_names(kc) == expected
+
+
+def test_default_key_names_starts_with_default_order():
+    # On the roomy XL the whole default order shows in order, so the first key
+    # the editor pre-populates is the head of DEFAULT_ORDER.
+    names = layout.default_key_names(32)
+    assert names[0] == actions.DEFAULT_ORDER[0]
+    assert all(n in actions.ACTIONS or n == "blank" for n in names)
+
+
 # -- action registry -------------------------------------------------------
 
 

@@ -31,7 +31,14 @@ def main(argv: list[str] | None = None) -> int:
     if "--dump-actions" in sys.argv:
         import json
         from .actions import catalog
-        print(json.dumps(catalog()))
+        from .layout import default_key_names, supported_key_counts
+        # The default key arrangement per supported deck size, so the web grid
+        # editor can pre-populate a fresh grid from the same layout the
+        # controller uses (rather than a hardcoded copy in the page's JS).
+        defaults = {
+            str(kc): default_key_names(kc) for kc in supported_key_counts()
+        }
+        print(json.dumps({"actions": catalog(), "default_keys": defaults}))
         return 0
     args = _parse_args(argv if argv is not None else sys.argv[1:])
     logging.basicConfig(
