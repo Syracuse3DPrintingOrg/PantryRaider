@@ -424,6 +424,22 @@ def test_poll_status_tolerates_errors():
     assert out == {"expiring": 0, "pending": 0, "shopping": 0, "ready": 0}
 
 
+def test_start_server_timer_posts_to_timers():
+    # A preset deck timer mirrors to the shared server registry via POST /timers
+    # so the web UI /timers page reflects it (FoodAssistant).
+    client = _FakeClient(post_map={"/timers": _Resp(200, {"id": 1})})
+    ok = asyncio.run(actions.start_server_timer(client, "http://x", "Eggs", 360))
+    assert ok is True
+    assert ("POST", "http://x/timers") in client.calls
+
+
+def test_start_server_timer_tolerates_failure():
+    # A non-200 (or unreachable server) returns False so the press still drives
+    # the deck's own local countdown.
+    ok = asyncio.run(actions.start_server_timer(_FakeClient(), "http://x", "Eggs", 360))
+    assert ok is False
+
+
 def test_poll_status_includes_shopping_and_ready_counts():
     client = _FakeClient(
         get_map={

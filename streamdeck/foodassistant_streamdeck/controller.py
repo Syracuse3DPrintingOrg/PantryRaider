@@ -619,7 +619,11 @@ class Controller:
             timer.set_minutes(round(float(recipe_seconds) / 60))
             self._start_recipe_server_timer(recipe_spec)
         elif preset > 0 and starting_fresh:
+            # A preset key loads its whole duration on one press, so it maps
+            # cleanly onto a shared server countdown; start one so the web UI
+            # /timers page and satellites see it too (FoodAssistant).
             timer.set_minutes(preset)
+            self._start_server_timer(self._timer_label(name), preset * 60)
         else:
             timer.short_press()
         # Reset the blink phase so a fresh alert starts on its bright frame.
@@ -640,6 +644,29 @@ class Controller:
                 label=recipe_spec.get("label", ""),
                 seconds=recipe_spec.get("seconds"),
             ),
+            self.loop,
+        )
+
+    def _timer_label(self, name: str) -> str:
+        """Best-effort display label for a timer key (per-key override first,
+        then the static ACTIONS registry), used to name the shared server timer.
+        Falls back to a generic 'Timer' so the server entry is never blank."""
+        for spec in self.key_overrides.values():
+            if spec.name == name and spec.kind == "timer":
+                return actions.clean_timer_label(spec.label) or "Timer"
+        spec = actions.ACTIONS.get(name)
+        if spec is not None and spec.kind == "timer":
+            return actions.clean_timer_label(spec.label) or "Timer"
+        return "Timer"
+
+    def _start_server_timer(self, label: str, seconds: float) -> None:
+        """Fire-and-forget POST that starts a shared server countdown for a preset
+        timer key, so surfaces beyond this deck reflect it too. Best-effort and
+        only when the event loop is live (skipped in unit tests with no loop)."""
+        if self.client is None or self.loop is None or not self.loop.is_running():
+            return
+        asyncio.run_coroutine_threadsafe(
+            actions.start_server_timer(self.client, self.config.base_url, label, seconds),
             self.loop,
         )
 

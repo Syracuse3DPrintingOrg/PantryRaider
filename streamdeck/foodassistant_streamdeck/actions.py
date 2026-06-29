@@ -1636,6 +1636,22 @@ async def add_shopping_item(client: Any, base_url: str, item: str) -> str:
         return "Failed"
 
 
+async def start_server_timer(
+    client: Any, base_url: str, label: str, seconds: float,
+) -> bool:
+    """Start a shared server countdown (POST /timers). Returns True on 200.
+
+    Used for preset timer keys so a timer started on the deck also appears on
+    the web UI /timers page and on satellites. Best-effort: any failure returns
+    False so the press still drives the deck's own local TimerState."""
+    base = base_url.rstrip("/")
+    try:
+        r = await client.post(f"{base}/timers", json={"label": label, "seconds": seconds})
+        return r.status_code == 200
+    except Exception:  # noqa: BLE001 - shared timer is best-effort
+        return False
+
+
 async def start_recipe_timer(
     client: Any, base_url: str, step_index: Any = None,
     label: str = "", seconds: Any = None,
