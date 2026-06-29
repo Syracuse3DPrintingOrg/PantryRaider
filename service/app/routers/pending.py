@@ -84,6 +84,13 @@ async def _autocheck_shopping(item_name: str) -> None:
                 await mealie.update_shopping_item(si["id"], updated)
 
 
+# Longest barcode we will accept from a scanner. UPC-A is 12, EAN-13 is 13, and
+# GS1 variable-weight / GS1-128 product codes run to roughly 22. Anything beyond
+# this is concatenation from a scanner buffer that did not clear between scans,
+# so it is refused rather than queued (FoodAssistant-doz6).
+_MAX_BARCODE_LEN = 24
+
+
 class ScanRequest(BaseModel):
     barcode: str
     quantity: float = 1.0
@@ -138,6 +145,19 @@ async def scan_barcode(body: ScanRequest, request: Request, db: Session = Depend
     barcode = body.barcode.strip()
     if not barcode:
         raise HTTPException(400, "Barcode is required")
+    # Reject an implausibly long code rather than queueing nonsense. A real
+    # product barcode (UPC-A 12, EAN-13 13, GS1 variable-weight up to ~22) never
+    # runs this long; a much longer string is concatenation from a scanner buffer
+    # that did not clear between scans (an HA-side input_text.barcode_buffer that
+    # never reset), so we refuse it instead of polluting the pending list. The
+    # scanner UI ignores the body, so this returns a readable 200 status rather
+    # than a hard error (FoodAssistant-doz6).
+    if len(barcode) > _MAX_BARCODE_LEN:
+        return JSONResponse(
+            {"status": "rejected", "reason": "barcode too long",
+             "barcode": barcode[:_MAX_BARCODE_LEN] + "…", "length": len(barcode)},
+            status_code=200,
+        )
 
     # Scanner mode routes the same physical scan to a different action
     # (FoodAssistant-8jbk). "inventory" (the default) falls through to the

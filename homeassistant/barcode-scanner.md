@@ -191,7 +191,11 @@ actions:
             data:
               value: ""
       # Digit pressed - append to the buffer. Codes 2-11 are 1..9,0 in
-      # order, so the digit is computed arithmetically.
+      # order, so the digit is computed arithmetically. If the buffer has
+      # already grown past a real barcode's length (24), Enter must have been
+      # missed on the previous scan, so start fresh with this digit instead of
+      # concatenating two scans into one nonsense code. The server also refuses
+      # anything longer than 24, so the pending list never fills with garbage.
       - conditions:
           - condition: template
             value_template: "{{ 2 <= key <= 11 }}"
@@ -200,8 +204,17 @@ actions:
             target:
               entity_id: input_text.barcode_buffer
             data:
-              value: "{{ buffer ~ ((key - 1) % 10) }}"
+              value: >-
+                {{ ((key - 1) % 10) if (buffer | length) >= 24
+                   else (buffer ~ ((key - 1) % 10)) }}
 ```
+
+> If scans keep arriving concatenated (one long code spanning several
+> products), the buffer is not clearing on Enter: your scanner may send a
+> terminator other than Enter (key_code 28), or send no terminator at all.
+> Check **Developer Tools - Events** for the terminator's `key_code` and add
+> it to the submit condition (e.g. `{{ key in [28, 96] }}` to also accept the
+> keypad Enter), or configure the scanner to append a carriage return suffix.
 
 **Debugging tips:**
 

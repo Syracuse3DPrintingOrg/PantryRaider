@@ -100,6 +100,35 @@ def test_consume_failure_returns_status_not_500(client, monkeypatch):
     assert r.json()["status"] == "consume_failed"
 
 
+def test_overlong_barcode_is_rejected_not_queued(client):
+    """A concatenated barcode (buffer that never cleared) is refused instead of
+    creating a nonsense pending item (FoodAssistant-doz6)."""
+    scanner_mode.set_mode("inventory")
+    junk = "1" * 60
+    r = client.post("/pending/scan", json={"barcode": junk})
+    assert r.status_code == 200
+    body = r.json()
+    # Refused before any lookup/queue, so the garbage never becomes a pending row.
+    assert body["status"] == "rejected"
+    assert body["length"] == 60
+
+
+def test_plausible_long_barcode_still_accepted(client, monkeypatch):
+    """A GS1 variable-weight code (up to ~22 digits) is below the cap and still
+    queues, so the guard does not reject legitimate longer barcodes."""
+    scanner_mode.set_mode("inventory")
+    from app.routers import pending as pending_router
+
+    async def _lookup(barcode, db):
+        from app.models.food import FoodItem
+        return FoodItem(name="Ground Beef")
+
+    monkeypatch.setattr(pending_router, "lookup_barcode", _lookup)
+    r = client.post("/pending/scan", json={"barcode": "021248141011152083353"})
+    assert r.status_code == 200
+    assert r.json().get("status") != "rejected"
+
+
 def test_scanner_mode_endpoints(client):
     assert client.get("/pending/scanner-mode").json()["mode"] == "inventory"
     cycled = client.post("/pending/scanner-mode/cycle").json()
