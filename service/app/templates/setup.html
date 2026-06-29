@@ -810,9 +810,11 @@
             <i class="bi bi-shield-lock me-2"></i>Security
             <i class="bi bi-{{ 'check-circle-fill text-success' if sec_ok else 'exclamation-circle-fill text-warning' }} ms-auto" title="{{ 'Configured' if sec_ok else 'Password required' }}"></i>
           </button>
+          {% if not is_satellite %}
           <button class="nav-link d-flex align-items-center" data-bs-toggle="pill" data-bs-target="#pane-tunnel" type="button">
             <i class="bi bi-globe me-2"></i>Remote Access
           </button>
+          {% endif %}
 
           {# --- Devices & hardware: scanners, satellites, the appliance --- #}
           {{ menu_header('Devices & Hardware') }}
@@ -1748,6 +1750,7 @@
         </div>
 
         <!-- Remote Access -->
+        {% if not is_satellite %}
         <div class="tab-pane fade" id="pane-tunnel">
           <p class="pane-intro">Expose FoodAssistant over the internet without port-forwarding your router.</p>
 
@@ -1824,6 +1827,7 @@
             <div class="test-result" id="tunnel-result"></div>
           </div>
         </div>
+        {% endif %}
 
         <!-- Backup & Updates -->
         <div class="tab-pane fade" id="pane-data">
@@ -4202,8 +4206,10 @@ async function wizSaveAll() {
   showRecipeSource();
   scannerTypeChanged();
   renderNavEditor();
+  {% if not is_satellite %}
   tunnelModeChanged();
   _initTunnelStatus();
+  {% endif %}
 
   // Settings form only: update auth hint on load
   {% if configured %}

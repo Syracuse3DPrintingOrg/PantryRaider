@@ -421,6 +421,7 @@ async def setup_page(request: Request):
         "deployment_modes": modes,
         "current_mode": current_mode,
         "is_pi": is_raspberry_pi(),
+        "is_satellite": settings.is_satellite(),
         "board_model": board_model(),
         "pi_mdns_host": _pi_mdns_host() if is_raspberry_pi() else "",
     })

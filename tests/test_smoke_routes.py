@@ -750,6 +750,25 @@ def test_settings_menu_has_logical_groups(client):
     assert 'data-bs-target="#pane-upstream"' not in r.text
 
 
+def test_remote_access_pane_hidden_on_satellite(client, monkeypatch):
+    """The Remote Access (tunnel) pane and its nav pill are meaningless on a
+    pi_remote satellite, so they must not render there but stay on a normal
+    server (FoodAssistant-3bu5)."""
+    from app.config import settings
+
+    # Normal server: the pane and its nav pill are present.
+    page = client.get("/setup").text
+    assert 'data-bs-target="#pane-tunnel"' in page
+    assert 'id="pane-tunnel"' in page
+
+    # Satellite: both are gone.
+    monkeypatch.setattr(settings, "deployment_mode", "pi_remote")
+    assert settings.is_satellite()
+    sat = client.get("/setup").text
+    assert 'data-bs-target="#pane-tunnel"' not in sat
+    assert 'id="pane-tunnel"' not in sat
+
+
 def test_generate_recipe_threads_custom_prompt(client, monkeypatch):
     """The Cook custom prompt reaches the provider's generate_recipe as an extra
     instruction (FoodAssistant-2mh9)."""
