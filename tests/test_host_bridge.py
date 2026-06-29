@@ -303,21 +303,36 @@ def test_streamdeck_info_missing_root_returns_absent(tmp_path):
 def test_hardware_status_shape(monkeypatch):
     monkeypatch.setattr(bridge, "_drm_connected", lambda *a, **k: ["card1-HDMI-A-1"])
     monkeypatch.setattr(bridge, "_streamdeck_info", lambda *a, **k: (True, "Stream Deck XL"))
+    monkeypatch.setattr(bridge, "_streamdeck_keycount", lambda *a, **k: 32)
     assert bridge._hardware_status() == {
         "ok": True,
         "display": {"present": True, "connectors": ["card1-HDMI-A-1"]},
-        "streamdeck": {"present": True, "model": "Stream Deck XL"},
+        "streamdeck": {"present": True, "model": "Stream Deck XL", "key_count": 32},
     }
 
 
 def test_hardware_status_nothing_attached(monkeypatch):
     monkeypatch.setattr(bridge, "_drm_connected", lambda *a, **k: [])
     monkeypatch.setattr(bridge, "_streamdeck_info", lambda *a, **k: (False, ""))
+    monkeypatch.setattr(bridge, "_streamdeck_keycount", lambda *a, **k: None)
     assert bridge._hardware_status() == {
         "ok": True,
         "display": {"present": False, "connectors": []},
-        "streamdeck": {"present": False, "model": ""},
+        "streamdeck": {"present": False, "model": "", "key_count": None},
     }
+
+
+def test_streamdeck_keycount_from_sysfs_fallback(tmp_path, monkeypatch):
+    # When lsusb is unavailable, the key count is read from the Elgato device's
+    # sysfs idProduct (FoodAssistant): an MK.2 (006d) maps to 15 keys.
+    def _raise(*a, **k):
+        raise FileNotFoundError("lsusb not installed")
+    monkeypatch.setattr(bridge.subprocess, "run", _raise)
+    dev = tmp_path / "1-1"
+    dev.mkdir()
+    (dev / "idVendor").write_text("0fd9\n")
+    (dev / "idProduct").write_text("006d\n")
+    assert bridge._streamdeck_keycount(usb_root=str(tmp_path)) == 15
 
 
 # System health: power / thermal / disk warnings (FoodAssistant-me1)

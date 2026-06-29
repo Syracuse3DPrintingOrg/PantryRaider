@@ -404,10 +404,14 @@ def _hardware_status():
     """
     connectors = _drm_connected()
     sd_present, sd_model = _streamdeck_info()
+    # key_count lets the wizard/editor pre-select the right deck size instead of
+    # defaulting to 15 (FoodAssistant). None when the model is unknown, in which
+    # case the app keeps its current selection.
     return {
         "ok": True,
         "display": {"present": bool(connectors), "connectors": connectors},
-        "streamdeck": {"present": sd_present, "model": sd_model},
+        "streamdeck": {"present": sd_present, "model": sd_model,
+                       "key_count": _streamdeck_keycount()},
     }
 
 
@@ -567,7 +571,7 @@ _SD_PRODUCT_KEYS = {
 }
 
 
-def _streamdeck_keycount():
+def _streamdeck_keycount(usb_root="/sys/bus/usb/devices"):
     """Best-effort key count for the attached deck, or None if unknown."""
     try:
         import re
@@ -575,6 +579,17 @@ def _streamdeck_keycount():
         m = re.search(r"0fd9:([0-9a-fA-F]{4})", out)
         if m:
             return _SD_PRODUCT_KEYS.get(m.group(1).lower())
+    except Exception:
+        pass
+    # Fallback when lsusb is unavailable: read the Elgato device's idProduct from
+    # sysfs and map it, mirroring how _streamdeck_info finds the vendor there.
+    try:
+        import glob
+        for vendor_path in sorted(glob.glob(os.path.join(usb_root, "*", "idVendor"))):
+            if _read_sysfs(vendor_path).lower() == _STREAMDECK_VENDOR:
+                pid = _read_sysfs(os.path.join(os.path.dirname(vendor_path), "idProduct")).lower()
+                if pid:
+                    return _SD_PRODUCT_KEYS.get(pid)
     except Exception:
         pass
     return None
