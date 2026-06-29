@@ -1972,6 +1972,32 @@ docker compose up -d</code></pre>
         <div class="tab-pane fade" id="pane-devices">
           <p class="pane-intro">Pi Remote satellites that pull their config from this server. Each device checks in on every config sync, so this list updates itself. You can queue a resync or forget a device here.</p>
 
+          <!-- Stream Deck weather lives here (not only on the Pi-only Stream Deck
+               pane) so it can be set on ANY main server, including a non-Pi one,
+               since satellite decks pull it from here (FoodAssistant). -->
+          <div class="section-card mb-3">
+            <div class="section-title"><i class="bi bi-cloud-sun text-info"></i> Stream Deck Weather (for satellite decks)</div>
+            <div class="row g-3 mb-2">
+              <div class="col-md-6">
+                <label class="form-label">Weather Location</label>
+                <input type="text" class="form-control form-control-sm" id="streamdeck_weather_location"
+                       placeholder="Leave empty to auto-detect" value="{{ s.streamdeck_weather_location }}">
+              </div>
+              <div class="col-md-6">
+                <label class="form-label">Weather Units</label>
+                <select class="form-select form-select-sm" id="streamdeck_weather_units">
+                  <option value="f" {{ 'selected' if s.streamdeck_weather_units == 'f' else '' }}>Fahrenheit (°F)</option>
+                  <option value="c" {{ 'selected' if s.streamdeck_weather_units == 'c' else '' }}>Celsius (°C)</option>
+                </select>
+              </div>
+            </div>
+            <button type="button" class="btn btn-info btn-sm" onclick="saveStreamDeckWeather(this)">
+              <i class="bi bi-check-lg me-1"></i>Save weather
+            </button>
+            <span class="test-result sd-weather-result ms-1"></span>
+            <div class="form-text">A city, ZIP, or "lat,lon". Used by this device's deck (if connected) and pulled by every connected satellite deck.</div>
+          </div>
+
           <div class="section-card mb-3">
             <div class="section-title d-flex align-items-center">
               <i class="bi bi-hdd-stack text-info"></i> Known Devices
@@ -2153,6 +2179,30 @@ docker compose up -d</code></pre>
         <div class="tab-pane fade" id="pane-streamdeck">
           <p class="pane-intro">Configure the Elgato Stream Deck attached to this appliance.</p>
 
+          {% if features.satellite %}
+          <!-- On a satellite the deck weather is server-controlled and shown
+               read-only here; it is edited on the main server (Satellite Devices
+               pane). The ids are kept so the deck save still reports them. -->
+          <div class="section-card mb-3">
+            <div class="section-title"><i class="bi bi-cloud-sun text-info"></i> Stream Deck Weather</div>
+            <div class="row g-3 mb-2">
+              <div class="col-md-6">
+                <label class="form-label">Weather Location</label>
+                <input type="text" class="form-control form-control-sm" id="streamdeck_weather_location"
+                       value="{{ s.streamdeck_weather_location }}" readonly>
+              </div>
+              <div class="col-md-6">
+                <label class="form-label">Weather Units</label>
+                <select class="form-select form-select-sm" id="streamdeck_weather_units" disabled>
+                  <option value="f" {{ 'selected' if s.streamdeck_weather_units == 'f' else '' }}>Fahrenheit (°F)</option>
+                  <option value="c" {{ 'selected' if s.streamdeck_weather_units == 'c' else '' }}>Celsius (°C)</option>
+                </select>
+              </div>
+            </div>
+            <div class="form-text"><i class="bi bi-hdd-network me-1"></i>Weather comes from the main server and syncs automatically. Change it there.</div>
+          </div>
+          {% endif %}
+
           <div class="section-card mb-3">
             <div class="section-title"><i class="bi bi-grid-3x3-gap text-info"></i> Stream Deck Device</div>
             <div class="form-check form-switch mb-3">
@@ -2205,24 +2255,6 @@ docker compose up -d</code></pre>
                 <div id="streamdeck-grid" class="d-inline-grid gap-1 mb-2" style="grid-template-columns: repeat(5, minmax(0,1fr));"></div>
                 <div id="streamdeck-palette" class="d-flex flex-column gap-1 mt-1" style="max-width:700px;"></div>
               </div>
-              <div class="row g-3 mb-3">
-                <div class="col-md-6">
-                  <label class="form-label">Weather Location</label>
-                  <input type="text" class="form-control form-control-sm" id="streamdeck_weather_location" placeholder="Leave empty to auto-detect"
-                         {% if features.satellite %}value="{{ s.streamdeck_weather_location }}" readonly{% endif %}>
-                </div>
-                <div class="col-md-6">
-                  <label class="form-label">Weather Units</label>
-                  <select class="form-select form-select-sm" id="streamdeck_weather_units" {% if features.satellite %}disabled{% endif %}>
-                    <option value="f" {{ 'selected' if s.streamdeck_weather_units == 'f' else '' }}>Fahrenheit (°F)</option>
-                    <option value="c" {{ 'selected' if s.streamdeck_weather_units == 'c' else '' }}>Celsius (°C)</option>
-                  </select>
-                </div>
-                {% if features.satellite %}
-                <div class="form-text"><i class="bi bi-hdd-network me-1"></i>Weather comes from the main server and syncs automatically. Change it there.</div>
-                {% endif %}
-              </div>
-
               <div class="card bg-body-tertiary border-secondary mb-3">
                 <div class="card-body">
                   <h6 class="card-title"><i class="bi bi-house me-1"></i>Home Assistant keys</h6>
@@ -5330,6 +5362,39 @@ function _sdLoadHaSettings(cfg) {
     if (s && !s.value) s.value = slot.service || '';
     if (l && !l.value) l.value = slot.label || '';
   });
+}
+
+// Save just the Stream Deck weather. Lives outside the "Stream Deck connected"
+// gate so a main server with no local deck can set the location its satellite
+// decks pull. Persists to settings, and when a deck is attached to THIS device
+// also pushes the change straight into its config.toml.
+async function saveStreamDeckWeather(btn) {
+  const setRes = (html) => document.querySelectorAll('.sd-weather-result')
+    .forEach(e => { e.innerHTML = html; });
+  setRes('<span class="text-secondary">Saving...</span>');
+  const weather_location = document.getElementById('streamdeck_weather_location')?.value || '';
+  const weather_units = document.getElementById('streamdeck_weather_units')?.value || 'f';
+  try {
+    await fetch('setup/save', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({streamdeck_weather_location: weather_location,
+                            streamdeck_weather_units: weather_units}),
+    });
+    if (document.getElementById('has_streamdeck')?.checked) {
+      try {
+        const cur = await fetch('setup/streamdeck/config').then(x => x.json());
+        const base = (cur && cur.ok && cur.config && typeof cur.config === 'object') ? cur.config : {};
+        const merged = Object.assign({}, base, {weather_location, weather_units});
+        await fetch('setup/streamdeck/config', {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({config: merged}),
+        });
+      } catch (e) { /* no local bridge: settings save is enough for satellites */ }
+    }
+    setRes('<span class="text-success">Saved.</span>');
+  } catch (e) {
+    setRes('<span class="text-danger">Save failed: ' + e.message + '</span>');
+  }
 }
 
 async function saveStreamDeckSettings() {
