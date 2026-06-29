@@ -739,6 +739,19 @@ def test_render_status_key_with_count():
     assert img.size == (96, 96)
 
 
+def test_multiline_label_stays_on_key():
+    # A two-line label like "Screen\nOff" must fit; the second line used to run
+    # off the bottom of the key (FoodAssistant-f7ci).
+    img = render.render_key(96, 96, label="Screen\nOff", color="#374151",
+                            icon="lightbulb-off", key_style="rich",
+                            action_name="screen_off")
+    gray = img.convert("L")
+    w, h = gray.size
+    # The bottom two rows should be background, not bright label text.
+    bottom = list(gray.crop((0, h - 2, w, h)).getdata())
+    assert max(bottom) < 140, "label text reaches the bottom edge of the key"
+
+
 def test_blank_key():
     img = render.blank_key(80, 80)
     assert img.size == (80, 80)

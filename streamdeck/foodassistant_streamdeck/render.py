@@ -604,7 +604,8 @@ def _draw_label(
     chosen by the caller for contrast against the key background.
     """
     font = _fit_font(draw, label, start_px, max_width, floor=_MIN_FONT_PX)
-    if _text_width(draw, label, font) <= max_width or " " in label:
+    explicit = "\n" in label
+    if not explicit and (_text_width(draw, label, font) <= max_width or " " in label):
         lw = _text_width(draw, label, font)
         draw.text(
             ((width - lw) / 2, label_y),
@@ -614,12 +615,32 @@ def _draw_label(
         )
         return
 
-    # A single word at the floor size still overflows: wrap it.
-    lines = _wrap_single_word(draw, label, font, max_width)
+    # Multi-line: explicit newlines in the label (e.g. "Screen\nOff"), or a
+    # single word too long for one line at the floor size. Render it as a block.
+    if explicit:
+        lines = label.split("\n")
+    else:
+        lines = _wrap_single_word(draw, label, font, max_width)
+
+    # Shrink so the whole block fits the vertical space from label_y down to near
+    # the bottom edge, then bottom-clamp, so no line falls off the key. The font
+    # tracked here starts from the width-fitted size and only gets smaller.
+    size = max(_MIN_FONT_PX, min(start_px, getattr(font, "size", start_px)))
+    font = _font(size)
+    budget = max(1, int(height * 0.97 - label_y))
     box = draw.textbbox((0, 0), "Ag", font=font)
     line_h = box[3] - box[1]
+    while size > _MIN_FONT_PX and line_h * len(lines) > budget:
+        size -= 2
+        font = _font(size)
+        box = draw.textbbox((0, 0), "Ag", font=font)
+        line_h = box[3] - box[1]
+
     block_h = line_h * len(lines)
+    # Centre around label_y, then clamp the block to stay fully on the key.
     y = label_y - (block_h - line_h) / 2
+    y = min(y, height * 0.97 - block_h)
+    y = max(y, height * 0.02)
     for line in lines:
         lw = _text_width(draw, line, font)
         draw.text(((width - lw) / 2, y), line, font=font, fill=fill)
