@@ -132,6 +132,9 @@ load_config() {
   #   waveshare_hdmi  - Waveshare HDMI touchscreen HAT. configure_touch then adds
   #                     a Waveshare dtoverlay and a touch udev rule so the panel's
   #                     controller is recognised as an input device.
+  #   dsi_7inch       - MIPI DSI 7-inch panel (official Pi 7-inch or 800x480
+  #                     clone). configure_touch writes dtoverlay=vc4-kms-dsi-7inch
+  #                     so the panel comes up on Bookworm full KMS.
   # The web wizard writes this to settings.json; config.env can also set it.
   DISPLAY_TYPE="${DISPLAY_TYPE:-generic}"
   FOODASSISTANT_TAG="${FOODASSISTANT_TAG:-latest}"
@@ -906,8 +909,58 @@ EOF
   _write_touch_calibration "*WaveShare*"
 }
 
+# MIPI DSI 7-inch panel support (DISPLAY_TYPE=dsi_7inch). Covers the official
+# Raspberry Pi 7-inch touchscreen and 800x480 driver-free clones (e.g. Hosyond).
+# Bookworm's full KMS pipeline removed DSI panel auto-detection, so the panel
+# stays dark until dtoverlay=vc4-kms-dsi-7inch is added to config.txt. The panel
+# reports touch over I2C (Goodix/FT5406), which libinput picks up once the
+# overlay brings the panel up. invx/invy can flip the touch axes for an upside
+# down mount via DSI_TOUCH_INVERT (e.g. "invx", "invy", or "invx,invy").
+# Confirmed on a Pi4 with a Hosyond 7-inch DSI.
+_configure_dsi_7inch() {
+  local cfg
+  cfg="$(_pi_config_txt)"
+  local overlay="vc4-kms-dsi-7inch"
+  # Optional touch-axis inversion appended to the overlay (invx / invy).
+  local invert="${DSI_TOUCH_INVERT:-}"
+  local overlay_line="dtoverlay=${overlay}"
+  if [ -n "$invert" ]; then
+    overlay_line="dtoverlay=${overlay},${invert}"
+  fi
+  if [ -z "$cfg" ]; then
+    warn "No Pi boot config.txt found; cannot write DSI 7-inch overlay"
+  elif grep -q "dtoverlay=${overlay}" "$cfg" 2>/dev/null; then
+    log "DSI 7-inch overlay (${overlay}) already present in $cfg; leaving untouched"
+  elif [ "$DRY_RUN" = "1" ]; then
+    log "DRY_RUN would append DSI 7-inch overlay to $cfg: ${overlay_line}"
+  else
+    printf '\n# FoodAssistant: MIPI DSI 7-inch touchscreen (official / 800x480 clone)\n%s\n' "$overlay_line" >> "$cfg"
+    log "Appended DSI 7-inch overlay (${overlay_line}) to $cfg (takes effect after reboot)"
+  fi
+
+  # The DSI panel's touch controller (Goodix on the official panel, FT5406 on
+  # many clones) is an I2C touchscreen libinput recognises once the overlay is
+  # active. Apply a calibration matrix matching the rotation so taps land right.
+  _write_touch_calibration "*Goodix*"
+}
+
 configure_touch() {
   local driver="${TOUCH_DRIVER:-auto}"
+
+  # A MIPI DSI 7-inch panel needs the vc4-kms-dsi-7inch overlay to light up on
+  # Bookworm full KMS. Apply it here, gated on the wizard's display type, then
+  # fall through so the verification tools and calibration helper install too.
+  if [ "${DISPLAY_TYPE:-generic}" = "dsi_7inch" ]; then
+    log "Display type is dsi_7inch; configuring MIPI DSI 7-inch touchscreen"
+    if [ "$DRY_RUN" = "1" ]; then
+      log "DRY_RUN would install touch verification tools: libinput-tools evtest"
+    else
+      apt_install libinput-tools evtest || warn "touch tools (libinput-tools/evtest) install failed; on-device calibration check unavailable"
+    fi
+    _install_touch_calibrate_helper
+    _configure_dsi_7inch
+    return 0
+  fi
 
   # Explicit opt-out
   if [ "$driver" = "none" ]; then

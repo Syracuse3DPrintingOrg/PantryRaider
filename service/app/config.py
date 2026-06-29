@@ -12,7 +12,7 @@ from .hardware import is_raspberry_pi
 
 # Single source of truth for the app version (shown in the UI, used by the
 # update checker, and reported by FastAPI). Bump on each tagged release.
-APP_VERSION = "0.6.92"
+APP_VERSION = "0.6.93"
 
 # GitHub repo used by the in-app update checker.
 GITHUB_REPO = "Syracuse3DPrinting/FoodAssistant"
@@ -74,9 +74,14 @@ _DEFAULT_DISPLAY_ROTATION = 0
 #   waveshare_hdmi  - a Waveshare HDMI touchscreen Pi HAT. These need a panel
 #                     dtoverlay in config.txt plus a touch udev rule so the
 #                     controller is recognised as an input device.
+#   dsi_7inch       - a MIPI DSI 7-inch panel (official Raspberry Pi 7-inch
+#                     touchscreen and 800x480 driver-free clones like the
+#                     Hosyond). Bookworm full KMS dropped DSI auto-detection, so
+#                     firstboot writes dtoverlay=vc4-kms-dsi-7inch to light it.
 DISPLAY_TYPES = {
     "generic":        {"label": "Generic HDMI display"},
     "waveshare_hdmi": {"label": "Waveshare HDMI touchscreen"},
+    "dsi_7inch":      {"label": "MIPI DSI 7-inch touchscreen (official / Hosyond clone)"},
 }
 _DEFAULT_DISPLAY_TYPE = "generic"
 

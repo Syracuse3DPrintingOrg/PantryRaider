@@ -506,6 +506,25 @@ def test_generic_display_skips_waveshare_path(tmp_path):
     assert "98-foodassistant-waveshare-touch.rules" not in out
 
 
+# MIPI DSI 7-inch panel (FoodAssistant-4yey): DISPLAY_TYPE=dsi_7inch writes the
+# vc4-kms-dsi-7inch overlay so the panel comes up on Bookworm full KMS, and
+# applies a Goodix-name touch calibration matrix.
+
+def test_dsi_7inch_display_configures_panel(tmp_path):
+    rc, out = _touch_run(tmp_path, {"DISPLAY_TYPE": "dsi_7inch"})
+    assert rc == 0, out
+    assert "Display type is dsi_7inch" in out
+    # The calibration rule matches the DSI panel's Goodix touch controller.
+    assert "name=*Goodix*" in out
+
+
+def test_generic_display_skips_dsi_path(tmp_path):
+    rc, out = _touch_run(tmp_path, {"TOUCH_DRIVER": "usb",
+                                    "DISPLAY_TYPE": "generic"})
+    assert rc == 0, out
+    assert "Display type is dsi_7inch" not in out
+
+
 def test_waveshare_display_type_read_from_settings_json(tmp_path):
     # display_type written by the web wizard to settings.json is honoured.
     sf = tmp_path / "settings.json"
