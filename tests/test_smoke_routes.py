@@ -86,6 +86,21 @@ def test_convert_page_has_known_conversion(client):
     assert "240 ml" in r.text  # 1 cup
 
 
+def test_setup_redirect_preserves_kiosk_flag(client, monkeypatch):
+    """An unconfigured appliance display loads /ui/?kiosk=1; the setup redirect
+    must carry kiosk=1 onto /setup so the display latches kiosk mode and polls
+    for the navigate-home hand-off (FoodAssistant-joj1)."""
+    from app.config import settings
+    monkeypatch.setattr(settings, "grocy_base_url", "")
+    assert not settings.is_configured()
+    r = client.get("/ui/?kiosk=1", follow_redirects=False)
+    assert r.status_code in (303, 307)
+    assert r.headers["location"].endswith("/setup?kiosk=1")
+    # A normal browser (no kiosk flag) still lands on a plain /setup.
+    r2 = client.get("/ui/", follow_redirects=False)
+    assert r2.headers["location"].endswith("/setup")
+
+
 def test_kitchen_guide_has_safe_temps(client):
     r = client.get("/ui/kitchen-guide")
     assert r.status_code == 200

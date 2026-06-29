@@ -114,7 +114,13 @@ async def redirect_if_unconfigured(request: Request, call_next):
             # this device is configured. That call must return JSON, not an HTML
             # setup redirect, or the wizard's JSON.parse fails.
             and request.url.path != "/api/devices/scan"):
-        return ingress_redirect(request, "/setup")
+        # Preserve the kiosk latch across the redirect (FoodAssistant-joj1). The
+        # appliance display loads /ui/?kiosk=1; without carrying kiosk=1 onto
+        # /setup, kiosk-display.js never latches kiosk mode there, so the setup
+        # page does not poll kiosk/navigate/pending and the display stays stuck
+        # on the wizard after setup completes from another browser.
+        target = "/setup?kiosk=1" if request.query_params.get("kiosk") == "1" else "/setup"
+        return ingress_redirect(request, target)
     return await call_next(request)
 
 
