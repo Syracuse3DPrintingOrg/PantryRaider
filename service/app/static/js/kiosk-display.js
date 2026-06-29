@@ -24,6 +24,18 @@
   if (localStorage.getItem('kioskMode') !== 'true') return;
 
   var html = document.documentElement;
+
+  // Display scale and rotation are settings for the appliance's OWN attached
+  // panel, not for whoever opens the UI. On a Pi, only the local display
+  // (reached over loopback, since the kiosk service loads http://localhost/...)
+  // applies them; a remote browser served by the same Pi must never inherit the
+  // panel's scale or rotation, even if it carries a stale kiosk flag
+  // (FoodAssistant-anou). Off a Pi there is no attached panel, so a kiosk-mode
+  // browser keeps applying its own scale as before.
+  var host = location.hostname;
+  var isLoopback = host === 'localhost' || host === '127.0.0.1' || host === '::1';
+  if (html.getAttribute('data-is-pi') === '1' && !isLoopback) return;
+
   var scale = parseFloat(html.getAttribute('data-ui-scale') || '1') || 1;
   var rot = parseInt(html.getAttribute('data-display-rotation') || '0', 10) || 0;
 
