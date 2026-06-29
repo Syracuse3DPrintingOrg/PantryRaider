@@ -866,6 +866,45 @@ def test_status_key_ignores_icon_and_keeps_count_layout():
     assert with_icon.tobytes() == without.tobytes()
 
 
+def test_text_only_kind_flags_info_heavy_kinds():
+    # Clock, weather, forecast, and today's-meal info keys carry a
+    # multi-character value, so they render text-only (no main icon).
+    for kind in ("clock", "weather", "forecast", "info"):
+        assert render.text_only_kind(kind)
+    # Ordinary action kinds stay icon-forward.
+    for kind in ("status", "nav", "trigger", "timer", "ha_entity"):
+        assert not render.text_only_kind(kind)
+
+
+def test_text_only_render_drops_main_icon():
+    # An info-heavy face renders without its main glyph: handing render_key an
+    # icon while text_only is set must match the plain text-only face byte for
+    # byte, so the value gets the whole key instead of a truncated glyph layout.
+    plain = render.render_key(96, 96, label="12:34\nThu 26", color="#1f2937")
+    info = render.render_key(
+        96, 96, label="12:34\nThu 26", color="#1f2937",
+        icon="clock", text_only=True,
+    )
+    assert info.size == plain.size == (96, 96)
+    assert info.tobytes() == plain.tobytes()
+
+
+def test_text_only_face_differs_from_iconed_face():
+    # Sanity check that the icon would otherwise have changed the face, so the
+    # byte-equality above is meaningful rather than vacuous. Skipped when the
+    # icon font is not vendored (the iconed path already degrades to text).
+    if not (render._icon_codepoints() and render._icon_font(16) is not None):
+        pytest.skip("bootstrap-icons font not vendored")
+    iconed = render.render_key(
+        96, 96, label="12:34\nThu 26", color="#1f2937", icon="clock"
+    )
+    text_only = render.render_key(
+        96, 96, label="12:34\nThu 26", color="#1f2937",
+        icon="clock", text_only=True,
+    )
+    assert iconed.tobytes() != text_only.tobytes()
+
+
 # -- rotation config -------------------------------------------------------
 
 

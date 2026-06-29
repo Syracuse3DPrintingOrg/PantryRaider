@@ -67,6 +67,23 @@ _WIDGET_ICON_FRACTION = 0.22
 # Action kinds whose face is dominated by temperature text rather than a glyph.
 _SMALL_ICON_KINDS = frozenset({"weather", "forecast"})
 
+# Info-heavy action kinds: their face is a multi-character value (the clock
+# time/date, the weather stat, the forecast high/low, today's meal name) rather
+# than a glyph. Drawing a main icon on these only steals room from the value and
+# truncates it, so the renderer skips the icon entirely and gives the text the
+# whole key face (FoodAssistant-510y).
+_TEXT_ONLY_KINDS = frozenset({"clock", "weather", "forecast", "info"})
+
+
+def text_only_kind(kind: str) -> bool:
+    """True when an action kind should render its value across the whole key.
+
+    These info-heavy kinds (clock, weather, forecast, today's meal) carry a
+    multi-character value that needs the full face; ``render_key`` suppresses the
+    main icon for them so the text does not truncate.
+    """
+    return kind in _TEXT_ONLY_KINDS
+
 
 def icon_fraction_for(kind: str) -> float:
     """Glyph height fraction for an action kind.
@@ -432,6 +449,7 @@ def render_key(
     action_name: str = "",
     emoji: str = "",
     icon_fraction: float = _ICON_FRACTION,
+    text_only: bool = False,
 ) -> Image.Image:
     """Render one key.
 
@@ -463,6 +481,11 @@ def render_key(
     ``icon_fraction`` is the glyph height as a fraction of the key, defaulting to
     the standard size. Weather and forecast faces pass a smaller value (see
     ``icon_fraction_for``) so the temperature text stays legible.
+
+    ``text_only`` suppresses the main icon entirely for info-heavy kinds (clock,
+    weather, forecast, today's meal), so their multi-character value gets the
+    whole key face instead of being truncated by the glyph above it. Status keys
+    (``count`` set) keep their own glyph-free layout and ignore this flag.
     """
     bg = _hex_to_rgb(color)
     if count and alert:
@@ -501,6 +524,17 @@ def render_key(
         label_px = _font_px(
             height, _STATUS_LABEL_FRACTION, density=density, floor=_MIN_FONT_PX
         )
+        _draw_label(draw, label, label_px, width, height, label_y, max_label_width, text_fill)
+        return img
+
+    if text_only:
+        # Info-heavy kinds (clock, weather, forecast, today's meal): skip the
+        # main icon and give the multi-character value the whole key face so it
+        # does not get truncated by a glyph above it (FoodAssistant-510y).
+        label_px = _font_px(
+            height, _LABEL_FRACTION, density=density, floor=_MIN_FONT_PX
+        )
+        label_y = (height - label_px) / 2
         _draw_label(draw, label, label_px, width, height, label_y, max_label_width, text_fill)
         return img
 
