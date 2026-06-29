@@ -7,6 +7,21 @@
   .meta-text { font-size: 0.75rem; color: var(--bs-secondary-color); }
 </style>
 
+<!-- Action items / notifications (FoodAssistant-iut3). Sits above the pending
+     scans and collapses entirely when there is nothing to action. -->
+<section id="action-items-section" class="my-3 d-none">
+  <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
+    <h4 class="mb-0">
+      <i class="bi bi-bell me-2"></i>Action Items
+      <span class="badge text-bg-danger ms-1" id="action-items-count">0</span>
+    </h4>
+    <button class="btn btn-outline-secondary btn-sm" onclick="loadActionItems()" title="Refresh">
+      <i class="bi bi-arrow-clockwise"></i>
+    </button>
+  </div>
+  <div id="action-items-list" class="d-flex flex-column gap-2"></div>
+</section>
+
 <div class="d-flex justify-content-between align-items-center my-3 flex-wrap gap-2">
   <h4 class="mb-0">
     <i class="bi bi-hourglass-split me-2"></i>Pending Scans
@@ -194,6 +209,81 @@ function showToast(msg, isError = false) {
   document.getElementById('pToastMsg').textContent = msg;
   new bootstrap.Toast(toast, { delay: 3000 }).show();
 }
+
+// --- Action items / notifications (FoodAssistant-iut3) -------------------
+function actionItemCard(it) {
+  const wrap = document.createElement('div');
+  const level = ['info', 'success', 'warning', 'error'].includes(it.level) ? it.level : 'info';
+  const accent = { info: 'info', success: 'success', warning: 'warning', error: 'danger' }[level];
+  wrap.className = 'card border-' + accent;
+  const body = document.createElement('div');
+  body.className = 'card-body py-2 px-3 d-flex justify-content-between align-items-center flex-wrap gap-2';
+  const text = document.createElement('div');
+  const title = document.createElement('div');
+  title.className = 'fw-semibold';
+  title.textContent = it.title || '';
+  const sub = document.createElement('div');
+  sub.className = 'meta-text';
+  sub.textContent = it.body || '';
+  text.appendChild(title);
+  if (it.body) text.appendChild(sub);
+  const btns = document.createElement('div');
+  btns.className = 'd-flex gap-1';
+  // A leftover prompt offers a primary "Save to leftovers"; every item can be
+  // snoozed or archived. The save action is wired by the leftovers feature.
+  if (it.kind === 'leftover_prompt') {
+    btns.appendChild(actionBtn('Save to leftovers', 'success', () => saveLeftover(it)));
+  }
+  btns.appendChild(actionBtn('Snooze 24h', 'outline-secondary', () => actionItemAct(it.id, 'snooze')));
+  btns.appendChild(actionBtn('Archive', 'outline-secondary', () => actionItemAct(it.id, 'archive')));
+  body.appendChild(text);
+  body.appendChild(btns);
+  wrap.appendChild(body);
+  return wrap;
+}
+
+function actionBtn(label, variant, onclick) {
+  const b = document.createElement('button');
+  b.className = 'btn btn-sm btn-' + variant;
+  b.textContent = label;
+  b.onclick = onclick;
+  return b;
+}
+
+async function loadActionItems() {
+  let data = { items: [] };
+  try {
+    const r = await fetch('action-items', { cache: 'no-store' });
+    if (r.ok) data = await r.json();
+  } catch (e) { /* offline: leave the section as-is */ return; }
+  const section = document.getElementById('action-items-section');
+  const list = document.getElementById('action-items-list');
+  const count = document.getElementById('action-items-count');
+  const items = data.items || [];
+  count.textContent = items.length;
+  list.innerHTML = '';
+  if (!items.length) { section.classList.add('d-none'); return; }
+  section.classList.remove('d-none');
+  items.forEach(it => list.appendChild(actionItemCard(it)));
+}
+
+async function actionItemAct(id, action) {
+  try {
+    await fetch('action-items/' + id + '/' + action, { method: 'POST',
+      headers: { 'Content-Type': 'application/json' }, body: '{}' });
+  } catch (e) { showToast('Could not update the item', true); return; }
+  loadActionItems();
+}
+
+// Placeholder hook the leftovers feature fills in; defined here so the button
+// never throws if pressed before that wiring lands.
+async function saveLeftover(it) {
+  if (typeof window.saveLeftoverImpl === 'function') return window.saveLeftoverImpl(it);
+  actionItemAct(it.id, 'resolve');
+}
+
+loadActionItems();
+setInterval(loadActionItems, 30000);
 
 loadPending();
 // Headless scanners add items while this page is open — keep it fresh

@@ -12,7 +12,7 @@ from .database import engine, get_db, Base
 from .ingress import ingress_redirect
 from .models import db_models  # noqa: F401 - registers models with Base
 from .services.defaults import seed_defaults
-from .routers import analyze, defaults, inventory, expiring, ui, setup, pending, mealie, admin, qr, tunnel, grocy, satellite, proxy, devices, current_recipe, events
+from .routers import analyze, defaults, inventory, expiring, ui, setup, pending, mealie, admin, qr, tunnel, grocy, satellite, proxy, devices, current_recipe, events, action_items
 
 
 @asynccontextmanager
@@ -206,6 +206,7 @@ app.include_router(devices.router)
 app.include_router(current_recipe.recipe_router)
 app.include_router(current_recipe.timers_router)
 app.include_router(events.router)
+app.include_router(action_items.router)
 
 
 @app.get("/")
