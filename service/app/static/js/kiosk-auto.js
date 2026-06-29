@@ -19,11 +19,25 @@
  * Off-Pi and when the endpoint is unreachable this is a no-op: it never enables
  * kiosk mode anywhere but a Pi with a confirmed display, and never overrides an
  * explicit user 'off'.
+ *
+ * IMPORTANT: only the appliance's OWN attached display may auto-enter kiosk
+ * mode. data-is-pi and the display-present probe are server-global (they
+ * describe the Pi host, not the visitor), so without a client-side gate EVERY
+ * browser hitting the Pi (a phone, a laptop) would latch kiosk mode and inherit
+ * the display's rotation and scale (FoodAssistant-anou). The local display
+ * reaches the app over loopback, since the kiosk service loads
+ * http://localhost/...; a remote browser uses the LAN IP or hostname. So this
+ * auto-enable is gated on a loopback hostname.
  */
 (function () {
   try {
     var html = document.documentElement;
     if (!html || html.getAttribute('data-is-pi') !== '1') return; // off-Pi: do nothing
+
+    // Only the local attached display (reached over loopback) may auto-enter
+    // kiosk mode; a remote browser must never inherit the display's orientation.
+    var host = location.hostname;
+    if (host !== 'localhost' && host !== '127.0.0.1' && host !== '::1') return;
 
     // Respect an explicit user choice (toggle button sets kioskExplicit).
     if (localStorage.getItem('kioskExplicit') === 'true') return;
