@@ -4,12 +4,30 @@
 <div class="d-flex justify-content-between align-items-center my-3">
   <h4 class="mb-0"><i class="bi bi-clock-history me-2"></i>Expiring Items</h4>
   <div class="d-flex gap-2 align-items-center">
+    <button class="btn btn-sm btn-outline-success" id="btn-use-it-up" onclick="loadUseItUp()"
+            title="Ideas for using up what is about to expire">
+      <i class="bi bi-recycle me-1"></i>Use it up
+    </button>
     <label class="mb-0 text-muted small">Show items expiring within</label>
     <select class="form-select form-select-sm w-auto" onchange="location='?days='+this.value">
       {% for d in [3, 7, 14, 30] %}
       <option value="{{ d }}" {% if d == days %}selected{% endif %}>{{ d }} days</option>
       {% endfor %}
     </select>
+  </div>
+</div>
+
+<!-- Use-it-up panel (FoodAssistant-m6wq). Hidden until requested. Shows AI recipe
+     ideas focused on the expiring items plus always-useful static tips. -->
+<div class="card mb-4 d-none" id="use-it-up-card">
+  <div class="card-header d-flex align-items-center">
+    <i class="bi bi-recycle me-2 text-success"></i>
+    <span class="fw-semibold">Use it up</span>
+    <button type="button" class="btn-close ms-auto" aria-label="Close"
+            onclick="document.getElementById('use-it-up-card').classList.add('d-none')"></button>
+  </div>
+  <div class="card-body" id="use-it-up-body">
+    <div class="text-secondary"><span class="spinner-border spinner-border-sm me-2"></span>Thinking of ways to use these up…</div>
   </div>
 </div>
 
@@ -104,4 +122,55 @@
   Nothing expiring within {{ days }} days.
 </div>
 {% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+function escHtml(s) {
+  return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+async function loadUseItUp() {
+  const card = document.getElementById('use-it-up-card');
+  const body = document.getElementById('use-it-up-body');
+  const btn = document.getElementById('btn-use-it-up');
+  card.classList.remove('d-none');
+  body.innerHTML = '<div class="text-secondary"><span class="spinner-border spinner-border-sm me-2"></span>Thinking of ways to use these up…</div>';
+  btn.disabled = true;
+  try {
+    const r = await fetch('mealie/use-it-up', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({days: {{ days }}}),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || r.statusText);
+    const sug = d.suggestions || [];
+    const tips = d.tips || [];
+    let htmlOut = '';
+    if (d.items && d.items.length) {
+      htmlOut += `<div class="small text-secondary mb-2">Targeting: ${d.items.map(escHtml).join(', ')}</div>`;
+    }
+    if (sug.length) {
+      htmlOut += '<div class="row g-2 row-cols-1 row-cols-md-2 row-cols-lg-3 mb-3">' + sug.map(s => `
+        <div class="col"><div class="card h-100"><div class="card-body py-2">
+          <div class="fw-semibold">${escHtml(s.name)}</div>
+          ${s.description ? `<div class="small text-secondary mt-1">${escHtml(s.description)}</div>` : ''}
+          ${(s.uses||[]).length ? `<div class="small text-success mt-1"><i class="bi bi-check2 me-1"></i>${s.uses.map(escHtml).join(', ')}</div>` : ''}
+        </div></div></div>`).join('') + '</div>';
+    } else if (d.message) {
+      htmlOut += `<div class="text-secondary mb-2">${escHtml(d.message)}</div>`;
+    }
+    if (tips.length) {
+      htmlOut += '<div class="small fw-semibold text-secondary mb-1"><i class="bi bi-lightbulb me-1"></i>Quick tips</div>'
+        + '<ul class="small mb-0">' + tips.map(t => `<li>${escHtml(t)}</li>`).join('') + '</ul>';
+    }
+    body.innerHTML = htmlOut || '<div class="text-secondary">No ideas right now.</div>';
+  } catch (e) {
+    body.innerHTML = `<div class="alert alert-danger mb-0">Could not load ideas: ${escHtml(e.message)}</div>`;
+  } finally {
+    btn.disabled = false;
+  }
+}
+</script>
 {% endblock %}

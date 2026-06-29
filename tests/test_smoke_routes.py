@@ -93,6 +93,17 @@ def test_kitchen_guide_has_safe_temps(client):
     assert "165&deg;F / 74&deg;C" in r.text
 
 
+def test_use_it_up_returns_static_tips(client):
+    """Use-it-up always returns static tips, even with no inventory or AI
+    (FoodAssistant-m6wq). Grocy is unconfigured in tests, so the item list is
+    empty and only the tips come back."""
+    r = client.post("/mealie/use-it-up", json={"days": 7})
+    assert r.status_code == 200
+    d = r.json()
+    assert isinstance(d.get("tips"), list) and len(d["tips"]) > 0
+    assert "suggestions" in d
+
+
 def test_timers_page_has_empty_state(client):
     r = client.get("/ui/timers")
     assert r.status_code == 200

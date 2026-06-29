@@ -424,6 +424,61 @@ async def suggest_llm(payload: SuggestLLMPayload = Body(default_factory=SuggestL
     return {"suggestions": suggestions or [], "inventory_items": len(stock)}
 
 
+# Static, no-AI fallback tips for using up food before it spoils. Always useful,
+# and the only content shown when no AI provider is configured (FoodAssistant-m6wq).
+USE_IT_UP_TIPS = [
+    "Simmer vegetable scraps, onion skins, and herb stems into a stock, then freeze it.",
+    "Turn soft or bruised fruit into a compote, jam, or smoothie packs for the freezer.",
+    "Blend wilting greens and tired herbs into pesto, soup, or a sauce.",
+    "Most cooked dishes, breads, and many raw proteins freeze well; portion and label them.",
+    "Roast aging vegetables together for a tray bake, then fold leftovers into grain bowls.",
+    "Overripe tomatoes become a quick pasta sauce; cook down and freeze in flat bags.",
+]
+
+
+class UseItUpPayload(BaseModel):
+    days: int = 7
+
+
+@router.post("/use-it-up")
+async def use_it_up(payload: UseItUpPayload = Body(default_factory=UseItUpPayload)):
+    """Suggest ways to use up food that is expiring soon (FoodAssistant-m6wq).
+
+    Pulls the items within ``days`` of their best-before date and asks the LLM
+    for recipes and methods that prioritize using them up (stocks, soups,
+    sauces, freezing). Always returns static tips too, so the feature is useful
+    even with no AI provider configured."""
+    try:
+        expiring = await GrocyClient().get_expiring(payload.days)
+    except Exception:
+        expiring = []
+    item_names = []
+    for e in expiring:
+        name = e.get("name") or (e.get("product") or {}).get("name")
+        if name:
+            item_names.append(name)
+    result = {"items": item_names, "tips": USE_IT_UP_TIPS, "suggestions": []}
+    if not item_names:
+        result["message"] = "Nothing expiring soon."
+        return result
+    prefs = _safe_user_steer(
+        "These ingredients are expiring soon and should be used up first: "
+        + ", ".join(item_names)
+        + ". Prioritize recipes and methods that use these up before they spoil, "
+        "such as soups, stocks, sauces, casseroles, and bakes. Note when an item "
+        "freezes well to extend its life.")
+    provider = get_enrich_provider()
+    try:
+        suggestions = await provider.suggest_from_inventory(
+            item_names, limit=settings.suggest_per_tier, preferences=prefs)
+        result["suggestions"] = suggestions or []
+    except Exception:
+        # No AI or a provider error still leaves the static tips, which is the
+        # whole point of returning them unconditionally.
+        pass
+    return result
+
+
 class ImportExternalPayload(BaseModel):
     external_id: str
     source: str = "themealdb"
