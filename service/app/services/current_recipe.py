@@ -13,8 +13,10 @@ it. Keep the I/O out so the core normalization/scaling stays pure and testable.
 """
 from __future__ import annotations
 
+import json
 import threading
 from dataclasses import asdict, dataclass, field
+from pathlib import Path
 
 
 @dataclass
@@ -41,6 +43,64 @@ class ActiveRecipe:
 
 _lock = threading.Lock()
 _active: ActiveRecipe | None = None
+# Whether we have tried to load the persisted recipe yet this process. A loaded
+# recipe stays active until the user clears or cooks it, surviving a restart
+# (FoodAssistant-yurm), so it is read back from disk once on first access.
+_loaded = False
+
+
+def _recipe_path() -> Path:
+    """Path of the persisted current recipe under the app data dir."""
+    from ..config import settings
+    return Path(settings.data_dir) / "current_recipe.json"
+
+
+def _from_stored(data: dict) -> ActiveRecipe:
+    """Rebuild an ActiveRecipe from its persisted dict (asdict form), preserving
+    the servings scale so a restored recipe keeps the user's chosen scale."""
+    ings = [
+        Ingredient(name=str(i.get("name", "")), quantity=i.get("quantity"),
+                   unit=i.get("unit"))
+        for i in (data.get("ingredients") or []) if isinstance(i, dict)
+    ]
+    return ActiveRecipe(
+        title=str(data.get("title", "")), source=str(data.get("source", "")),
+        id=data.get("id"), servings=int(data.get("servings", 1) or 1),
+        servings_scale=float(data.get("servings_scale", 1.0) or 1.0),
+        ingredients=ings, steps=list(data.get("steps") or []),
+        notes=str(data.get("notes", "")),
+    )
+
+
+def _ensure_loaded_locked() -> None:
+    """Load the persisted recipe once, on first access. Caller holds the lock."""
+    global _active, _loaded
+    if _loaded:
+        return
+    _loaded = True
+    try:
+        path = _recipe_path()
+        if path.exists():
+            data = json.loads(path.read_text())
+            if data:
+                _active = _from_stored(data)
+    except Exception:  # noqa: BLE001 - a bad/old file must not crash the app
+        _active = None
+
+
+def _persist_locked() -> None:
+    """Write the active recipe (or clear the file) to disk. Caller holds the
+    lock. Best-effort: a write failure leaves the in-memory state authoritative."""
+    try:
+        path = _recipe_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if _active is None:
+            if path.exists():
+                path.unlink()
+        else:
+            path.write_text(json.dumps(asdict(_active)))
+    except Exception:  # noqa: BLE001 - persistence is best-effort
+        pass
 
 
 def _to_float(value) -> float | None:
@@ -120,26 +180,31 @@ def _serialize(recipe: ActiveRecipe) -> dict:
 def set_active(recipe_dict: dict) -> dict:
     """Replace the active recipe with a normalized copy of recipe_dict and
     return the serialized form."""
-    global _active
+    global _active, _loaded
     normalized = _normalize(recipe_dict)
     with _lock:
+        _loaded = True  # an explicit set supersedes anything on disk
         _active = normalized
+        _persist_locked()
         return _serialize(_active)
 
 
 def get_active() -> dict | None:
     """Return the serialized active recipe, or None when nothing is loaded."""
     with _lock:
+        _ensure_loaded_locked()
         if _active is None:
             return None
         return _serialize(_active)
 
 
 def clear_active() -> None:
-    """Forget the active recipe."""
-    global _active
+    """Forget the active recipe (and remove the persisted copy)."""
+    global _active, _loaded
     with _lock:
+        _loaded = True
         _active = None
+        _persist_locked()
 
 
 def _mealie_ingredient(raw: dict) -> dict:
@@ -202,6 +267,7 @@ def scale_servings(factor: float) -> dict | None:
     serialized form. Returns None when no recipe is loaded. A non-positive or
     unparseable factor is ignored (kept at the current scale)."""
     with _lock:
+        _ensure_loaded_locked()
         if _active is None:
             return None
         try:
@@ -210,4 +276,5 @@ def scale_servings(factor: float) -> dict | None:
             f = _active.servings_scale
         if f > 0:
             _active.servings_scale = f
+        _persist_locked()
         return _serialize(_active)

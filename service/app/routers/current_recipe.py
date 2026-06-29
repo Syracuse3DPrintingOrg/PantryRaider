@@ -9,11 +9,16 @@ Two APIRouters share this module: one under /current-recipe, one under /timers.
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Body
+from datetime import date, timedelta
+
+from fastapi import APIRouter, Body, Depends
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
 
-from ..services import current_recipe, recipe_timers, timers
+from ..config import settings
+from ..database import get_db
+from ..services import action_items, current_recipe, recipe_timers, timers
 
 recipe_router = APIRouter(prefix="/current-recipe", tags=["current-recipe"])
 timers_router = APIRouter(prefix="/timers", tags=["timers"])
@@ -111,6 +116,102 @@ def scale_current_recipe(payload: ScaleIn):
     if recipe is None:
         return JSONResponse({"detail": "No active recipe"}, status_code=404)
     return {"recipe": recipe}
+
+
+# How many days a saved leftover keeps before it counts as expiring. A sensible
+# fridge default; the user can edit the date in Grocy after it is created.
+_LEFTOVER_DEFAULT_DAYS = 4
+
+
+async def _consume_active_recipe(recipe: dict) -> list[str]:
+    """Consume one unit of each Grocy stock item matching an active-recipe
+    ingredient. Best-effort and pure of HTTP failures: returns the names
+    consumed, or [] when Grocy is unreachable."""
+    from ..services.grocy import GrocyClient
+    from ..services.mealie import _tokens
+    try:
+        stock = await GrocyClient().get_full_stock()
+    except Exception:
+        return []
+    inv = [{"product_id": s["product_id"], "name": s["name"], "amount": s["amount"],
+            "tokens": _tokens(s["name"])}
+           for s in stock if s.get("product_id") and _tokens(s["name"])]
+    consumed: list[str] = []
+    seen: set[int] = set()
+    grocy = GrocyClient()
+    for ing in recipe.get("ingredients") or []:
+        toks = _tokens(str(ing.get("name") or ""))
+        if not toks:
+            continue
+        hit = next((s for s in inv if toks & s["tokens"]), None)
+        if not hit or hit["product_id"] in seen:
+            continue
+        seen.add(hit["product_id"])
+        try:
+            await grocy.consume_stock(hit["product_id"], min(1.0, hit["amount"]))
+            consumed.append(hit["name"])
+        except Exception:
+            pass
+    return consumed
+
+
+@recipe_router.post("/cooked")
+async def cook_current_recipe(db: Session = Depends(get_db)):
+    """Mark the active recipe cooked: consume matched inventory, raise a
+    'save to leftovers?' action item, and clear the active recipe so a finished
+    meal does not linger as the current one (FoodAssistant-yurm)."""
+    recipe = current_recipe.get_active()
+    if recipe is None:
+        return JSONResponse({"detail": "No active recipe"}, status_code=404)
+    title = recipe.get("title") or "the recipe"
+    consumed = await _consume_active_recipe(recipe)
+    servings = recipe.get("scaled_servings") or recipe.get("servings") or 1
+    item = action_items.create(
+        db, action_items.KIND_LEFTOVER_PROMPT,
+        f"Save {title} to leftovers?",
+        body="Cooked just now. Save the extra portions to your inventory so they "
+             "show up in Expiring Soon.",
+        dedupe_key=None, level="success",
+        payload={"title": title, "servings": servings, "days": _LEFTOVER_DEFAULT_DAYS},
+    )
+    current_recipe.clear_active()
+    return {"ok": True, "consumed": consumed, "action_item": item}
+
+
+class LeftoverIn(BaseModel):
+    title: str = ""
+    servings: float = 1.0
+    days: int = _LEFTOVER_DEFAULT_DAYS
+    action_item_id: int | None = None
+
+
+@recipe_router.post("/leftover")
+async def save_leftover(payload: LeftoverIn, db: Session = Depends(get_db)):
+    """Save a cooked meal to Grocy as a short-expiry leftover so it appears in
+    inventory and Expiring Soon like any other item (FoodAssistant-fu1u). Then
+    resolve the originating action item, if one was given."""
+    if not settings.mealie_configured() and not settings.grocy_base_url:
+        return JSONResponse({"detail": "Grocy is not configured."}, status_code=400)
+    name = (payload.title or "Leftovers").strip()
+    if not name.lower().startswith("leftover"):
+        name = f"Leftovers: {name}"
+    from ..models.food import FoodItem, FoodCategory, StorageType
+    from ..services.grocy import GrocyClient
+    days = max(0, int(payload.days or _LEFTOVER_DEFAULT_DAYS))
+    item = FoodItem(
+        name=name,
+        quantity=max(1.0, float(payload.servings or 1)),
+        category=FoodCategory.other,
+        storage_type=StorageType.refrigerated,
+        best_by_date=date.today() + timedelta(days=days),
+    )
+    try:
+        result = await GrocyClient().import_item(item)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"detail": f"Could not save the leftover: {e}"}, status_code=502)
+    if payload.action_item_id is not None:
+        action_items.resolve(db, payload.action_item_id)
+    return {"ok": True, "product_id": result.get("product_id"), "name": name}
 
 
 @recipe_router.get("/timer-suggestions")

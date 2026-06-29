@@ -51,7 +51,7 @@
       <h5 class="mb-1" id="cr-title"></h5>
       <div class="small text-secondary" id="cr-source"></div>
     </div>
-    <div class="d-flex align-items-center gap-2">
+    <div class="d-flex align-items-center gap-2 flex-wrap">
       <label class="small text-secondary mb-0">Servings</label>
       <div class="input-group input-group-sm" style="width: 8.5rem;">
         <button class="btn btn-outline-secondary" type="button" onclick="bumpServings(-1)" title="Fewer servings">
@@ -62,6 +62,13 @@
           <i class="bi bi-plus"></i>
         </button>
       </div>
+      <!-- A loaded recipe stays until the user clears or cooks it (yurm). -->
+      <button class="btn btn-success btn-sm" onclick="markCooked(this)" title="Mark cooked, consume ingredients, offer leftovers">
+        <i class="bi bi-check2-circle me-1"></i>Cooked
+      </button>
+      <button class="btn btn-outline-secondary btn-sm" onclick="clearCurrentRecipe(this)" title="Clear the current recipe">
+        <i class="bi bi-x-circle me-1"></i>Clear
+      </button>
     </div>
   </div>
 
@@ -147,6 +154,32 @@ async function loadCurrentRecipe() {
     document.getElementById('cr-empty').querySelector('p').innerHTML =
       `<span class="text-danger">Could not load the active recipe: ${escHtml(e.message)}</span>`;
   }
+}
+
+async function clearCurrentRecipe(btn) {
+  if (btn) btn.disabled = true;
+  try {
+    await fetch('current-recipe', { method: 'DELETE' });
+  } catch (e) { /* ignore: reload reflects the truth */ }
+  if (btn) btn.disabled = false;
+  loadCurrentRecipe();
+}
+
+async function markCooked(btn) {
+  if (btn) btn.disabled = true;
+  try {
+    const r = await fetch('current-recipe/cooked', { method: 'POST' });
+    if (!r.ok) throw new Error('cook failed');
+    const data = await r.json();
+    const n = (data.consumed || []).length;
+    // The leftovers prompt now lives in the Pending page Action Items inbox.
+    alert('Marked cooked. Consumed ' + n + ' item' + (n === 1 ? '' : 's') +
+          ' from inventory. A "save to leftovers?" item is waiting on the Pending page.');
+  } catch (e) {
+    alert('Could not mark the recipe cooked.');
+  }
+  if (btn) btn.disabled = false;
+  loadCurrentRecipe();
 }
 
 function renderRecipe() {

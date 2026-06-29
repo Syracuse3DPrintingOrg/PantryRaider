@@ -275,11 +275,20 @@ async function actionItemAct(id, action) {
   loadActionItems();
 }
 
-// Placeholder hook the leftovers feature fills in; defined here so the button
-// never throws if pressed before that wiring lands.
+// Save a cooked meal to Grocy as a short-expiry leftover (FoodAssistant-fu1u),
+// then the originating action item resolves itself server-side.
 async function saveLeftover(it) {
-  if (typeof window.saveLeftoverImpl === 'function') return window.saveLeftoverImpl(it);
-  actionItemAct(it.id, 'resolve');
+  const p = it.payload || {};
+  try {
+    const r = await fetch('current-recipe/leftover', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: p.title || '', servings: p.servings || 1,
+                             days: p.days || 4, action_item_id: it.id }),
+    });
+    if (!r.ok) throw new Error('save failed');
+    showToast('Saved to leftovers');
+  } catch (e) { showToast('Could not save the leftover', true); return; }
+  loadActionItems();
 }
 
 loadActionItems();
