@@ -120,6 +120,18 @@ def test_kiosk_enabled_with_display(tmp_path):
     assert "Installing Chromium kiosk" in out
 
 
+def test_kiosk_sets_up_seatd(tmp_path):
+    # seatd brokers DRM/VT to the kiosk user on a headless-provisioned Pi
+    # (FoodAssistant-hmr3); the provisioning path must enable it and add the
+    # kiosk user to the _seatd group.
+    rc, out = run_firstboot(
+        tmp_path, "ENABLE_KIOSK=true\n", extra_env={"FORCE_DISPLAY": "1"}
+    )
+    assert rc == 0, out
+    assert "seatd" in out
+    assert "_seatd" in out
+
+
 def test_hide_cursor_auto_no_pointer_hides(tmp_path):
     # HIDE_CURSOR=auto with no pointer device attached -> hide the cursor.
     rc, out = run_firstboot(

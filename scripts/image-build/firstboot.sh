@@ -1120,6 +1120,12 @@ configure_kiosk() {
   # WLR_OUTPUT_TRANSFORM on the DRM backend). Best-effort: rotation just stays
   # at normal if it is missing.
   apt_install wlr-randr || warn "wlr-randr install failed; display rotation will not apply"
+  # seatd brokers DRM/VT access to the kiosk user (FoodAssistant-hmr3). On a
+  # headless-provisioned Pi the kiosk user has no active seat0 logind session,
+  # so libseat's builtin (root-only) backend denies cage (running as the user)
+  # access to tty0/DRM and the unit crash-loops. seatd runs as root and hands a
+  # session to members of the _seatd group, which is the reliable fix here.
+  apt_install seatd || warn "seatd install failed; kiosk may not get a DRM session"
 
   # Bake absolute binary paths into the unit. cage execs the browser via PATH,
   # but a systemd service runs with a minimal environment, so we resolve full
@@ -1146,12 +1152,23 @@ configure_kiosk() {
   kuid="$(id -u "$kuser")"
 
   if [ "$DRY_RUN" = "1" ]; then
-    log "DRY_RUN would run kiosk as $kuser (uid $kuid), disable getty@tty1, write foodassistant-kiosk.service"
+    log "DRY_RUN would run kiosk as $kuser (uid $kuid), disable getty@tty1, enable seatd, add $kuser to _seatd, write foodassistant-kiosk.service"
     return 0
   fi
 
   loginctl enable-linger "$kuser" || warn "enable-linger failed"
   systemctl disable getty@tty1.service 2>/dev/null || true
+
+  # Grant the kiosk user a DRM/VT session via seatd (FoodAssistant-hmr3).
+  # Idempotent: usermod -aG is additive, and enable --now is a no-op if seatd
+  # is already running. The unit sets LIBSEAT_BACKEND=seatd so cage uses this
+  # broker instead of the root-only builtin backend.
+  if getent group _seatd >/dev/null 2>&1; then
+    usermod -aG _seatd "$kuser" || warn "could not add $kuser to _seatd group"
+  else
+    warn "_seatd group missing (seatd not installed?); kiosk DRM session may fail"
+  fi
+  systemctl enable --now seatd 2>/dev/null || warn "seatd enable/start failed"
 
   # When hiding, install the transparent cursor theme and prepare the extra
   # Environment lines for the unit. If theme install fails we leave the cursor
@@ -1191,6 +1208,7 @@ StandardError=journal
 UtmpIdentifier=tty1
 UtmpMode=user
 Environment=XDG_RUNTIME_DIR=/run/user/$kuid
+Environment=LIBSEAT_BACKEND=seatd
 ${cursor_env:+$cursor_env
 }ExecStart=$cage_bin -- $chromium_bin --kiosk --noerrdialogs \\
   --disable-infobars --no-first-run --ozone-platform=wayland \\
