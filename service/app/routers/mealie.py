@@ -6,7 +6,7 @@ import httpx
 from fastapi import APIRouter, Body, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel
 
-from ..config import settings
+from ..config import settings, appliances_clause
 from ..dependencies import get_enrich_provider
 from ..services.grocy import GrocyClient
 from ..services.mealie import MealieClient, MealieError, classify_recipes
@@ -371,7 +371,9 @@ async def generate_recipe(payload: GenerateRecipePayload):
     provider = get_enrich_provider()
     try:
         recipe = await provider.generate_recipe(
-            name.strip(), extra_instructions=_safe_user_steer(payload.custom_prompt))
+            name.strip(), extra_instructions=_safe_user_steer(". ".join(
+                p for p in (appliances_clause(settings.kitchen_appliances),
+                            payload.custom_prompt) if p)))
     except NotImplementedError:
         raise HTTPException(503, {"detail": "AI provider not configured", "setup_url": "/setup"})
     except Exception as e:
@@ -411,7 +413,9 @@ async def suggest_llm(payload: SuggestLLMPayload = Body(default_factory=SuggestL
                                            s.get("days_remaining") or 999))
     item_names = [s["name"] for s in ordered]
     combined_prefs = _safe_user_steer(". ".join(
-        p for p in (settings.cook_ai_context, payload.preferences, payload.custom_prompt) if p))
+        p for p in (settings.cook_ai_context,
+                    appliances_clause(settings.kitchen_appliances),
+                    payload.preferences, payload.custom_prompt) if p))
     provider = get_enrich_provider()
     try:
         suggestions = await provider.suggest_from_inventory(

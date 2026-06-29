@@ -1295,6 +1295,35 @@
               <div class="form-text">Sent to the AI when generating recipe suggestions on the Cook page
                 ("Ask AI"). Describe tastes, restrictions, or cuisines you enjoy.</div>
             </div>
+            <!-- Kitchen appliances (FoodAssistant-k2kv framework). Steers the AI
+                 cook suggestions to dishes this kitchen can actually make. -->
+            <div class="mb-2" id="kitchen-appliances">
+              <label class="form-label mb-1"><i class="bi bi-tools me-1"></i>My Kitchen Appliances
+                <span class="text-secondary small">(optional)</span></label>
+              <div class="form-text mt-0 mb-2">Tell the AI what you can cook with. Common items are
+                pre-selected; turn off anything you don't have and add the rest.</div>
+              <div class="d-flex gap-2 mb-2">
+                <button type="button" class="btn btn-outline-secondary btn-sm" onclick="applianceSelectAll(true)">Select all</button>
+                <button type="button" class="btn btn-outline-secondary btn-sm" onclick="applianceSelectAll(false)">Clear</button>
+              </div>
+              {% for group, title in [('major', 'Major appliances'), ('minor', 'Smaller tools and cookware')] %}
+              <div class="mb-2">
+                <div class="text-secondary small text-uppercase mb-1">{{ title }}</div>
+                <div class="row row-cols-2 row-cols-sm-3 row-cols-md-4 g-1">
+                  {% for a in appliance_groups[group] %}
+                  <div class="col">
+                    <div class="form-check">
+                      <input class="form-check-input appliance-chk" type="checkbox"
+                             id="appliance_{{ a.key }}" value="{{ a.key }}"
+                             {{ 'checked' if a.checked else '' }}>
+                      <label class="form-check-label small" for="appliance_{{ a.key }}">{{ a.label }}</label>
+                    </div>
+                  </div>
+                  {% endfor %}
+                </div>
+              </div>
+              {% endfor %}
+            </div>
             <div class="row g-2">
               <div class="col-sm-4">
                 <label class="form-label">Perishable window <span class="text-secondary small">(days)</span></label>
@@ -3213,6 +3242,21 @@ function savePaneAi(btn) {
   }, btn, 'ai-save-result');
 }
 
+// Collect the checked kitchen appliances. Absent container (e.g. on a satellite
+// where Preferences may differ) returns undefined so the field is not posted and
+// the stored selection is left alone; otherwise an explicit (possibly empty) list.
+function collectAppliances() {
+  const box = document.getElementById('kitchen-appliances');
+  if (!box) return undefined;
+  return Array.from(box.querySelectorAll('.appliance-chk'))
+    .filter(c => c.checked).map(c => c.value);
+}
+
+function applianceSelectAll(state) {
+  document.querySelectorAll('#kitchen-appliances .appliance-chk')
+    .forEach(c => { c.checked = state; });
+}
+
 function savePaneRecipes(btn) {
   return savePane({
     mealie_base_url:   optVal('mealie_base_url'),
@@ -3224,6 +3268,7 @@ function savePaneRecipes(btn) {
     spoonacular_api_key: document.getElementById('spoonacular_api_key') ? secretVal('spoonacular_api_key') : undefined,
     staple_items:      optVal('staple_items'),
     cook_ai_context:   optVal('cook_ai_context'),
+    kitchen_appliances: collectAppliances(),
     perishable_days:   document.getElementById('perishable_days') ? num('perishable_days', 14) : undefined,
     expiring_soon_days: document.getElementById('expiring_soon_days') ? num('expiring_soon_days', 5) : undefined,
     suggest_per_tier:  document.getElementById('suggest_per_tier') ? num('suggest_per_tier', 8) : undefined,

@@ -784,6 +784,9 @@ def test_generate_recipe_threads_custom_prompt(client, monkeypatch):
     """The Cook custom prompt reaches the provider's generate_recipe as an extra
     instruction (FoodAssistant-2mh9)."""
     import app.routers.mealie as mealie_router
+    from app.config import settings
+    # Isolate the custom-prompt behaviour from the appliance clause.
+    monkeypatch.setattr(settings, "kitchen_appliances", [])
 
     captured = {}
 
@@ -801,10 +804,31 @@ def test_generate_recipe_threads_custom_prompt(client, monkeypatch):
     assert "extra spicy, no beans" in captured["extra"]
     assert "USER NOTE" in captured["extra"]
 
-    # Omitting the custom prompt yields an empty instruction (default prompt).
+    # With no custom prompt and no appliances, the instruction is empty (default).
     r = client.post("/mealie/recipes/generate", json={"name": "Soup"})
     assert r.status_code == 200
     assert captured["extra"] == ""
+
+
+def test_generate_recipe_threads_appliances(client, monkeypatch):
+    """The owned kitchen appliances steer generate_recipe so the AI only proposes
+    dishes the kitchen can make (FoodAssistant-k2kv framework)."""
+    import app.routers.mealie as mealie_router
+    from app.config import settings
+    monkeypatch.setattr(settings, "kitchen_appliances", ["stove", "sous_vide"])
+
+    captured = {}
+
+    class FakeProvider:
+        async def generate_recipe(self, name, extra_instructions=""):
+            captured["extra"] = extra_instructions
+            return {"name": name, "ingredients": [], "instructions": []}
+
+    monkeypatch.setattr(mealie_router, "get_enrich_provider", lambda: FakeProvider())
+    r = client.post("/mealie/recipes/generate", json={"name": "Steak"})
+    assert r.status_code == 200
+    assert "Sous vide" in captured["extra"]
+    assert "Stovetop" in captured["extra"]
 
 
 def test_suggest_llm_folds_in_custom_prompt(client, monkeypatch):

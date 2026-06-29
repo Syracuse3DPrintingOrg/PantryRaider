@@ -12,7 +12,7 @@ from .hardware import is_raspberry_pi
 
 # Single source of truth for the app version (shown in the UI, used by the
 # update checker, and reported by FastAPI). Bump on each tagged release.
-APP_VERSION = "0.6.126"
+APP_VERSION = "0.6.127"
 
 # GitHub repo used by the in-app update checker.
 GITHUB_REPO = "Syracuse3DPrinting/FoodAssistant"
@@ -182,7 +182,8 @@ _SAVEABLE = [
     "mealie_base_url", "mealie_api_key", "mealie_public_url",
     "device_hostname",
     "recipe_source", "themealdb_api_key", "spoonacular_api_key",
-    "staple_items", "cook_ai_context", "perishable_days", "expiring_soon_days", "suggest_per_tier",
+    "staple_items", "cook_ai_context", "kitchen_appliances",
+    "perishable_days", "expiring_soon_days", "suggest_per_tier",
     "nav_order", "nav_hidden", "custom_storage_categories", "ui_theme",
     "custom_theme_base", "custom_theme_primary", "custom_theme_accent",
     "custom_theme_bg", "custom_theme_surface", "custom_theme_text",
@@ -217,7 +218,7 @@ SATELLITE_PULL_FIELDS = [
     "grocy_base_url", "grocy_api_key", "grocy_public_url",
     "mealie_base_url", "mealie_api_key", "mealie_public_url",
     "recipe_source", "themealdb_api_key", "spoonacular_api_key",
-    "staple_items", "cook_ai_context",
+    "staple_items", "cook_ai_context", "kitchen_appliances",
     "perishable_days", "expiring_soon_days", "suggest_per_tier",
     "custom_storage_categories", "ui_theme",
     # Stream Deck weather widget config, so a satellite's deck matches the
@@ -238,6 +239,84 @@ SATELLITE_PULL_FIELDS = [
     # device-local on purpose: each kiosk keeps its own conversion cheat sheet.
     "ha_events_enabled", "ha_camera_popup_seconds",
 ]
+
+# Kitchen appliances the user owns, used to steer the AI cook suggestions so it
+# only proposes dishes the kitchen can actually make, and (later) to drive
+# affiliate product recommendations (FoodAssistant-k2kv). Each entry is
+# (key, label, group, default_on). "group" is "major" or "minor" purely for how
+# the checklist is laid out; "default_on" pre-checks the everyday items so a new
+# install is useful before the user touches anything. Keys are stable ids stored
+# in settings.kitchen_appliances; labels can be reworded without a migration.
+KITCHEN_APPLIANCES = [
+    # Major: the big, common, mostly-assumed kitchen workhorses.
+    ("stove", "Stovetop", "major", True),
+    ("oven", "Oven", "major", True),
+    ("microwave", "Microwave", "major", True),
+    ("refrigerator", "Refrigerator", "major", True),
+    ("freezer", "Freezer", "major", True),
+    ("toaster", "Toaster", "major", True),
+    ("blender", "Blender", "major", True),
+    ("dishwasher", "Dishwasher", "major", False),
+    ("toaster_oven", "Toaster oven", "major", False),
+    ("air_fryer", "Air fryer", "major", False),
+    ("slow_cooker", "Slow cooker", "major", False),
+    ("pressure_cooker", "Pressure cooker / Instant Pot", "major", False),
+    ("rice_cooker", "Rice cooker", "major", False),
+    ("stand_mixer", "Stand mixer", "major", False),
+    ("food_processor", "Food processor", "major", False),
+    ("sous_vide", "Sous vide", "major", False),
+    ("deep_fryer", "Deep fryer", "major", False),
+    ("grill", "Grill / BBQ", "major", False),
+    ("smoker", "Smoker", "major", False),
+    ("bread_machine", "Bread machine", "major", False),
+    ("dehydrator", "Dehydrator", "major", False),
+    ("ice_cream_maker", "Ice cream maker", "major", False),
+    # Minor: smaller tools and specialty cookware.
+    ("immersion_blender", "Immersion blender", "minor", False),
+    ("hand_mixer", "Hand mixer", "minor", False),
+    ("cast_iron", "Cast iron skillet", "minor", False),
+    ("wok", "Wok", "minor", False),
+    ("dutch_oven", "Dutch oven", "minor", False),
+    ("griddle", "Griddle", "minor", False),
+    ("waffle_iron", "Waffle iron", "minor", False),
+    ("panini_press", "Panini press", "minor", False),
+    ("bun_steamer", "Bun / food steamer", "minor", False),
+    ("pizza_stone", "Pizza stone", "minor", False),
+    ("mandoline", "Mandoline", "minor", False),
+    ("spiralizer", "Spiralizer", "minor", False),
+    ("kitchen_scale", "Kitchen scale", "minor", False),
+    ("meat_thermometer", "Meat thermometer", "minor", False),
+    ("mortar_pestle", "Mortar and pestle", "minor", False),
+    ("microplane", "Microplane / zester", "minor", False),
+    ("garlic_press", "Garlic press", "minor", False),
+    ("rolling_pin", "Rolling pin", "minor", False),
+    ("pastry_bag", "Piping / pastry bag", "minor", False),
+    ("torch", "Kitchen torch", "minor", False),
+]
+
+# Stable id -> label, and the default-on id list, derived once from the catalog.
+KITCHEN_APPLIANCE_LABELS = {key: label for key, label, _g, _d in KITCHEN_APPLIANCES}
+KITCHEN_APPLIANCE_KEYS = tuple(key for key, *_rest in KITCHEN_APPLIANCES)
+DEFAULT_KITCHEN_APPLIANCES = [key for key, _l, _g, default_on in KITCHEN_APPLIANCES if default_on]
+
+
+def appliances_clause(keys) -> str:
+    """A short sentence listing the owned appliances for the AI cook prompt.
+
+    Returns "" when nothing is selected (so the prompt is left unconstrained).
+    Unknown ids are dropped, so a stale saved key never leaks into the prompt.
+    Pure, so it is unit-testable without settings.
+    """
+    labels = [KITCHEN_APPLIANCE_LABELS[k] for k in (keys or [])
+              if k in KITCHEN_APPLIANCE_LABELS]
+    if not labels:
+        return ""
+    return (
+        "Available kitchen appliances: " + ", ".join(labels)
+        + ". Prefer recipes that can be made with this equipment; do not require "
+        "appliances that are not listed."
+    )
+
 
 # Stream Deck key rendering style (FoodAssistant-fygv). Pushed into the deck's
 # config.toml so the controller picks them up. "rich" is a subtle gradient,
@@ -506,6 +585,12 @@ class Settings(BaseSettings):
     # on hand (empty = built-in list). Thresholds in days.
     staple_items: str = ""
     cook_ai_context: str = ""
+    # Kitchen appliances the user owns (list of stable ids from
+    # KITCHEN_APPLIANCES). Steers the AI cook suggestions and, later, affiliate
+    # recommendations. Defaults to the everyday items so a fresh install is
+    # useful before the user edits anything; an explicit empty list (user
+    # unchecked everything) is preserved distinctly from the unset default.
+    kitchen_appliances: list = DEFAULT_KITCHEN_APPLIANCES
     perishable_days: int = 14
     expiring_soon_days: int = 5
     suggest_per_tier: int = 8

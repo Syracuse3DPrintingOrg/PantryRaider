@@ -23,6 +23,7 @@ from ..config import (
     STREAMDECK_KEY_STYLES, STREAMDECK_ICON_COLORS,
     DEPLOYMENT_MODES, _DEFAULT_DEPLOYMENT_MODE,
     AI_MODELS, SATELLITE_PULL_FIELDS,
+    KITCHEN_APPLIANCES, KITCHEN_APPLIANCE_KEYS,
     browser_host, device_hostname,
 )
 from ..database import SessionLocal
@@ -188,6 +189,9 @@ class SetupPayload(BaseModel):
     barcode_llm_fallback: bool = False
     barcode_autocheck_shopping: bool = False
     cook_ai_context: str = ""
+    # Kitchen appliances the user owns (list of catalog ids). None = field not
+    # submitted (leave the stored selection alone); [] = explicitly none.
+    kitchen_appliances: list[str] | None = None
     has_streamdeck: bool = False
     streamdeck_key_count: int = 0
     # These were previously sent by the setup page but dropped here (BaseModel
@@ -424,7 +428,22 @@ async def setup_page(request: Request):
         "is_satellite": settings.is_satellite(),
         "board_model": board_model(),
         "pi_mdns_host": _pi_mdns_host() if is_raspberry_pi() else "",
+        # Kitchen-appliance checklist, grouped for the Preferences section, with
+        # each item's current checked state from the saved selection.
+        "appliance_groups": _appliance_groups(),
     })
+
+
+def _appliance_groups() -> dict:
+    """Group the appliance catalog into major/minor with each item's checked
+    state, so the Preferences checklist renders without logic in the template."""
+    selected = set(settings.kitchen_appliances or [])
+    groups: dict[str, list] = {"major": [], "minor": []}
+    for key, label, group, _default in KITCHEN_APPLIANCES:
+        groups.get(group, groups["minor"]).append(
+            {"key": key, "label": label, "checked": key in selected}
+        )
+    return groups
 
 
 class ModePayload(BaseModel):
@@ -520,6 +539,16 @@ async def save_setup(payload: SetupPayload):
         data.pop("streamdeck_key_style", None)
     if "streamdeck_icon_color" in data and data["streamdeck_icon_color"] not in STREAMDECK_ICON_COLORS:
         data.pop("streamdeck_icon_color", None)
+    # Keep only known appliance ids, de-duplicated in catalog order, so a stale
+    # or hand-crafted id never reaches the AI prompt. An empty list is preserved
+    # (the user owns none); the field absent leaves the stored choice untouched.
+    if "kitchen_appliances" in data:
+        submitted = data["kitchen_appliances"]
+        if isinstance(submitted, list):
+            chosen = {str(x) for x in submitted}
+            data["kitchen_appliances"] = [k for k in KITCHEN_APPLIANCE_KEYS if k in chosen]
+        else:
+            data.pop("kitchen_appliances", None)
     # Drop an unknown deployment mode rather than persisting a broken value;
     # an empty/absent mode leaves the existing choice untouched.
     if data.get("deployment_mode") and data["deployment_mode"] not in DEPLOYMENT_MODES:
