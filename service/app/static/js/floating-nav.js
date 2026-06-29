@@ -51,12 +51,20 @@
     if (!edge || (autohide && hasDeck)) {
       nav.classList.add('d-none');
       clearPadding();
+      // Signal CSS that the floating nav is NOT the active nav surface, so the
+      // top navbar keeps its full primary-tab row even at high zoom (otherwise
+      // a high-scale small panel would have no visible tab navigation at all).
+      document.documentElement.removeAttribute('data-floatnav-active');
       return;
     }
 
     applyDock(nav, edge);
     nav.classList.remove('d-none');
     reserveSpace(nav, edge);
+    // The floating nav is the single on-screen nav surface here. Publish that as
+    // an attribute so base.html can slim the redundant top navbar at high zoom
+    // on a small panel (FoodAssistant-fuuj) and reclaim the screen for content.
+    document.documentElement.setAttribute('data-floatnav-active', '1');
 
     window.addEventListener('resize', function () {
       reserveSpace(nav, edge);

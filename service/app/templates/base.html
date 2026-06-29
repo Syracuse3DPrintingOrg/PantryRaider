@@ -174,6 +174,47 @@
          (fixed, large targets, no hamburger), so it is NOT hidden here. It is
          auto-enabled in kiosk mode by floating-nav.js. */
     }
+    /* High-zoom small-panel nav reclaim (FoodAssistant-fuuj).
+       At large/xlarge UI scale on a small/kiosk panel (e.g. an 800x480 screen
+       zoomed 1.2-1.4x, leaving a short effective CSS viewport) BOTH the top
+       navbar and the bottom floating nav were showing, so navigation chrome ate
+       ~half the screen. When the floating nav is the active nav surface
+       (floating-nav.js sets data-floatnav-active on <html>), it already exposes
+       every destination plus Settings, so the top navbar's redundant primary
+       tab row and utility toggler are pure overhead here. Collapse the top bar
+       to just the brand and slim its height, leaving the floating nav as the one
+       navigation surface. Scoped to high scale + small viewport + active
+       floating nav, so normal scale, phones, and desktop are untouched, and a
+       panel WITHOUT the floating nav keeps its full top navbar. */
+    @media (max-width: 991.98px) {
+      html[data-floatnav-active="1"][data-ui-scale^="1.2"] .navbar.fixed-top .nav-primary,
+      html[data-floatnav-active="1"][data-ui-scale^="1.2"] .navbar.fixed-top .navbar-toggler,
+      html[data-floatnav-active="1"][data-ui-scale^="1.2"] .navbar.fixed-top .navbar-collapse,
+      html[data-floatnav-active="1"][data-ui-scale^="1.4"] .navbar.fixed-top .nav-primary,
+      html[data-floatnav-active="1"][data-ui-scale^="1.4"] .navbar.fixed-top .navbar-toggler,
+      html[data-floatnav-active="1"][data-ui-scale^="1.4"] .navbar.fixed-top .navbar-collapse {
+        display: none !important;
+      }
+      /* Slim the now brand-only bar and shrink the body's top offset to match so
+         the reclaimed row goes to content, not to empty padding. */
+      html[data-floatnav-active="1"][data-ui-scale^="1.2"] .navbar.fixed-top,
+      html[data-floatnav-active="1"][data-ui-scale^="1.4"] .navbar.fixed-top {
+        min-height: 0;
+        padding-top: 0.15rem;
+        padding-bottom: 0.15rem;
+      }
+      html[data-floatnav-active="1"][data-ui-scale^="1.2"] .navbar-brand,
+      html[data-floatnav-active="1"][data-ui-scale^="1.4"] .navbar-brand {
+        font-size: 0.95rem;
+        padding-top: 0;
+        padding-bottom: 0;
+        line-height: 1.4;
+      }
+      html[data-floatnav-active="1"][data-ui-scale^="1.2"] body,
+      html[data-floatnav-active="1"][data-ui-scale^="1.4"] body {
+        padding-top: 38px !important;
+      }
+    }
     /* On-screen navigation bar (FoodAssistant-bzuu, -i181). A FIXED bar docked
        to a screen edge. Unlike the old draggable overlay, it reserves layout
        space (floating-nav.js pads the body on the docked side), so it never sits
