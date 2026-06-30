@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+{% block title %}Nutrition: FoodAssistant{% endblock %}
+{% block content %}
+
+<div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mt-3 mb-3">
+  <h4 class="mb-0"><i class="bi bi-heart-pulse me-2"></i>Nutrition <span class="text-secondary fs-6" id="nt-date"></span></h4>
+  <button class="btn btn-outline-secondary btn-sm" onclick="loadToday()" title="Refresh"><i class="bi bi-arrow-clockwise me-1"></i>Refresh</button>
+</div>
+
+<!-- Today's running totals -->
+<div class="row g-2 mb-3" id="nt-totals">
+  <div class="col-6 col-md-3"><div class="card text-center"><div class="card-body py-2"><div class="fs-3 fw-semibold" id="tt-cal">0</div><div class="small text-secondary">calories</div></div></div></div>
+  <div class="col-6 col-md-3"><div class="card text-center"><div class="card-body py-2"><div class="fs-3 fw-semibold" id="tt-pro">0</div><div class="small text-secondary">protein (g)</div></div></div></div>
+  <div class="col-6 col-md-3"><div class="card text-center"><div class="card-body py-2"><div class="fs-3 fw-semibold" id="tt-carb">0</div><div class="small text-secondary">carbs (g)</div></div></div></div>
+  <div class="col-6 col-md-3"><div class="card text-center"><div class="card-body py-2"><div class="fs-3 fw-semibold" id="tt-fat">0</div><div class="small text-secondary">fat (g)</div></div></div></div>
+</div>
+
+<!-- Add a food -->
+<div class="card mb-3">
+  <div class="card-body">
+    <h6 class="card-title"><i class="bi bi-plus-circle me-1"></i>Log a food</h6>
+    <div class="row g-2 align-items-end">
+      <div class="col-12 col-md-5">
+        <label class="form-label small mb-1">Food</label>
+        <input type="text" class="form-control form-control-sm" id="nt-name" placeholder="e.g. 2 eggs and toast">
+      </div>
+      <div class="col-4 col-md-2">
+        <label class="form-label small mb-1">Servings</label>
+        <input type="number" class="form-control form-control-sm" id="nt-serv" value="1" min="0" step="0.5">
+      </div>
+      {% if ai_configured %}
+      <div class="col-8 col-md-3">
+        <button class="btn btn-outline-info btn-sm w-100" onclick="estimateMacros(this)" title="Ask the AI to estimate calories and macros">
+          <i class="bi bi-stars me-1"></i>Estimate with AI
+        </button>
+      </div>
+      {% endif %}
+    </div>
+    <div class="row g-2 mt-1">
+      <div class="col"><label class="form-label small mb-1">Calories</label><input type="number" class="form-control form-control-sm" id="nt-cal" min="0" step="1"></div>
+      <div class="col"><label class="form-label small mb-1">Protein g</label><input type="number" class="form-control form-control-sm" id="nt-pro" min="0" step="0.1"></div>
+      <div class="col"><label class="form-label small mb-1">Carbs g</label><input type="number" class="form-control form-control-sm" id="nt-carb" min="0" step="0.1"></div>
+      <div class="col"><label class="form-label small mb-1">Fat g</label><input type="number" class="form-control form-control-sm" id="nt-fat" min="0" step="0.1"></div>
+    </div>
+    <button class="btn btn-success btn-sm mt-2" onclick="logFood(this)"><i class="bi bi-check-lg me-1"></i>Add to today</button>
+    <span class="small ms-2" id="nt-msg"></span>
+  </div>
+</div>
+
+<h6 class="text-secondary">Today's log</h6>
+<div id="nt-entries" class="d-flex flex-column gap-2"></div>
+<div id="nt-empty" class="text-secondary small d-none">Nothing logged yet today.</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function esc(s){const d=document.createElement('div');d.textContent=s==null?'':s;return d.innerHTML;}
+function val(id){const v=document.getElementById(id).value;return v===''?null:parseFloat(v);}
+function fmt(n){return n==null?'-':(Math.round(n*10)/10);}
+
+async function loadToday(){
+  let d={entries:[],totals:{}};
+  try{ d=await fetch('nutrition/today',{cache:'no-store'}).then(r=>r.json()); }catch(e){}
+  document.getElementById('nt-date').textContent = d.date||'';
+  const t=d.totals||{};
+  document.getElementById('tt-cal').textContent=fmt(t.calories)||0;
+  document.getElementById('tt-pro').textContent=fmt(t.protein)||0;
+  document.getElementById('tt-carb').textContent=fmt(t.carbs)||0;
+  document.getElementById('tt-fat').textContent=fmt(t.fat)||0;
+  const list=document.getElementById('nt-entries'); list.innerHTML='';
+  const entries=d.entries||[];
+  document.getElementById('nt-empty').classList.toggle('d-none', entries.length>0);
+  entries.forEach(e=>{
+    const row=document.createElement('div');
+    row.className='card';
+    row.innerHTML=`<div class="card-body py-2 px-3 d-flex justify-content-between align-items-center flex-wrap gap-2">
+      <div><span class="fw-semibold">${esc(e.name)}</span>
+        <span class="small text-secondary">x${esc(e.servings)} · ${fmt(e.calories)} cal · P ${fmt(e.protein)} / C ${fmt(e.carbs)} / F ${fmt(e.fat)}</span></div>
+      <button class="btn btn-sm btn-outline-danger" title="Remove"><i class="bi bi-trash"></i></button></div>`;
+    row.querySelector('button').onclick=()=>delEntry(e.id);
+    list.appendChild(row);
+  });
+}
+
+async function estimateMacros(btn){
+  const name=document.getElementById('nt-name').value.trim();
+  if(!name){document.getElementById('nt-msg').innerHTML='<span class="text-warning">Enter a food first.</span>';return;}
+  const orig=btn.innerHTML; btn.disabled=true; btn.innerHTML='<span class="spinner-border spinner-border-sm"></span>';
+  try{
+    const r=await fetch('nutrition/estimate',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({name,servings:val('nt-serv')||1})}).then(x=>x.json());
+    if(!r.ok){document.getElementById('nt-msg').innerHTML='<span class="text-secondary">'+(r.error||'No estimate')+'</span>';}
+    else{const e=r.estimate||{};
+      if(e.calories!=null)document.getElementById('nt-cal').value=e.calories;
+      if(e.protein!=null)document.getElementById('nt-pro').value=e.protein;
+      if(e.carbs!=null)document.getElementById('nt-carb').value=e.carbs;
+      if(e.fat!=null)document.getElementById('nt-fat').value=e.fat;
+      document.getElementById('nt-msg').innerHTML='<span class="text-success">Estimated. Edit if needed, then add.</span>';}
+  }catch(e){document.getElementById('nt-msg').innerHTML='<span class="text-danger">Estimate failed.</span>';}
+  btn.disabled=false; btn.innerHTML=orig;
+}
+
+async function logFood(btn){
+  const name=document.getElementById('nt-name').value.trim();
+  if(!name){document.getElementById('nt-msg').innerHTML='<span class="text-warning">Enter a food.</span>';return;}
+  const body={name,servings:val('nt-serv')||1,calories:val('nt-cal'),protein:val('nt-pro'),carbs:val('nt-carb'),fat:val('nt-fat')};
+  try{
+    await fetch('nutrition/log',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  }catch(e){document.getElementById('nt-msg').innerHTML='<span class="text-danger">Could not log.</span>';return;}
+  ['nt-name','nt-cal','nt-pro','nt-carb','nt-fat'].forEach(i=>document.getElementById(i).value='');
+  document.getElementById('nt-serv').value='1';
+  document.getElementById('nt-msg').textContent='';
+  loadToday();
+}
+
+async function delEntry(id){
+  try{ await fetch('nutrition/'+id,{method:'DELETE'}); }catch(e){}
+  loadToday();
+}
+
+loadToday();
+</script>
+{% endblock %}

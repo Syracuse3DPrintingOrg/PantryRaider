@@ -95,6 +95,11 @@ class OllamaProvider(VisionProvider):
         raw = await self._generate_text(prompt)
         return json.loads(raw)
 
+    async def estimate_nutrition(self, name: str, servings: float = 1.0) -> dict | None:
+        from .base import NUTRITION_PROMPT, nutrition_fields, parse_json_response
+        raw = await self._generate_text(NUTRITION_PROMPT.format(name=name, servings=servings))
+        return nutrition_fields(parse_json_response(raw))
+
     async def suggest_from_inventory(self, items: list[str], limit: int = 8,
                                       preferences: str = "") -> list[dict] | None:
         pref_block = f"\nMy food preferences / restrictions:\n{preferences}\n" if preferences.strip() else ""

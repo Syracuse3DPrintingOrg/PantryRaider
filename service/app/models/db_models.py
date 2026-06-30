@@ -109,3 +109,27 @@ class ActionItem(Base):
     updated_at = Column(
         String, default=lambda: datetime.now(timezone.utc).isoformat(timespec="seconds")
     )
+
+
+class IntakeLog(Base):
+    """One logged food/meal in the food-intake tracker (FoodAssistant-e6qt).
+
+    Records what was eaten and its nutrition so the Nutrition page can show
+    daily totals. Macros are per the logged servings (already multiplied), so a
+    day's total is a straight sum. ``date`` is the local calendar day
+    (YYYY-MM-DD) the entry counts toward, kept denormalised so the day query is
+    a simple index lookup."""
+    __tablename__ = "intake_log"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    servings = Column(Float, default=1.0)
+    calories = Column(Float, nullable=True)
+    protein = Column(Float, nullable=True)   # grams
+    carbs = Column(Float, nullable=True)     # grams
+    fat = Column(Float, nullable=True)       # grams
+    date = Column(String, nullable=False, index=True)   # local YYYY-MM-DD
+    source = Column(String, default="manual")  # manual | barcode | recipe
+    created_at = Column(
+        String, default=lambda: datetime.now(timezone.utc).isoformat(timespec="seconds")
+    )

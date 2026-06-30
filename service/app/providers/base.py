@@ -13,6 +13,30 @@ def parse_json_response(raw: str):
     return json.loads(text)
 
 
+# Shared nutrition-estimate prompt + result normaliser, so every provider asks
+# the same way and returns the same clean {calories, protein, carbs, fat} shape
+# (FoodAssistant-e6qt). Grams for the macros, totals for the given servings.
+NUTRITION_PROMPT = (
+    'Estimate the nutrition for {servings} serving(s) of "{name}". Reply with ONLY '
+    'compact JSON and nothing else: {{"calories": <number>, "protein": <grams>, '
+    '"carbs": <grams>, "fat": <grams>}}. The numbers are the TOTAL for {servings} '
+    'serving(s); use your best general estimate.'
+)
+
+
+def nutrition_fields(data) -> dict:
+    """Coerce a model's nutrition JSON into {calories, protein, carbs, fat} of
+    floats (or None). Tolerant of missing/garbled values."""
+    out: dict = {}
+    for key in ("calories", "protein", "carbs", "fat"):
+        value = data.get(key) if isinstance(data, dict) else None
+        try:
+            out[key] = round(float(value), 1) if value is not None else None
+        except (TypeError, ValueError):
+            out[key] = None
+    return out
+
+
 class VisionProvider(ABC):
     @abstractmethod
     async def analyze_food(self, image_data: bytes, mime_type: str) -> AnalysisResult:
@@ -47,6 +71,13 @@ class VisionProvider(ABC):
                                       preferences: str = "") -> list[dict] | None:
         """Suggest recipes from a list of available ingredients. Returns a list of
         {name, description, uses} dicts, or None if unsupported."""
+        return None
+
+    async def estimate_nutrition(self, name: str, servings: float = 1.0) -> dict | None:
+        """Estimate calories + macros (grams) for a food, scaled to servings.
+
+        Returns {calories, protein, carbs, fat} (floats or None), or None if the
+        provider does not support text generation (FoodAssistant-e6qt)."""
         return None
 
     async def extract_recipe(self, image_data: bytes | None = None,

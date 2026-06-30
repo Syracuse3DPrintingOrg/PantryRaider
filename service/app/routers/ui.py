@@ -497,6 +497,16 @@ async def weather_data(location: str | None = None):
     return {"ok": True, "forecast": forecast, "location": loc}
 
 
+@router.get("/nutrition", response_class=HTMLResponse)
+async def nutrition_page(request: Request):
+    """Food-intake / nutrition tracker (FoodAssistant-e6qt)."""
+    return templates.TemplateResponse(request, "nutrition.html", {
+        "request": request,
+        "active": "nutrition",
+        "ai_configured": settings.ai_configured(),
+    })
+
+
 @router.get("/about", response_class=HTMLResponse)
 async def about_page(request: Request):
     return templates.TemplateResponse(request, "about.html", {

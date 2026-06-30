@@ -109,6 +109,11 @@ class OpenAIProvider(VisionProvider):
         raw = await self._generate(prompt, max_tokens=4096)
         return parse_json_response(raw)
 
+    async def estimate_nutrition(self, name: str, servings: float = 1.0) -> dict | None:
+        from .base import NUTRITION_PROMPT, nutrition_fields
+        raw = await self._generate(NUTRITION_PROMPT.format(name=name, servings=servings), max_tokens=300)
+        return nutrition_fields(parse_json_response(raw))
+
     async def suggest_from_inventory(self, items: list[str], limit: int = 8,
                                       preferences: str = "") -> list[dict] | None:
         pref_block = f"\nMy food preferences / restrictions:\n{preferences}\n" if preferences.strip() else ""

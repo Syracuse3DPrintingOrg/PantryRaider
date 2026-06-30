@@ -180,6 +180,12 @@ class GeminiProvider(VisionProvider):
         response = await self.model.generate_content_async([prompt])
         return json.loads(response.text)
 
+    async def estimate_nutrition(self, name: str, servings: float = 1.0) -> dict | None:
+        from .base import NUTRITION_PROMPT, nutrition_fields, parse_json_response
+        response = await self.model.generate_content_async(
+            [NUTRITION_PROMPT.format(name=name, servings=servings)])
+        return nutrition_fields(parse_json_response(response.text))
+
     async def suggest_from_inventory(self, items: list[str], limit: int = 8,
                                       preferences: str = "") -> list[dict] | None:
         pref_block = f"\nMy food preferences / restrictions:\n{preferences}\n" if preferences.strip() else ""

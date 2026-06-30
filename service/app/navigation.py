@@ -19,6 +19,7 @@ NAV_TABS = [
     {"key": "current_recipe", "label": "On the Line", "icon": "bi-fire", "href": "ui/current-recipe", "requires": "mealie"},
     {"key": "mealplan",  "label": "Meal Plan", "icon": "bi-calendar-week",   "href": "ui/mealplan", "requires": "mealie"},
     {"key": "shopping",  "label": "Shopping",  "icon": "bi-cart",            "href": "ui/shopping"},
+    {"key": "nutrition", "label": "Nutrition", "icon": "bi-heart-pulse",     "href": "ui/nutrition"},
     {"key": "camera",    "label": "Camera",    "icon": "bi-camera-video",    "href": "ui/camera",   "requires": "cameras"},
     {"key": "convert",   "label": "Convert",   "icon": "bi-rulers",          "href": "ui/convert"},
     {"key": "guide",     "label": "Kitchen Guide", "icon": "bi-book",        "href": "ui/kitchen-guide"},
