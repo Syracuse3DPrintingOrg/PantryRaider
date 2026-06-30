@@ -381,11 +381,17 @@ def _setup_phone_url(request: Request) -> str:
     """A phone/PC-reachable URL to this device's setup page (FoodAssistant-cssj).
 
     The kiosk browser reaches the app over localhost, which is useless on a
-    phone, so we swap in the device's LAN host (<hostname>.local or its IP) and
-    keep the port the request came in on. Off a Pi (no mDNS helper) we fall back
-    to the request hostname, which is already the address the user typed.
+    phone, so we swap in the device's LAN address and keep the port the request
+    came in on. We prefer the LAN IP over the <hostname>.local mDNS name, because
+    a phone or laptop on the same subnet can always reach the IP, while .local
+    needs mDNS which many networks do not resolve (FoodAssistant). Off a Pi we
+    fall back to the request hostname, which is already the address the user typed.
     """
-    host = _pi_mdns_host() if is_raspberry_pi() else (request.url.hostname or "")
+    if is_raspberry_pi():
+        from ..config import _lan_ip
+        host = _lan_ip() or _pi_mdns_host()
+    else:
+        host = request.url.hostname or ""
     if not host:
         return ""
     port = request.url.port
