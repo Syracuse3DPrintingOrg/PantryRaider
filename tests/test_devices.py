@@ -228,3 +228,21 @@ def test_satellite_config_records_heartbeat(monkeypatch):
         "X-Device-Id": "pi-x1",
     })
     assert resp2.json()["command"] is None
+
+
+# ---------------------------------------------------------------------------
+# lan_cidr_from_known_devices (blank-scan fallback for bridge-only servers)
+# ---------------------------------------------------------------------------
+
+def test_lan_cidr_prefers_real_lan_heartbeat():
+    from app.services import devices
+    # A Docker-network scan row and a real-LAN heartbeat row.
+    devices.record_scan_result("172.19.0.1", version="0.7.7")
+    devices.record_heartbeat("dev-pi", ip="192.168.1.31", deployment_mode="pi_remote")
+    assert devices.lan_cidr_from_known_devices() == "192.168.1.0/24"
+
+
+def test_lan_cidr_skips_docker_and_loopback():
+    from app.services import devices
+    devices.record_scan_result("172.19.0.1", version="0.7.7")  # docker only
+    assert devices.lan_cidr_from_known_devices() is None

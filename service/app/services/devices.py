@@ -119,6 +119,33 @@ def list_devices() -> list[dict]:
     return out
 
 
+def lan_cidr_from_known_devices() -> str | None:
+    """A /24 taken from a checked-in device's real LAN IP, preferring heartbeat
+    rows. Lets a bridge-only server (which only sees its Docker subnet) scan the
+    LAN where its satellites actually live, so a blank scan still finds the fleet.
+    Skips loopback and Docker (172.16/12) addresses."""
+    import ipaddress
+    db = SessionLocal()
+    try:
+        rows = db.query(SatelliteDevice).all()
+    finally:
+        db.close()
+    # Heartbeat rows first (a real device that reached the server), then any.
+    rows.sort(key=lambda r: 0 if getattr(r, "source", "") == "heartbeat" else 1)
+    for dev in rows:
+        ip = (dev.ip or "").strip()
+        if not ip or ip.startswith("127."):
+            continue
+        try:
+            net = ipaddress.ip_network(f"{ip}/24", strict=False)
+        except ValueError:
+            continue
+        if net.subnet_of(ipaddress.ip_network("172.16.0.0/12")):
+            continue  # Docker network, not a real LAN
+        return str(net)
+    return None
+
+
 def queue_command(device_id: str, command: str) -> bool:
     """Queue a command for a device to pick up on its next heartbeat.
 

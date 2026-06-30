@@ -270,7 +270,7 @@ _FINGERPRINT = {"app": "foodassistant", "version": APP_VERSION}
 async def health():
     if not settings.is_configured():
         return {**_FINGERPRINT, "status": "unconfigured", "setup": "/setup",
-                "mode": settings.deployment_mode}
+                "mode": settings.deployment_mode, "device_id": settings.device_id}
     from .dependencies import get_vision_provider
     from .services.grocy import GrocyClient
     provider = get_vision_provider()
@@ -283,6 +283,9 @@ async def health():
         **_FINGERPRINT,
         "status": "ok",
         "mode": settings.deployment_mode,
+        # Lets a LAN scan recognise and skip this very server when it answers its
+        # own probe through a Docker gateway (FoodAssistant).
+        "device_id": settings.device_id,
         "vision_provider": vision_status,
         "grocy": "ok" if await grocy.health_check() else "error",
     }

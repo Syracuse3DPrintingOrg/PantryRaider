@@ -51,6 +51,7 @@ def _probe_host(ip: str, ports: list[int], timeout: float) -> dict | None:
                 "version": data.get("version"),
                 "mode": data.get("mode"),
                 "status": data.get("status"),
+                "device_id": data.get("device_id"),
             }
     return None
 
