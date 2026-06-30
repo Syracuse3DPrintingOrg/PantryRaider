@@ -115,15 +115,20 @@
         t.textContent = msg; t.style.display = 'block';
         clearTimeout(t._h); t._h = setTimeout(() => { t.style.display = 'none'; }, 2200);
       }
+      // Resolve a relative app path against the <base href>, not the current
+      // /ui/start URL. Setting location.href on a relative value resolves it
+      // against the page URL, which would make "ui/" become "/ui/ui/" and the
+      // key appear to do nothing (FoodAssistant).
+      function go(path) { location.href = new URL(path, document.baseURI).href; }
       function fire(el) {
-        if (el.dataset.kind === 'builtin') { location.href = el.dataset.href; return; }
+        if (el.dataset.kind === 'builtin') { go(el.dataset.href); return; }
         if (el.dataset.kind === 'deckonly') {
           toast('"' + (el.dataset.label || 'This') + '" runs on a connected Stream Deck.'); return;
         }
         const t = el.dataset.type;
-        if (ROUTE[t]) { location.href = ROUTE[t]; return; }
+        if (ROUTE[t]) { go(ROUTE[t]); return; }
         if (NEEDS_DECK[t]) { toast('This ' + NEEDS_DECK[t] + ' key runs on a connected Stream Deck.'); return; }
-        location.href = 'ui/';
+        go('ui/');
       }
       document.querySelectorAll('.start-key[role="button"]').forEach(el => {
         el.addEventListener('click', () => fire(el));

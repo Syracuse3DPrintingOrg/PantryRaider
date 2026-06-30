@@ -59,7 +59,7 @@ def test_resolve_layout_uses_deck_tokens(monkeypatch):
     # Tokens are the deck model: action name, custom id, or blank.
     resolved = sp.resolve_layout(["inventory", "k1", "brightness", "bogus"], 6)
     assert len(resolved) == 6
-    assert resolved[0]["kind"] == "builtin" and resolved[0]["href"] == "ui/"
+    assert resolved[0]["kind"] == "builtin" and resolved[0]["href"] == "ui/inventory"
     assert resolved[1]["kind"] == "custom" and resolved[1]["id"] == "k1"
     assert resolved[2]["kind"] == "deckonly"   # a deck-only action (no on-screen page)
     assert resolved[3]["kind"] == "blank"      # unknown token
@@ -131,3 +131,9 @@ def test_start_page_enabled_renders_grid(client, monkeypatch):
     assert "repeat(3, 1fr)" in r.text
     assert "start-key" in r.text
     assert r.text.count("start-key") >= 6  # all six cells render (some blank)
+
+
+def test_inventory_key_avoids_the_ui_root_redirect():
+    # /ui/ may redirect to the Start Page when it leads the nav, so the Stock key
+    # must target the explicit inventory route, not "ui/", or it would loop back.
+    assert sp.DECK_CATALOG["inventory"]["href"] == "ui/inventory"

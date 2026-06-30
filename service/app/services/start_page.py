@@ -29,7 +29,7 @@ DECK_CATALOG: dict[str, dict] = {
     "pending":   {"label": "Pending",  "icon": "bi-inbox",           "color": "#1d4ed8", "href": "ui/pending"},
     "commit":    {"label": "Commit",   "icon": "bi-check2-circle",   "color": "#15803d", "href": None},
     "add":       {"label": "Add",      "icon": "bi-plus-circle",     "color": "#b45309", "href": "ui/add"},
-    "inventory": {"label": "Stock",    "icon": "bi-grid",            "color": "#0f766e", "href": "ui/"},
+    "inventory": {"label": "Stock",    "icon": "bi-grid",            "color": "#0f766e", "href": "ui/inventory"},
     "cook":      {"label": "Cook",     "icon": "bi-fire",            "color": "#7e22ce", "href": "ui/cook"},
     "recipes":   {"label": "Recipes",  "icon": "bi-journal-richtext","color": "#7e22ce", "href": "ui/recipes"},
     "mealplan":  {"label": "Plan",     "icon": "bi-calendar-week",   "color": "#7e22ce", "href": "ui/mealplan"},
