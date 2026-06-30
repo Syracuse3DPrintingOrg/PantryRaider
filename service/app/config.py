@@ -12,7 +12,7 @@ from .hardware import is_raspberry_pi
 
 # Single source of truth for the app version (shown in the UI, used by the
 # update checker, and reported by FastAPI). Bump on each tagged release.
-APP_VERSION = "0.7.14"
+APP_VERSION = "0.7.15"
 
 # GitHub repo used by the in-app update checker.
 GITHUB_REPO = "Syracuse3DPrinting/FoodAssistant"
@@ -28,7 +28,7 @@ AMAZON_ASSOCIATES_TAG = _os.environ.get("AMAZON_ASSOCIATES_TAG", "improvisedeng-
 # Like the Associates tag this is the project owner's static link, not a
 # per-user setting. Empty by default; set AMAZON_STOREFRONT_URL to surface the
 # storefront link on the Shop page. No URL is invented here.
-AMAZON_STOREFRONT_URL = _os.environ.get("AMAZON_STOREFRONT_URL", "").strip()
+AMAZON_STOREFRONT_URL = _os.environ.get("AMAZON_STOREFRONT_URL", "https://www.amazon.com/shop/improvisedeng").strip()
 
 # UI themes. Each entry carries the Bootstrap 5.3 colour mode (data-bs-theme)
 # and an optional vendored Bootswatch stylesheet served from /static. When

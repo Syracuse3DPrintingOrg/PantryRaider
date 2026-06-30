@@ -169,8 +169,9 @@ def test_shop_page_renders_with_disclosure(client):
     assert "Recommended for you" in body
 
 
-def test_shop_page_hides_storefront_link_when_unset(client):
-    # Default storefront url is empty, so no storefront button renders.
+def test_shop_page_hides_storefront_link_when_unset(monkeypatch, client):
+    # With no storefront url, no storefront button renders.
+    monkeypatch.setattr("app.routers.affiliate.AMAZON_STOREFRONT_URL", "", raising=False)
     r = client.get("/ui/shop")
     assert "Browse our recommended items on Amazon" not in r.text
 
