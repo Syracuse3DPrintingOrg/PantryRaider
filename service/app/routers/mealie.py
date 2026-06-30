@@ -304,9 +304,15 @@ async def suggest(
         mealie_names = {(r.get("name") or "").lower() for r in recipes}
         ext_recipes = [r for r in ext_recipes if (r.get("name") or "").lower() not in mealie_names]
 
+    # Classify Mealie and web recipes together so every tier (Ready, With Pantry
+    # Staples, Worth a Shop Run) draws from both sources rather than siloing the
+    # web results in their own section (FoodAssistant-uo73). ext_recipes are
+    # already de-duplicated against the Mealie names above, so combining is safe.
     return {
-        "tiers": classify_recipes(recipes, stock, top_per_tier=top),
-        "external_tiers": classify_recipes(ext_recipes, stock, top_per_tier=top) if ext_recipes else {},
+        "tiers": classify_recipes(recipes + ext_recipes, stock, top_per_tier=top),
+        # Kept for response-shape compatibility; the web recipes are now merged
+        # into "tiers" above, so this stays empty.
+        "external_tiers": {},
         "recipes_considered": len(recipes) + len(ext_recipes),
         "external_considered": len(ext_recipes),
         "inventory_items": len(stock),

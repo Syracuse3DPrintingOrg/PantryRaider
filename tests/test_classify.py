@@ -42,6 +42,19 @@ def test_stock_plus_staples_is_staples_tier():
     assert sorted(r["staple_ingredients"]) == ["eggs", "flour", "salt"]
 
 
+def test_web_recipes_share_the_staples_tier(monkeypatch):
+    """A web recipe makeable from stock + staples lands in the same staples tier
+    as a Mealie one, since /suggest now classifies both pools together (uo73)."""
+    mealie_r = recipe("Mealie Chicken", ["chicken", "salt", "butter"], source="mealie")
+    web_r = recipe("Web Omelette", ["eggs", "salt", "butter"],
+                   source="themealdb", external_id="e1")
+    tiers = classify_recipes([mealie_r, web_r],
+                             [stock("Chicken breast"), stock("Eggs")])
+    names_sources = {(r["name"], r["source"]) for r in tiers["staples"]}
+    assert ("Mealie Chicken", "mealie") in names_sources
+    assert ("Web Omelette", "themealdb") in names_sources
+
+
 def test_perishable_plus_missing_is_shopping_tier():
     tiers = classify_recipes(
         [recipe("Salmon Curry", ["salmon", "coconut milk", "curry paste"])],
