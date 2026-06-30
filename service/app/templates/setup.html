@@ -4770,11 +4770,13 @@ function showKioskWizard() {
   tunnelModeChanged();
   _initTunnelStatus();
   {% endif %}
-  {% if is_pi_appliance %}
-  // Surface an available update on a Pi appliance as soon as Settings opens, so
-  // the device shows new software is ready without the user pressing anything.
-  if (typeof checkSatelliteUpdate === 'function') checkSatelliteUpdate(null);
-  {% endif %}
+  // Surface an available update as soon as Settings opens (Pi appliance or
+  // server), so the card shows new software is ready without the user pressing
+  // anything. Runs wherever the availability line exists; a satellite has no
+  // such control.
+  if (typeof checkSatelliteUpdate === 'function' && document.getElementById('update-avail')) {
+    checkSatelliteUpdate(null);
+  }
   // Reflect the saved debug-logging state in its toggle.
   if (typeof _loadLoggingState === 'function') _loadLoggingState();
 
