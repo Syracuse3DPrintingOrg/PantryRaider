@@ -1,33 +1,177 @@
-"""Server-side weather forecast from wttr.in's free JSON API (FoodAssistant-afqd).
+"""Server-side weather forecast (FoodAssistant-afqd, -wx2 reliability).
 
-The kiosk weather page used to load a panel PNG from v2.wttr.in directly in the
-browser, which is unreliable and depends on the kiosk's own internet access. The
-Stream Deck weather widget instead uses wttr.in's j1 JSON API server-side, which
-is dependable, so the page now uses the same path: the server fetches and parses
-the forecast and the page renders plain HTML.
+Primary source is Open-Meteo: a free, no-key, very reliable JSON API. The
+location name is geocoded to lat/lon with Open-Meteo's geocoder, then the
+forecast is fetched. wttr.in (the source the Stream Deck widget uses) is kept as
+a fallback, because it is frequently rate-limited and returns error pages, which
+is the likely reason the weather screen showed "unavailable".
 
-The parse step is a pure function so it is unit-testable without any network.
+All parse steps are pure functions so they are unit-testable without a network.
+The public ``fetch_forecast`` returns ``(forecast, error)`` so the caller can
+show why it failed instead of a bare "unavailable".
 """
 from __future__ import annotations
 
+import re
 from typing import Any
 
-# wttr.in numeric weather codes -> short description, mirroring the Stream Deck
-# widget's table so the two surfaces agree.
+# --- Open-Meteo (primary) -------------------------------------------------
+
+# WMO weather codes -> short description (Open-Meteo's ``weather_code``).
+_WMO = {
+    0: "Clear", 1: "Mainly clear", 2: "Partly cloudy", 3: "Overcast",
+    45: "Fog", 48: "Rime fog",
+    51: "Light drizzle", 53: "Drizzle", 55: "Heavy drizzle",
+    56: "Freezing drizzle", 57: "Freezing drizzle",
+    61: "Light rain", 63: "Rain", 65: "Heavy rain",
+    66: "Freezing rain", 67: "Freezing rain",
+    71: "Light snow", 73: "Snow", 75: "Heavy snow", 77: "Snow grains",
+    80: "Light showers", 81: "Showers", 82: "Heavy showers",
+    85: "Snow showers", 86: "Heavy snow showers",
+    95: "Thunderstorm", 96: "Thunderstorm + hail", 99: "Severe thunderstorm",
+}
+
+
+def _wmo_desc(code) -> str:
+    try:
+        return _WMO.get(int(code), "")
+    except (TypeError, ValueError):
+        return ""
+
+
+def _round(value) -> str:
+    """Render a number as a clean integer string, or '?' when missing."""
+    try:
+        return str(round(float(value)))
+    except (TypeError, ValueError):
+        return "?"
+
+
+def _is_lat_lon(text: str) -> tuple[float, float] | None:
+    """Parse a bare 'lat,lon' string, or None. Lets a user skip geocoding."""
+    m = re.fullmatch(r"\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*", text or "")
+    if not m:
+        return None
+    lat, lon = float(m.group(1)), float(m.group(2))
+    if -90 <= lat <= 90 and -180 <= lon <= 180:
+        return lat, lon
+    return None
+
+
+def parse_open_meteo(data: Any, units: str = "f", location: str = "") -> dict | None:
+    """Parse an Open-Meteo forecast payload into the render-ready shape, or None.
+
+    Shape: ``{location, units, current: {...}, days: [{...}]}``. Pure.
+    """
+    if not isinstance(data, dict):
+        return None
+    units = "c" if str(units).lower() == "c" else "f"
+    u = "F" if units == "f" else "C"
+    cur = data.get("current") or {}
+    daily = data.get("daily") or {}
+    if not isinstance(cur, dict) or "temperature_2m" not in cur:
+        return None
+    current = {
+        "temp": _round(cur.get("temperature_2m")),
+        "feels": _round(cur.get("apparent_temperature", cur.get("temperature_2m"))),
+        "humidity": _round(cur.get("relative_humidity_2m")),
+        "wind": _round(cur.get("wind_speed_10m")),
+        "wind_unit": "mph" if units == "f" else "km/h",
+        "desc": _wmo_desc(cur.get("weather_code")),
+        "unit": u,
+    }
+    times = daily.get("time") or []
+    highs = daily.get("temperature_2m_max") or []
+    lows = daily.get("temperature_2m_min") or []
+    codes = daily.get("weather_code") or []
+    tags = ("Today", "Tomorrow")
+    days: list[dict] = []
+    for i, date in enumerate(times):
+        days.append({
+            "label": tags[i] if i < len(tags) else str(date),
+            "date": str(date),
+            "hi": _round(highs[i]) if i < len(highs) else "?",
+            "lo": _round(lows[i]) if i < len(lows) else "?",
+            "desc": _wmo_desc(codes[i]) if i < len(codes) else "",
+            "unit": u,
+        })
+    return {"location": location, "units": units, "current": current, "days": days}
+
+
+async def _geocode(client, name: str) -> tuple[float, float] | None:
+    """Resolve a place name to (lat, lon) via Open-Meteo's geocoder, or None.
+
+    A trailing region (", NY") is used to prefer the right match among results
+    rather than being sent as part of the city name, which the geocoder dislikes.
+    """
+    coords = _is_lat_lon(name)
+    if coords:
+        return coords
+    raw = (name or "").strip()
+    if not raw:
+        return None
+    city = raw.split(",", 1)[0].strip()
+    region = raw.split(",", 1)[1].strip().lower() if "," in raw else ""
+    try:
+        r = await client.get(
+            "https://geocoding-api.open-meteo.com/v1/search",
+            params={"name": city, "count": 5, "language": "en", "format": "json"},
+        )
+        results = (r.json() or {}).get("results") or [] if r.status_code == 200 else []
+    except Exception:  # noqa: BLE001
+        return None
+    if not results:
+        return None
+    if region:
+        for res in results:
+            hay = " ".join(str(res.get(k, "")) for k in ("admin1", "admin1_id", "country", "country_code")).lower()
+            if region in hay or region.replace(" ", "") in hay.replace(" ", ""):
+                return res.get("latitude"), res.get("longitude")
+    first = results[0]
+    return first.get("latitude"), first.get("longitude")
+
+
+async def _fetch_open_meteo(client, location: str, units: str) -> tuple[dict | None, str]:
+    coords = await _geocode(client, location) if location.strip() else None
+    if location.strip() and not coords:
+        return None, "could not find that location"
+    params = {
+        "current": "temperature_2m,apparent_temperature,relative_humidity_2m,wind_speed_10m,weather_code",
+        "daily": "temperature_2m_max,temperature_2m_min,weather_code",
+        "timezone": "auto",
+        "forecast_days": 4,
+        "temperature_unit": "fahrenheit" if str(units).lower() != "c" else "celsius",
+        "wind_speed_unit": "mph" if str(units).lower() != "c" else "kmh",
+    }
+    if coords:
+        params["latitude"], params["longitude"] = coords[0], coords[1]
+    try:
+        r = await client.get("https://api.open-meteo.com/v1/forecast", params=params)
+    except Exception as e:  # noqa: BLE001
+        return None, f"could not reach the weather service ({e.__class__.__name__})"
+    if r.status_code != 200:
+        return None, f"weather service returned HTTP {r.status_code}"
+    try:
+        data = r.json()
+    except Exception:  # noqa: BLE001
+        return None, "weather service did not return forecast data"
+    parsed = parse_open_meteo(data, units, location)
+    if parsed is None:
+        return None, "could not parse the forecast"
+    return parsed, ""
+
+
+# --- wttr.in (fallback) ---------------------------------------------------
+
 _CONDITION = {
     113: "Sunny", 116: "Partly cloudy", 119: "Cloudy", 122: "Overcast",
     143: "Mist", 176: "Patchy rain", 179: "Patchy snow", 182: "Sleet",
     185: "Drizzle", 200: "Thundery", 227: "Blowing snow", 230: "Blizzard",
-    248: "Fog", 260: "Fog", 263: "Drizzle", 266: "Drizzle", 281: "Drizzle",
-    284: "Drizzle", 293: "Light rain", 296: "Light rain", 299: "Rain",
-    302: "Rain", 305: "Heavy rain", 308: "Heavy rain", 311: "Sleet",
-    314: "Sleet", 317: "Light sleet", 320: "Sleet", 323: "Light snow",
-    326: "Light snow", 329: "Snow", 332: "Snow", 335: "Heavy snow",
-    338: "Heavy snow", 350: "Ice pellets", 353: "Light showers",
-    356: "Showers", 359: "Heavy showers", 362: "Sleet showers",
-    365: "Sleet showers", 368: "Snow showers", 371: "Snow showers",
-    374: "Ice showers", 377: "Ice showers", 386: "Thundery showers",
-    389: "Thundery rain", 392: "Thundery snow", 395: "Heavy snow showers",
+    248: "Fog", 263: "Drizzle", 266: "Drizzle", 293: "Light rain",
+    296: "Light rain", 299: "Rain", 302: "Rain", 305: "Heavy rain",
+    308: "Heavy rain", 323: "Light snow", 326: "Light snow", 329: "Snow",
+    332: "Snow", 335: "Heavy snow", 338: "Heavy snow", 353: "Light showers",
+    356: "Showers", 359: "Heavy showers", 368: "Snow showers", 386: "Thundery showers",
 }
 
 
@@ -45,11 +189,7 @@ def _desc(cond: dict) -> str:
 
 
 def parse_forecast(data: Any, units: str = "f") -> dict | None:
-    """Parse a wttr.in j1 payload into a render-ready forecast dict, or None.
-
-    Shape: ``{location, units, current: {...}, days: [{...}]}``. Pure: it only
-    reads the dict it is handed. Returns None when the payload is unusable.
-    """
+    """Parse a wttr.in j1 payload into the render-ready shape, or None. Pure."""
     if not isinstance(data, dict):
         return None
     units = "c" if str(units).lower() == "c" else "f"
@@ -63,7 +203,7 @@ def parse_forecast(data: Any, units: str = "f") -> dict | None:
         "feels": cond.get("FeelsLikeF" if units == "f" else "FeelsLikeC", "?"),
         "humidity": cond.get("humidity", "?"),
         "wind": cond.get("windspeedMiles" if units == "f" else "windspeedKmph", "?"),
-        "wind_unit": "mph" if units == "f" else "kph",
+        "wind_unit": "mph" if units == "f" else "km/h",
         "desc": _desc(cond),
         "unit": u,
     }
@@ -72,7 +212,6 @@ def parse_forecast(data: Any, units: str = "f") -> dict | None:
     for i, day in enumerate(data.get("weather", []) or []):
         if not isinstance(day, dict):
             continue
-        # Pick a representative midday condition where the hourly data has one.
         hourly = day.get("hourly") or []
         mid = hourly[len(hourly) // 2] if hourly else {}
         days.append({
@@ -88,51 +227,48 @@ def parse_forecast(data: Any, units: str = "f") -> dict | None:
     return {"units": units, "current": current, "days": days}
 
 
-async def _fetch_one(client, loc: str, units: str) -> tuple[dict | None, str]:
-    """Fetch+parse one wttr.in query. Returns (forecast|None, error_str)."""
+async def _fetch_wttr(client, location: str, units: str) -> tuple[dict | None, str]:
+    loc = (location or "").strip().replace(" ", "+")
     url = f"https://wttr.in/{loc}?format=j1"
     try:
         r = await client.get(url, headers={"User-Agent": "foodassistant-weather/1.0"})
-    except Exception as e:  # noqa: BLE001 - network/DNS/TLS error
-        return None, f"could not reach wttr.in ({e.__class__.__name__})"
+    except Exception as e:  # noqa: BLE001
+        return None, f"could not reach the weather service ({e.__class__.__name__})"
     if r.status_code != 200:
-        return None, f"wttr.in returned HTTP {r.status_code}"
+        return None, f"weather service returned HTTP {r.status_code}"
     try:
         data = r.json()
-    except Exception:  # noqa: BLE001 - rate-limit/error page, not JSON
-        return None, "wttr.in did not return forecast data (it may be rate limiting)"
+    except Exception:  # noqa: BLE001
+        return None, "weather service did not return forecast data"
     parsed = parse_forecast(data, units)
     if parsed is None:
-        return None, "could not parse the forecast for this location"
+        return None, "could not parse the forecast"
+    parsed["location"] = location
     return parsed, ""
 
 
-async def fetch_forecast(location: str = "", units: str = "f") -> tuple[dict | None, str]:
-    """Fetch and parse the wttr.in forecast for ``location``.
+# --- public ---------------------------------------------------------------
 
-    Returns ``(forecast, "")`` on success or ``(None, error)`` so the caller can
-    show why it failed instead of a bare "unavailable". A blank location lets
-    wttr.in geolocate from this server's egress IP, matching the Stream Deck
-    widget. If a "City, ST" query fails, it retries with just the city, since
-    wttr.in is picky about some region suffixes."""
+async def fetch_forecast(location: str = "", units: str = "f") -> tuple[dict | None, str]:
+    """Fetch a forecast, preferring Open-Meteo and falling back to wttr.in.
+
+    Returns ``(forecast, "")`` on success or ``(None, error)`` with the reason.
+    A blank location geolocates from this server's egress IP (wttr.in path);
+    Open-Meteo needs coordinates, so a blank location skips straight to wttr.in.
+    """
     import httpx
-    raw = (location or "").strip()
-    primary = raw.replace(" ", "+")
-    # Build an ordered, de-duplicated list of queries to try.
-    queries = [primary]
-    if "," in raw:
-        city = raw.split(",", 1)[0].strip().replace(" ", "+")
-        if city and city != primary:
-            queries.append(city)
     last_error = ""
     try:
-        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
-            for q in queries:
-                parsed, err = await _fetch_one(client, q, units)
-                if parsed is not None:
-                    parsed["location"] = location
-                    return parsed, ""
+        async with httpx.AsyncClient(timeout=12.0, follow_redirects=True) as client:
+            if location.strip():
+                forecast, err = await _fetch_open_meteo(client, location, units)
+                if forecast is not None:
+                    return forecast, ""
                 last_error = err
-    except Exception as e:  # noqa: BLE001 - client construction, never crash
+            forecast, err = await _fetch_wttr(client, location, units)
+            if forecast is not None:
+                return forecast, ""
+            last_error = err or last_error
+    except Exception as e:  # noqa: BLE001
         return None, f"weather lookup failed ({e.__class__.__name__})"
     return None, last_error or "forecast unavailable"
