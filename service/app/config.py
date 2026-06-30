@@ -24,6 +24,12 @@ GITHUB_REPO = "Syracuse3DPrinting/FoodAssistant"
 import os as _os
 AMAZON_ASSOCIATES_TAG = _os.environ.get("AMAZON_ASSOCIATES_TAG", "improvisedeng-20").strip()
 
+# Public Amazon storefront (the project's curated "recommended items" page).
+# Like the Associates tag this is the project owner's static link, not a
+# per-user setting. Empty by default; set AMAZON_STOREFRONT_URL to surface the
+# storefront link on the Shop page. No URL is invented here.
+AMAZON_STOREFRONT_URL = _os.environ.get("AMAZON_STOREFRONT_URL", "").strip()
+
 # UI themes. Each entry carries the Bootstrap 5.3 colour mode (data-bs-theme)
 # and an optional vendored Bootswatch stylesheet served from /static. When
 # "stylesheet" is None the default Bootstrap CSS is used (native light/dark).
@@ -309,6 +315,18 @@ KITCHEN_APPLIANCES = [
     ("rolling_pin", "Rolling pin", "minor", False),
     ("pastry_bag", "Piping / pastry bag", "minor", False),
     ("torch", "Kitchen torch", "minor", False),
+    ("pasta_roller", "Pasta roller", "minor", False),
+    ("pasta_extruder", "Pasta extruder", "minor", False),
+    # Stand-mixer attachments: the common KitchenAid-style add-ons. Grouped on
+    # their own so the checklist can label them clearly; each is only useful if
+    # you own a compatible stand mixer.
+    ("sm_pasta_roller_cutter", "Pasta roller and cutter set", "attachment", False),
+    ("sm_meat_grinder", "Meat grinder", "attachment", False),
+    ("sm_spiralizer", "Spiralizer attachment", "attachment", False),
+    ("sm_food_processor", "Food processor attachment", "attachment", False),
+    ("sm_ice_cream_maker", "Ice cream maker attachment", "attachment", False),
+    ("sm_grain_mill", "Grain mill", "attachment", False),
+    ("sm_sausage_stuffer", "Sausage stuffer", "attachment", False),
 ]
 
 # Stable id -> label, and the default-on id list, derived once from the catalog.

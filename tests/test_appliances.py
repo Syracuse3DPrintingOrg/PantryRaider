@@ -28,8 +28,11 @@ from app.config import (  # noqa: E402
 def test_catalog_is_well_formed():
     keys = [k for k, *_ in KITCHEN_APPLIANCES]
     assert len(keys) == len(set(keys)), "appliance ids must be unique"
-    # Every catalog row carries a group of major or minor.
-    assert all(g in ("major", "minor") for _k, _l, g, _d in KITCHEN_APPLIANCES)
+    # Every catalog row carries a known group.
+    assert all(g in ("major", "minor", "attachment") for _k, _l, g, _d in KITCHEN_APPLIANCES)
+    # The pasta tools and the stand-mixer attachments are in the catalog.
+    for k in ("pasta_roller", "pasta_extruder", "sm_meat_grinder", "sm_pasta_roller_cutter"):
+        assert k in keys
     # Derived lookups stay in sync with the catalog.
     assert set(KITCHEN_APPLIANCE_KEYS) == set(keys)
     assert set(KITCHEN_APPLIANCE_LABELS) == set(keys)

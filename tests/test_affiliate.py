@@ -82,10 +82,13 @@ def test_no_tag_means_no_tag_param():
     assert all("tag=" not in r["url"] for r in recs)
 
 
+_CATEGORIES = {c for c, _label in affiliate.CATEGORY_LABELS}
+
+
 def test_grouped_recommendations_cover_all_categories():
     groups = affiliate.grouped_recommendations([], tag="")
     labels = {g["category"] for g in groups}
-    assert {"appliances", "cookware", "gadgets", "storage"} <= labels
+    assert {"appliances", "attachments", "cookware", "gadgets", "storage"} <= labels
     # Every catalog item ends up in exactly one group.
     total = sum(len(g["products"]) for g in groups)
     assert total == len(affiliate.PRODUCT_CATALOG)
@@ -95,7 +98,39 @@ def test_catalog_has_no_fabricated_asins():
     # The catalog uses search terms only (no 10-char ASIN strings baked in).
     for item in affiliate.PRODUCT_CATALOG:
         assert not affiliate._ASIN_RE.match(item["term"])
-        assert item["category"] in {"appliances", "cookware", "gadgets", "storage"}
+        assert item["category"] in _CATEGORIES
+
+
+def test_stand_mixer_attachments_are_in_the_catalog():
+    keys = {item["appliance_key"] for item in affiliate.PRODUCT_CATALOG}
+    for k in ("pasta_roller", "pasta_extruder", "sm_meat_grinder",
+              "sm_pasta_roller_cutter", "sm_spiralizer"):
+        assert k in keys
+
+
+def test_highlighted_flag_marks_unowned_and_missing():
+    recs = affiliate.recommendations(["air_fryer"], tag="", recipe_missing=["Slow cooker"])
+    by_key = {r["appliance_key"]: r for r in recs if r["appliance_key"]}
+    # An un-owned appliance and a recipe-missing one are highlighted.
+    assert by_key["slow_cooker"]["highlighted"] is True
+    assert by_key["blender"]["highlighted"] is True
+    # An owned appliance is not highlighted.
+    assert by_key["air_fryer"]["highlighted"] is False
+
+
+def test_top_recommendations_only_highlighted_and_capped():
+    picks = affiliate.top_recommendations([], tag="", recipe_missing=["Slow cooker"], limit=4)
+    assert len(picks) <= 4
+    assert all(p["highlighted"] for p in picks)
+    # Recipe-missing pick floats to the very top.
+    assert picks[0]["appliance_key"] == "slow_cooker"
+
+
+def test_top_recommendations_empty_when_all_owned():
+    owned = list(affiliate._missing_names_to_keys([]) | {
+        item["appliance_key"] for item in affiliate.PRODUCT_CATALOG if item["appliance_key"]
+    })
+    assert affiliate.top_recommendations(owned, tag="") == []
 
 
 # -- /ui/shop render --------------------------------------------------------
@@ -130,3 +165,22 @@ def test_shop_page_renders_with_disclosure(client):
     # Tagged links should appear on the page.
     assert "tag=rendertag-20" in body
     assert "Recommended Kitchen Products" in body
+    # The kitchen owns only blender/oven, so the un-owned picks are pinned.
+    assert "Recommended for you" in body
+
+
+def test_shop_page_hides_storefront_link_when_unset(client):
+    # Default storefront url is empty, so no storefront button renders.
+    r = client.get("/ui/shop")
+    assert "Browse our recommended items on Amazon" not in r.text
+
+
+def test_shop_page_shows_storefront_link_when_set(monkeypatch, client):
+    monkeypatch.setattr(
+        "app.routers.affiliate.AMAZON_STOREFRONT_URL",
+        "https://www.amazon.com/shop/example",
+        raising=False,
+    )
+    r = client.get("/ui/shop")
+    assert "Browse our recommended items on Amazon" in r.text
+    assert "https://www.amazon.com/shop/example" in r.text

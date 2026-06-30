@@ -13,6 +13,13 @@
   <span>{{ disclosure }}</span>
 </div>
 
+{% if storefront_url %}
+<a class="btn btn-warning btn-sm mb-3 d-inline-flex align-items-center"
+   href="{{ storefront_url }}" target="_blank" rel="noopener nofollow sponsored">
+  <i class="bi bi-shop-window me-2"></i>Browse our recommended items on Amazon
+</a>
+{% endif %}
+
 {% if recipe_missing %}
 <div class="alert alert-info py-2 small">
   <i class="bi bi-fire me-1"></i>Your active recipe needs equipment you may not own:
@@ -20,10 +27,29 @@
 </div>
 {% endif %}
 
-{% if not affiliate_tag %}
-<div class="form-text mb-3">
-  <i class="bi bi-tag me-1"></i>No Amazon Associates tag is set, so these links are not monetized.
-  Add yours in <a href="setup#pane-recipes" target="_self">Settings (Recipes)</a> to support the project.
+{% if top_picks %}
+<div class="card border-warning mb-4">
+  <div class="card-header bg-warning-subtle d-flex align-items-center">
+    <i class="bi bi-stars me-2"></i><span class="fw-semibold">Recommended for you</span>
+    <span class="ms-2 small text-secondary">picks for your kitchen and active recipe</span>
+  </div>
+  <div class="card-body p-2">
+    <div class="row row-cols-1 row-cols-sm-2 row-cols-lg-3 g-2">
+      {% for item in top_picks %}
+      <div class="col">
+        <a class="d-flex flex-column h-100 text-decoration-none card border-warning bg-body-tertiary p-2"
+           href="{{ item.url }}" target="_blank" rel="noopener nofollow sponsored">
+          <span class="fw-semibold d-flex justify-content-between align-items-start gap-2">
+            <span>{{ item.name }}</span>
+            <span class="badge bg-warning text-dark flex-shrink-0">Recommended</span>
+          </span>
+          <span class="small text-secondary">{{ item.reason }}</span>
+          <span class="small text-info mt-1"><i class="bi bi-box-arrow-up-right me-1"></i>View on Amazon</span>
+        </a>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
 </div>
 {% endif %}
 
@@ -34,9 +60,12 @@
     <div class="row row-cols-1 row-cols-sm-2 row-cols-lg-3 g-2">
       {% for item in group.products %}
       <div class="col">
-        <a class="d-flex flex-column h-100 text-decoration-none card bg-body-tertiary p-2"
+        <a class="d-flex flex-column h-100 text-decoration-none card {{ 'border-warning' if item.highlighted else 'bg-body-tertiary' }} {{ 'bg-body-tertiary' if item.highlighted else '' }} p-2"
            href="{{ item.url }}" target="_blank" rel="noopener nofollow sponsored">
-          <span class="fw-semibold">{{ item.name }}</span>
+          <span class="fw-semibold d-flex justify-content-between align-items-start gap-2">
+            <span>{{ item.name }}</span>
+            {% if item.highlighted %}<span class="badge bg-warning text-dark flex-shrink-0">Recommended</span>{% endif %}
+          </span>
           <span class="small text-secondary">{{ item.reason }}</span>
           <span class="small text-info mt-1"><i class="bi bi-box-arrow-up-right me-1"></i>View on Amazon</span>
         </a>

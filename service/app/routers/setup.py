@@ -520,10 +520,11 @@ async def setup_page(request: Request):
 
 
 def _appliance_groups() -> dict:
-    """Group the appliance catalog into major/minor with each item's checked
-    state, so the Preferences checklist renders without logic in the template."""
+    """Group the appliance catalog into major/minor/attachment with each item's
+    checked state, so the Preferences checklist renders without logic in the
+    template."""
     selected = set(settings.kitchen_appliances or [])
-    groups: dict[str, list] = {"major": [], "minor": []}
+    groups: dict[str, list] = {"major": [], "minor": [], "attachment": []}
     for key, label, group, _default in KITCHEN_APPLIANCES:
         groups.get(group, groups["minor"]).append(
             {"key": key, "label": label, "checked": key in selected}

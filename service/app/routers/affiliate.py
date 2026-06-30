@@ -10,7 +10,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 
-from ..config import settings, AMAZON_ASSOCIATES_TAG
+from ..config import settings, AMAZON_ASSOCIATES_TAG, AMAZON_STOREFRONT_URL
 from ..services import affiliate, current_recipe, utensils
 from ..templating import templates
 
@@ -43,11 +43,20 @@ async def shop_page(request: Request):
         AMAZON_ASSOCIATES_TAG,
         recipe_missing=missing,
     )
+    # Pinned "Recommended for you" picks: appliances the user has not marked as
+    # owned plus anything the active recipe needs. Empty when nothing stands out.
+    top_picks = affiliate.top_recommendations(
+        settings.kitchen_appliances,
+        AMAZON_ASSOCIATES_TAG,
+        recipe_missing=missing,
+    )
     return templates.TemplateResponse(request, "shop.html", {
         "request": request,
         "active": "shop",
         "groups": groups,
+        "top_picks": top_picks,
         "recipe_missing": missing,
         "disclosure": affiliate.DISCLOSURE,
         "affiliate_tag": AMAZON_ASSOCIATES_TAG,
+        "storefront_url": AMAZON_STOREFRONT_URL,
     })

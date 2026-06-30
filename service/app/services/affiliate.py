@@ -74,6 +74,8 @@ PRODUCT_CATALOG = [
     {"name": "Mandoline slicer", "category": "gadgets", "term": "mandoline slicer", "appliance_key": "mandoline"},
     {"name": "Microplane zester", "category": "gadgets", "term": "microplane zester grater", "appliance_key": "microplane"},
     {"name": "Garlic press", "category": "gadgets", "term": "garlic press", "appliance_key": "garlic_press"},
+    {"name": "Pasta roller", "category": "gadgets", "term": "hand crank pasta roller machine", "appliance_key": "pasta_roller"},
+    {"name": "Pasta extruder", "category": "gadgets", "term": "pasta extruder machine", "appliance_key": "pasta_extruder"},
     {"name": "Measuring cups and spoons", "category": "gadgets", "term": "measuring cups and spoons set", "appliance_key": ""},
     {"name": "Mixing bowl set", "category": "gadgets", "term": "stainless steel mixing bowl set", "appliance_key": ""},
     {"name": "Silicone spatula set", "category": "gadgets", "term": "silicone spatula set", "appliance_key": ""},
@@ -86,11 +88,21 @@ PRODUCT_CATALOG = [
     {"name": "Reusable silicone food bags", "category": "storage", "term": "reusable silicone food storage bags", "appliance_key": ""},
     {"name": "Vacuum sealer", "category": "storage", "term": "food vacuum sealer machine", "appliance_key": ""},
     {"name": "Mason jars", "category": "storage", "term": "wide mouth mason jars", "appliance_key": ""},
+    # Stand-mixer attachments (KitchenAid-style add-ons). Each maps to its own
+    # appliance key so ownership is tracked independently of the mixer itself.
+    {"name": "Pasta roller and cutter set", "category": "attachments", "term": "kitchenaid pasta roller cutter attachment set", "appliance_key": "sm_pasta_roller_cutter"},
+    {"name": "Meat grinder attachment", "category": "attachments", "term": "kitchenaid meat grinder attachment", "appliance_key": "sm_meat_grinder"},
+    {"name": "Spiralizer attachment", "category": "attachments", "term": "kitchenaid spiralizer attachment", "appliance_key": "sm_spiralizer"},
+    {"name": "Food processor attachment", "category": "attachments", "term": "kitchenaid food processor attachment", "appliance_key": "sm_food_processor"},
+    {"name": "Ice cream maker attachment", "category": "attachments", "term": "kitchenaid ice cream maker attachment", "appliance_key": "sm_ice_cream_maker"},
+    {"name": "Grain mill attachment", "category": "attachments", "term": "kitchenaid grain mill attachment", "appliance_key": "sm_grain_mill"},
+    {"name": "Sausage stuffer attachment", "category": "attachments", "term": "kitchenaid sausage stuffer attachment", "appliance_key": "sm_sausage_stuffer"},
 ]
 
 # Display order and friendly labels for the category groupings on the Shop page.
 CATEGORY_LABELS = [
     ("appliances", "Appliances"),
+    ("attachments", "Stand mixer attachments"),
     ("cookware", "Cookware"),
     ("gadgets", "Gadgets and tools"),
     ("storage", "Storage"),
@@ -126,8 +138,10 @@ def recommendations(owned_appliance_keys, tag="", recipe_missing=None) -> list[d
       2. Appliances the user does NOT own (by appliance_key).
       3. Everything else (general cookware, gadgets, storage, owned appliances).
 
-    Each returned item is the catalog dict plus ``url`` (affiliate link) and
-    ``reason`` (why it is recommended). Pure: pass owned keys / tag / missing.
+    Each returned item is the catalog dict plus ``url`` (affiliate link),
+    ``reason`` (why it is recommended), and ``highlighted`` (True when the item
+    is a recipe-missing or un-owned pick, so the Shop page can make it stand
+    out). Pure: pass owned keys / tag / missing.
     """
     owned = {str(k) for k in (owned_appliance_keys or [])}
     missing_keys = _missing_names_to_keys(recipe_missing)
@@ -150,10 +164,31 @@ def recommendations(owned_appliance_keys, tag="", recipe_missing=None) -> list[d
 
     out = []
     for item in PRODUCT_CATALOG:
-        out.append({**item, "url": amazon_url(item["term"], tag), "reason": reason(item)})
+        r = rank(item)
+        out.append({
+            **item,
+            "url": amazon_url(item["term"], tag),
+            "reason": reason(item),
+            # Ranks 0 (recipe-missing) and 1 (un-owned) are the picks worth
+            # calling out; rank 2 is general/owned filler.
+            "highlighted": r < 2,
+        })
     # Stable sort by rank keeps catalog order within each tier.
     out.sort(key=rank)
     return out
+
+
+def top_recommendations(owned_appliance_keys, tag="", recipe_missing=None,
+                        limit=6) -> list[dict]:
+    """The best ``limit`` recommendations (recipe-missing first, then un-owned).
+
+    Drives the pinned "Recommended for you" section on the Shop page. Returns
+    only highlighted items (so an all-owned kitchen yields an empty list rather
+    than padding with filler), best-first, capped at ``limit``. Pure.
+    """
+    recs = recommendations(owned_appliance_keys, tag, recipe_missing)
+    picks = [r for r in recs if r.get("highlighted")]
+    return picks[: max(0, int(limit))]
 
 
 def grouped_recommendations(owned_appliance_keys, tag="", recipe_missing=None) -> list[dict]:
