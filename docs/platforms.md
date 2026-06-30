@@ -88,6 +88,28 @@ the JSON it expects. So Home Assistant REST sensors point at the LAN address suc
 as `http://192.168.1.170:9284`, while human-facing Lovelace buttons can use the
 public URL.
 
+### HTTPS
+
+FoodAssistant serves plain HTTP on port 9284 and does not terminate TLS itself,
+so secure access is added in front of it. Pick whichever fits your setup:
+
+- **Reverse proxy (recommended).** Put a proxy such as Caddy, nginx, Traefik, or
+  the bundled Pangolin tunnel in front of the app and let it handle TLS and
+  certificates. Caddy is the simplest: a one-line site block proxying to
+  `localhost:9284` gets an automatic Let's Encrypt certificate for a public
+  hostname. Terminate TLS at the proxy and forward HTTP to FoodAssistant on the
+  LAN.
+- **Tunnel.** The built-in remote-access tunnel (Settings, Remote Access)
+  publishes the app over HTTPS without opening a port, which is the easiest way
+  to reach it securely from outside the LAN.
+- **Self-signed, LAN only.** For a closed network you can place any of the above
+  proxies in front with a self-signed certificate; expect a browser warning
+  unless you trust the certificate on each device.
+
+Keep the LAN-URL caveat above in mind: Home Assistant REST sensors and other
+headless clients should still call the LAN HTTP address directly, not the
+HTTPS front end.
+
 ## AI providers
 
 AI features are optional. The vision provider is selected in the setup wizard.

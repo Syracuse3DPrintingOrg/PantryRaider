@@ -21,3 +21,6 @@ package.json
 
 # Claude Code worktrees (transient agent worktrees)
 .claude/worktrees/
+
+# MkDocs build output
+site/
