@@ -44,6 +44,17 @@ def test_corrupt_file_is_preserved_not_clobbered(tmp_path, monkeypatch):
     assert fresh["secret_key"] == "abc123"
 
 
+def test_save_keeps_a_rollback_copy(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "data_dir", str(tmp_path), raising=False)
+    sf = tmp_path / "settings.json"
+    sf.write_text(json.dumps({"mealie_base_url": "http://m:9285"}))
+    settings.save({"ui_theme": "forest"})
+    bak = tmp_path / "settings.json.bak"
+    assert bak.exists()
+    # The .bak holds the previous good content (before this save).
+    assert json.loads(bak.read_text()) == {"mealie_base_url": "http://m:9285"}
+
+
 def test_empty_file_is_treated_as_fresh(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "data_dir", str(tmp_path), raising=False)
     sf = tmp_path / "settings.json"

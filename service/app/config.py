@@ -12,7 +12,7 @@ from .hardware import is_raspberry_pi
 
 # Single source of truth for the app version (shown in the UI, used by the
 # update checker, and reported by FastAPI). Bump on each tagged release.
-APP_VERSION = "0.7.4"
+APP_VERSION = "0.7.5"
 
 # GitHub repo used by the in-app update checker.
 GITHUB_REPO = "Syracuse3DPrinting/FoodAssistant"
@@ -961,6 +961,7 @@ class Settings(BaseSettings):
         sf = Path(self.data_dir) / "settings.json"
         sf.parent.mkdir(parents=True, exist_ok=True)
         existing: dict = {}
+        good_raw = None  # the last valid on-disk content, kept for a rollback copy
         if sf.exists():
             raw = None
             try:
@@ -972,6 +973,7 @@ class Settings(BaseSettings):
             if raw is not None and raw.strip():
                 try:
                     existing = json.loads(raw)
+                    good_raw = raw
                 except Exception as exc:
                     _logging.getLogger("foodassistant.config").error(
                         "settings.json is corrupt (%s); preserving it as a backup", exc)
@@ -998,6 +1000,16 @@ class Settings(BaseSettings):
             if data.get(_sk) and not looks_hashed(data[_sk]):
                 data[_sk] = hash_secret(data[_sk])
         existing.update({k: v for k, v in data.items() if k in _SAVEABLE and v is not None})
+        # Keep a one-step rollback copy of the last good settings, so even a logic
+        # bug that blanks a field leaves yesterday's values recoverable from
+        # settings.json.bak. Best effort: never let it block the save.
+        if good_raw is not None:
+            try:
+                bak = sf.with_name("settings.json.bak")
+                bak.write_text(good_raw)
+                bak.chmod(0o600)
+            except Exception:
+                pass
         # Atomic write: write a temp file in the same dir, then rename over the
         # target so a crash mid-write leaves the old file intact.
         tmp = sf.with_name("settings.json.tmp")
