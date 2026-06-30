@@ -178,7 +178,28 @@
 
 {# FIRST-TIME WIZARD  (shown when configured=False) #}
 {% if not configured %}
-<div class="wiz-wrap" id="wizard-root">
+
+{# On the attached kiosk display, steer the user to finish setup from a phone or
+   computer instead of typing the whole wizard on a touchscreen (cssj). Shown
+   only when the page is opened in kiosk mode; a link reveals the on-screen
+   wizard for anyone who would rather continue here. #}
+{% if kiosk and setup_phone_url %}
+<div class="wiz-wrap" id="kiosk-setup-hint">
+  <div class="wiz-card text-center">
+    <div class="wiz-card-title"><i class="bi bi-phone text-primary me-2"></i>Finish setup from your phone or computer</div>
+    <p class="wiz-card-sub mb-4">First-time setup is easiest on a device with a keyboard. On a phone or computer
+      that is on the same network, open the address below, or scan this code.</p>
+    <img src="ui/qr?url={{ setup_phone_url | urlencode }}" alt="Setup QR code"
+         class="img-fluid mb-3" style="max-width: 240px; background:#fff; padding:10px; border-radius:6px;">
+    <div class="mb-4"><code class="user-select-all fs-6">{{ setup_phone_url }}</code></div>
+    <button type="button" class="btn btn-link btn-sm text-secondary" onclick="showKioskWizard()">
+      Continue on this screen instead
+    </button>
+  </div>
+</div>
+{% endif %}
+
+<div class="wiz-wrap{% if kiosk and setup_phone_url %} d-none{% endif %}" id="wizard-root">
 
   <!-- Header -->
   <div class="d-flex align-items-center gap-3 mb-3">
@@ -4355,6 +4376,13 @@ async function wizSaveAll() {
 {% endif %}
 
 // Initialization
+// Kiosk first-time setup: reveal the on-screen wizard if the user opts out of
+// finishing setup from a phone (cssj).
+function showKioskWizard() {
+  document.getElementById('kiosk-setup-hint')?.classList.add('d-none');
+  document.getElementById('wizard-root')?.classList.remove('d-none');
+}
+
 (function init() {
   showProvider();
   showRecipeSource();

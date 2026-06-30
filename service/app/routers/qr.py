@@ -8,8 +8,10 @@ router = APIRouter(tags=["ui"])
 
 
 @router.get("/ui/qr")
-def qr_code(request: Request) -> Response:
-    """Return an SVG QR code whose encoded URL is http://{host}/ui/add.
+def qr_code(request: Request, url: str = "") -> Response:
+    """Return an SVG QR code. Defaults to http://{host}/ui/add (the phone deep
+    link); pass ?url= to encode a specific http(s) URL instead, e.g. the LAN
+    setup link shown on the kiosk (FoodAssistant-cssj).
 
     The URL is also embedded as a <title> element inside the SVG so tests and
     screen-readers can confirm which URL is encoded.
@@ -17,8 +19,11 @@ def qr_code(request: Request) -> Response:
     import qrcode
     import qrcode.image.svg
 
-    host = request.headers.get("host", request.url.netloc)
-    url = f"http://{host}/ui/add"
+    # Only honor an explicit http(s) URL so the parameter cannot encode arbitrary
+    # schemes (javascript:, data:, etc.) into a scannable code.
+    if not (url.startswith("http://") or url.startswith("https://")):
+        host = request.headers.get("host", request.url.netloc)
+        url = f"http://{host}/ui/add"
 
     factory = qrcode.image.svg.SvgPathImage
     qr = qrcode.make(url, image_factory=factory)

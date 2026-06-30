@@ -336,6 +336,22 @@ def _pi_mdns_host() -> str:
     return browser_host()
 
 
+def _setup_phone_url(request: Request) -> str:
+    """A phone/PC-reachable URL to this device's setup page (FoodAssistant-cssj).
+
+    The kiosk browser reaches the app over localhost, which is useless on a
+    phone, so we swap in the device's LAN host (<hostname>.local or its IP) and
+    keep the port the request came in on. Off a Pi (no mDNS helper) we fall back
+    to the request hostname, which is already the address the user typed.
+    """
+    host = _pi_mdns_host() if is_raspberry_pi() else (request.url.hostname or "")
+    if not host:
+        return ""
+    port = request.url.port
+    netloc = host if (not port or port in (80, 443)) else f"{host}:{port}"
+    return f"http://{netloc}/setup"
+
+
 def _grocy_url_for_api(request: Request, detected: str) -> str:
     """The Grocy URL to pre-fill as the server-side API base.
 
@@ -428,6 +444,13 @@ async def setup_page(request: Request):
         "is_satellite": settings.is_satellite(),
         "board_model": board_model(),
         "pi_mdns_host": _pi_mdns_host() if is_raspberry_pi() else "",
+        # On the attached kiosk display the wizard's many text inputs are painful
+        # to fill with a touchscreen, so when the page is opened in kiosk mode and
+        # setup is not finished we steer the user to a phone/PC browser instead
+        # (FoodAssistant-cssj). The reachable URL uses the device's LAN host, not
+        # the kiosk's localhost, so a phone on the same network can open it.
+        "kiosk": request.query_params.get("kiosk") == "1",
+        "setup_phone_url": _setup_phone_url(request),
         # Kitchen-appliance checklist, grouped for the Preferences section, with
         # each item's current checked state from the saved selection.
         "appliance_groups": _appliance_groups(),
