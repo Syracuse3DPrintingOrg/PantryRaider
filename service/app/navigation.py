@@ -28,6 +28,47 @@ NAV_TABS = [
     {"key": "about",     "label": "About",     "icon": "bi-info-circle",     "href": "ui/about"},
 ]
 
+# Default submenu nesting for a fresh install (FoodAssistant-dprh). This is the
+# baseline child-key to parent-key map: a logical grouping so a new menu is tidy
+# instead of one long flat row. The primary daily-use tabs (Inventory, Add,
+# Inbox, Shopping, Recipes) stay at the top level; secondary views nest under a
+# visible top-level parent whose own page is still reachable as the first item of
+# its dropdown.
+#
+#   Inventory  -> Expiring, Audit        (stock views)
+#   Recipes    -> Cook, On the Line, Meal Plan  (cooking workflow)
+#   Kitchen Guide -> Convert, Nutrition, Camera (reference and tools)
+#
+# A saved nav_parents map (set the moment the user touches the nav editor) wins
+# wholesale over this baseline, so a user's arrangement is never overridden. See
+# effective_nav_parents().
+DEFAULT_NAV_PARENTS = {
+    "expiring": "inventory",
+    "audit": "inventory",
+    "cook": "recipes",
+    "current_recipe": "recipes",
+    "mealplan": "recipes",
+    "convert": "guide",
+    "nutrition": "guide",
+    "camera": "guide",
+}
+
+
+def effective_nav_parents() -> dict:
+    """The parent map to apply: the user's saved nav_parents if they have set
+    any, otherwise the DEFAULT_NAV_PARENTS baseline.
+
+    A fresh install (and any install where the nav editor was never saved) has an
+    empty nav_parents, so it inherits the default grouping. As soon as the user
+    saves nesting choices, that non-empty map replaces the default entirely, so a
+    deliberate flat arrangement or a custom grouping is preserved.
+    """
+    saved = getattr(settings, "nav_parents", {}) or {}
+    if not isinstance(saved, dict):
+        saved = {}
+    return saved if saved else dict(DEFAULT_NAV_PARENTS)
+
+
 # Requirements backed by a configurable service that gets its own "unlock" hint
 # in the navbar when missing (see auto_hidden_groups). A requirement outside this
 # set (for example "cameras", which is configured in Interface, not a service)
@@ -148,7 +189,7 @@ def build_nav_tree(tabs: list[dict] | None = None, parents: dict | None = None) 
     if tabs is None:
         tabs = _ordered_visible()
     if parents is None:
-        parents = getattr(settings, "nav_parents", {}) or {}
+        parents = effective_nav_parents()
     if not isinstance(parents, dict):
         parents = {}
     by_key = {t["key"]: t for t in tabs}
@@ -201,9 +242,7 @@ def all_tabs() -> list[dict]:
     """
     visible_keys = {t["key"] for t in visible_tabs()}
     hidden = {k for k in settings.nav_hidden.split(",") if k}
-    parents = getattr(settings, "nav_parents", {}) or {}
-    if not isinstance(parents, dict):
-        parents = {}
+    parents = effective_nav_parents()
     builtins = {t["key"]: t for t in NAV_TABS}
     customs = {t["key"]: t for t in custom_nav_tabs()}
     everything = {**builtins, **customs}

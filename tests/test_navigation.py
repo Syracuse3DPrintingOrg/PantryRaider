@@ -144,6 +144,91 @@ def test_build_nav_tree_only_one_level_deep():
     assert "c" in [n["key"] for n in tree]
 
 
+# -- default grouping (FoodAssistant-dprh) ----------------------------------
+
+def test_effective_nav_parents_uses_default_when_unset(monkeypatch):
+    monkeypatch.setattr(settings, "nav_parents", {}, raising=False)
+    assert navigation.effective_nav_parents() == navigation.DEFAULT_NAV_PARENTS
+
+
+def test_effective_nav_parents_user_override_wins(monkeypatch):
+    monkeypatch.setattr(settings, "nav_parents", {"audit": "shopping"}, raising=False)
+    eff = navigation.effective_nav_parents()
+    assert eff == {"audit": "shopping"}
+    # The default baseline must not leak through once the user has saved a map.
+    assert "expiring" not in eff
+
+
+def test_default_tree_groups_secondary_tabs_under_parents(monkeypatch):
+    # Fresh install: nothing hidden, no saved nesting, Mealie + a camera on so the
+    # recipe and camera parents/children are all present.
+    monkeypatch.setattr(settings, "nav_order", "", raising=False)
+    monkeypatch.setattr(settings, "nav_hidden", "", raising=False)
+    monkeypatch.setattr(settings, "nav_parents", {}, raising=False)
+    monkeypatch.setattr(settings, "custom_nav_tabs", [], raising=False)
+    monkeypatch.setattr(settings, "streamdeck_cameras",
+                        [{"name": "Door", "snapshot_url": "http://x/s.jpg"}], raising=False)
+    monkeypatch.setattr(settings, "mealie_base_url", "http://mealie.test", raising=False)
+    monkeypatch.setattr(settings, "mealie_api_key", "k", raising=False)
+
+    tree = navigation.build_nav_tree()
+    top = {n["key"]: n for n in tree}
+    children = {k: [c["key"] for c in n["children"]] for k, n in top.items()}
+
+    # Primary daily-use tabs stay at the top level.
+    for key in ("inventory", "add", "pending", "shopping", "recipes"):
+        assert key in top, f"{key} should be a top-level tab"
+
+    # Secondary tabs are grouped, not top-level.
+    for key in ("expiring", "audit", "cook", "current_recipe", "mealplan",
+                "convert", "nutrition", "camera"):
+        assert key not in top, f"{key} should be nested, not top-level"
+
+    # Children follow the flat NAV_TABS registration order within each parent.
+    assert children["inventory"] == ["expiring", "audit"]
+    assert children["recipes"] == ["cook", "current_recipe", "mealplan"]
+    assert sorted(children["guide"]) == sorted(["convert", "nutrition", "camera"])
+
+
+def test_default_grouping_keeps_every_tab_reachable_flat(monkeypatch):
+    # The flat list (floating nav / overflow menu) must still expose every tab,
+    # including the ones nested by the default grouping.
+    monkeypatch.setattr(settings, "nav_order", "", raising=False)
+    monkeypatch.setattr(settings, "nav_hidden", "", raising=False)
+    monkeypatch.setattr(settings, "nav_parents", {}, raising=False)
+    monkeypatch.setattr(settings, "custom_nav_tabs", [], raising=False)
+    monkeypatch.setattr(settings, "streamdeck_cameras",
+                        [{"name": "Door", "snapshot_url": "http://x/s.jpg"}], raising=False)
+    monkeypatch.setattr(settings, "mealie_base_url", "http://mealie.test", raising=False)
+    monkeypatch.setattr(settings, "mealie_api_key", "k", raising=False)
+    flat = {t["key"] for t in navigation.visible_tabs()}
+    for key in ("expiring", "audit", "cook", "current_recipe", "mealplan",
+                "convert", "nutrition", "camera"):
+        assert key in flat
+
+
+def test_user_override_wins_over_default_tree(monkeypatch):
+    # A saved nav_parents map replaces the default grouping wholesale: only the
+    # user's nesting applies, and default-nested tabs return to the top level.
+    monkeypatch.setattr(settings, "nav_order", "", raising=False)
+    monkeypatch.setattr(settings, "nav_hidden", "", raising=False)
+    monkeypatch.setattr(settings, "nav_parents", {"shopping": "inventory"}, raising=False)
+    monkeypatch.setattr(settings, "custom_nav_tabs", [], raising=False)
+    monkeypatch.setattr(settings, "streamdeck_cameras", [], raising=False)
+    monkeypatch.setattr(settings, "mealie_base_url", "", raising=False)
+    monkeypatch.setattr(settings, "mealie_api_key", "", raising=False)
+
+    tree = navigation.build_nav_tree()
+    top = {n["key"]: n for n in tree}
+    # The user's single nesting applies.
+    assert "shopping" not in top
+    inv = top["inventory"]
+    assert [c["key"] for c in inv["children"]] == ["shopping"]
+    # Default-nested tabs are no longer grouped; expiring is back at top level.
+    assert "expiring" in top
+    assert inv != {} and "expiring" not in [c["key"] for c in inv["children"]]
+
+
 # -- render smoke test: a parent with children produces a dropdown ----------
 
 def test_navbar_renders_dropdown_for_parent_with_children(monkeypatch, tmp_path):
