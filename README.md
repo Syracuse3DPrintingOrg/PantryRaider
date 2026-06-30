@@ -213,7 +213,7 @@ git pull
 docker compose up -d --build service
 ```
 
-**Raspberry Pi appliance:** the Pi over-the-air update helper redeploys the Stream Deck controller alongside the app, and is safe to re-run after a manual `git pull`.
+**Raspberry Pi appliance:** the Pi over-the-air update helper redeploys the Stream Deck controller alongside the app, and is safe to re-run after a manual `git pull`. Pi appliances also auto-update on their own when the global "Install updates automatically" setting is on (the default), which you can toggle under Settings. The flag is shared with any Pi Remotes connected to a server, so a server and its remotes stay on the same version.
 
 ### Upgrading pinned images
 

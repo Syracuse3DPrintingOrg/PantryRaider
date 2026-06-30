@@ -48,14 +48,19 @@ async def lifespan(app: FastAPI):
             pass
         # Keep mirroring while the server-side config drifts.
         app.state.sync_task = asyncio.create_task(_periodic_satellite_sync())
+    # Pi appliances keep themselves current when the global auto_update flag is
+    # on (FoodAssistant-k2kk). A non-Pi server uses Watchtower instead.
+    if settings.is_pi_appliance():
+        app.state.auto_update_task = asyncio.create_task(_periodic_auto_update())
     yield
-    task = getattr(app.state, "sync_task", None)
-    if task is not None:
-        task.cancel()
-        try:
-            await task
-        except asyncio.CancelledError:
-            pass
+    for attr in ("sync_task", "auto_update_task"):
+        task = getattr(app.state, attr, None)
+        if task is not None:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
 
 
 async def _periodic_satellite_sync():
@@ -73,6 +78,36 @@ async def _periodic_satellite_sync():
             await run_in_threadpool(sync_from_upstream)
         except Exception:
             pass
+
+
+async def _periodic_auto_update():
+    """Apply updates on a Pi appliance while the global auto_update flag is on.
+
+    Re-checks every few hours. A satellite only updates when its server is on a
+    different version (so the fleet converges on the server's version); a Pi
+    Hosted box attempts on each pass (the OTA no-ops when already current). The
+    bridge restarts the app as part of an update, which cancels this task with
+    the old process; the new process schedules it again, so a single extra pass
+    after a restart is harmless because the OTA is idempotent.
+    """
+    from .services import auto_update as au
+    from .services.satellite import last_server_version
+    from .routers.setup import run_host_bridge_update
+    # Settle after boot so a freshly provisioned device is not updated mid-setup.
+    await asyncio.sleep(600)
+    while True:
+        try:
+            if settings.auto_update and settings.is_pi_appliance():
+                if au.should_run(settings.is_satellite(), APP_VERSION, last_server_version()):
+                    result = await run_host_bridge_update()
+                    if result.get("ok"):
+                        import logging
+                        logging.getLogger("foodassistant.autoupdate").info(
+                            "Auto-update ran: before=%s after=%s restarted=%s",
+                            result.get("before"), result.get("after"), result.get("restarted"))
+        except Exception:
+            pass
+        await asyncio.sleep(6 * 3600)
 
 
 app = FastAPI(

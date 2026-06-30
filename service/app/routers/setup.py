@@ -244,6 +244,7 @@ class SetupPayload(BaseModel):
     streamdeck_ha_slots: list = []
     ha_events_enabled: bool = False
     ha_camera_popup_seconds: int = 20
+    auto_update: bool = True
     convert_custom_rows: list = []
     floating_nav_position: str = ""
     floating_nav_orientation: str = ""
@@ -1240,12 +1241,18 @@ async def update_software():
     if not settings.is_pi_appliance():
         return JSONResponse(
             {"ok": False, "error": "In-app updates are only available on Pi appliances."})
+    return JSONResponse(await run_host_bridge_update())
+
+
+async def run_host_bridge_update() -> dict:
+    """POST the host bridge OTA and return its JSON result. Shared by the manual
+    Update button and the automatic-update scheduler (FoodAssistant-k2kk)."""
     try:
         async with httpx.AsyncClient(timeout=620.0) as c:
             r = await c.post(f"{_HOST_BRIDGE}/update")
         return r.json()
     except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)})
+        return {"ok": False, "error": str(e)}
 
 
 class _RestoreReq(BaseModel):

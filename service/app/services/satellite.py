@@ -22,6 +22,17 @@ from ..config import settings, SATELLITE_PULL_FIELDS, APP_VERSION
 
 logger = logging.getLogger("foodassistant.satellite")
 
+# The main server's version, learned on each successful sync. Process-local (a
+# restart clears it until the next sync). Used by the auto-update scheduler so a
+# satellite converges on its server's version rather than racing ahead to
+# whatever is newest on GitHub (FoodAssistant-k2kk).
+_last_server_version = ""
+
+
+def last_server_version() -> str:
+    """The server version seen on the most recent sync, or '' if not yet known."""
+    return _last_server_version
+
 
 def _record_last_sync(result: dict) -> None:
     """Persist a compact summary of a pull so the setup page can show its health.
@@ -362,6 +373,9 @@ def _do_sync_from_upstream(timeout: float = 8.0) -> dict:
             logger.warning("satellite sync: could not cache server IP: %s", exc)
 
     data = resp.json()
+    # Remember the server's version for the auto-update scheduler (k2kk).
+    global _last_server_version
+    _last_server_version = str(data.get("server_version", "") or "").strip()
     # Learn the server's hostname so a bare-IP satellite can fall back to
     # <host>.local after a DHCP IP change (k9a8). Persist only on change.
     server_host = str(data.get("server_hostname", "") or "").strip().rstrip(".")

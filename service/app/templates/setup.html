@@ -2058,6 +2058,22 @@ docker compose up -d</code></pre>
                 <code>git pull &amp;&amp; docker compose up -d --build service</code></div>
             </div>
             {% endif %}
+
+            <hr class="my-3">
+            <div class="form-check form-switch mb-1">
+              <input class="form-check-input" type="checkbox" id="auto_update"
+                     {{ 'checked' if s.auto_update else '' }}
+                     {% if is_satellite %}disabled{% else %}onchange="saveAutoUpdate(this)"{% endif %}>
+              <label class="form-check-label" for="auto_update">Install updates automatically</label>
+            </div>
+            {% if is_satellite %}
+            <div class="form-text"><i class="bi bi-hdd-network me-1"></i>Managed on the main server. A remote follows the server so the whole fleet stays on the same version.</div>
+            {% elif is_pi_appliance %}
+            <div class="form-text">On by default. This device and any remotes connected to it update themselves and stay on the same version. Turn it off to update only with the button above.</div>
+            {% else %}
+            <div class="form-text">On by default. This setting also applies to any Pi Remotes connected to this server, so the fleet stays on the same version. This server itself auto-updates through the Watchtower container (see the README).</div>
+            {% endif %}
+            <span class="test-result ms-1" id="auto-update-result"></span>
           </div>
 
           <div class="section-card">
@@ -4149,6 +4165,26 @@ async function syncFromUpstream() {
     for (const el of [out, now]) {
       if (el) { el.className = 'test-result text-danger'; el.textContent = String(e); }
     }
+  }
+}
+
+// Updates: persist the global auto-update flag (FoodAssistant-k2kk).
+async function saveAutoUpdate(box) {
+  const out = document.getElementById('auto-update-result');
+  if (out) { out.className = 'test-result ms-1 text-secondary'; out.textContent = 'Saving...'; }
+  try {
+    const r = await fetch('setup/save', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ auto_update: box.checked }),
+    });
+    const d = await r.json();
+    if (out) {
+      const ok = d.ok !== false;
+      out.className = 'test-result ms-1 ' + (ok ? 'text-success' : 'text-danger');
+      out.textContent = ok ? (box.checked ? 'Automatic updates on.' : 'Automatic updates off.') : 'Could not save.';
+    }
+  } catch (e) {
+    if (out) { out.className = 'test-result ms-1 text-danger'; out.textContent = 'Could not save.'; }
   }
 }
 

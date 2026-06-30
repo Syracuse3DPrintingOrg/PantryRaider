@@ -12,7 +12,7 @@ from .hardware import is_raspberry_pi
 
 # Single source of truth for the app version (shown in the UI, used by the
 # update checker, and reported by FastAPI). Bump on each tagged release.
-APP_VERSION = "0.6.170"
+APP_VERSION = "0.6.171"
 
 # GitHub repo used by the in-app update checker.
 GITHUB_REPO = "Syracuse3DPrinting/FoodAssistant"
@@ -203,7 +203,7 @@ _SAVEABLE = [
     "secret_key", "auth_password", "totp_secret", "api_key", "extra_api_keys", "auth_required",
     "rclone_remote", "rclone_schedule_hours",
     "tunnel_mode", "tunnel_token", "tunnel_url",
-    "debug_logging",
+    "debug_logging", "auto_update",
 ]
 
 # Settings a satellite (pi_remote) pulls from its main server and mirrors
@@ -244,6 +244,9 @@ SATELLITE_PULL_FIELDS = [
     # (events are still pushed per-instance by HA). convert_custom_rows is left
     # device-local on purpose: each kiosk keeps its own conversion cheat sheet.
     "ha_events_enabled", "ha_camera_popup_seconds",
+    # Fleet-wide auto-update flag, so a satellite obeys the main server's choice
+    # and the whole fleet updates (or holds) together (FoodAssistant-k2kk).
+    "auto_update",
 ]
 
 # Kitchen appliances the user owns, used to steer the AI cook suggestions so it
@@ -849,6 +852,13 @@ class Settings(BaseSettings):
     # Verbose logging to a rotating file under data_dir/logs for support bundles
     # (FoodAssistant-asra). Off by default; raises the app log level to DEBUG.
     debug_logging: bool = False
+
+    # Fleet-wide automatic updates (FoodAssistant-k2kk). On by default. This is a
+    # GLOBAL flag: it is pulled by satellites (see SATELLITE_PULL_FIELDS) so a
+    # main server and its remotes share one setting and converge on the same
+    # version. A Pi appliance auto-applies via the host-bridge OTA; a non-Pi
+    # server applies via the Watchtower container in docker-compose.prod.yml.
+    auto_update: bool = True
 
     # Remote access tunnel. tunnel_mode: "" | "cloudflare" | "subscription"
     tunnel_mode: str = ""
