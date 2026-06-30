@@ -23,6 +23,31 @@ _OM = {
         "temperature_2m_max": [80.6, 78.1, 76.0],
         "temperature_2m_min": [60.2, 58.9, 57.4],
         "weather_code": [0, 61, 3],
+        "precipitation_probability_max": [10, 80, 30],
+        "wind_speed_10m_max": [12.4, 9.1, 15.6],
+        "sunrise": ["2026-06-30T05:31", "2026-07-01T05:32", "2026-07-02T05:33"],
+        "sunset": ["2026-06-30T20:42", "2026-07-01T20:42", "2026-07-02T20:41"],
+    },
+    "hourly": {
+        "time": [
+            "2026-06-30T00:00", "2026-06-30T12:00",
+            "2026-07-01T00:00", "2026-07-01T12:00",
+        ],
+        "temperature_2m": [61.0, 79.4, 59.0, 77.2],
+        "precipitation_probability": [5, 20, 70, 85],
+        "weather_code": [0, 2, 61, 63],
+    },
+}
+
+# An Open-Meteo payload with only the original (pre-detail) fields, used to
+# confirm the new day keys degrade to None / [] when the source omits them.
+_OM_BASE = {
+    "current": _OM["current"],
+    "daily": {
+        "time": ["2026-06-30", "2026-07-01"],
+        "temperature_2m_max": [80.6, 78.1],
+        "temperature_2m_min": [60.2, 58.9],
+        "weather_code": [0, 61],
     },
 }
 
@@ -58,6 +83,39 @@ def test_parse_includes_icon():
     assert fc["days"][0]["icon"] == "sun"          # WMO 0 = Clear
 
 
+def test_parse_open_meteo_day_detail_fields():
+    fc = weather.parse_open_meteo(_OM, "f", "X")
+    d0 = fc["days"][0]
+    assert d0["precip"] == "10"
+    assert d0["wind"] == "12" and d0["wind_unit"] == "mph"
+    assert d0["sunrise"] == "05:31" and d0["sunset"] == "20:42"
+    d1 = fc["days"][1]
+    assert d1["precip"] == "80"
+
+
+def test_parse_open_meteo_hourly_strip_filters_by_day():
+    fc = weather.parse_open_meteo(_OM, "f", "X")
+    hours0 = fc["days"][0]["hourly"]
+    assert [h["time"] for h in hours0] == ["00:00", "12:00"]   # only 2026-06-30 rows
+    assert hours0[1]["temp"] == "79" and hours0[1]["precip"] == "20"
+    assert hours0[0]["icon"] == "sun"                          # WMO 0 = Clear
+    hours1 = fc["days"][1]["hourly"]
+    assert [h["temp"] for h in hours1] == ["59", "77"]         # only 2026-07-01 rows
+
+
+def test_parse_open_meteo_celsius_wind_unit():
+    fc = weather.parse_open_meteo(_OM, "c", "X")
+    assert fc["days"][0]["wind_unit"] == "km/h"
+
+
+def test_parse_open_meteo_missing_detail_degrades():
+    fc = weather.parse_open_meteo(_OM_BASE, "f", "X")
+    d0 = fc["days"][0]
+    assert d0["precip"] is None and d0["wind"] is None
+    assert d0["sunrise"] is None and d0["sunset"] is None
+    assert d0["hourly"] == []
+
+
 def test_parse_open_meteo_rejects_garbage():
     assert weather.parse_open_meteo(None) is None
     assert weather.parse_open_meteo({}, "f") is None          # no current
@@ -81,7 +139,16 @@ _WTTR = {
     }],
     "weather": [
         {"date": "2026-06-30", "maxtempF": "80", "mintempF": "60",
-         "maxtempC": "27", "mintempC": "16", "hourly": [{"weatherCode": "113"}]},
+         "maxtempC": "27", "mintempC": "16",
+         "astronomy": [{"sunrise": "05:31 AM", "sunset": "08:42 PM"}],
+         "hourly": [
+             {"time": "0", "tempF": "62", "tempC": "17", "chanceofrain": "5",
+              "windspeedMiles": "6", "windspeedKmph": "10", "weatherCode": "116"},
+             {"time": "1200", "tempF": "79", "tempC": "26", "chanceofrain": "40",
+              "windspeedMiles": "14", "windspeedKmph": "22", "weatherCode": "113"},
+             {"time": "2100", "tempF": "66", "tempC": "19", "chanceofrain": "20",
+              "windspeedMiles": "8", "windspeedKmph": "13", "weatherCode": "116"},
+         ]},
     ],
 }
 
@@ -90,6 +157,23 @@ def test_parse_wttr_forecast():
     fc = weather.parse_forecast(_WTTR, "f")
     assert fc["current"]["temp"] == "72" and fc["current"]["desc"] == "Partly cloudy"
     assert fc["days"][0]["hi"] == "80" and fc["days"][0]["desc"] == "Sunny"
+
+
+def test_parse_wttr_day_detail_and_hours():
+    fc = weather.parse_forecast(_WTTR, "f")
+    d0 = fc["days"][0]
+    assert d0["precip"] == "40"            # max chanceofrain across the day
+    assert d0["wind"] == "14" and d0["wind_unit"] == "mph"
+    assert d0["sunrise"] == "05:31 AM" and d0["sunset"] == "08:42 PM"
+    hours = d0["hourly"]
+    assert [h["time"] for h in hours] == ["00:00", "12:00", "21:00"]
+    assert hours[1]["temp"] == "79" and hours[1]["precip"] == "40"
+    assert hours[1]["icon"] == "sun"       # wttr code 113 = Sunny
+
+
+def test_parse_wttr_celsius_wind_unit():
+    fc = weather.parse_forecast(_WTTR, "c")
+    assert fc["days"][0]["wind_unit"] == "km/h" and fc["days"][0]["wind"] == "22"
 
 
 def test_parse_wttr_rejects_garbage():

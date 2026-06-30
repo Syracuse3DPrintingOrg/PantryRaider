@@ -24,6 +24,11 @@
   .wx-days { display: flex; flex-wrap: nowrap; gap: .5rem; overflow-x: auto; }
   .wx-days > .wx-day { flex: 1 1 0; min-width: 0; }
   @media (max-width: 575.98px) { .wx-days { flex-wrap: wrap; } .wx-days > .wx-day { flex: 1 1 30%; } }
+  .wx-day .card { cursor: pointer; transition: border-color .15s ease; }
+  .wx-day .card:hover, .wx-day .card.wx-open { border-color: #4a90d9; }
+  .wx-detail .wx-hours { display: flex; flex-wrap: nowrap; gap: .4rem; overflow-x: auto; padding-bottom: .25rem; }
+  .wx-hour { flex: 0 0 auto; text-align: center; min-width: 3rem; }
+  .wx-detail .wx-stat { background: rgba(255,255,255,0.06); border-radius: .4rem; padding: .25rem .5rem; }
 </style>
 
 <div id="weatherBody" class="d-none">
@@ -44,6 +49,9 @@
   </div>
   <!-- Multi-day forecast -->
   <div class="wx-days" id="wxDays"></div>
+  <!-- Inline detail for the selected day (collapsible, hidden by default so the
+       compact row still fits a 7in 1024x600 landscape screen without scrolling). -->
+  <div id="wxDetail" class="wx-detail d-none mt-2"></div>
 </div>
 
 <div id="weatherError" class="d-none text-center text-secondary p-4">
@@ -65,6 +73,65 @@
 
   function esc(s) { const d = document.createElement('div'); d.textContent = s == null ? '' : s; return d.innerHTML; }
 
+  let wxDaysData = [];   // kept so a click can look up the day's detail
+  let wxOpenIdx = -1;    // index of the expanded day, or -1 when collapsed
+
+  function statBlock(label, value) {
+    if (value == null || value === '') return '';
+    return `<div class="col"><div class="wx-stat text-center"><div class="small text-secondary">${esc(label)}</div><div class="fw-semibold">${value}</div></div></div>`;
+  }
+
+  function renderHourStrip(hours, unit) {
+    if (!hours || !hours.length) return '';
+    const cells = hours.map(h => `
+      <div class="wx-hour">
+        <div class="small text-secondary">${esc(h.time)}</div>
+        <i class="bi bi-${esc(h.icon || 'cloud')} text-info"></i>
+        <div class="small fw-semibold">${esc(h.temp)}&deg;</div>
+        ${h.precip != null ? `<div class="small text-info">${esc(h.precip)}%</div>` : ''}
+      </div>`).join('');
+    return `<div class="wx-hours mt-2">${cells}</div>`;
+  }
+
+  function renderDetail(idx) {
+    const detailEl = document.getElementById('wxDetail');
+    const d = wxDaysData[idx];
+    if (!d) { detailEl.classList.add('d-none'); detailEl.innerHTML = ''; return; }
+    const stats = [
+      statBlock('High', `${esc(d.hi)}&deg;${esc(d.unit)}`),
+      statBlock('Low', `${esc(d.lo)}&deg;${esc(d.unit)}`),
+      d.precip != null ? statBlock('Rain', `${esc(d.precip)}%`) : '',
+      d.wind != null ? statBlock('Wind', `${esc(d.wind)} ${esc(d.wind_unit || '')}`) : '',
+      d.sunrise ? statBlock('Sunrise', esc(d.sunrise)) : '',
+      d.sunset ? statBlock('Sunset', esc(d.sunset)) : '',
+    ].join('');
+    detailEl.innerHTML = `
+      <div class="card">
+        <div class="card-body p-2">
+          <div class="d-flex align-items-center justify-content-between mb-2">
+            <div class="fw-semibold"><i class="bi bi-${esc(d.icon || 'cloud')} text-info me-1"></i>${esc(d.label)} <span class="text-secondary small">${esc(d.desc)}</span></div>
+            <button type="button" class="btn-close btn-close-white" aria-label="Close" onclick="closeDetail()"></button>
+          </div>
+          <div class="row row-cols-3 row-cols-md-6 g-2">${stats}</div>
+          ${renderHourStrip(d.hourly, d.unit)}
+        </div>
+      </div>`;
+    detailEl.classList.remove('d-none');
+  }
+
+  function closeDetail() {
+    wxOpenIdx = -1;
+    renderDetail(-1);
+    document.querySelectorAll('#wxDays .card').forEach(c => c.classList.remove('wx-open'));
+  }
+
+  function toggleDay(idx) {
+    if (wxOpenIdx === idx) { closeDetail(); return; }
+    wxOpenIdx = idx;
+    renderDetail(idx);
+    document.querySelectorAll('#wxDays .card').forEach((c, i) => c.classList.toggle('wx-open', i === idx));
+  }
+
   function render(fc) {
     const c = fc.current || {};
     document.getElementById('wxIcon').className = 'bi wx-hero-icon bi-' + (c.icon || 'cloud');
@@ -74,14 +141,17 @@
     document.getElementById('wxHumidity').textContent = `${c.humidity}%`;
     document.getElementById('wxWind').textContent = `${c.wind} ${c.wind_unit}`;
     const days = fc.days || [];
-    document.getElementById('wxDays').innerHTML = days.map(d => `
+    wxDaysData = days;
+    closeDetail();
+    document.getElementById('wxDays').innerHTML = days.map((d, i) => `
       <div class="wx-day">
-        <div class="card h-100 text-center">
+        <div class="card h-100 text-center" role="button" tabindex="0" onclick="toggleDay(${i})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleDay(${i});}">
           <div class="card-body p-2">
             <div class="fw-semibold small mb-1">${esc(d.label)}</div>
             <i class="bi bi-${esc(d.icon || 'cloud')} wx-day-icon text-info d-block mb-1"></i>
             <div class="small text-secondary text-truncate mb-1">${esc(d.desc)}</div>
             <div class="fs-6 fw-semibold">${esc(d.hi)}&deg;<span class="text-secondary"> / ${esc(d.lo)}&deg;${esc(d.unit)}</span></div>
+            ${d.precip != null ? `<div class="small text-info"><i class="bi bi-droplet"></i> ${esc(d.precip)}%</div>` : ''}
           </div>
         </div>
       </div>`).join('');

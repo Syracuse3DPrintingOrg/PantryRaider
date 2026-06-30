@@ -71,6 +71,50 @@ def _round(value) -> str:
         return "?"
 
 
+def _opt_round(value):
+    """Like ``_round`` but returns None when missing, so the template can hide
+    a stat the source did not provide rather than showing '?'. Pure."""
+    try:
+        return str(round(float(value)))
+    except (TypeError, ValueError):
+        return None
+
+
+def _clock(value) -> str | None:
+    """Pull 'HH:MM' out of an ISO timestamp like '2026-06-30T05:31', or None.
+    Pure, no timezone math (Open-Meteo already returns local times)."""
+    text = str(value or "").strip()
+    if "T" in text:
+        text = text.split("T", 1)[1]
+    m = re.match(r"^(\d{1,2}:\d{2})", text)
+    return m.group(1) if m else None
+
+
+def _parse_om_hours(hourly: dict, date: str) -> list[dict]:
+    """Build a day's hourly strip from an Open-Meteo ``hourly`` block, keeping
+    only the rows whose timestamp falls on ``date``. Pure."""
+    if not isinstance(hourly, dict):
+        return []
+    times = hourly.get("time") or []
+    temps = hourly.get("temperature_2m") or []
+    probs = hourly.get("precipitation_probability") or []
+    codes = hourly.get("weather_code") or []
+    out: list[dict] = []
+    for i, stamp in enumerate(times):
+        stamp = str(stamp)
+        if date and not stamp.startswith(date):
+            continue
+        desc = _wmo_desc(codes[i]) if i < len(codes) else ""
+        out.append({
+            "time": _clock(stamp) or "",
+            "temp": _round(temps[i]) if i < len(temps) else "?",
+            "precip": _opt_round(probs[i]) if i < len(probs) else None,
+            "icon": icon_for(desc),
+            "desc": desc,
+        })
+    return out
+
+
 def _is_lat_lon(text: str) -> tuple[float, float] | None:
     """Parse a bare 'lat,lon' string, or None. Lets a user skip geocoding."""
     m = re.fullmatch(r"\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*", text or "")
@@ -110,6 +154,12 @@ def parse_open_meteo(data: Any, units: str = "f", location: str = "") -> dict | 
     highs = daily.get("temperature_2m_max") or []
     lows = daily.get("temperature_2m_min") or []
     codes = daily.get("weather_code") or []
+    precips = daily.get("precipitation_probability_max") or []
+    winds = daily.get("wind_speed_10m_max") or []
+    sunrises = daily.get("sunrise") or []
+    sunsets = daily.get("sunset") or []
+    hourly = data.get("hourly") or {}
+    wind_unit = "mph" if units == "f" else "km/h"
     tags = ("Today", "Tomorrow")
     days: list[dict] = []
     for i, date in enumerate(times):
@@ -122,6 +172,12 @@ def parse_open_meteo(data: Any, units: str = "f", location: str = "") -> dict | 
             "desc": day_desc,
             "icon": icon_for(day_desc),
             "unit": u,
+            "precip": _opt_round(precips[i]) if i < len(precips) else None,
+            "wind": _opt_round(winds[i]) if i < len(winds) else None,
+            "wind_unit": wind_unit,
+            "sunrise": _clock(sunrises[i]) if i < len(sunrises) else None,
+            "sunset": _clock(sunsets[i]) if i < len(sunsets) else None,
+            "hourly": _parse_om_hours(hourly, str(date)),
         })
     return {"location": location, "units": units, "current": current, "days": days}
 
@@ -165,7 +221,8 @@ async def _fetch_open_meteo(client, location: str, units: str) -> tuple[dict | N
         return None, "could not find that location"
     params = {
         "current": "temperature_2m,apparent_temperature,relative_humidity_2m,wind_speed_10m,weather_code",
-        "daily": "temperature_2m_max,temperature_2m_min,weather_code",
+        "daily": "temperature_2m_max,temperature_2m_min,weather_code,precipitation_probability_max,wind_speed_10m_max,sunrise,sunset",
+        "hourly": "temperature_2m,precipitation_probability,weather_code",
         "timezone": "auto",
         "forecast_days": 4,
         "temperature_unit": "fahrenheit" if str(units).lower() != "c" else "celsius",
@@ -216,6 +273,58 @@ def _desc(cond: dict) -> str:
         return ""
 
 
+def _wttr_clock(value) -> str:
+    """Turn a wttr.in hourly 'time' (e.g. '0', '300', '1500') into 'HH:MM'."""
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        return ""
+    return f"{n // 100:02d}:{n % 100:02d}"
+
+
+def _wttr_max_wind(hourly: list, units: str):
+    """Largest hourly wind speed across a wttr.in day, or None. Pure."""
+    key = "windspeedMiles" if units == "f" else "windspeedKmph"
+    speeds = []
+    for h in hourly or []:
+        if isinstance(h, dict):
+            try:
+                speeds.append(float(h.get(key)))
+            except (TypeError, ValueError):
+                continue
+    return max(speeds) if speeds else None
+
+
+def _wttr_day_precip(hourly: list):
+    """Highest chance-of-rain across a wttr.in day as a string, or None. Pure."""
+    chances = []
+    for h in hourly or []:
+        if isinstance(h, dict):
+            try:
+                chances.append(int(h.get("chanceofrain")))
+            except (TypeError, ValueError):
+                continue
+    return str(max(chances)) if chances else None
+
+
+def _parse_wttr_hours(hourly: list, units: str) -> list[dict]:
+    """Build the hourly strip from a wttr.in day's hourly list. Pure."""
+    out: list[dict] = []
+    for h in hourly or []:
+        if not isinstance(h, dict):
+            continue
+        desc = _desc(h)
+        precip = h.get("chanceofrain")
+        out.append({
+            "time": _wttr_clock(h.get("time")),
+            "temp": h.get("tempF" if units == "f" else "tempC", "?"),
+            "precip": str(precip) if precip not in (None, "") else None,
+            "icon": icon_for(desc),
+            "desc": desc,
+        })
+    return out
+
+
 def parse_forecast(data: Any, units: str = "f") -> dict | None:
     """Parse a wttr.in j1 payload into the render-ready shape, or None. Pure."""
     if not isinstance(data, dict):
@@ -245,6 +354,7 @@ def parse_forecast(data: Any, units: str = "f") -> dict | None:
         hourly = day.get("hourly") or []
         mid = hourly[len(hourly) // 2] if hourly else {}
         day_desc = _desc(mid) if isinstance(mid, dict) else ""
+        astro = (day.get("astronomy") or [{}])[0] if isinstance(day.get("astronomy"), list) else {}
         days.append({
             "label": tags[i] if i < len(tags) else str(day.get("date", "")),
             "date": str(day.get("date", "")),
@@ -253,6 +363,12 @@ def parse_forecast(data: Any, units: str = "f") -> dict | None:
             "desc": day_desc,
             "icon": icon_for(day_desc),
             "unit": u,
+            "precip": _wttr_day_precip(hourly),
+            "wind": _opt_round(_wttr_max_wind(hourly, units)),
+            "wind_unit": "mph" if units == "f" else "km/h",
+            "sunrise": astro.get("sunrise") if isinstance(astro, dict) else None,
+            "sunset": astro.get("sunset") if isinstance(astro, dict) else None,
+            "hourly": _parse_wttr_hours(hourly, units),
         })
     if not days and not current.get("temp"):
         return None
