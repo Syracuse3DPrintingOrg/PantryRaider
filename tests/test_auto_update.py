@@ -55,6 +55,9 @@ def client(monkeypatch, tmp_path):
     os.chdir(SERVICE)
     monkeypatch.setattr(settings, "data_dir", str(tmp_path), raising=False)
     monkeypatch.setattr(settings, "auth_required", False, raising=False)
+    # Configured so the setup-redirect middleware lets /setup/* through.
+    monkeypatch.setattr(settings, "grocy_base_url", "http://grocy.test", raising=False)
+    monkeypatch.setattr(settings, "grocy_api_key", "k", raising=False)
     from fastapi.testclient import TestClient
     from app.main import app
     try:
@@ -81,6 +84,46 @@ def test_satellite_auto_update_toggle_is_read_only(client, monkeypatch):
     assert 'id="auto_update"' in html
     assert 'onchange="saveAutoUpdate(this)"' not in html   # disabled on a remote
     assert "Managed on the main server" in html
+
+
+def test_update_server_rejects_pi_appliance(client, monkeypatch):
+    monkeypatch.setattr(settings, "deployment_mode", "pi_hosted")
+    r = client.post("/setup/update-server").json()
+    assert r["ok"] is False and "Pi appliance" in r["error"]
+
+
+def test_update_server_needs_watchtower_token(client, monkeypatch):
+    monkeypatch.setattr(settings, "deployment_mode", "server")
+    monkeypatch.delenv("WATCHTOWER_HTTP_API_TOKEN", raising=False)
+    r = client.post("/setup/update-server").json()
+    assert r["ok"] is False and "updater" in r["error"].lower()
+
+
+def test_update_server_triggers_watchtower(client, monkeypatch):
+    monkeypatch.setattr(settings, "deployment_mode", "server")
+    monkeypatch.setenv("WATCHTOWER_HTTP_API_TOKEN", "secret")
+    monkeypatch.setenv("WATCHTOWER_URL", "http://watchtower:8080")
+    import app.routers.setup as srouter
+
+    posted = {}
+
+    class _Resp:
+        status_code = 200
+
+    class _FakeClient:
+        def __init__(self, *a, **k): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+        async def post(self, url, headers=None, **k):
+            posted["url"] = url
+            posted["auth"] = (headers or {}).get("Authorization")
+            return _Resp()
+
+    monkeypatch.setattr(srouter.httpx, "AsyncClient", lambda *a, **k: _FakeClient())
+    r = client.post("/setup/update-server").json()
+    assert r["ok"] is True
+    assert posted["url"] == "http://watchtower:8080/v1/update"
+    assert posted["auth"] == "Bearer secret"
 
 
 def test_setup_save_persists_auto_update(client, monkeypatch):

@@ -14,7 +14,7 @@ from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 
 from ..config import (
-    settings, APP_VERSION, THEMES, _DEFAULT_THEME,
+    settings, APP_VERSION, GITHUB_REPO, THEMES, _DEFAULT_THEME,
     UI_SCALES, _DEFAULT_UI_SCALE,
     DISPLAY_ROTATIONS, _DEFAULT_DISPLAY_ROTATION,
     DISPLAY_TYPES, _DEFAULT_DISPLAY_TYPE,
@@ -485,6 +485,8 @@ async def setup_page(request: Request):
         # Pi appliance (Pi Hosted or Pi Remote): both run the host bridge, so both
         # offer the in-app OTA update. Mode based so it is stable off-device too.
         "is_pi_appliance": settings.is_pi_appliance(),
+        # For the Updates card's release-notes link.
+        "github_repo": GITHUB_REPO,
         "board_model": board_model(),
         "pi_mdns_host": _pi_mdns_host() if is_raspberry_pi() else "",
         # On the attached kiosk display the wizard's many text inputs are painful
@@ -1258,6 +1260,39 @@ async def run_host_bridge_update() -> dict:
         return r.json()
     except Exception as e:
         return {"ok": False, "error": str(e)}
+
+
+@router.post("/update-server")
+async def update_server():
+    """Apply an update now on a non-Pi server by triggering Watchtower's HTTP
+    API, so the user does not wait for the daily poll. The watchtower service in
+    docker-compose.prod.yml exposes the API with a shared token; the app reaches
+    it on the compose network. Degrades gracefully when watchtower is not
+    running or not configured.
+    """
+    if settings.is_pi_appliance():
+        return JSONResponse(
+            {"ok": False, "error": "On a Pi appliance use the Update now button above."})
+    url = os.environ.get("WATCHTOWER_URL", "http://watchtower:8080").rstrip("/")
+    token = os.environ.get("WATCHTOWER_HTTP_API_TOKEN", "")
+    if not token:
+        return JSONResponse({"ok": False, "error": (
+            "Automatic updater not configured. Start the watchtower service "
+            "(it is in the production compose) or run the commands below.")})
+    try:
+        async with httpx.AsyncClient(timeout=180.0) as c:
+            r = await c.post(f"{url}/v1/update",
+                             headers={"Authorization": f"Bearer {token}"})
+        if r.status_code == 200:
+            return {"ok": True, "message": (
+                "Update triggered. If a newer image was published the app will "
+                "pull it and restart in a moment.")}
+        return JSONResponse(
+            {"ok": False, "error": f"Updater returned HTTP {r.status_code}."})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": (
+            f"Could not reach the updater ({e.__class__.__name__}). "
+            "Is the watchtower service running?")})
 
 
 class _RestoreReq(BaseModel):

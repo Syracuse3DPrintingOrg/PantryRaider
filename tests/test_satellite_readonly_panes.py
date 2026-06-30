@@ -110,13 +110,16 @@ def test_satellite_updates_card_detects_availability(client, monkeypatch):
     assert ">Update now" in html
 
 
-def test_non_satellite_updates_card_keeps_manual_check(client, monkeypatch):
-    """A plain server (non-Pi) uses the manual checkUpdate button and shows the
-    copy-paste update commands, not the appliance OTA wiring."""
+def test_non_satellite_updates_card_has_server_update_now(client, monkeypatch):
+    """A plain server (non-Pi) gets an availability check plus a manual Update
+    now that triggers Watchtower, and still shows the copy-paste fallback. It
+    does NOT use the Pi host-bridge OTA (checkForUpdates)."""
     html = _render_setup(client, monkeypatch, satellite=False)
-    assert 'onclick="checkUpdate(this)"' in html
-    assert "checkSatelliteUpdate(null)" not in html
-    assert 'onclick="checkForUpdates()"' not in html
+    assert 'onclick="updateServerNow(this)"' in html       # manual trigger
+    assert 'onclick="checkSatelliteUpdate(this)"' in html   # availability check
+    assert 'onclick="checkForUpdates()"' not in html        # not the Pi OTA path
+    assert "Release notes" in html                          # release-notes link
+    assert "docker compose pull" in html                    # command fallback kept
 
 
 def test_pi_hosted_gets_the_in_app_ota(client, monkeypatch):
