@@ -161,7 +161,7 @@ def test_shop_page_renders_with_disclosure(client):
     r = client.get("/ui/shop")
     assert r.status_code == 200
     body = r.text
-    assert "As an Amazon Associate this site earns from qualifying purchases." in body
+    assert "affiliate links" in body and "free and open source" in body
     # Tagged links should appear on the page.
     assert "tag=rendertag-20" in body
     assert "Recommended Kitchen Products" in body

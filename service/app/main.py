@@ -132,6 +132,9 @@ _SETUP_BYPASS = {
     "/setup/test/provider", "/setup/test/mealie", "/setup/test/recipes",
     "/setup/totp/generate", "/setup/totp/verify", "/setup/totp/disable",
     "/setup/satellite/sync", "/setup/ha/cameras",
+    # The last wizard step can start Mealie and poll its status before setup is
+    # finished, so these must return JSON, not the setup-redirect HTML page.
+    "/setup/mealie/start", "/setup/mealie/status",
     # Satellites pull config here; the handler enforces its own X-API-Key, so
     # it is safe to skip the setup-redirect/auth wrappers.
     "/api/config/satellite",

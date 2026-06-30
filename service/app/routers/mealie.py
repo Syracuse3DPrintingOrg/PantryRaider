@@ -739,15 +739,18 @@ async def suggest_ready_count():
 
 @router.get("/shopping")
 async def get_shopping(list_id: str = ""):
-    m = _client()
     try:
+        m = _client()
         lists = await m.get_shopping_lists()
         if not lists:
             return {"lists": [], "list": None, "items": []}
         selected = next((l for l in lists if l.get("id") == list_id), lists[0])
         detail = await m.get_shopping_list(selected["id"])
-    except MealieError as e:
-        raise HTTPException(502, str(e))
+    except Exception as e:
+        # Never 500 to the page (it parses JSON): return an empty list plus a
+        # readable error so the Shopping tab degrades instead of breaking when
+        # Mealie is not configured or unreachable on a fresh install.
+        return {"lists": [], "list": None, "items": [], "error": str(e)}
 
     items = detail.get("listItems") or []
     items.sort(key=lambda i: (bool(i.get("checked")), (i.get("note") or "").lower()))

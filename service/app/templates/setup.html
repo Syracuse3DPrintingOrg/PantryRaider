@@ -657,7 +657,7 @@
     <div class="input-group">
       <input type="url" class="form-control" id="mealie_base_url"
              placeholder="http://192.168.1.10:9285"
-             value="{{ s.mealie_base_url or suggested_mealie_url }}">
+             value="{{ s.mealie_base_url or suggested_mealie_internal_url or suggested_mealie_url }}">
       <a class="btn btn-outline-secondary" id="mealie-url-open" href="{{ suggested_mealie_url or '#' }}" target="_blank" title="Open Mealie in new tab">
         <i class="bi bi-box-arrow-up-right"></i>
       </a>
@@ -1031,9 +1031,12 @@
               <input type="url" class="form-control" id="grocy_base_url"
                      placeholder="http://192.168.1.10:9383"
                      value="{{ s.grocy_base_url if (s.grocy_base_url and s.grocy_base_url != 'http://grocy:80') else suggested_grocy_url }}">
-              <div class="form-text">Full URL to your Grocy instance — no trailing slash.
+              <div class="form-text">Full URL to your Grocy instance, no trailing slash.
                 {% if suggested_grocy_url and not s.grocy_base_url %}
-                <span class="text-success"><i class="bi bi-check-circle me-1"></i>Grocy detected locally — URL pre-filled.</span>
+                <span class="text-success"><i class="bi bi-check-circle me-1"></i>Grocy detected locally, URL pre-filled.</span>
+                {% endif %}
+                {% if is_pi and not features.satellite %}
+                <span class="d-block">On a Pi Hosted box Grocy runs alongside the app, so the pre-filled default works as is. You do not need to change it.</span>
                 {% endif %}
               </div>
             </div>
@@ -1274,7 +1277,7 @@
               <label class="form-label">Mealie URL <span class="text-secondary small">(internal — used for API calls)</span></label>
               <div class="input-group">
                 <input type="url" class="form-control" id="mealie_base_url"
-                       placeholder="http://192.168.1.10:9285" value="{{ s.mealie_base_url or suggested_mealie_url }}" {% if features.satellite %}readonly{% endif %}>
+                       placeholder="http://192.168.1.10:9285" value="{{ s.mealie_base_url or suggested_mealie_internal_url or suggested_mealie_url }}" {% if features.satellite %}readonly{% endif %}>
                 <a class="btn btn-outline-secondary" id="mealie-open-link" href="{{ suggested_mealie_url or s.mealie_base_url or '#' }}" target="_blank" title="Open Mealie in new tab">
                   <i class="bi bi-box-arrow-up-right"></i>
                 </a>

@@ -415,10 +415,11 @@ def _grocy_url_for_api(request: Request, detected: str) -> str:
 
 
 def _suggest_mealie_url(request: Request) -> str:
-    """Return a suggested Mealie URL for the browser, or '' if not applicable.
+    """A suggested Mealie URL for opening in a BROWSER, or '' if not applicable.
 
     On a Pi appliance Mealie runs (or will run) on the same host at port 9285.
-    Prefers the mDNS hostname so the link survives DHCP IP changes.
+    Prefers the mDNS hostname so the link survives DHCP IP changes. This is for
+    the "open in new tab" link, not the internal API field.
     Returns '' when Mealie is already configured or we are not on a Pi.
     """
     if not is_raspberry_pi():
@@ -427,6 +428,19 @@ def _suggest_mealie_url(request: Request) -> str:
         return ""
     host = _pi_mdns_host()
     return f"http://{host}:9285" if host else ""
+
+
+def _suggest_mealie_internal_url() -> str:
+    """The suggested Mealie URL for the INTERNAL API field on a Pi appliance.
+
+    The app talks to Mealie on the same host, so localhost is correct and always
+    reachable container-to-host; a <hostname>.local or LAN address is only for a
+    browser and may not resolve from inside the container (FoodAssistant). Empty
+    when Mealie is already configured or off a Pi.
+    """
+    if not is_raspberry_pi() or settings.mealie_base_url:
+        return ""
+    return "http://localhost:9285"
 
 
 def available_modes() -> dict:
@@ -488,6 +502,7 @@ async def setup_page(request: Request):
         "suggested_grocy_url": suggested_grocy_url,
         "grocy_browser_link": grocy_browser_link,
         "suggested_mealie_url": _suggest_mealie_url(request),
+        "suggested_mealie_internal_url": _suggest_mealie_internal_url(),
         "deployment_modes": modes,
         "current_mode": current_mode,
         "is_pi": is_raspberry_pi(),

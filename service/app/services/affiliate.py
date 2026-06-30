@@ -214,4 +214,6 @@ def grouped_recommendations(owned_appliance_keys, tag="", recipe_missing=None) -
 
 # Required FTC / Amazon Associates disclosure, surfaced wherever affiliate links
 # appear. Kept here so the wording lives in one place.
-DISCLOSURE = "As an Amazon Associate this site earns from qualifying purchases."
+DISCLOSURE = ("Some links here are affiliate links. If you buy through them the "
+              "creator may earn a small commission at no extra cost to you, which "
+              "helps keep FoodAssistant free and open source. Thanks for your support.")
