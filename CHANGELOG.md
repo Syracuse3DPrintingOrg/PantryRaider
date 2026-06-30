@@ -11,6 +11,7 @@ All notable changes to FoodAssistant are recorded here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **Pending duplicate hint.** When a scanned item is already in Grocy inventory, the Pending page shows a small "Already in inventory (duplicate)" info badge on that row. It is informational only: the item can still be committed, and an item scanned on a different day lands as its own Grocy stock entry (Grocy keys entries by best-before date) so each keeps its own expiration.
 - **Home Assistant on-screen notifications.** Turn on the event channel under Settings > Home Assistant and a Home Assistant automation can push notifications to this device's screen (a `rest_command` to `/events/notify`); they appear as toasts on the kiosk and in any open browser tab, coloured by level. The settings page shows the exact rest_command and automation YAML and has a Send test notification button.
 - **Home Assistant camera pop-ups.** An automation can pop a camera up full-screen on the display (`/events/camera-popup` with a camera name), for example the doorbell camera when a person is detected. It shows for a configurable few seconds, then closes; it reuses the same camera proxy as the Camera page.
 - **Convert has its own tab, and is customizable.** The Conversions page is now a normal navigation tab (hideable like any other), and a "My conversions" section lets you add your own quick-reference rows (for example "1 stick butter = 113 g") that stay on the device alongside the built-in cheat sheet and the calculator.

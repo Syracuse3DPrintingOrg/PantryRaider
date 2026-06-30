@@ -9,6 +9,29 @@ class GrocyError(Exception):
     """Raised with Grocy's actual error message instead of a bare HTTP status."""
 
 
+def stock_has_product(name: str, stock: list[dict]) -> bool:
+    """True when ``name`` already has a stock entry (case-insensitive match).
+
+    Pure and testable: it only compares the given name against the names already
+    present in a Grocy stock list. Used to flag a scanned item as a duplicate
+    (already in inventory) without blocking the add. An empty name never matches.
+    Note this is informational only: adding the same product with a different
+    best-before date still creates a separate Grocy stock entry, so each scan
+    keeps its own expiration (Grocy keys stock entries by best-before date).
+    """
+    wanted = (name or "").strip().lower()
+    if not wanted:
+        return False
+    for entry in stock or []:
+        if float(entry.get("amount") or 0) <= 0:
+            continue
+        product = entry.get("product") or {}
+        entry_name = (product.get("name") or entry.get("name") or "").strip().lower()
+        if entry_name and entry_name == wanted:
+            return True
+    return False
+
+
 # Shared connection pool for the life of the app
 _client = httpx.AsyncClient(timeout=15.0)
 
@@ -61,6 +84,17 @@ class GrocyClient:
 
     async def get_stock(self) -> list[dict]:
         return await self._get("/stock")
+
+    async def has_in_stock(self, name: str) -> bool:
+        """True when a product named ``name`` currently has stock in Grocy.
+
+        Used to flag a scanned item as already in inventory (a duplicate). It is
+        informational only and never blocks adding: a later add with a different
+        best-before date still lands as its own stock entry.
+        """
+        if not (name or "").strip():
+            return False
+        return stock_has_product(name, await self.get_stock())
 
     async def _ensure_object(self, path: str, name: str, extra: dict | None = None) -> int:
         """Find an object by name (case-insensitive) or create it. Updates cache."""

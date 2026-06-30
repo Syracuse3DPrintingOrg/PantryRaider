@@ -134,6 +134,12 @@ async function loadPending() {
             </button>
           </div>
         </div>
+        ${item.duplicate ? `
+        <div class="mt-1 ms-1">
+          <span class="badge text-bg-info" title="This product already has stock in Grocy. You can still add it; scanned on a different day it lands as a separate entry so each keeps its own expiration.">
+            <i class="bi bi-info-circle me-1"></i>Already in inventory (duplicate)
+          </span>
+        </div>` : ''}
         <div class="meta-text mt-1 ms-1">
           ${item.lookup_failed ? '<i class="bi bi-exclamation-triangle text-warning me-1"></i>lookup failed — ' : ''}
           ${item.barcode ? `barcode ${esc(item.barcode)} · ` : ''}

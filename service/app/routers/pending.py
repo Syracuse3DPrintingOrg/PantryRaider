@@ -13,7 +13,7 @@ from ..models.db_models import PendingItem
 from ..models.food import FoodItem, FoodCategory, StorageType
 from ..services.barcode import lookup_barcode, BarcodeNotFound, BarcodeServiceError
 from ..services.defaults import apply_defaults
-from ..services.grocy import GrocyClient
+from ..services.grocy import GrocyClient, stock_has_product
 from ..services import scanner_mode
 
 router = APIRouter(prefix="/pending", tags=["pending"])
@@ -129,7 +129,7 @@ class CommitRequest(BaseModel):
     ids: Optional[list[int]] = None   # None = commit everything
 
 
-def _row_dict(row: PendingItem) -> dict:
+def _row_dict(row: PendingItem, duplicate: bool = False) -> dict:
     return {
         "id": row.id,
         "barcode": row.barcode,
@@ -142,9 +142,44 @@ def _row_dict(row: PendingItem) -> dict:
         "brand": row.brand,
         "notes": row.notes,
         "lookup_failed": bool(row.lookup_failed),
+        # True when this product already has stock in Grocy. Informational only:
+        # the item can still be committed, and a commit on a different day lands a
+        # separate stock entry so each scan keeps its own expiration.
+        "duplicate": bool(duplicate),
         "source": row.source,
         "created_at": row.created_at,
     }
+
+
+async def _duplicate_names(rows: list[PendingItem]) -> set[str]:
+    """Lower-cased names among ``rows`` that already have stock in Grocy.
+
+    One Grocy stock fetch covers the whole list. Never raises: if Grocy is
+    unreachable or misconfigured the duplicate hint is simply omitted (the
+    pending list must still load), so an empty set is returned on any error.
+    """
+    wanted = {(r.name or "").strip().lower() for r in rows if (r.name or "").strip()}
+    if not wanted:
+        return set()
+    try:
+        stock = await GrocyClient().get_stock()
+    except Exception:
+        return set()
+    return {name for name in wanted if stock_has_product(name, stock)}
+
+
+async def _is_duplicate(name: str) -> bool:
+    """True when a single product ``name`` already has stock in Grocy.
+
+    Never raises: a Grocy outage just drops the hint (returns False) so a scan
+    is never blocked by an inventory lookup.
+    """
+    if not (name or "").strip():
+        return False
+    try:
+        return await GrocyClient().has_in_stock(name)
+    except Exception:
+        return False
 
 
 @router.post("/scan")
@@ -251,7 +286,8 @@ async def scan_barcode(body: ScanRequest, request: Request, db: Session = Depend
     if existing:
         existing.quantity = (existing.quantity or 1.0) + body.quantity
         db.commit()
-        return {"status": "merged", "item": _row_dict(existing)}
+        dup = await _is_duplicate(existing.name)
+        return {"status": "merged", "item": _row_dict(existing, dup)}
 
     lookup_failed = False
     try:
@@ -275,7 +311,8 @@ async def scan_barcode(body: ScanRequest, request: Request, db: Session = Depend
     db.add(row)
     db.commit()
     db.refresh(row)
-    return {"status": "queued", "item": _row_dict(row)}
+    dup = await _is_duplicate(row.name)
+    return {"status": "queued", "item": _row_dict(row, dup)}
 
 
 class ScannerModePayload(BaseModel):
@@ -310,7 +347,8 @@ async def list_pending(request: Request, db: Session = Depends(get_db)):
     if _upstream():
         return await _forward(request, "/")
     rows = db.query(PendingItem).order_by(PendingItem.created_at.desc()).all()
-    return {"items": [_row_dict(r) for r in rows]}
+    dupes = await _duplicate_names(rows)
+    return {"items": [_row_dict(r, (r.name or "").strip().lower() in dupes) for r in rows]}
 
 
 @router.get("/count")
