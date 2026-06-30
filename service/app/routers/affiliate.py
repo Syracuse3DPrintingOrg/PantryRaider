@@ -10,7 +10,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 
-from ..config import settings
+from ..config import settings, AMAZON_ASSOCIATES_TAG
 from ..services import affiliate, current_recipe, utensils
 from ..templating import templates
 
@@ -36,9 +36,11 @@ def _recipe_missing() -> list[str]:
 @router.get("/shop", response_class=HTMLResponse)
 async def shop_page(request: Request):
     missing = _recipe_missing()
+    # The Associates tag is the project owner's static tag (not a per-user
+    # setting), so the links earn for the project on every deployment.
     groups = affiliate.grouped_recommendations(
         settings.kitchen_appliances,
-        settings.amazon_affiliate_tag,
+        AMAZON_ASSOCIATES_TAG,
         recipe_missing=missing,
     )
     return templates.TemplateResponse(request, "shop.html", {
@@ -47,5 +49,5 @@ async def shop_page(request: Request):
         "groups": groups,
         "recipe_missing": missing,
         "disclosure": affiliate.DISCLOSURE,
-        "affiliate_tag": settings.amazon_affiliate_tag,
+        "affiliate_tag": AMAZON_ASSOCIATES_TAG,
     })

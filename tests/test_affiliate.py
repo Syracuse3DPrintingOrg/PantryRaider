@@ -111,7 +111,9 @@ def client(monkeypatch, tmp_path):
     monkeypatch.setattr(settings, "vision_provider", "gemini", raising=False)
     monkeypatch.setattr(settings, "gemini_api_key", "k", raising=False)
     monkeypatch.setattr(settings, "kitchen_appliances", ["blender", "oven"], raising=False)
-    monkeypatch.setattr(settings, "amazon_affiliate_tag", "rendertag-20", raising=False)
+    # The Associates tag is now the project owner's static constant, not a
+    # per-user setting; override it on the router module for the render test.
+    monkeypatch.setattr("app.routers.affiliate.AMAZON_ASSOCIATES_TAG", "rendertag-20", raising=False)
     from fastapi.testclient import TestClient
     from app.main import app
     try:

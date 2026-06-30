@@ -12,10 +12,17 @@ from .hardware import is_raspberry_pi
 
 # Single source of truth for the app version (shown in the UI, used by the
 # update checker, and reported by FastAPI). Bump on each tagged release.
-APP_VERSION = "0.7.11"
+APP_VERSION = "0.7.12"
 
 # GitHub repo used by the in-app update checker.
 GITHUB_REPO = "Syracuse3DPrinting/FoodAssistant"
+
+# Amazon Associates tag for the Shop recommendations. This is the project
+# owner's static tag (the same on every deployment, since the affiliate revenue
+# is the project's), NOT a per-user setting. Set it here once. Empty leaves the
+# links working but unmonetized. An AMAZON_ASSOCIATES_TAG env var overrides it.
+import os as _os
+AMAZON_ASSOCIATES_TAG = _os.environ.get("AMAZON_ASSOCIATES_TAG", "").strip()
 
 # UI themes. Each entry carries the Bootstrap 5.3 colour mode (data-bs-theme)
 # and an optional vendored Bootswatch stylesheet served from /static. When
@@ -182,7 +189,7 @@ _SAVEABLE = [
     "mealie_base_url", "mealie_api_key", "mealie_public_url",
     "device_hostname",
     "recipe_source", "themealdb_api_key", "spoonacular_api_key",
-    "staple_items", "cook_ai_context", "kitchen_appliances", "amazon_affiliate_tag",
+    "staple_items", "cook_ai_context", "kitchen_appliances",
     "perishable_days", "expiring_soon_days", "suggest_per_tier",
     "nav_order", "nav_hidden", "custom_nav_tabs", "nav_parents",
     "custom_storage_categories", "ui_theme",
@@ -221,7 +228,7 @@ SATELLITE_PULL_FIELDS = [
     "grocy_base_url", "grocy_api_key", "grocy_public_url",
     "mealie_base_url", "mealie_api_key", "mealie_public_url",
     "recipe_source", "themealdb_api_key", "spoonacular_api_key",
-    "staple_items", "cook_ai_context", "kitchen_appliances", "amazon_affiliate_tag",
+    "staple_items", "cook_ai_context", "kitchen_appliances",
     "perishable_days", "expiring_soon_days", "suggest_per_tier",
     "custom_storage_categories", "ui_theme",
     # Stream Deck weather widget config, so a satellite's deck matches the
@@ -605,7 +612,6 @@ class Settings(BaseSettings):
     # Shop page's product links (FoodAssistant-k2kv). Empty means links are still
     # built and useful, just not tagged. Shared to satellites so the whole fleet
     # uses one tag (see SATELLITE_PULL_FIELDS).
-    amazon_affiliate_tag: str = ""
     perishable_days: int = 14
     expiring_soon_days: int = 5
     suggest_per_tier: int = 8
