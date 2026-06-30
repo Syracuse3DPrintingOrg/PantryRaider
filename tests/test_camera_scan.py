@@ -122,3 +122,22 @@ def test_best_lan_cidr_prefers_real_lan_over_docker(monkeypatch):
     # the endpoint flags it as dockerish so the UI tells the user to correct it.
     monkeypatch.setattr(camera_scan, "_candidate_ips", lambda: {"172.19.0.5"})
     assert camera_scan.best_lan_cidr() == "172.19.0.0/24"
+
+
+def test_camera_scan_default_uses_grocy_url_lan(monkeypatch):
+    """The camera scan default inherits the LAN from the Grocy/Mealie URL, the
+    same as the device scan, so a containerized server does not default to its
+    Docker subnet (FoodAssistant)."""
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "service"))
+    from app.config import settings
+    from app.services import lan_scan
+    monkeypatch.setattr(settings, "grocy_base_url", "http://192.168.1.170:9383", raising=False)
+    monkeypatch.setattr(settings, "mealie_base_url", "", raising=False)
+    monkeypatch.setattr(settings, "grocy_public_url", "", raising=False)
+    monkeypatch.setattr(settings, "mealie_public_url", "", raising=False)
+    monkeypatch.setattr(settings, "lan_scan_cidr", "", raising=False)
+    # Only a Docker candidate available -> falls through to the Grocy URL host.
+    monkeypatch.setattr(lan_scan, "default_cidr", lambda: "172.19.0.0/24")
+    assert lan_scan.resolve_lan_cidr("", candidates=["172.19.0.0/24"]) == "192.168.1.0/24"

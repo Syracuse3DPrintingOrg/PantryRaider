@@ -36,40 +36,18 @@ def _good_cidr(c: str | None) -> bool:
     return bool(c) and not lan_scan.looks_dockerish(c)
 
 
+# Kept for tests/back-compat: the Grocy/Mealie URL derivation now lives in
+# lan_scan so the camera scan shares it.
 def _lan_cidr_from_config_urls() -> str | None:
-    """Derive a LAN /24 from a configured backend URL (Grocy, Mealie). The user
-    points those at a real LAN IP and the container reaches them there, so they
-    are a reliable LAN reference even on a bridge container that cannot see its
-    own LAN address (FoodAssistant)."""
-    import ipaddress
-    from urllib.parse import urlparse
-    for url in (settings.grocy_base_url, settings.mealie_base_url,
-                settings.grocy_public_url, settings.mealie_public_url):
-        host = urlparse(url or "").hostname or ""
-        try:
-            ip = ipaddress.ip_address(host)
-        except ValueError:
-            continue  # a hostname, not a literal IP
-        if ip.is_loopback or not ip.is_private:
-            continue
-        net = str(ipaddress.ip_network(f"{host}/24", strict=False))
-        if _good_cidr(net):
-            return net
-    return None
+    return lan_scan.lan_cidr_from_config_urls()
 
 
 def _resolve_scan_cidr(explicit: str) -> str | None:
-    """Pick the network to scan: the user's explicit range, else a remembered
-    one, a real LAN interface, a satellite's LAN, or a configured backend URL.
-    Docker subnets are skipped so a bridge container never scans its own network."""
-    explicit = (explicit or "").strip()
-    if explicit:
-        return explicit
-    for cand in (settings.lan_scan_cidr, lan_scan.default_cidr(),
-                 devices.lan_cidr_from_known_devices(), _lan_cidr_from_config_urls()):
-        if _good_cidr(cand):
-            return cand
-    return None
+    """Pick the network to scan, including a checked-in satellite's subnet as an
+    extra candidate. Shared resolution (remembered range, LAN interface, backend
+    URL host) lives in lan_scan.resolve_lan_cidr so the camera scan matches."""
+    return lan_scan.resolve_lan_cidr(
+        explicit, candidates=[devices.lan_cidr_from_known_devices()])
 
 
 @router.get("")

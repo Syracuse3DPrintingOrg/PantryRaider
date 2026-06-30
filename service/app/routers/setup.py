@@ -1444,10 +1444,19 @@ async def scan_ip_cameras(payload: CameraScanPayload = CameraScanPayload()):
     snapshot paths, returning candidates the user can preview and add. Runs the
     blocking sweep in a thread so the event loop stays free."""
     import anyio
-    from ..services import camera_scan
-    cidr = (payload.cidr or "").strip() or camera_scan.best_lan_cidr()
+    from ..services import camera_scan, lan_scan
+    # Same resolution as the device scan: explicit, then a remembered range, this
+    # host's LAN interface, and a Grocy/Mealie URL host, skipping Docker subnets.
+    cidr = lan_scan.resolve_lan_cidr(payload.cidr or "", candidates=[camera_scan.best_lan_cidr()])
     if not cidr:
         return {"ok": False, "error": "Could not determine the local network; enter a CIDR like 192.168.1.0/24."}
+    # Remember a good (non-Docker) range so the next blank scan (camera or device)
+    # reuses it without the user retyping it.
+    if not lan_scan.looks_dockerish(cidr) and cidr != settings.lan_scan_cidr:
+        try:
+            settings.save({"lan_scan_cidr": cidr})
+        except Exception:
+            pass
     result = await anyio.to_thread.run_sync(lambda: camera_scan.scan_for_cameras(cidr))
     if result.get("error"):
         return {"ok": False, "error": result["error"]}
@@ -1482,8 +1491,10 @@ async def scan_ip_cameras(payload: CameraScanPayload = CameraScanPayload()):
 async def scan_default_cidr():
     """The CIDR the camera scan would default to, so the UI can pre-fill and
     show it before scanning (FoodAssistant-d9rx)."""
-    from ..services import camera_scan
-    cidr = camera_scan.best_lan_cidr() or ""
+    from ..services import camera_scan, lan_scan
+    # Resolve like the actual scan does (remembered range, LAN interface, then a
+    # Grocy/Mealie URL host) so the pre-filled default is the real LAN, not Docker.
+    cidr = lan_scan.resolve_lan_cidr("", candidates=[camera_scan.best_lan_cidr()]) or ""
     return {"cidr": cidr, "dockerish": camera_scan.looks_dockerish(cidr) if cidr else False}
 
 

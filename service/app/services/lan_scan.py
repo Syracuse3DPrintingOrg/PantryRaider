@@ -166,3 +166,46 @@ def default_cidr() -> str | None:
         return str(ipaddress.ip_network(f"{ip}/24", strict=False))
     except ValueError:
         return None
+
+
+def lan_cidr_from_config_urls() -> str | None:
+    """Derive a LAN /24 from a configured backend URL (Grocy, Mealie). The user
+    points those at a real LAN IP and the container reaches them there, so they
+    are a reliable LAN reference even on a bridge container that cannot see its
+    own LAN address. Shared by the device scan and the camera scan."""
+    from ..config import settings
+    from urllib.parse import urlparse
+    for url in (settings.grocy_base_url, settings.mealie_base_url,
+                settings.grocy_public_url, settings.mealie_public_url):
+        host = urlparse(url or "").hostname or ""
+        try:
+            ip = ipaddress.ip_address(host)
+        except ValueError:
+            continue  # a hostname, not a literal IP
+        if ip.is_loopback or not ip.is_private:
+            continue
+        net = str(ipaddress.ip_network(f"{host}/24", strict=False))
+        if not looks_dockerish(net):
+            return net
+    return None
+
+
+def resolve_lan_cidr(explicit: str = "", candidates=None) -> str | None:
+    """Pick the network to scan, shared by the device and camera scans: the
+    user's explicit range, else a remembered one, any caller-supplied candidates
+    (e.g. a checked-in satellite's subnet), a real LAN interface, and finally a
+    configured backend URL host. Docker subnets are skipped so a bridge container
+    never defaults to scanning its own network. Returns None when nothing fits.
+    """
+    explicit = (explicit or "").strip()
+    if explicit:
+        return explicit
+    from ..config import settings
+    seq = [settings.lan_scan_cidr]
+    if candidates:
+        seq += list(candidates)
+    seq += [default_cidr(), lan_cidr_from_config_urls()]
+    for c in seq:
+        if c and not looks_dockerish(c):
+            return c
+    return None
