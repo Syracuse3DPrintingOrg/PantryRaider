@@ -213,3 +213,17 @@ body {
   padding: 0.25rem 0;
   font-size: 1.15rem;
 }
+
+/* Hide the mouse pointer on a touch-only kiosk (FoodAssistant-1dp5).
+ * The firstboot transparent XCURSOR theme only hides cage's own compositor
+ * cursor; fullscreen Chromium still paints its own arrow over the page via
+ * wl_pointer.set_cursor, so a pointer stays visible despite HIDE_CURSOR=auto.
+ * Gate on the primary pointer so this only applies when touch (or nothing) is
+ * the input device: plug in a real mouse and pointer:fine wins, the rules drop
+ * out, and the cursor returns. This stylesheet already loads only in kiosk
+ * mode, so it never affects a normal desktop browser session. */
+@media (pointer: coarse), (pointer: none) {
+  html, body, * {
+    cursor: none !important;
+  }
+}
