@@ -162,8 +162,13 @@ def recommendations(owned_appliance_keys, tag="", recipe_missing=None) -> list[d
             return "You have not marked this as owned"
         return "Popular kitchen pick"
 
+    # Stand-mixer attachments are only relevant to someone who owns a stand
+    # mixer, so hide that whole category otherwise (FoodAssistant).
+    owns_mixer = "stand_mixer" in owned
     out = []
     for item in PRODUCT_CATALOG:
+        if item.get("category") == "attachments" and not owns_mixer:
+            continue
         r = rank(item)
         out.append({
             **item,

@@ -86,12 +86,21 @@ _CATEGORIES = {c for c, _label in affiliate.CATEGORY_LABELS}
 
 
 def test_grouped_recommendations_cover_all_categories():
-    groups = affiliate.grouped_recommendations([], tag="")
+    # With a stand mixer owned, every category (including attachments) appears.
+    groups = affiliate.grouped_recommendations(["stand_mixer"], tag="")
     labels = {g["category"] for g in groups}
     assert {"appliances", "attachments", "cookware", "gadgets", "storage"} <= labels
     # Every catalog item ends up in exactly one group.
     total = sum(len(g["products"]) for g in groups)
     assert total == len(affiliate.PRODUCT_CATALOG)
+
+
+def test_attachments_hidden_without_a_stand_mixer():
+    groups = affiliate.grouped_recommendations([], tag="")
+    assert "attachments" not in {g["category"] for g in groups}
+    # And present once a stand mixer is owned.
+    owned_groups = affiliate.grouped_recommendations(["stand_mixer"], tag="")
+    assert "attachments" in {g["category"] for g in owned_groups}
 
 
 def test_catalog_has_no_fabricated_asins():
