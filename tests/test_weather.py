@@ -126,3 +126,25 @@ def test_fetch_reports_error_when_both_fail(monkeypatch):
     monkeypatch.setattr(weather, "_fetch_wttr", fail)
     fc, err = asyncio.run(weather.fetch_forecast("Syracuse, NY", "f"))
     assert fc is None and "could not reach the weather service" in err
+
+
+def test_weather_page_calls_the_correct_data_path(tmp_path, monkeypatch):
+    """The data endpoint lives under /ui, and the page's <base href> is the app
+    root, so the page MUST fetch 'ui/weather/data' (not 'weather/data', which
+    would 404 and show 'unavailable' forever). Regression guard for that bug."""
+    import os
+    from unittest.mock import patch
+    cwd = os.getcwd()
+    os.chdir(SERVICE)
+    try:
+        from app.config import settings
+        monkeypatch.setattr(settings, "data_dir", str(tmp_path), raising=False)
+        monkeypatch.setattr(settings, "auth_required", False, raising=False)
+        from fastapi.testclient import TestClient
+        from app.main import app
+        with patch.object(type(settings), "is_configured", lambda self: True):
+            html = TestClient(app).get("/ui/weather").text
+        assert "fetch('ui/weather/data'" in html
+        assert "fetch('weather/data'" not in html
+    finally:
+        os.chdir(cwd)

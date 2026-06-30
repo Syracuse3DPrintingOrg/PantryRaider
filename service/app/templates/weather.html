@@ -76,7 +76,7 @@
     bodyEl.classList.add('d-none');
     errEl.classList.add('d-none');
     try {
-      const r = await fetch('weather/data', { cache: 'no-store' });
+      const r = await fetch('ui/weather/data', { cache: 'no-store' });
       const d = await r.json();
       if (!d.ok || !d.forecast) throw new Error(d.error || 'unavailable');
       render(d.forecast);
