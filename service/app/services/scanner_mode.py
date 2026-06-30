@@ -11,10 +11,12 @@ scopes the "audit" mode (FoodAssistant-ugku) to one place for a stock count.
 """
 from __future__ import annotations
 
-# Ordered so a deck key can cycle through them predictably. "audit" (a
-# location-scoped stock count) is a separate, larger feature and is not part of
-# this set yet (FoodAssistant-ugku).
-SCANNER_MODES: tuple[str, ...] = ("inventory", "consume", "shopping")
+# Ordered so a deck key can cycle through them predictably. "audit" is a
+# location-scoped, read-only stock count (FoodAssistant-ugku): in this mode a
+# scan is recorded against the active audit session and never queued or
+# consumed. It is locked to a location that the audit session itself holds, so
+# the cycle just selects the mode; the location is chosen on the /ui/audit page.
+SCANNER_MODES: tuple[str, ...] = ("inventory", "consume", "shopping", "audit")
 _DEFAULT_MODE = "inventory"
 
 # Short, glanceable labels for the deck/kiosk face.
@@ -22,6 +24,7 @@ MODE_LABELS = {
     "inventory": "Stock",
     "consume": "Use",
     "shopping": "Shop",
+    "audit": "Audit",
 }
 
 _state: dict = {"mode": _DEFAULT_MODE}

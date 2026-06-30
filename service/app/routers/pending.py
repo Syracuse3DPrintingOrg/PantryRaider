@@ -189,6 +189,26 @@ async def scan_barcode(body: ScanRequest, request: Request, db: Session = Depend
     # return a short status the scanner UI / deck can show. Errors come back as
     # a 200 status object rather than an exception so a scan never hard-fails.
     mode = scanner_mode.get_mode()
+    if mode == "audit":
+        # Read-only stock count: record the scan against the active audit session
+        # (FoodAssistant-ugku). Nothing is queued or written to Grocy. Resolve the
+        # barcode to a product name so it can match the location's expected stock;
+        # an unknown code is still recorded under its code so the scan is not lost.
+        from ..services import audit
+        if not audit.is_active():
+            return JSONResponse(
+                {"status": "no_audit_session", "barcode": barcode, "mode": mode,
+                 "error": "Start an audit at a location first."},
+                status_code=200,
+            )
+        name = f"Unknown ({barcode})"
+        try:
+            item = await lookup_barcode(barcode, db)
+            name = item.name
+        except (BarcodeNotFound, BarcodeServiceError):
+            pass
+        result = audit.record_scan(name, barcode)
+        return {"mode": mode, **result}
     if mode == "consume":
         try:
             await GrocyClient().consume_by_barcode(barcode, body.quantity)

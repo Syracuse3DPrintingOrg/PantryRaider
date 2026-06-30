@@ -301,6 +301,17 @@ async def timers_page(request: Request):
     })
 
 
+@router.get("/audit", response_class=HTMLResponse)
+async def audit_page(request: Request):
+    # Pantry audit: pick a storage location, start, then scan items there. The
+    # page polls /audit/status and highlights matched, missing, and unexpected
+    # items. Read-only: nothing is written to Grocy (FoodAssistant-ugku).
+    return templates.TemplateResponse(request, "audit.html", {
+        "request": request,
+        "active": "audit",
+    })
+
+
 @router.get("/camera", response_class=HTMLResponse)
 async def camera_page(request: Request):
     from ..services.cameras import camera_sources
