@@ -2274,38 +2274,28 @@ docker compose up -d</code></pre>
                 <div id="streamdeck-page-nav" class="d-flex align-items-center gap-2 mb-2 d-none"></div>
                 <div id="streamdeck-grid" class="d-inline-grid gap-1 mb-2" style="grid-template-columns: repeat(5, minmax(0,1fr));"></div>
                 <div id="streamdeck-palette" class="d-flex flex-column gap-1 mt-1" style="max-width:700px;"></div>
-              </div>
-              <div class="card bg-body-tertiary border-secondary mb-3">
-                <div class="card-body">
-                  <h6 class="card-title"><i class="bi bi-house me-1"></i>Home Assistant keys</h6>
-                  <div class="form-text mb-2">Bind the five Home Assistant keys (ha_1 to ha_5) to entities. The instance URL and
-                    token are set once under <strong>Home Assistant</strong> in the Settings menu (stored on the server so a second Pi
-                    inherits them); these key bindings are saved with the rest of the Stream Deck settings below.</div>
-                  <div id="streamdeck-ha-slots" class="d-flex flex-column gap-2">
-                    {% for i in range(1, 6) %}
-                    {% set slot = s.streamdeck_ha_slots[i - 1] if s.streamdeck_ha_slots and s.streamdeck_ha_slots|length >= i else None %}
-                    <div class="row g-2 align-items-end sd-ha-slot">
-                      <div class="col-auto" style="max-width:70px">
-                        <label class="form-label small mb-1">Key</label>
-                        <input type="text" class="form-control form-control-sm" value="ha_{{ i }}" disabled>
-                      </div>
-                      <div class="col">
-                        <label class="form-label small mb-1">Entity ID</label>
-                        <input type="text" class="form-control form-control-sm sd-ha-entity" placeholder="light.kitchen" value="{{ slot.entity_id if slot else '' }}">
-                      </div>
-                      <div class="col">
-                        <label class="form-label small mb-1">Service (optional)</label>
-                        <input type="text" class="form-control form-control-sm sd-ha-service" placeholder="light.toggle" value="{{ slot.service if slot else '' }}">
-                      </div>
-                      <div class="col">
-                        <label class="form-label small mb-1">Label (optional)</label>
-                        <input type="text" class="form-control form-control-sm sd-ha-label" placeholder="Kitchen" value="{{ slot.label if slot else '' }}">
-                      </div>
-                    </div>
-                    {% endfor %}
-                  </div>
+                <div class="mt-2">
+                  <button type="button" class="btn btn-outline-secondary btn-sm" onclick="_sdResetLayout()">
+                    <i class="bi bi-arrow-counterclockwise me-1"></i>Reset layout to default
+                  </button>
+                  <span class="form-text ms-1">Restores the stock key arrangement (custom keys you built are kept in the palette).</span>
                 </div>
               </div>
+
+              <!-- Custom keys sit directly below the editor so you build a key
+                   and immediately drag its chip onto the grid (FoodAssistant-o7cz). -->
+              <div class="mb-3">
+                <label class="form-label">Custom keys</label>
+                <div class="form-text mb-2">Build your own keys (Home Assistant actions, timers, weather, cameras, media, macros, and more). Each one you create appears as a chip in the palette under the grid above; drag it onto a key to place it, just like a built-in action. There is no slot to assign. A custom key left here but not placed on the grid is kept for later.</div>
+                <div id="streamdeck-overrides" class="d-flex flex-column gap-2 mb-2"></div>
+                <button type="button" class="btn btn-outline-secondary btn-sm" onclick="_sdAddOverrideRow()">
+                  <i class="bi bi-plus-lg me-1"></i>Add custom key
+                </button>
+              </div>
+              <div class="form-text mb-3"><i class="bi bi-house me-1"></i>Home Assistant keys are now created as
+                <strong>custom keys</strong> above (pick the "Home Assistant action" type), so they work exactly
+                like any other key. The HA URL and token are still set once under <strong>Home Assistant</strong>
+                in the Settings menu.</div>
 
               <div class="form-text mb-3"><i class="bi bi-camera-video me-1"></i>Camera feeds are configured under
                 <strong>Cameras</strong> in the Settings menu (they also power the on-screen Camera page), and are pushed to the deck from there.</div>
@@ -2362,14 +2352,6 @@ docker compose up -d</code></pre>
                 <div class="test-result mt-1" id="sd-profile-result"></div>
               </div>
 
-              <div class="mb-3">
-                <label class="form-label">Custom keys</label>
-                <div class="form-text mb-2">Build your own keys (Home Assistant actions, timers, weather, cameras, media, macros, and more). Each one you create appears as a chip in the palette under the grid above; drag it onto a key to place it, just like a built-in action. There is no slot to assign. A custom key left here but not placed on the grid is kept for later.</div>
-                <div id="streamdeck-overrides" class="d-flex flex-column gap-2 mb-2"></div>
-                <button type="button" class="btn btn-outline-secondary btn-sm" onclick="_sdAddOverrideRow()">
-                  <i class="bi bi-plus-lg me-1"></i>Add custom key
-                </button>
-              </div>
             </div>
             <div id="streamdeck-status-row" class="mb-2"><span class="text-secondary small">Checking...</span></div>
             <button class="btn btn-outline-info btn-sm d-none mb-2" id="btn-install-streamdeck" onclick="installStreamDeck(this)">
@@ -4685,6 +4667,23 @@ function _sdAddPage() {
   while (_sdKeys.length < target) _sdKeys.push('blank');
   _sdPage = curPages;   // jump to the new page
   _sdRenderGrid();
+}
+
+// Stock key order, mirroring foodassistant_streamdeck.actions.DEFAULT_ORDER.
+// Used by the "Reset layout to default" button (FoodAssistant-o7cz). Keep in
+// step with actions.py; an extra/missing name is harmless (unknowns are dropped).
+const SD_DEFAULT_ORDER = [
+  'expiring', 'pending', 'ready', 'shopping_count', 'commit', 'add', 'inventory',
+  'cook', 'recipes', 'mealplan', 'shopping', 'meal_today', 'cooked', 'timer_1',
+  'timer_2', 'timer_3', 'timer_eggs', 'timer_pasta', 'timer_rice', 'timers_view',
+  'convert', 'clock', 'weather', 'forecast', 'health', 'camera', 'screen_off', 'brightness',
+];
+
+async function _sdResetLayout() {
+  if (!confirm('Reset the key layout to the default arrangement? Your custom keys are kept in the palette.')) return;
+  _sdKeys = SD_DEFAULT_ORDER.slice();
+  _sdPage = 0;
+  await _sdRenderGrid();
 }
 
 async function _sdRenderGrid() {
