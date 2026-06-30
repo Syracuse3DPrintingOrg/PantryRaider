@@ -25,6 +25,10 @@
             title="Invent a random recipe from your preferences and inventory">
       <i class="bi bi-dice-5 me-1"></i>Surprise me
     </button>
+    <button class="btn btn-outline-secondary" id="btn-copycat" onclick="copycatDish()"
+            title="Recreate a famous restaurant dish at home">
+      <i class="bi bi-shop me-1"></i>Copycat
+    </button>
     {% endif %}
     <button class="btn btn-outline-secondary" onclick="loadSuggestions()" title="Refresh">
       <i class="bi bi-arrow-clockwise me-1"></i>Refresh
@@ -1169,6 +1173,19 @@ function surpriseMe() {
   }
   const nonce = Math.random().toString(36).slice(2, 7);
   openAiPreview(concept, `Invent ONE creative dish and give it a real, appetizing name (do not call it "${concept}"). Variation seed: ${nonce}.`);
+}
+
+// Copycat a well-known restaurant dish (FoodAssistant-sk80). Reuses the AI
+// generate path with a copycat-styled instruction so the result previews and
+// saves exactly like any other generated recipe.
+function copycatDish() {
+  const dish = (prompt('Which restaurant dish do you want a copycat of?\n' +
+    'e.g. "Olive Garden Alfredo", "Chipotle barbacoa", "In-N-Out animal fries"') || '').trim();
+  if (!dish) return;
+  openAiPreview(dish,
+    'Recreate this as a faithful COPYCAT of the well-known restaurant version: match the ' +
+    'flavors, texture, and presentation as closely as you can using common home ingredients ' +
+    'and techniques. Call out any signature components or sauces.');
 }
 
 async function openAiPreview(name, extraInstruction) {
