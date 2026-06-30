@@ -30,10 +30,13 @@ def test_normalize_key_count():
     assert sp.normalize_key_count("x") == 15
 
 
-def test_builtin_actions_include_navigation_and_extras():
-    keys = {a["key"] for a in sp.builtin_actions()}
-    assert "inventory" in keys and "shopping" in keys      # nav tabs
-    assert "settings" in keys and "timers" in keys         # extras
+def test_catalog_mirrors_the_deck_actions():
+    names = {a["name"] for a in sp.catalog_for_editor()}
+    # The editor catalog uses the same action names as the deck.
+    assert {"inventory", "shopping", "cook", "weather", "timer_1", "brightness"} <= names
+    # Each entry carries the deck face (label/icon/colour) + a group.
+    inv = next(a for a in sp.catalog_for_editor() if a["name"] == "inventory")
+    assert inv["label"] and inv["icon"] and inv["color"] and inv["group"]
 
 
 def test_custom_buttons_come_from_streamdeck_overrides(monkeypatch):
@@ -45,21 +48,22 @@ def test_custom_buttons_come_from_streamdeck_overrides(monkeypatch):
     cbs = sp.custom_buttons()
     by = {c["id"]: c for c in cbs}
     assert set(by) == {"k1", "k2"}
-    assert by["k1"]["label"] == "10 min timer"   # derived label
+    assert by["k1"]["label"] == "10 min"     # derived label
     assert by["k2"]["label"] == "Milk"
+    assert by["k1"]["color"] and by["k1"]["icon"]
 
 
-def test_resolve_layout_pads_and_resolves(monkeypatch):
+def test_resolve_layout_uses_deck_tokens(monkeypatch):
     monkeypatch.setattr(settings, "streamdeck_key_overrides",
                         [{"id": "k1", "type": "timer", "minutes": 5}])
-    resolved = sp.resolve_layout(["inventory", "custom:k1", "custom:missing", "bogus"], 6)
+    # Tokens are the deck model: action name, custom id, or blank.
+    resolved = sp.resolve_layout(["inventory", "k1", "brightness", "bogus"], 6)
     assert len(resolved) == 6
-    assert resolved[0] == {"kind": "builtin", "key": "inventory",
-                           "label": "Inventory", "icon": "bi-grid", "href": "ui/"}
+    assert resolved[0]["kind"] == "builtin" and resolved[0]["href"] == "ui/"
     assert resolved[1]["kind"] == "custom" and resolved[1]["id"] == "k1"
-    assert resolved[2]["kind"] == "blank"   # unknown custom id
-    assert resolved[3]["kind"] == "blank"   # unknown builtin
-    assert resolved[5]["kind"] == "blank"   # padded
+    assert resolved[2]["kind"] == "deckonly"   # a deck-only action (no on-screen page)
+    assert resolved[3]["kind"] == "blank"      # unknown token
+    assert resolved[5]["kind"] == "blank"      # padded
 
 
 # -- route ------------------------------------------------------------------

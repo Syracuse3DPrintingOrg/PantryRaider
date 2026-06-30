@@ -570,12 +570,13 @@ async def setup_page(request: Request):
 
 def _start_actions() -> list[dict]:
     from ..services import start_page
-    return start_page.builtin_actions()
+    return start_page.catalog_for_editor()
 
 
 def _start_customs() -> list[dict]:
     from ..services import start_page
-    return [{"id": c["id"], "label": c["label"], "icon": c["icon"], "type": c["type"]}
+    return [{"id": c["id"], "label": c["label"], "icon": c["icon"],
+             "color": c.get("color", "#374151"), "type": c["type"]}
             for c in start_page.custom_buttons()]
 
 

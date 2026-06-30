@@ -2414,7 +2414,7 @@ docker compose up -d</code></pre>
             </div>
             <div class="mb-2 fw-semibold small"><i class="bi bi-grid me-1"></i>Layout</div>
             <p class="text-secondary small mb-2">Drag an action from the palette onto a key, drag keys to rearrange them, or click a key to clear it. Custom buttons are shared with the Stream Deck.</p>
-            <div id="start-grid" class="d-inline-grid gap-1 mb-2" style="grid-template-columns: repeat(5, minmax(0,1fr));"></div>
+            <div id="start-grid" class="d-inline-grid gap-2 mb-2" style="grid-template-columns: repeat(5, minmax(0,1fr));"></div>
             <div id="start-palette" class="d-flex flex-column gap-1 mt-1 mb-3" style="max-width:700px;"></div>
 
             <div class="mb-2 fw-semibold small"><i class="bi bi-sliders me-1"></i>Custom keys</div>
@@ -2423,6 +2423,29 @@ docker compose up -d</code></pre>
             <button type="button" class="btn btn-outline-secondary btn-sm mb-3" onclick="_startAddOverrideRow()">
               <i class="bi bi-plus-lg me-1"></i>Add custom key
             </button>
+
+            {# Key style + icon treatment, the same options the Stream Deck has
+               (shared settings, so changing one changes both). #}
+            <div class="mb-2 fw-semibold small"><i class="bi bi-palette me-1"></i>Key style</div>
+            <div class="row g-3 mb-3">
+              <div class="col-md-6">
+                <label class="form-label" for="start_key_style">Key style</label>
+                <select class="form-select form-select-sm" id="start_key_style" style="max-width:200px">
+                  <option value="rich"    {{ 'selected' if s.streamdeck_key_style == 'rich' else '' }}>Rich (gradient)</option>
+                  <option value="glass"   {{ 'selected' if s.streamdeck_key_style == 'glass' else '' }}>Glass</option>
+                  <option value="clean"   {{ 'selected' if s.streamdeck_key_style == 'clean' else '' }}>Clean (no background)</option>
+                  <option value="minimal" {{ 'selected' if s.streamdeck_key_style == 'minimal' else '' }}>Minimalist (flat)</option>
+                </select>
+              </div>
+              <div class="col-md-6">
+                <label class="form-label" for="start_icon_color">Icons</label>
+                <select class="form-select form-select-sm" id="start_icon_color" style="max-width:220px">
+                  <option value="color" {{ 'selected' if s.streamdeck_icon_color == 'color' else '' }}>Full colour (emoji set)</option>
+                  <option value="full"  {{ 'selected' if s.streamdeck_icon_color == 'full' else '' }}>Tinted glyph</option>
+                  <option value="mono"  {{ 'selected' if s.streamdeck_icon_color == 'mono' else '' }}>Monochrome</option>
+                </select>
+              </div>
+            </div>
 
             <div><button type="button" class="btn btn-outline-info btn-sm" onclick="savePaneStartPage(this)">
               <i class="bi bi-check-lg me-1"></i>Save Start Page
@@ -4125,13 +4148,12 @@ function _startCustomMeta(def) {
   try { return _sdDefMeta(def); } catch (e) { return { label: def.label || 'Custom', icon: def.icon || 'bi-grid-1x2' }; }
 }
 function _startTokenInfo(tok) {
-  if (!tok) return { kind: 'blank', color: '#1f2937' };
-  if (tok.indexOf('custom:') === 0) {
-    const def = _startCustomDefs().find(d => d.id === tok.slice(7));
-    if (def) { const m = _startCustomMeta(def); return { kind: 'custom', icon: m.icon, label: m.label, color: m.color || '#374151' }; }
-    return { kind: 'blank', color: '#1f2937' };
-  }
-  const a = START_ACTIONS.find(x => x.key === tok);
+  // Tokens use the SAME model as the deck: a built-in action name, a custom key
+  // id, or "blank"/empty.
+  if (!tok || tok === 'blank') return { kind: 'blank', color: '#1f2937' };
+  const def = _startCustomDefs().find(d => d.id === tok);
+  if (def) { const m = _startCustomMeta(def); return { kind: 'custom', icon: m.icon, label: m.label, color: m.color || '#374151' }; }
+  const a = START_ACTIONS.find(x => x.name === tok);
   return a ? { kind: 'builtin', icon: a.icon, label: a.label, color: a.color || '#374151' } : { kind: 'blank', color: '#1f2937' };
 }
 // Build a Start Page custom-key editor row from the deck's shared row builder,
@@ -4201,17 +4223,18 @@ function _startRenderPalette() {
     return row;
   };
   // Custom keys first (shared with the deck), then grouped built-in actions.
+  // Tokens are bare ids/names, the same model the deck uses.
   const customDefs = _startCustomDefs();
   if (customDefs.length) {
     const row = makeRow('Custom');
-    customDefs.forEach(def => { const m = _startCustomMeta(def); row.appendChild(makeChip('custom:' + def.id, m.label, m.color || '#374151', m.icon)); });
+    customDefs.forEach(def => { const m = _startCustomMeta(def); row.appendChild(makeChip(def.id, m.label, m.color || '#374151', m.icon)); });
     wrap.appendChild(row);
   }
   const groups = {};
   START_ACTIONS.forEach(a => { (groups[a.group || 'More'] = groups[a.group || 'More'] || []).push(a); });
   Object.keys(groups).forEach(gname => {
     const row = makeRow(gname);
-    groups[gname].forEach(a => row.appendChild(makeChip(a.key, a.label, a.color, a.icon)));
+    groups[gname].forEach(a => row.appendChild(makeChip(a.name, a.label, a.color, a.icon)));
     wrap.appendChild(row);
   });
 }
@@ -4232,20 +4255,22 @@ function _startEditorRender() {
     const blank = info.kind === 'blank';
     const cell = document.createElement('div');
     cell.className = 'rounded position-relative';
+    // Larger keys than the deck editor (the Start Page's roomier design), in the
+    // same coloured deck-key style.
     cell.style.cssText = [
-      'aspect-ratio:1', 'min-width:60px', 'min-height:44px', 'display:flex',
+      'aspect-ratio:1', 'min-width:74px', 'min-height:74px', 'display:flex',
       'flex-direction:column', 'align-items:center', 'justify-content:center',
-      'gap:1px', 'overflow:hidden', 'background:' + (info.color || '#1f2937'),
+      'gap:4px', 'overflow:hidden', 'background:' + (info.color || '#1f2937'),
       'cursor:' + (blank ? 'pointer' : 'grab'), 'user-select:none',
-      'transition:filter 0.1s', 'border:2px solid rgba(255,255,255,0.15)',
+      'transition:filter 0.1s', 'border-radius:0.75rem', 'border:2px solid rgba(255,255,255,0.15)',
       blank ? 'opacity:0.55;border-style:dashed' : '',
     ].join(';');
     cell.draggable = !blank;
     cell.dataset.idx = i;
     cell.innerHTML = blank
-      ? '<i class="bi bi-plus" style="color:#fff;opacity:0.6;font-size:1.1rem"></i>'
-      : '<i class="bi ' + info.icon + '" style="color:#fff;font-size:0.95rem;line-height:1"></i>' +
-        '<span style="color:#fff;font-size:0.6rem;line-height:1.1;text-align:center;word-break:break-word;padding:0 3px">' + info.label + '</span>';
+      ? '<i class="bi bi-plus" style="color:#fff;opacity:0.6;font-size:1.7rem"></i>'
+      : '<i class="bi ' + info.icon + '" style="color:#fff;font-size:1.6rem;line-height:1"></i>' +
+        '<span style="color:#fff;font-size:0.72rem;line-height:1.05;text-align:center;word-break:break-word;padding:0 4px">' + info.label + '</span>';
     cell.title = blank ? 'Drop an action here' : (info.label + ' — click to clear');
     cell.addEventListener('click', () => {
       if (_startDragTok) { _startState[i] = _startDragTok; _startDragTok = null; }
@@ -4280,6 +4305,9 @@ function savePaneStartPage(btn) {
     // removed here from one added on the deck since this page loaded.
     start_custom_defs:  _startCustomDefs(),
     start_loaded_ids:   (window.START_OVERRIDES || []).map(o => o && o.id).filter(Boolean),
+    // Key style + icon treatment are shared with the deck (same settings).
+    streamdeck_key_style:  optVal('start_key_style'),
+    streamdeck_icon_color: optVal('start_icon_color'),
   }, btn, 'start-page-result');
 }
 
