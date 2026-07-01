@@ -30,12 +30,12 @@ def test_normalize_key_count():
     assert sp.normalize_key_count("x") == 15
 
 
-def test_catalog_mirrors_the_deck_actions():
-    names = {a["name"] for a in sp.catalog_for_editor()}
-    # The editor catalog uses the same action names as the deck.
+def test_fallback_catalog_mirrors_the_deck_actions():
+    # The off-Pi fallback catalog uses the same action names/faces as the deck's
+    # JS fallback, so the editor and /ui/start show the same keys.
+    names = {a["name"] for a in sp.FALLBACK_CATALOG}
     assert {"inventory", "shopping", "cook", "weather", "timer_1", "brightness"} <= names
-    # Each entry carries the deck face (label/icon/colour) + a group.
-    inv = next(a for a in sp.catalog_for_editor() if a["name"] == "inventory")
+    inv = next(a for a in sp.FALLBACK_CATALOG if a["name"] == "inventory")
     assert inv["label"] and inv["icon"] and inv["color"] and inv["group"]
 
 
@@ -136,4 +136,4 @@ def test_start_page_enabled_renders_grid(client, monkeypatch):
 def test_inventory_key_avoids_the_ui_root_redirect():
     # /ui/ may redirect to the Start Page when it leads the nav, so the Stock key
     # must target the explicit inventory route, not "ui/", or it would loop back.
-    assert sp.DECK_CATALOG["inventory"]["href"] == "ui/inventory"
+    assert sp.ACTION_HREF["inventory"] == "ui/inventory"

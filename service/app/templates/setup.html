@@ -2894,9 +2894,9 @@ docker compose up -d</code></pre>
 const TABS = {{ tabs | tojson }};
 // Pristine built-in layout for the nav editor's Reset to defaults (FoodAssistant-oret).
 window.TABS_DEFAULT = {{ tabs_default | tojson }};
-// On-screen Start Page editor data (FoodAssistant): built-in launcher actions,
-// the shared custom buttons (same store as the Stream Deck), and the saved layout.
-const START_ACTIONS = {{ start_actions | tojson }};
+// On-screen Start Page editor data (FoodAssistant): the shared custom buttons
+// and the saved layout. The built-in key catalog is the deck's own (_sdCatalog),
+// so the Start Page and Stream Deck editors are identical.
 const START_CUSTOMS = {{ start_customs | tojson }};
 window.START_LAYOUT = {{ (s.start_page_layout or []) | tojson }};
 // Full shared custom-key definitions (same store as the Stream Deck), so the
@@ -4171,11 +4171,17 @@ function _startCustomMeta(def) {
 function _startTokenInfo(tok) {
   // Tokens use the SAME model as the deck: a built-in action name, a custom key
   // id, or "blank"/empty.
-  if (!tok || tok === 'blank') return { kind: 'blank', color: '#1f2937' };
+  if (!tok || tok === 'blank') return { kind: 'blank', color: '#1f2937', iconCls: '' };
   const def = _startCustomDefs().find(d => d.id === tok);
-  if (def) { const m = _startCustomMeta(def); return { kind: 'custom', icon: m.icon, label: m.label, color: m.color || '#374151' }; }
-  const a = START_ACTIONS.find(x => x.name === tok);
-  return a ? { kind: 'builtin', icon: a.icon, label: a.label, color: a.color || '#374151' } : { kind: 'blank', color: '#1f2937' };
+  if (def) {
+    const m = _startCustomMeta(def);
+    const iconCls = m.icon ? 'bi bi-' + String(m.icon).replace(/^bi-/, '') : '';
+    return { kind: 'custom', iconCls: iconCls, label: m.label, color: m.color || '#374151' };
+  }
+  // Built-in face from the deck's own catalog, so it matches the deck exactly.
+  const a = _sdActionByName(tok);
+  if (a) return { kind: 'builtin', iconCls: _sdIconClass(a), label: a.label, color: a.color || '#374151' };
+  return { kind: 'blank', color: '#1f2937', iconCls: '' };
 }
 // Build a Start Page custom-key editor row from the deck's shared row builder,
 // rewiring its delete + change handlers to refresh the Start Page palette.
@@ -4193,7 +4199,10 @@ function _startAddOverrideRow() {
   wrap.appendChild(_startBuildRow({}));
   _startRenderPalette();
 }
-function _startEditorInit() {
+async function _startEditorInit() {
+  // Load the deck's own action catalog so the Start Page palette and keys are
+  // identical to the Stream Deck (same source, on a Pi it is the host bridge).
+  try { await _sdLoadCatalog(); } catch (e) { }
   if (_startState) { _startEditorRender(); return; }   // keep edits across pane switches
   const n = _startKeyCount();
   _startState = [];
@@ -4219,7 +4228,7 @@ function _startRenderPalette() {
   wrap.innerHTML = '';
   // Coloured draggable chips + group rows, identical in style to the Stream
   // Deck palette so the two editors look the same.
-  const makeChip = (tok, label, color, icon) => {
+  const makeChip = (tok, label, color, iconCls) => {
     const chip = document.createElement('div');
     chip.style.cssText = [
       'background:' + (color || '#374151'), 'color:#fff', 'border-radius:4px',
@@ -4227,7 +4236,7 @@ function _startRenderPalette() {
       'border:1px solid rgba(255,255,255,0.2)',
     ].join(';');
     chip.draggable = true; chip.dataset.tok = tok;
-    chip.innerHTML = (icon ? '<i class="bi ' + icon + ' me-1"></i>' : '') + label;
+    chip.innerHTML = (iconCls ? '<i class="' + iconCls + ' me-1"></i>' : '') + escapeHtml(label);
     chip.addEventListener('dragstart', e => { _startDragTok = tok; _startDragCell = null; e.dataTransfer.effectAllowed = 'copy'; chip.style.opacity = '0.5'; });
     chip.addEventListener('dragend', () => { chip.style.opacity = '1'; });
     chip.addEventListener('click', () => { _startDragTok = tok; chip.style.outline = '2px solid #0dcaf0'; setTimeout(() => chip.style.outline = '', 600); });
@@ -4243,19 +4252,19 @@ function _startRenderPalette() {
     row.appendChild(lbl);
     return row;
   };
-  // Custom keys first (shared with the deck), then grouped built-in actions.
-  // Tokens are bare ids/names, the same model the deck uses.
+  // Custom keys first (shared with the deck), then the deck's own action catalog
+  // grouped exactly like the Stream Deck palette, so the two are identical.
   const customDefs = _startCustomDefs();
   if (customDefs.length) {
     const row = makeRow('Custom');
-    customDefs.forEach(def => { const m = _startCustomMeta(def); row.appendChild(makeChip(def.id, m.label, m.color || '#374151', m.icon)); });
+    customDefs.forEach(def => { const m = _startCustomMeta(def); const ic = m.icon ? 'bi bi-' + String(m.icon).replace(/^bi-/, '') : ''; row.appendChild(makeChip(def.id, m.label, m.color || '#374151', ic)); });
     wrap.appendChild(row);
   }
   const groups = {};
-  START_ACTIONS.forEach(a => { (groups[a.group || 'More'] = groups[a.group || 'More'] || []).push(a); });
+  (Array.isArray(_sdCatalog) ? _sdCatalog : []).forEach(a => { (groups[a.group || 'Other'] = groups[a.group || 'Other'] || []).push(a); });
   Object.keys(groups).forEach(gname => {
     const row = makeRow(gname);
-    groups[gname].forEach(a => row.appendChild(makeChip(a.name, a.label, a.color, a.icon)));
+    groups[gname].forEach(a => row.appendChild(makeChip(a.name, a.label, a.color, _sdIconClass(a))));
     wrap.appendChild(row);
   });
 }
@@ -4290,8 +4299,8 @@ function _startEditorRender() {
     cell.dataset.idx = i;
     cell.innerHTML = blank
       ? '<i class="bi bi-plus" style="color:#fff;opacity:0.6;font-size:1.7rem"></i>'
-      : '<i class="bi ' + info.icon + '" style="color:#fff;font-size:1.6rem;line-height:1"></i>' +
-        '<span style="color:#fff;font-size:0.72rem;line-height:1.05;text-align:center;word-break:break-word;padding:0 4px">' + info.label + '</span>';
+      : (info.iconCls ? '<i class="' + info.iconCls + '" style="color:#fff;font-size:1.6rem;line-height:1"></i>' : '') +
+        '<span style="color:#fff;font-size:0.72rem;line-height:1.05;text-align:center;word-break:break-word;padding:0 4px">' + escapeHtml(info.label || '') + '</span>';
     cell.title = blank ? 'Drop an action here' : (info.label + ' — click to clear');
     cell.addEventListener('click', () => {
       if (_startDragTok) { _startState[i] = _startDragTok; _startDragTok = null; }

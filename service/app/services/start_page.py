@@ -19,42 +19,68 @@ GRID_SHAPES = {6: (3, 2), 15: (5, 3), 32: (8, 4)}
 VALID_KEY_COUNTS = tuple(GRID_SHAPES.keys())
 _DEFAULT_KEYS = 15
 
-# The built-in key catalog, mirroring the Stream Deck action catalog (the JS
-# fallback in setup.html and streamdeck/actions.py). Each entry carries the deck
-# face (label/icon/colour, so a key looks identical to the deck) and ``href``:
-# the app page the key opens when pressed on-screen, or None for a deck-only
-# action (Home Assistant entity, brightness, paging) that has no on-screen page.
-DECK_CATALOG: dict[str, dict] = {
-    "expiring":  {"label": "Expiring", "icon": "bi-clock-history",   "color": "#b54708", "href": "ui/expiring"},
-    "pending":   {"label": "Pending",  "icon": "bi-inbox",           "color": "#1d4ed8", "href": "ui/pending"},
-    "commit":    {"label": "Commit",   "icon": "bi-check2-circle",   "color": "#15803d", "href": None},
-    "add":       {"label": "Add",      "icon": "bi-plus-circle",     "color": "#b45309", "href": "ui/add"},
-    "inventory": {"label": "Stock",    "icon": "bi-grid",            "color": "#0f766e", "href": "ui/inventory"},
-    "cook":      {"label": "Cook",     "icon": "bi-fire",            "color": "#7e22ce", "href": "ui/cook"},
-    "recipes":   {"label": "Recipes",  "icon": "bi-journal-richtext","color": "#7e22ce", "href": "ui/recipes"},
-    "mealplan":  {"label": "Plan",     "icon": "bi-calendar-week",   "color": "#7e22ce", "href": "ui/mealplan"},
-    "shopping":  {"label": "Shop",     "icon": "bi-cart",            "color": "#7e22ce", "href": "ui/shopping"},
-    "defaults":  {"label": "Defaults", "icon": "bi-table",           "color": "#7e22ce", "href": "ui/defaults"},
-    "audit":     {"label": "Audit",    "icon": "bi-clipboard-check", "color": "#0f766e", "href": "ui/audit"},
-    "nutrition": {"label": "Nutrition","icon": "bi-heart-pulse",     "color": "#0f766e", "href": "ui/nutrition"},
-    "convert":   {"label": "Convert",  "icon": "bi-rulers",          "color": "#0d9488", "href": "ui/convert"},
-    "guide":     {"label": "Guide",    "icon": "bi-book",            "color": "#0d9488", "href": "ui/kitchen-guide"},
-    "camera":    {"label": "Camera",   "icon": "bi-camera-video",    "color": "#0d9488", "href": "ui/camera"},
-    "timer_1":   {"label": "Timer 1",  "icon": "bi-stopwatch",       "color": "#0d9488", "href": "ui/timers"},
-    "timer_2":   {"label": "Timer 2",  "icon": "bi-stopwatch",       "color": "#0d9488", "href": "ui/timers"},
-    "timer_3":   {"label": "Timer 3",  "icon": "bi-stopwatch",       "color": "#0d9488", "href": "ui/timers"},
-    "timers_view": {"label": "Timers", "icon": "bi-stopwatch",       "color": "#0d9488", "href": "ui/timers"},
-    "weather":   {"label": "Weather",  "icon": "bi-cloud-sun",       "color": "#1e40af", "href": "ui/weather"},
-    "forecast":  {"label": "Forecast", "icon": "bi-cloud-sun",       "color": "#0e7490", "href": "ui/weather"},
-    "shop":      {"label": "Shop",     "icon": "bi-bag",             "color": "#7e22ce", "href": "ui/shop"},
-    "settings":  {"label": "Settings", "icon": "bi-gear",            "color": "#475569", "href": "setup"},
-    "ha_1":      {"label": "HA 1",     "icon": "bi-house",           "color": "#475569", "href": None},
-    "ha_2":      {"label": "HA 2",     "icon": "bi-house",           "color": "#475569", "href": None},
-    "ha_3":      {"label": "HA 3",     "icon": "bi-house",           "color": "#475569", "href": None},
-    "ha_4":      {"label": "HA 4",     "icon": "bi-house",           "color": "#475569", "href": None},
-    "ha_5":      {"label": "HA 5",     "icon": "bi-house",           "color": "#475569", "href": None},
-    "brightness":{"label": "Bright",   "icon": "bi-brightness-high", "color": "#475569", "href": None},
+# The on-screen app page each Stream Deck action opens when pressed on the Start
+# Page. Any deck action not listed here is a deck-only action (paging, screen
+# power, brightness, Home Assistant entity, deck workflow) that renders on the
+# Start Page but notes it needs a connected deck. Keyed by the deck action name.
+ACTION_HREF: dict[str, str] = {
+    "expiring": "ui/expiring", "pending": "ui/pending", "add": "ui/add",
+    "inventory": "ui/inventory", "cook": "ui/cook", "recipes": "ui/recipes",
+    "mealplan": "ui/mealplan", "shopping": "ui/shopping", "shopping_count": "ui/shopping",
+    "defaults": "ui/defaults", "convert": "ui/convert", "guide": "ui/kitchen-guide",
+    "camera": "ui/camera", "camera_full": "ui/camera", "nutrition": "ui/nutrition",
+    "audit": "ui/audit", "shop": "ui/shop", "settings": "setup",
+    "weather": "ui/weather", "forecast": "ui/weather", "health": "ui/nutrition",
+    "meal_today": "ui/mealplan",
+    "timer_1": "ui/timers", "timer_2": "ui/timers", "timer_3": "ui/timers",
+    "timer_eggs": "ui/timers", "timer_pasta": "ui/timers", "timer_rice": "ui/timers",
+    "timers_view": "ui/timers",
 }
+
+# Fallback catalog used off-Pi (or when the host bridge is unreachable), matching
+# the JS fallback in setup.html's _sdLoadCatalog so the editor and /ui/start show
+# the same keys. On a Pi the real catalog comes from the host bridge.
+FALLBACK_CATALOG: list[dict] = [
+    {"name": "expiring",  "label": "Expiring", "icon": "clock-history",   "color": "#b54708", "group": "Status"},
+    {"name": "pending",   "label": "Pending",  "icon": "inbox",           "color": "#1d4ed8", "group": "Status"},
+    {"name": "commit",    "label": "Commit",   "icon": "check2-circle",   "color": "#15803d", "group": "Actions"},
+    {"name": "add",       "label": "Add",      "icon": "plus-circle",     "color": "#b45309", "group": "Navigation"},
+    {"name": "inventory", "label": "Stock",    "icon": "grid",            "color": "#0f766e", "group": "Navigation"},
+    {"name": "cook",      "label": "Cook",     "icon": "fire",            "color": "#7e22ce", "group": "Navigation"},
+    {"name": "recipes",   "label": "Recipes",  "icon": "journal-richtext","color": "#7e22ce", "group": "Navigation"},
+    {"name": "mealplan",  "label": "Plan",     "icon": "calendar-week",   "color": "#7e22ce", "group": "Navigation"},
+    {"name": "shopping",  "label": "Shop",     "icon": "cart",            "color": "#7e22ce", "group": "Navigation"},
+    {"name": "defaults",  "label": "Defaults", "icon": "table",           "color": "#7e22ce", "group": "Navigation"},
+    {"name": "timer_1",   "label": "Timer 1",  "icon": "stopwatch",       "color": "#0d9488", "group": "Timers"},
+    {"name": "timer_2",   "label": "Timer 2",  "icon": "stopwatch",       "color": "#0d9488", "group": "Timers"},
+    {"name": "timer_3",   "label": "Timer 3",  "icon": "stopwatch",       "color": "#0d9488", "group": "Timers"},
+    {"name": "weather",   "label": "Weather",  "icon": "cloud-sun",       "color": "#1e40af", "group": "Weather"},
+    {"name": "forecast",  "label": "Forecast", "icon": "cloud-sun",       "color": "#0e7490", "group": "Weather"},
+    {"name": "ha_1",      "label": "HA 1",     "icon": "house",           "color": "#475569", "group": "Home Assistant"},
+    {"name": "ha_2",      "label": "HA 2",     "icon": "house",           "color": "#475569", "group": "Home Assistant"},
+    {"name": "ha_3",      "label": "HA 3",     "icon": "house",           "color": "#475569", "group": "Home Assistant"},
+    {"name": "ha_4",      "label": "HA 4",     "icon": "house",           "color": "#475569", "group": "Home Assistant"},
+    {"name": "ha_5",      "label": "HA 5",     "icon": "house",           "color": "#475569", "group": "Home Assistant"},
+    {"name": "brightness","label": "Bright",   "icon": "brightness-high", "color": "#475569", "group": "System"},
+]
+
+
+async def fetch_deck_catalog() -> list[dict]:
+    """The Stream Deck action catalog: the live one from the host bridge on a Pi
+    appliance (identical to what the editor loads), else the static fallback. So
+    /ui/start renders every key with the same face as the editor and the deck."""
+    from ..hardware import is_raspberry_pi
+    if is_raspberry_pi():
+        try:
+            import httpx
+            from ..routers.setup import _HOST_BRIDGE
+            async with httpx.AsyncClient(timeout=6.0) as c:
+                r = (await c.get(f"{_HOST_BRIDGE}/streamdeck/actions")).json()
+            if r.get("ok") and isinstance(r.get("actions"), list):
+                return r["actions"]
+        except Exception:
+            pass
+    return FALLBACK_CATALOG
 
 
 def normalize_key_count(value) -> int:
@@ -109,16 +135,29 @@ def custom_buttons(overrides: list | None = None) -> list[dict]:
     return out
 
 
+def _norm_icon(icon: str) -> str:
+    """Normalise a catalog icon to a full Bootstrap Icons class (the deck catalog
+    uses bare names like 'grid'; templates expect 'bi-grid')."""
+    icon = str(icon or "").strip()
+    if not icon:
+        return "bi-grid-1x2"
+    return icon if icon.startswith("bi-") else "bi-" + icon
+
+
 def resolve_layout(layout: list | None, key_count: int,
-                   overrides: list | None = None) -> list[dict]:
+                   overrides: list | None = None,
+                   catalog: list | None = None) -> list[dict]:
     """Resolve a stored layout into exactly ``key_count`` render-ready keys.
 
-    Each result is ``{"kind": "builtin"|"custom"|"deckonly"|"blank", ...}`` with
-    the face fields. Tokens are the same as the deck: an action name, a custom
-    key id, or "blank". A deck-only action (no on-screen page) renders but is
-    flagged so the page can note it needs a connected deck."""
+    ``catalog`` is the deck action catalog (from ``fetch_deck_catalog``); the
+    face for a built-in key comes straight from it so it matches the editor and
+    the deck. Each result is ``{"kind": "builtin"|"custom"|"deckonly"|"blank",
+    ...}``. Tokens are the deck model: an action name, a custom key id, or
+    "blank". An action with no on-screen page renders as deck-only."""
     key_count = normalize_key_count(key_count)
     customs = {c["id"]: c for c in custom_buttons(overrides)}
+    cat = {a["name"]: a for a in (catalog or FALLBACK_CATALOG)
+           if isinstance(a, dict) and a.get("name")}
     slots = list(layout or [])[:key_count]
     out: list[dict] = []
     for tok in slots:
@@ -128,32 +167,15 @@ def resolve_layout(layout: list | None, key_count: int,
         elif tok in customs:
             c = customs[tok]
             out.append({"kind": "custom", "id": tok, "type": c["type"],
-                        "label": c["label"], "icon": c["icon"], "color": c["color"]})
-        elif tok in DECK_CATALOG:
-            a = DECK_CATALOG[tok]
-            kind = "builtin" if a["href"] else "deckonly"
-            out.append({"kind": kind, "key": tok, "label": a["label"],
-                        "icon": a["icon"], "color": a["color"], "href": a["href"]})
+                        "label": c["label"], "icon": _norm_icon(c["icon"]), "color": c["color"]})
+        elif tok in cat:
+            a = cat[tok]
+            href = ACTION_HREF.get(tok)
+            out.append({"kind": "builtin" if href else "deckonly", "key": tok,
+                        "label": a.get("label", tok), "icon": _norm_icon(a.get("icon")),
+                        "color": a.get("color", "#374151"), "href": href})
         else:
             out.append({"kind": "blank"})
     while len(out) < key_count:
         out.append({"kind": "blank"})
     return out
-
-
-def catalog_for_editor() -> list[dict]:
-    """The built-in catalog as a list (name + face + group) for the editor."""
-    groups = {
-        "expiring": "Status", "pending": "Status", "commit": "Actions",
-        "add": "Pages", "inventory": "Pages", "cook": "Pages", "recipes": "Pages",
-        "mealplan": "Pages", "shopping": "Pages", "defaults": "Pages",
-        "audit": "Pages", "nutrition": "Pages", "convert": "Tools",
-        "guide": "Tools", "camera": "Tools", "shop": "Tools", "settings": "Tools",
-        "weather": "Weather", "forecast": "Weather",
-        "timer_1": "Timers", "timer_2": "Timers", "timer_3": "Timers", "timers_view": "Timers",
-        "ha_1": "Home Assistant", "ha_2": "Home Assistant", "ha_3": "Home Assistant",
-        "ha_4": "Home Assistant", "ha_5": "Home Assistant", "brightness": "System",
-    }
-    return [{"name": k, "label": v["label"], "icon": v["icon"],
-             "color": v["color"], "group": groups.get(k, "Other")}
-            for k, v in DECK_CATALOG.items()]

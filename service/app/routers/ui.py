@@ -514,7 +514,8 @@ async def start_page(request: Request):
     from ..services import start_page as sp
     keys = sp.normalize_key_count(settings.start_page_keys)
     cols, rows = sp.GRID_SHAPES[keys]
-    layout = sp.resolve_layout(settings.start_page_layout, keys)
+    catalog = await sp.fetch_deck_catalog()
+    layout = sp.resolve_layout(settings.start_page_layout, keys, catalog=catalog)
     return templates.TemplateResponse(request, "start.html", {
         "request": request,
         "enabled": settings.start_page_enabled,

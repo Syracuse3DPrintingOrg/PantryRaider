@@ -514,9 +514,9 @@ async def setup_page(request: Request):
         "ai_models": AI_MODELS,
         "tabs": all_tabs(),
         "tabs_default": default_tabs(),
-        # On-screen Start Page editor (FoodAssistant): the built-in launcher
-        # actions and the shared custom buttons (same store as the Stream Deck).
-        "start_actions": _start_actions(),
+        # On-screen Start Page editor (FoodAssistant): the shared custom buttons
+        # (same store as the Stream Deck). The built-in key catalog is the deck's
+        # own (_sdCatalog, loaded client-side), so the two editors are identical.
         "start_customs": _start_customs(),
         "version": APP_VERSION,
         "custom_categories": custom_categories(),
@@ -566,11 +566,6 @@ async def setup_page(request: Request):
         # each item's current checked state from the saved selection.
         "appliance_groups": _appliance_groups(),
     })
-
-
-def _start_actions() -> list[dict]:
-    from ..services import start_page
-    return start_page.catalog_for_editor()
 
 
 def _start_customs() -> list[dict]:
