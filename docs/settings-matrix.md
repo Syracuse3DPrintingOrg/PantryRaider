@@ -48,6 +48,7 @@ enrichment, and cook suggestions. All are pulled by a satellite from the server.
 | `anthropic_api_key` | Secret | Editable | Editable | Inherited (read-only) |
 | `anthropic_model` | | Editable | Editable | Inherited (read-only) |
 | `ai_extra_keys` | Secret | Editable | Editable | Device-local |
+| `ai_token_budget` | | Editable | Editable | Device-local |
 
 Note: `ai_extra_keys` is device-local. It is in `_SAVEABLE` and is a secret, but
 it is not in `SATELLITE_PULL_FIELDS`, so each device keeps its own spare keys.
@@ -125,9 +126,16 @@ scale, and display rotation are device-local hardware/look choices.
 | `custom_theme_bg` | | Editable | Editable | Device-local |
 | `custom_theme_surface` | | Editable | Editable | Device-local |
 | `custom_theme_text` | | Editable | Editable | Device-local |
+| `custom_themes` | | Editable | Editable | Device-local |
+| `background_image_url` | | Editable | Editable | Device-local |
+| `background_opacity` | | Editable | Editable | Device-local |
+| `start_page_enabled` | | Editable | Editable | Device-local |
+| `start_page_keys` | | Editable | Editable | Device-local |
+| `start_page_layout` | | Editable | Editable | Device-local |
 | `ui_scale` | | Editable | Editable | Device-local |
 | `display_rotation` | | Editable | Editable | Device-local |
 | `display_type` | | Editable | Editable | Device-local |
+| `quiet_mode` | | Editable | Editable | Device-local |
 | `convert_custom_rows` | | Editable | Editable | Device-local |
 
 Note: `convert_custom_rows` (the Conversions cheat-sheet rows) is intentionally
@@ -141,6 +149,7 @@ and are device-local. They do not apply to a server install.
 | Setting | Secret | Server | Pi Hosted | Pi Remote |
 | --- | --- | --- | --- | --- |
 | `device_hostname` | | Editable | Editable | Device-local |
+| `lan_scan_cidr` | | Editable | Editable | Device-local |
 | `has_streamdeck` | | Not applicable | Editable | Device-local |
 | `streamdeck_key_count` | | Not applicable | Editable | Device-local |
 | `display_touch` | | Not applicable | Editable | Device-local |
@@ -164,6 +173,7 @@ each deck can pick its own look and keep it across syncs.
 | `streamdeck_key_overrides` | | Editable | Editable | Inherited (read-only) |
 | `streamdeck_weather_location` | | Editable | Editable | Inherited (read-only) |
 | `streamdeck_weather_units` | | Editable | Editable | Inherited (read-only) |
+| `weather_api_base` | | Editable | Editable | Device-local |
 | `streamdeck_key_style` | | Editable | Editable | Device-local |
 | `streamdeck_icon_color` | | Editable | Editable | Device-local |
 | `streamdeck_cameras` | | Editable | Editable | Inherited (read-only) |
