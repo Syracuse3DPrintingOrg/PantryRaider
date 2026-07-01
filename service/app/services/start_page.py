@@ -20,9 +20,10 @@ VALID_KEY_COUNTS = tuple(GRID_SHAPES.keys())
 _DEFAULT_KEYS = 15
 
 # The on-screen app page each Stream Deck action opens when pressed on the Start
-# Page. Any deck action not listed here is a deck-only action (paging, screen
-# power, brightness, Home Assistant entity, deck workflow) that renders on the
-# Start Page but notes it needs a connected deck. Keyed by the deck action name.
+# Page. Any deck action not listed here renders as "deckonly": the ha_1..ha_5
+# slot keys still fire server-side via ui/start/fire (see start_actions), while
+# the rest (paging, screen power, brightness, deck workflow) note that they need
+# a connected deck. Keyed by the deck action name.
 ACTION_HREF: dict[str, str] = {
     "expiring": "ui/expiring", "pending": "ui/pending", "add": "ui/add",
     "inventory": "ui/inventory", "cook": "ui/cook", "recipes": "ui/recipes",

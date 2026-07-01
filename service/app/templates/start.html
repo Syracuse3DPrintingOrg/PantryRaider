@@ -93,7 +93,7 @@
         </div>
         {% else %}
         <div class="start-key deckonly" role="button" tabindex="0" style="background: {{ k.color }}"
-             data-kind="deckonly" data-label="{{ k.label }}">
+             data-kind="deckonly" data-label="{{ k.label }}" data-key="{{ k.key }}">
           <i class="bi {{ k.icon }} ico"></i><span class="lbl">{{ k.label }}</span>
         </div>
         {% endif %}
@@ -104,12 +104,11 @@
   <script>
     (function () {
       // Where a shared custom button sends you on-screen. The action-typed deck
-      // buttons (HA toggle, media, macro) need a connected Stream Deck to fire;
-      // on-screen we open the most relevant page, or note that it needs a deck.
+      // buttons (HA toggle, media, macro) and the built-in HA slot keys fire
+      // server-side via ui/start/fire, so they work without a connected deck.
       const ROUTE = { timer: 'ui/timers', shopping_add: 'ui/shopping',
         weather: 'ui/weather', camera: 'ui/camera' };
-      const NEEDS_DECK = { ha_action: 'Home Assistant toggle', media: 'media control',
-        macro: 'macro' };
+      const FIRE = { ha_action: 1, media: 1, macro: 1 };
       function toast(msg) {
         const t = document.getElementById('start-toast');
         t.textContent = msg; t.style.display = 'block';
@@ -120,14 +119,23 @@
       // against the page URL, which would make "ui/" become "/ui/ui/" and the
       // key appear to do nothing (Pantry Raider).
       function go(path) { location.href = new URL(path, document.baseURI).href; }
+      function fireServer(name) {
+        fetch(new URL('ui/start/fire/' + encodeURIComponent(name), document.baseURI), { method: 'POST' })
+          .then(r => r.json())
+          .then(d => toast(d.detail || (d.ok ? 'Done.' : 'That did not work.')))
+          .catch(() => toast('Could not reach the server.'));
+      }
       function fire(el) {
         if (el.dataset.kind === 'builtin') { go(el.dataset.href); return; }
         if (el.dataset.kind === 'deckonly') {
+          // The built-in HA slot keys (ha_1..ha_5) execute server-side; the
+          // rest (paging, brightness, deck workflow) really do need hardware.
+          if (/^ha_[1-5]$/.test(el.dataset.key || '')) { fireServer(el.dataset.key); return; }
           toast('"' + (el.dataset.label || 'This') + '" runs on a connected Stream Deck.'); return;
         }
         const t = el.dataset.type;
         if (ROUTE[t]) { go(ROUTE[t]); return; }
-        if (NEEDS_DECK[t]) { toast('This ' + NEEDS_DECK[t] + ' key runs on a connected Stream Deck.'); return; }
+        if (FIRE[t]) { fireServer(el.dataset.id); return; }
         go('ui/');
       }
       document.querySelectorAll('.start-key[role="button"]').forEach(el => {
