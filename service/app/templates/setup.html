@@ -4338,7 +4338,9 @@ function savePaneStartPage(btn) {
     // Key style + icon treatment are shared with the deck (same settings).
     streamdeck_key_style:  optVal('start_key_style'),
     streamdeck_icon_color: optVal('start_icon_color'),
-  }, btn, 'start-page-result');
+    // Enabling/disabling the Start Page adds or removes the Start nav tab and
+    // changes the home page, so reload so the interface reflects it at once.
+  }, btn, 'start-page-result').then(() => { setTimeout(() => location.reload(), 400); });
 }
 
 function savePaneSecurity(btn) {

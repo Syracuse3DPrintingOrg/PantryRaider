@@ -126,6 +126,20 @@ def _is_lat_lon(text: str) -> tuple[float, float] | None:
     return None
 
 
+def _day_label(i: int, date: str) -> str:
+    """Forecast day label: Today, Tomorrow, then the weekday name (Tuesday,
+    Wednesday, ...) rather than a bare date (FoodAssistant). Pure."""
+    if i == 0:
+        return "Today"
+    if i == 1:
+        return "Tomorrow"
+    try:
+        from datetime import datetime
+        return datetime.strptime(str(date)[:10], "%Y-%m-%d").strftime("%A")
+    except Exception:
+        return str(date)
+
+
 def parse_open_meteo(data: Any, units: str = "f", location: str = "") -> dict | None:
     """Parse an Open-Meteo forecast payload into the render-ready shape, or None.
 
@@ -160,12 +174,11 @@ def parse_open_meteo(data: Any, units: str = "f", location: str = "") -> dict | 
     sunsets = daily.get("sunset") or []
     hourly = data.get("hourly") or {}
     wind_unit = "mph" if units == "f" else "km/h"
-    tags = ("Today", "Tomorrow")
     days: list[dict] = []
     for i, date in enumerate(times):
         day_desc = _wmo_desc(codes[i]) if i < len(codes) else ""
         days.append({
-            "label": tags[i] if i < len(tags) else str(date),
+            "label": _day_label(i, date),
             "date": str(date),
             "hi": _round(highs[i]) if i < len(highs) else "?",
             "lo": _round(lows[i]) if i < len(lows) else "?",
@@ -348,7 +361,6 @@ def parse_forecast(data: Any, units: str = "f") -> dict | None:
         "icon": icon_for(cur_desc),
         "unit": u,
     }
-    tags = ("Today", "Tomorrow")
     days: list[dict] = []
     for i, day in enumerate(data.get("weather", []) or []):
         if not isinstance(day, dict):
@@ -358,7 +370,7 @@ def parse_forecast(data: Any, units: str = "f") -> dict | None:
         day_desc = _desc(mid) if isinstance(mid, dict) else ""
         astro = (day.get("astronomy") or [{}])[0] if isinstance(day.get("astronomy"), list) else {}
         days.append({
-            "label": tags[i] if i < len(tags) else str(day.get("date", "")),
+            "label": _day_label(i, day.get("date", "")),
             "date": str(day.get("date", "")),
             "hi": day.get("maxtempF" if units == "f" else "maxtempC", "?"),
             "lo": day.get("mintempF" if units == "f" else "mintempC", "?"),
