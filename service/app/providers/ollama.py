@@ -22,7 +22,13 @@ class OllamaProvider(VisionProvider):
         async with httpx.AsyncClient(timeout=180.0) as client:
             r = await client.post(f"{self.base_url}/api/generate", json=payload)
             r.raise_for_status()
-            return r.json()["response"]
+            data = r.json()
+            try:
+                from ..services import usage
+                usage.record_response("ollama", data)
+            except Exception:
+                pass
+            return data["response"]
 
     async def _generate(self, prompt: str, image_data: bytes) -> str:
         b64 = base64.b64encode(image_data).decode()
@@ -36,7 +42,13 @@ class OllamaProvider(VisionProvider):
         async with httpx.AsyncClient(timeout=120.0) as client:
             response = await client.post(f"{self.base_url}/api/generate", json=payload)
             response.raise_for_status()
-            return response.json()["response"]
+            _d = response.json()
+            try:
+                from ..services import usage
+                usage.record_response("ollama", _d)
+            except Exception:
+                pass
+            return _d["response"]
 
     async def analyze_food(self, image_data: bytes, mime_type: str) -> AnalysisResult:
         raw = await self._generate(_FOOD_PROMPT, image_data)

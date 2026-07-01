@@ -6,11 +6,19 @@ from ..database import get_db
 from ..models.food import AnalysisResult
 from ..services.defaults import apply_defaults
 from ..services.barcode import lookup_barcode, BarcodeNotFound, BarcodeServiceError
+from ..services import usage
 from ..dependencies import get_vision_provider
 
 router = APIRouter(prefix="/analyze", tags=["analyze"])
 
 _ALLOWED_MIME = {"image/jpeg", "image/png", "image/webp", "image/heic"}
+_BUDGET_MSG = ("AI token budget reached for this month. Raise it in "
+               "Settings, AI, or wait for the next month.")
+
+
+def _check_budget():
+    if usage.over_budget():
+        raise HTTPException(429, detail=_BUDGET_MSG)
 
 
 # Phone photos are 4000px+; vision LLM cost scales with size. Receipts get a
@@ -45,6 +53,7 @@ async def analyze_food(
     """Analyze a photo of one or more food items."""
     if file.content_type not in _ALLOWED_MIME:
         raise HTTPException(400, f"Unsupported image type: {file.content_type}")
+    _check_budget()
     data, mime = _downscale(await file.read(), file.content_type)
     try:
         result = await provider.analyze_food(data, mime)
@@ -75,6 +84,7 @@ async def analyze_receipt(
     """Parse a receipt image and return all food items with defaults applied."""
     if file.content_type not in _ALLOWED_MIME:
         raise HTTPException(400, f"Unsupported image type: {file.content_type}")
+    _check_budget()
     data, mime = _downscale(await file.read(), file.content_type, _MAX_DIM_RECEIPT)
     try:
         result = await provider.analyze_receipt(data, mime)

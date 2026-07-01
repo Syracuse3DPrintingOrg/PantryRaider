@@ -45,6 +45,11 @@ class AnthropicProvider(VisionProvider):
             max_tokens=max_tokens,
             messages=[{"role": "user", "content": content}],
         )
+        try:
+            from ..services import usage
+            usage.record_response("anthropic", response)
+        except Exception:
+            pass
         return next(b.text for b in response.content if b.type == "text")
 
     async def analyze_food(self, image_data: bytes, mime_type: str) -> AnalysisResult:

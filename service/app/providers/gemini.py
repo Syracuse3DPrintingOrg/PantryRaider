@@ -141,9 +141,19 @@ class GeminiProvider(VisionProvider):
         self._health_ok: bool | None = None
         self._health_ts: float = 0.0
 
+    async def _gen(self, parts):
+        """Call the model and record the tokens it reports (FoodAssistant)."""
+        response = await self.model.generate_content_async(parts)
+        try:
+            from ..services import usage
+            usage.record_response("gemini", response)
+        except Exception:
+            pass
+        return response
+
     async def analyze_food(self, image_data: bytes, mime_type: str) -> AnalysisResult:
         image_part = {"mime_type": mime_type, "data": image_data}
-        response = await self.model.generate_content_async([_FOOD_PROMPT, image_part])
+        response = await self._gen([_FOOD_PROMPT, image_part])
         raw = response.text
         data = json.loads(raw)
         item = _parse_item(data, default_confidence=0.8)
@@ -151,14 +161,14 @@ class GeminiProvider(VisionProvider):
 
     async def analyze_receipt(self, image_data: bytes, mime_type: str) -> AnalysisResult:
         image_part = {"mime_type": mime_type, "data": image_data}
-        response = await self.model.generate_content_async([_RECEIPT_PROMPT, image_part])
+        response = await self._gen([_RECEIPT_PROMPT, image_part])
         raw = response.text
         data = json.loads(raw)
         return _parse_receipt(data, default_confidence=0.8, raw=raw)
 
     async def enrich_product(self, info: dict) -> dict | None:
         prompt = _ENRICH_PROMPT.format(info=json.dumps(info, ensure_ascii=False))
-        response = await self.model.generate_content_async([prompt])
+        response = await self._gen([prompt])
         return json.loads(response.text)
 
     async def extract_recipe(self, image_data: bytes | None = None,
@@ -170,19 +180,19 @@ class GeminiProvider(VisionProvider):
         else:
             prompt = _RECIPE_PROMPT.format(source="webpage text below")
             parts = [f"{prompt}\n\n--- PAGE TEXT ---\n{page_text}"]
-        response = await self.model.generate_content_async(parts)
+        response = await self._gen(parts)
         return json.loads(response.text)
 
     async def generate_recipe(self, name: str, extra_instructions: str = "") -> dict | None:
         prompt = _GENERATE_RECIPE_PROMPT.format(name=name)
         if extra_instructions.strip():
             prompt += "\n\nAdditional instructions from the user (follow these):\n" + extra_instructions.strip() + "\n"
-        response = await self.model.generate_content_async([prompt])
+        response = await self._gen([prompt])
         return json.loads(response.text)
 
     async def estimate_nutrition(self, name: str, servings: float = 1.0) -> dict | None:
         from .base import NUTRITION_PROMPT, nutrition_fields, parse_json_response
-        response = await self.model.generate_content_async(
+        response = await self._gen(
             [NUTRITION_PROMPT.format(name=name, servings=servings)])
         return nutrition_fields(parse_json_response(response.text))
 
@@ -192,7 +202,7 @@ class GeminiProvider(VisionProvider):
         prompt = _SUGGEST_INVENTORY_PROMPT.format(
             items="\n".join(f"- {i}" for i in items), limit=limit,
             preferences_block=pref_block)
-        response = await self.model.generate_content_async([prompt])
+        response = await self._gen([prompt])
         return json.loads(response.text).get("suggestions", [])
 
     async def health_check(self) -> bool:

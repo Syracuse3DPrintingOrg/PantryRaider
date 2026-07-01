@@ -1358,6 +1358,33 @@
           </button>
           <div class="test-result mt-2" id="ai-save-result"></div>
           {% endif %}
+
+          {# AI token usage + budget (FoodAssistant). Shows what this instance's
+             AI key has spent and lets a user on their own key cap it per month.
+             Foundation for cloud per-user quotas. #}
+          <div class="section-card mt-3">
+            <div class="section-title"><i class="bi bi-speedometer2 text-warning"></i> AI token usage &amp; budget</div>
+            <p class="text-secondary small">Tokens your AI provider has used through this app. For your own API key you can set a monthly token budget; when it is reached, AI photo import and barcode enrichment are declined until the next month or you raise it. 0 = no budget.</p>
+            <div id="ai-usage-display" class="mb-3 small text-secondary">Loading usage…</div>
+            {% if not features.satellite %}
+            <div class="row g-2 align-items-end mb-2" style="max-width:420px">
+              <div class="col">
+                <label class="form-label small mb-1" for="ai_token_budget">Monthly token budget</label>
+                <input type="number" min="0" step="1000" class="form-control form-control-sm" id="ai_token_budget"
+                       value="{{ s.ai_token_budget }}" placeholder="0 = unlimited">
+              </div>
+              <div class="col-auto">
+                <button type="button" class="btn btn-outline-info btn-sm" onclick="saveAiBudget(this)">
+                  <i class="bi bi-check-lg me-1"></i>Save budget
+                </button>
+              </div>
+            </div>
+            <button type="button" class="btn btn-outline-secondary btn-sm" onclick="resetAiUsage(this)">
+              <i class="bi bi-arrow-counterclockwise me-1"></i>Reset usage
+            </button>
+            <span class="test-result ms-2" id="ai-budget-result"></span>
+            {% endif %}
+          </div>
         </div>
 
         <!-- Recipes -->
@@ -3928,7 +3955,43 @@ function savePaneAi(btn) {
     barcode_llm_fallback: chk('barcode_llm_fallback'),
     enrich_provider:   optVal('enrich_provider'),
     enrich_model:      optVal('enrich_model'),
+    ai_token_budget:   document.getElementById('ai_token_budget') ? num('ai_token_budget', 0) : undefined,
   }, btn, 'ai-save-result');
+}
+
+// AI token usage + budget (FoodAssistant).
+async function _loadAiUsage() {
+  const el = document.getElementById('ai-usage-display');
+  if (!el) return;
+  try {
+    const d = await fetch('setup/ai-usage').then(r => r.json());
+    if (!d.ok) { el.textContent = 'Usage unavailable.'; return; }
+    const fmt = n => (n || 0).toLocaleString();
+    const by = Object.entries(d.by_provider || {}).filter(([, v]) => v)
+      .map(([k, v]) => k + ' ' + fmt(v)).join(', ');
+    let html = '<div><i class="bi bi-graph-up me-1"></i>This month (' + d.month_key + '): <strong>' + fmt(d.month) + '</strong> tokens';
+    if (d.budget) {
+      const pct = Math.min(100, Math.round(d.month / d.budget * 100));
+      const bar = d.over_budget ? 'bg-danger' : (pct >= 80 ? 'bg-warning' : 'bg-success');
+      html += ' of ' + fmt(d.budget) + ' budget' + (d.over_budget ? ' <span class="text-danger">(reached)</span>' : '')
+        + '</div><div class="progress mt-1" style="max-width:420px;height:8px"><div class="progress-bar ' + bar + '" style="width:' + pct + '%"></div></div>';
+    } else { html += '</div>'; }
+    html += '<div class="mt-1">All time: ' + fmt(d.total) + ' tokens' + (by ? ' (' + by + ')' : '') + '</div>';
+    el.innerHTML = html;
+  } catch (e) { el.textContent = 'Usage unavailable.'; }
+}
+function saveAiBudget(btn) {
+  return savePane({ ai_token_budget: num('ai_token_budget', 0) }, btn, 'ai-budget-result')
+    .then(() => _loadAiUsage());
+}
+async function resetAiUsage(btn) {
+  if (!confirm('Reset the recorded AI token usage to zero?')) return;
+  const el = document.getElementById('ai-budget-result');
+  try {
+    await fetch('setup/ai-usage/reset', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    if (el) el.innerHTML = '<span class="text-success"><i class="bi bi-check-circle me-1"></i>Usage reset.</span>';
+    _loadAiUsage();
+  } catch (e) { if (el) el.innerHTML = '<span class="text-danger">' + e + '</span>'; }
 }
 
 // Collect the checked kitchen appliances. Absent container (e.g. on a satellite
@@ -5578,6 +5641,8 @@ setTimeout(_revealMenu, 1500);
   if (typeof _loadLoggingState === 'function') _loadLoggingState();
   // Reflect this device's on-screen-events choice in its selector.
   if (typeof _haInitDeviceEvents === 'function') _haInitDeviceEvents();
+  // Show current AI token usage against any budget.
+  if (typeof _loadAiUsage === 'function') _loadAiUsage();
 
   // Settings form only: update auth hint on load
   {% if configured %}

@@ -12,7 +12,7 @@ from .hardware import is_raspberry_pi
 
 # Single source of truth for the app version (shown in the UI, used by the
 # update checker, and reported by FastAPI). Bump on each tagged release.
-APP_VERSION = "0.7.43"
+APP_VERSION = "0.7.44"
 
 # GitHub repo used by the in-app update checker.
 GITHUB_REPO = "Syracuse3DPrinting/FoodAssistant"
@@ -259,7 +259,7 @@ _SAVEABLE = [
     "ollama_base_url", "ollama_model",
     "openai_api_key", "openai_model",
     "anthropic_api_key", "anthropic_model",
-    "ai_extra_keys",
+    "ai_extra_keys", "ai_token_budget",
     "scanner_type", "barcode_global_capture", "extra_api_key_names",
     "barcode_enrichment", "barcode_llm_fallback", "barcode_autocheck_shopping", "enrich_provider", "enrich_model",
     "grocy_base_url", "grocy_api_key", "grocy_public_url",
@@ -588,6 +588,14 @@ class Settings(BaseSettings):
     # is always tried first; the extras give the app spare keys to fall back to
     # when one is rate-limited or revoked. Set in the setup wizard.
     ai_extra_keys: dict = {}
+
+    # AI token budget (FoodAssistant). A per-calendar-month cap on AI tokens for
+    # this instance, for users on their own API key who want to bound spend. 0 =
+    # no budget (unlimited). Usage is tracked in data_dir/ai_usage.json; when the
+    # month's usage reaches the budget, AI photo/enrichment calls are declined
+    # until the next month or the budget is raised. Foundation for cloud per-user
+    # quotas.
+    ai_token_budget: int = 0
 
     # How barcodes are scanned: "usb" = USB/BT HID keyboard-wedge, "camera" =
     # Pi camera / scan engine, "" = not set (user picks on Add Food page).

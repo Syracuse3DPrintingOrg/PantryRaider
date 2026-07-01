@@ -185,6 +185,7 @@ class SetupPayload(BaseModel):
     # Extra API keys per provider, e.g. {"gemini": ["key2", "key3"]}. When
     # absent the stored extras are left untouched (see save handler).
     ai_extra_keys: dict[str, list[str]] | None = None
+    ai_token_budget: int = 0
     scanner_type: str = ""
     barcode_global_capture: bool = True
     quiet_mode: bool = False
@@ -779,6 +780,21 @@ async def clear_background():
     return {"ok": True}
 
 
+@router.get("/ai-usage")
+async def ai_usage():
+    """Current AI token usage + budget for the AI settings panel (FoodAssistant)."""
+    from ..services import usage
+    return {"ok": True, **usage.get_usage()}
+
+
+@router.post("/ai-usage/reset")
+async def ai_usage_reset():
+    """Clear the recorded AI token usage."""
+    from ..services import usage
+    usage.reset()
+    return {"ok": True}
+
+
 class ScalePayload(BaseModel):
     ui_scale: str = _DEFAULT_UI_SCALE
     display_rotation: int = _DEFAULT_DISPLAY_ROTATION
@@ -819,6 +835,12 @@ async def save_setup(payload: SetupPayload):
         data["extra_api_keys"], data["extra_api_key_names"] = merged_sat
     if data.get("display_rotation") not in DISPLAY_ROTATIONS:
         data["display_rotation"] = _DEFAULT_DISPLAY_ROTATION
+    # AI token budget: non-negative integer (0 = no budget).
+    if "ai_token_budget" in data:
+        try:
+            data["ai_token_budget"] = max(0, int(data["ai_token_budget"]))
+        except (TypeError, ValueError):
+            data.pop("ai_token_budget", None)
     # On-screen Start Page: only 6/15/32 keys are valid (Stream Deck sizes).
     if "start_page_keys" in data and data["start_page_keys"] not in (6, 15, 32):
         data["start_page_keys"] = 15

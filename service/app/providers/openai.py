@@ -58,7 +58,13 @@ class OpenAIProvider(VisionProvider):
                     continue
                 r.raise_for_status()
                 self._promote(key)
-                return r.json()["choices"][0]["message"]["content"]
+                data = r.json()
+                try:
+                    from ..services import usage
+                    usage.record_response("openai", data)
+                except Exception:
+                    pass
+                return data["choices"][0]["message"]["content"]
         raise last_error if last_error else RuntimeError("No OpenAI API key configured")
 
     def _promote(self, key: str) -> None:
