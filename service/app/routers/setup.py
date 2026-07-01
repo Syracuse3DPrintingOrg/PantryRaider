@@ -1464,6 +1464,15 @@ async def touch_provision(request: Request):
         async with httpx.AsyncClient(timeout=20.0) as c:
             r = await c.post(f"{_HOST_BRIDGE}/touch/provision",
                              json={"driver": driver, "reboot": reboot})
+        # An old host bridge (updated app, stale bridge) has no such route and
+        # answers 404 {"error": "not found"}. Say so plainly instead of leaking
+        # a bare "not found" (FoodAssistant-vbfp): the bridge is redeployed by
+        # the updater now, so the fix is to run the update once more or reboot.
+        if r.status_code == 404:
+            return JSONResponse({"ok": False, "error":
+                "The host bridge on this device is out of date and cannot set up "
+                "touch yet. Run Backup & Updates, Update once more (it now "
+                "refreshes the bridge), or reboot, then try again."})
         out = r.json()
         out["driver"] = driver
         return out

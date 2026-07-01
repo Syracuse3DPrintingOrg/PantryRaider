@@ -140,6 +140,40 @@ for _h in foodassistant-update foodassistant-restore; do
   fi
 done
 
+# Keep the host bridge current too. It is a long-running root daemon (on
+# 127.0.0.1:9299), NOT a re-exec'd helper, so a new file only takes effect after
+# a restart, and new app code that calls a new bridge route fails with a 404
+# until then. We must NOT restart it inline: THIS script is a child of the
+# bridge process (the bridge ran us via subprocess.run for POST /update), so an
+# inline `systemctl restart` would kill us mid-update. Install the new file, then
+# schedule a DETACHED restart a few seconds out so our JSON result reaches the UI
+# first and the restart runs outside our (soon-to-be-killed) cgroup. Done before
+# the Pi Hosted Docker branch below so both hosted and remote devices get it.
+_bsrc="$REPO/scripts/image-build/foodassistant-host-bridge"
+_bdst="/usr/local/bin/foodassistant-host-bridge"
+if [ -f "$_bsrc" ]; then
+  _bs="$(sha1sum "$_bsrc" 2>/dev/null | cut -d' ' -f1)"
+  _bd="$(sha1sum "$_bdst" 2>/dev/null | cut -d' ' -f1)"
+  if [ "$_bs" != "$_bd" ] && install -m 755 "$_bsrc" "$_bdst" 2>/dev/null; then
+    log "Refreshed $_bdst (host bridge); scheduling a detached restart"
+    # Refresh the unit file too if it changed, then reload systemd.
+    _bsvc="$REPO/scripts/image-build/foodassistant-host-bridge.service"
+    if [ -f "$_bsvc" ] && ! cmp -s "$_bsvc" /etc/systemd/system/foodassistant-host-bridge.service; then
+      install -m 644 "$_bsvc" /etc/systemd/system/foodassistant-host-bridge.service 2>/dev/null \
+        && systemctl daemon-reload 2>/dev/null || true
+    fi
+    if command -v systemd-run >/dev/null 2>&1; then
+      systemd-run --on-active=5s --unit="fa-bridge-restart-$$" \
+        systemctl restart foodassistant-host-bridge.service >/dev/null 2>&1 \
+        || setsid bash -c 'sleep 5; systemctl restart foodassistant-host-bridge.service' >/dev/null 2>&1 &
+    else
+      setsid bash -c 'sleep 5; systemctl restart foodassistant-host-bridge.service' >/dev/null 2>&1 &
+    fi
+  elif [ "$_bs" = "$_bd" ]; then
+    log "Host bridge unchanged; no restart needed."
+  fi
+fi
+
 # --- Pi Hosted (Docker) deployment -----------------------------------------
 # On a Pi Hosted appliance the app runs from a prebuilt image (see
 # docker-compose.appliance.yml: only ./data is mounted, the code lives in the
