@@ -526,6 +526,15 @@ async def start_page(request: Request):
     })
 
 
+@router.post("/start/fire/{key_name}")
+async def start_fire(key_name: str):
+    """Execute a deck-only Start Page key server-side (HA toggle, media, macro,
+    or a built-in ha_1..ha_5 slot key). Always answers 200 with a toastable
+    {ok, detail} so the Start Page can report the outcome inline."""
+    from ..services import start_actions
+    return JSONResponse(await start_actions.fire_key(key_name))
+
+
 @router.get("/weather", response_class=HTMLResponse)
 async def weather_page(request: Request):
     # Full-screen forecast for the kiosk. Opened by the Stream Deck weather and

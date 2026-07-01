@@ -14,6 +14,7 @@ service/data/
 .dolt/
 .beads-credential-key
 .beads/proxieddb/
+.beads/.auto-import-issues.jsonl
 backups/
 node_modules/
 package-lock.json

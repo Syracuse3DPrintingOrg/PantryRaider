@@ -62,8 +62,14 @@ full-screen launcher that works like an on-screen Stream Deck, served at
 - When enabled, the Start tab is added to the navigation and defaults to the top,
   so the Start Page can act as the device's home screen (including the kiosk).
 - Built-in keys open the matching app page. Custom keys that map to a page
-  (timer, shopping, weather, camera) open it; deck-only actions (Home Assistant
-  entity, brightness) render but note that they run on a connected Stream Deck.
+  (timer, shopping, weather, camera) open it.
+- Action keys fire from the screen, no deck required: a Home Assistant toggle,
+  a media key, a macro, and the built-in HA slot keys (ha_1 to ha_5) call Home
+  Assistant through the server using the Stream Deck HA settings, and show the
+  result in a small toast. A macro runs its HA slot and preset kitchen-timer
+  steps (the timers become shared server timers); steps that need deck hardware
+  (paging, brightness) are skipped and named in the toast. Purely hardware-bound
+  keys still note that they run on a connected Stream Deck.
 
 On a Pi appliance, the Start & Stream Deck menu shows a toggle at the top to
 switch between configuring the on-screen Start Page and the physical deck.

@@ -67,8 +67,8 @@ All AI features are optional. You can run Pantry Raider without any AI provider 
 | **Inventory**: stock grouped by storage, drag-to-move | **Add item**: barcode scan, photo analysis, manual entry |
 | ![Recipe suggestions](docs/screenshots/cook.png) | ![Meal plan](docs/screenshots/mealplan.png) |
 | **Cook**: recipes ranked by what's in stock | **Meal plan**: week view with Mealie integration |
-| ![Setup wizard](docs/screenshots/setup.png) | ![Expiring items](docs/screenshots/expiring.png) |
-| **Setup wizard**: configure providers and auth | **Expiring**: urgency-sorted view with HA sensor data |
+| ![Settings](docs/screenshots/setup.png) | ![Expiring items](docs/screenshots/expiring.png) |
+| **Settings**: AI provider, integrations, and auth | **Expiring**: urgency-sorted view with HA sensor data |
 
 ## How AI works in this app
 

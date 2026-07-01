@@ -9,7 +9,10 @@ import pytest
 # is not installed in the pure-logic test environment. Stub it so the shared
 # receipt parsing helpers (which need no SDK) stay importable.
 if "google.generativeai" not in sys.modules:
-    sys.modules["google.generativeai"] = types.ModuleType("google.generativeai")
+    google_pkg = sys.modules.setdefault("google", types.ModuleType("google"))
+    genai_stub = types.ModuleType("google.generativeai")
+    google_pkg.generativeai = genai_stub
+    sys.modules["google.generativeai"] = genai_stub
 
 from app.providers.gemini import _parse_receipt, _safe_date
 from app.models.food import FoodItem
