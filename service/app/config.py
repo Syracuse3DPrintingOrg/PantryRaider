@@ -12,7 +12,7 @@ from .hardware import is_raspberry_pi
 
 # Single source of truth for the app version (shown in the UI, used by the
 # update checker, and reported by FastAPI). Bump on each tagged release.
-APP_VERSION = "0.7.61"
+APP_VERSION = "0.7.62"
 
 # Single source of truth for the product's display name. The runtime identifiers
 # (systemd units, install paths, the foodassistant_streamdeck package, the
@@ -21,7 +21,7 @@ APP_VERSION = "0.7.61"
 APP_NAME = "Pantry Raider"
 
 # GitHub repo used by the in-app update checker.
-GITHUB_REPO = "Syracuse3DPrinting/PantryRaider"
+GITHUB_REPO = "Syracuse3DPrintingOrg/PantryRaider"
 
 # Amazon Associates tag for the Shop recommendations. This is the project
 # owner's static tag (the same on every deployment, since the affiliate revenue

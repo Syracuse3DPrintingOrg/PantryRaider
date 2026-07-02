@@ -70,7 +70,7 @@ unattended pull cannot move you onto a breaking release.
 
 | Service | Image | Tag | Port |
 |---------|-------|-----|------|
-| Pantry Raider | `ghcr.io/syracuse3dprinting/foodassistant` | `${FOODASSISTANT_TAG}` (default `latest`) | 9284 |
+| Pantry Raider | `ghcr.io/syracuse3dprintingorg/pantryraider` | `${FOODASSISTANT_TAG}` (default `latest`) | 9284 |
 | Grocy | `lscr.io/linuxserver/grocy` | `4.6.0` | 9383 |
 | Mealie | `ghcr.io/mealie-recipes/mealie` | `v3.19.2` | 9285 |
 | Ollama | `ollama/ollama` | `0.30.8` | 11434 |

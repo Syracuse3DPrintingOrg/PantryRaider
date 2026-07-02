@@ -51,7 +51,7 @@ DONE_MARKER="${DONE_MARKER:-/var/lib/foodassistant/firstboot.done}"
 # a build is needed, the provisioner clones REPO_URL here so a fresh device can
 # build from source with no manual steps.
 REPO_DIR="${REPO_DIR:-/home/foodassistant/FoodAssistant}"
-REPO_URL="${REPO_URL:-https://github.com/Syracuse3DPrinting/FoodAssistant.git}"
+REPO_URL="${REPO_URL:-https://github.com/Syracuse3DPrintingOrg/PantryRaider.git}"
 
 # Logging helpers
 log()  { printf '%s [firstboot] %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"; }
@@ -1842,7 +1842,7 @@ EOF
     cat > /etc/systemd/system/foodassistant-remote.service <<EOF
 [Unit]
 Description=FoodAssistant Pi Remote UI
-Documentation=https://github.com/Syracuse3DPrinting/FoodAssistant
+Documentation=https://github.com/Syracuse3DPrintingOrg/PantryRaider
 After=network.target
 Wants=network.target
 

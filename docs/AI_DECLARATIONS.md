@@ -22,4 +22,4 @@ involvement. Pantry Raider is open source, so you can read the code, check the
 dependencies, and decide for yourself.
 
 If you find a problem or have a question about how something works, the source
-is on [GitHub](https://github.com/Syracuse3DPrinting/PantryRaider).
+is on [GitHub](https://github.com/Syracuse3DPrintingOrg/PantryRaider).

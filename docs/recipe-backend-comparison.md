@@ -117,4 +117,4 @@ features therefore means running Mealie. Using Grocy as the recipe backend
 instead would be a real feature to build, not a setting to flip; it is tracked as
 possible future work, not something you can turn on now. If a Grocy-native recipe
 mode would make your setup simpler, that is useful feedback to raise on the
-[issue tracker](https://github.com/Syracuse3DPrinting/PantryRaider/issues).
+[issue tracker](https://github.com/Syracuse3DPrintingOrg/PantryRaider/issues).

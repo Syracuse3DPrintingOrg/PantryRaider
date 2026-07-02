@@ -16,7 +16,7 @@ build_wiki = importlib.util.module_from_spec(_spec)
 sys.modules["build_wiki"] = build_wiki
 _spec.loader.exec_module(build_wiki)
 
-REPO = "Syracuse3DPrinting/PantryRaider"
+REPO = "Syracuse3DPrintingOrg/PantryRaider"
 PAGE_MAP = build_wiki._src_to_page()
 
 

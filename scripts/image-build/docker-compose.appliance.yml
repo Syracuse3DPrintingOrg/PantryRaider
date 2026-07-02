@@ -10,7 +10,7 @@
 #   - Mealie/Ollama still profile-gated (with-mealie / with-ollama).
 services:
   service:
-    image: ghcr.io/syracuse3dprinting/foodassistant:${FOODASSISTANT_TAG:-latest}
+    image: ghcr.io/syracuse3dprintingorg/pantryraider:${FOODASSISTANT_TAG:-latest}
     # Local-source fallback: if the GHCR pull fails (image not yet public, no
     # auth, or no internet), run "docker compose build service" to build from the
     # on-device clone at REPO_DIR (default /home/foodassistant/FoodAssistant).

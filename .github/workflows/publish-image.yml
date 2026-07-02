@@ -24,18 +24,23 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  # Pinned to the ORIGINAL image name, not github.repository. The repo was
-  # renamed to PantryRaider, but a GHCR package does not rename with it, and
-  # every deployed device's compose file pulls
-  # ghcr.io/syracuse3dprinting/foodassistant:latest (a runtime identifier we
-  # keep, like the systemd units and install paths). Deriving the name from
-  # github.repository after the rename silently published to a NEW package the
-  # fleet never pulls, so devices stopped updating.
+  # Pinned EXPLICITLY, never derived from github.repository: a GHCR package
+  # does not follow repo renames or transfers, and deriving the name once
+  # silently published to a package the fleet never pulls, so devices stopped
+  # updating. The canonical image is the org-owned
+  # ghcr.io/syracuse3dprintingorg/pantryraider. Deployed devices that still
+  # reference the legacy personal-account image
+  # (ghcr.io/syracuse3dprinting/foodassistant) are migrated by
+  # foodassistant-update, which rewrites the image line in their compose file
+  # on the next update.
   #
-  # NOTE: pushes made by other workflows with GITHUB_TOKEN (e.g. Brand sync)
+  # NOTE 1: after the FIRST publish to a new package, set its visibility to
+  # Public (org -> Packages -> pantryraider -> Package settings), or appliance
+  # devices cannot pull it.
+  # NOTE 2: pushes made by other workflows with GITHUB_TOKEN (e.g. Brand sync)
   # do not trigger this workflow. After such a push, run it manually from the
   # Actions tab (workflow_dispatch) if the image needs the change.
-  IMAGE_NAME: syracuse3dprinting/foodassistant
+  IMAGE_NAME: syracuse3dprintingorg/pantryraider
 
 jobs:
   build-and-push:

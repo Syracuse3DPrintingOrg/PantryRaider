@@ -63,7 +63,7 @@ your router, or it may print on an attached screen).
 Then run the installer:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Syracuse3DPrinting/PantryRaider/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Syracuse3DPrintingOrg/PantryRaider/main/install.sh | bash
 ```
 
 The installer shows what it detected (board, display, Stream Deck) and asks one
@@ -90,7 +90,7 @@ The installer can run unattended by passing the choices as environment variables
 and setting `NONINTERACTIVE=1`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Syracuse3DPrinting/PantryRaider/main/install.sh \
+curl -fsSL https://raw.githubusercontent.com/Syracuse3DPrintingOrg/PantryRaider/main/install.sh \
   | NONINTERACTIVE=1 DEPLOYMENT_MODE=pi_hosted ENABLE_MEALIE=true bash
 ```
 
@@ -123,7 +123,7 @@ see Troubleshooting.)
 
 If you want a flash-and-go card with no SSH step, a pre-built
 `foodassistant-appliance-*-arm64.img.xz` is published to the
-[Releases page](https://github.com/Syracuse3DPrinting/PantryRaider/releases).
+[Releases page](https://github.com/Syracuse3DPrintingOrg/PantryRaider/releases).
 It bakes the provisioner into the image so it self-installs the full Pi Hosted
 stack on first boot. Flash it with balenaEtcher or `dd`.
 
@@ -210,7 +210,7 @@ again. To force the provisioner to redo a completed step set `FORCE=1`:
 
 ```bash
 sudo rm -f /var/lib/foodassistant/firstboot.done
-curl -fsSL https://raw.githubusercontent.com/Syracuse3DPrinting/PantryRaider/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Syracuse3DPrintingOrg/PantryRaider/main/install.sh | bash
 ```
 
 **Verify the stack.**

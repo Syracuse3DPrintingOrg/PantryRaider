@@ -1,7 +1,7 @@
 site_name: Pantry Raider
 site_description: Self-hosted food spoilage tracker built on Grocy, with optional Mealie and Ollama.
-repo_url: https://github.com/Syracuse3DPrinting/PantryRaider
-repo_name: Syracuse3DPrinting/PantryRaider
+repo_url: https://github.com/Syracuse3DPrintingOrg/PantryRaider
+repo_name: Syracuse3DPrintingOrg/PantryRaider
 docs_dir: docs
 
 theme:

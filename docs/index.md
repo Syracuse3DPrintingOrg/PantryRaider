@@ -34,4 +34,4 @@ What Pantry Raider adds on top of Grocy:
   [HTTP API](api.md).
 
 The project source and issues live on
-[GitHub](https://github.com/Syracuse3DPrinting/PantryRaider).
+[GitHub](https://github.com/Syracuse3DPrintingOrg/PantryRaider).

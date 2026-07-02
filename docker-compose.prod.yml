@@ -1,6 +1,6 @@
 # Production compose: runs the prebuilt image from GHCR — no local build needed.
 #
-#   curl -fsSL https://raw.githubusercontent.com/Syracuse3DPrinting/PantryRaider/main/docker-compose.prod.yml -o docker-compose.yml
+#   curl -fsSL https://raw.githubusercontent.com/Syracuse3DPrintingOrg/PantryRaider/main/docker-compose.prod.yml -o docker-compose.yml
 #   docker compose up -d
 #   # then open http://YOUR-HOST:9284/setup
 #
@@ -10,7 +10,7 @@
 # Pin a version by setting FOODASSISTANT_TAG (e.g. v1.0.0); defaults to latest.
 services:
   service:
-    image: ghcr.io/syracuse3dprinting/foodassistant:${FOODASSISTANT_TAG:-latest}
+    image: ghcr.io/syracuse3dprintingorg/pantryraider:${FOODASSISTANT_TAG:-latest}
     container_name: foodassistant-service
     env_file:
       - path: .env

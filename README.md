@@ -1,6 +1,6 @@
 # Pantry Raider
 
-[![CI](https://github.com/Syracuse3DPrinting/PantryRaider/actions/workflows/ci.yml/badge.svg)](https://github.com/Syracuse3DPrinting/PantryRaider/actions/workflows/ci.yml)
+[![CI](https://github.com/Syracuse3DPrintingOrg/PantryRaider/actions/workflows/ci.yml/badge.svg)](https://github.com/Syracuse3DPrintingOrg/PantryRaider/actions/workflows/ci.yml)
 
 A self-hosted food tracker that helps you manage what's in your fridge, reduce waste, and plan meals. Built to run entirely on your own hardware with no cloud dependency required.
 
@@ -94,7 +94,7 @@ Pick the path that matches where you're running it.
 Needs [Docker](https://docs.docker.com/get-docker/) with Compose v2. One command pulls the prebuilt image and starts Pantry Raider plus a bundled Grocy:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Syracuse3DPrinting/PantryRaider/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Syracuse3DPrintingOrg/PantryRaider/main/scripts/install.sh | bash
 ```
 
 Then open **http://YOUR-HOST:9284/setup** and follow the wizard: set a UI password (required by default), add your Grocy and AI provider keys, test, save.
@@ -119,7 +119,7 @@ For each, create an API key/token in that service and paste it into the setup wi
 
 Runs inside Home Assistant with the UI in the sidebar and no separate login - HA handles auth through Ingress.
 
-1. **Settings > Add-ons > Add-on Store**, open the three-dot menu, choose **Repositories**, and add `https://github.com/Syracuse3DPrinting/PantryRaider`.
+1. **Settings > Add-ons > Add-on Store**, open the three-dot menu, choose **Repositories**, and add `https://github.com/Syracuse3DPrintingOrg/PantryRaider`.
 2. Install **Pantry Raider** and start it, then click **Open Web UI**.
 
 Install the community **Grocy** add-on first and point Pantry Raider at it in the wizard. Full details, including low-power AI options: [add-on docs](homeassistant/addon/foodassistant/DOCS.md).
@@ -129,7 +129,7 @@ Install the community **Grocy** add-on first and point Pantry Raider at it in th
 Turn a Raspberry Pi into a dedicated Pantry Raider appliance (optionally with a kiosk display and a Stream Deck). Flash a stock Raspberry Pi OS Lite card with Raspberry Pi Imager (set wifi, hostname, and SSH there), boot, SSH in, and run:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Syracuse3DPrinting/PantryRaider/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Syracuse3DPrintingOrg/PantryRaider/main/install.sh | bash
 ```
 
 The installer detects the board, any attached display, and any Stream Deck, then asks for the deployment mode (full **Pi Hosted** stack, or a thin **Pi Remote** that only drives a kiosk/Stream Deck for a server elsewhere) and which add-ons to enable. Nothing to edit on your PC. Full walkthrough: [docs/hardware/sd-image.md](docs/hardware/sd-image.md).
@@ -182,7 +182,7 @@ For support, turn on **Settings > Security > Debug logging** to raise the log le
 
 ## Home Assistant
 
-**Running Home Assistant OS or Supervised?** Install Pantry Raider as an add-on so it lives in the HA sidebar with no separate login - HA authenticates the UI through Ingress. In HA go to **Settings > Add-ons > Add-on Store**, open the menu, choose Repositories, and add `https://github.com/Syracuse3DPrinting/PantryRaider`, then install Pantry Raider. Full instructions: [homeassistant/addon/foodassistant/DOCS.md](homeassistant/addon/foodassistant/DOCS.md).
+**Running Home Assistant OS or Supervised?** Install Pantry Raider as an add-on so it lives in the HA sidebar with no separate login - HA authenticates the UI through Ingress. In HA go to **Settings > Add-ons > Add-on Store**, open the menu, choose Repositories, and add `https://github.com/Syracuse3DPrintingOrg/PantryRaider`, then install Pantry Raider. Full instructions: [homeassistant/addon/foodassistant/DOCS.md](homeassistant/addon/foodassistant/DOCS.md).
 
 For a **standalone** install, see [homeassistant/README.md](homeassistant/README.md) for REST sensors, automations, and the Lovelace dashboard.
 

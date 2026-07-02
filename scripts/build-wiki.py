@@ -139,7 +139,7 @@ def build(root: Path, out: Path, repo: str, branch: str) -> int:
 def main() -> None:
     ap = argparse.ArgumentParser(description="Build the GitHub wiki from docs.")
     ap.add_argument("--out", default="_wiki", help="output directory")
-    ap.add_argument("--repo", default="Syracuse3DPrinting/PantryRaider",
+    ap.add_argument("--repo", default="Syracuse3DPrintingOrg/PantryRaider",
                     help="owner/name for absolute links")
     ap.add_argument("--branch", default="main", help="branch for absolute links")
     args = ap.parse_args()

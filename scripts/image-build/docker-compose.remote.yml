@@ -21,7 +21,7 @@
 # running on port 80, it skips installing the venv service (FoodAssistant-dhr).
 services:
   service:
-    image: ghcr.io/syracuse3dprinting/foodassistant:${FOODASSISTANT_TAG:-latest}
+    image: ghcr.io/syracuse3dprintingorg/pantryraider:${FOODASSISTANT_TAG:-latest}
     build:
       context: ${REPO_DIR:-/home/foodassistant/FoodAssistant}/service
       dockerfile: Dockerfile

@@ -190,6 +190,22 @@ if [ -f "$COMPOSE_FILE" ] && command -v docker >/dev/null 2>&1; then
     _result 0 "Could not enter $INSTALL_DIR to run the Docker update." "$before" "$after" 0 0 0 0
   fi
 
+  # One-time image migration: the project moved to a GitHub organization, and
+  # the published image with it. A compose file deployed before the move still
+  # pulls the legacy personal-account package, which no longer receives builds,
+  # so rewrite the image reference in place (idempotent: the old string is gone
+  # after the first run). NOTE: this runs from the REFRESHED helper, so a device
+  # updating from the pre-move version needs two Update presses: the first pull
+  # refreshes this script, the second applies the migration and pulls the new
+  # image.
+  if grep -q "ghcr.io/syracuse3dprinting/foodassistant" "$COMPOSE_FILE" 2>/dev/null; then
+    if sed -i "s|ghcr.io/syracuse3dprinting/foodassistant|ghcr.io/syracuse3dprintingorg/pantryraider|g" "$COMPOSE_FILE"; then
+      log "Migrated compose image reference to ghcr.io/syracuse3dprintingorg/pantryraider"
+    else
+      log "WARN: could not rewrite the legacy image reference in $COMPOSE_FILE"
+    fi
+  fi
+
   img_before="$(docker compose images -q service 2>/dev/null | head -n1)"
 
   # Prefer the published image. Fall back to building from the on-device source

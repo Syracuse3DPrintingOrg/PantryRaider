@@ -4,7 +4,7 @@
 # Run this ON the device (a freshly imaged Raspberry Pi, or any Debian/Ubuntu
 # box) over SSH. It asks what you want to install, then provisions only that.
 #
-#   curl -fsSL https://raw.githubusercontent.com/Syracuse3DPrinting/PantryRaider/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/Syracuse3DPrintingOrg/PantryRaider/main/install.sh | bash
 #
 # There is nothing to edit on your PC and no repo to clone on your PC. Flash the
 # card with Raspberry Pi Imager (set wifi/hostname/locale there), boot, SSH in,
@@ -31,7 +31,7 @@
 # without cloning, using sudo, or provisioning (used by the test suite).
 set -euo pipefail
 
-REPO_URL="${REPO_URL:-https://github.com/Syracuse3DPrinting/PantryRaider.git}"
+REPO_URL="${REPO_URL:-https://github.com/Syracuse3DPrintingOrg/PantryRaider.git}"
 REPO_BRANCH="${REPO_BRANCH:-main}"
 # Where the repo is checked out ON THE DEVICE (never on the user's PC).
 REPO_DIR="${REPO_DIR:-/opt/foodassistant-src}"

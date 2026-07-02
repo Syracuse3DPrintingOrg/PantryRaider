@@ -10,7 +10,7 @@ from .defaults import apply_defaults
 
 logger = logging.getLogger(__name__)
 
-OFF_UA = "PantryRaider/1.0 (github.com/Syracuse3DPrinting/PantryRaider)"
+OFF_UA = "PantryRaider/1.0 (github.com/Syracuse3DPrintingOrg/PantryRaider)"
 
 _OFF_CATEGORY_MAP = [
     # (substring to match in categories_tags, our FoodCategory)

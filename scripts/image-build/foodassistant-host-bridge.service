@@ -1,6 +1,6 @@
 [Unit]
 Description=FoodAssistant host bridge
-Documentation=https://github.com/Syracuse3DPrinting/FoodAssistant
+Documentation=https://github.com/Syracuse3DPrintingOrg/PantryRaider
 After=network.target NetworkManager.service
 Wants=NetworkManager.service
 

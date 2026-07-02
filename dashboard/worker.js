@@ -8,7 +8,7 @@
  *   - Changelog: GitHub raw  CHANGELOG.md
  */
 
-const OWNER = "Syracuse3DPrinting";
+const OWNER = "Syracuse3DPrintingOrg";
 const REPO  = "PantryRaider";
 const BRANCHES = ["main", "arch/modular", "ANG-Test", "ANGTEST2"];
 
