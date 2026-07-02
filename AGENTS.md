@@ -217,8 +217,9 @@ import smoke test above. A user-facing change also needs a CHANGELOG entry
 
 ## Authorship and Git
 
-- **All commits are authored by Dan** (`Dan <dm.marafino@gmail.com>`); the
-  repo git config is already set. Never add Co-Authored-By trailers, AI
+- **All commits are authored by Dan's GitHub identity**
+  (`Syracuse3DPrinting <dm.marafino@gmail.com>`); the repo git config is
+  already set, do not change it. Never add Co-Authored-By trailers, AI
   attributions, or session links to commit messages.
 - Development happens on **`main`** directly.
 - GitHub interactions in cloud sessions go through the GitHub MCP
