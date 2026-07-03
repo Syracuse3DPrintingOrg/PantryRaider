@@ -1127,6 +1127,19 @@
             <p class="text-secondary small">Backend settings and expiry defaults are managed on the main server and mirrored here read-only. Edit them there, then Sync. This device keeps its own display, Stream Deck, and security settings.</p>
           </div>
 
+          {% if s.hosted_stack_parked %}
+          <div class="section-card">
+            <div class="section-title"><i class="bi bi-box-arrow-in-left text-warning"></i> Return to full stack</div>
+            <p class="text-secondary small">This appliance used to run its own inventory stack, and that stack is
+              still on the device, paused, with all its data. Switching back starts it again, disconnects from the
+              main server, and restores the inventory, recipe, and AI settings this device had before the switch.</p>
+            <button class="btn btn-outline-warning btn-sm" id="switch-hosted-btn" onclick="switchToHosted(this)">
+              <i class="bi bi-box-arrow-in-left me-1"></i>Switch back to full stack
+            </button>
+            <div class="test-result mt-2" id="switch-hosted-result"></div>
+          </div>
+          {% endif %}
+
           <button type="button" class="btn btn-outline-info btn-sm" onclick="savePaneUpstream(this)">
             <i class="bi bi-check-lg me-1"></i>Save Main Server
           </button>
@@ -2417,6 +2430,38 @@ docker compose up -d</code></pre>
             {% endif %}
             <span class="test-result ms-1" id="auto-update-result"></span>
           </div>
+
+          {% if s.deployment_mode == 'pi_hosted' %}
+          <div class="section-card">
+            <div class="section-title"><i class="bi bi-hdd-network text-warning"></i> Run as a satellite</div>
+            <p class="text-secondary small">Point this appliance at another Pantry Raider server and it becomes a
+              satellite: the screen and Stream Deck keep working, but inventory, recipes, and AI settings come from
+              that server. The local Grocy{% if s.mealie_base_url %} and Mealie{% endif %} stop running, and
+              <strong>all inventory data stays on this device</strong>, so you can switch back at any time and pick up
+              exactly where you left off.</p>
+            <div class="mb-2">
+              <label class="form-label">Main server URL</label>
+              <div class="input-group" style="max-width:520px">
+                <input type="url" class="form-control" id="switch_server_url"
+                       placeholder="http://192.168.1.10:9284" value="{{ s.remote_server_url or '' }}">
+                <button class="btn btn-outline-secondary btn-sm" type="button"
+                        onclick="scanLanForServer('switch_server_url', 'switch-scan-result')">
+                  <i class="bi bi-search me-1"></i>Scan LAN
+                </button>
+              </div>
+              <div id="switch-scan-result" class="small mt-1"></div>
+            </div>
+            <div class="mb-3" style="max-width:520px">
+              <label class="form-label">Main server API key</label>
+              <input type="text" class="form-control font-monospace" id="switch_upstream_api_key"
+                     placeholder="the API key from that server's Settings, under Security" autocomplete="off">
+            </div>
+            <button class="btn btn-outline-warning btn-sm" id="switch-satellite-btn" onclick="switchToSatellite(this)">
+              <i class="bi bi-hdd-network me-1"></i>Switch to satellite mode
+            </button>
+            <div class="test-result mt-2" id="switch-satellite-result"></div>
+          </div>
+          {% endif %}
 
           <div class="section-card">
             <div class="section-title"><i class="bi bi-clock text-info"></i> Date &amp; time</div>
@@ -5215,6 +5260,62 @@ async function syncFromUpstream() {
     for (const el of [out, now]) {
       if (el) { el.className = 'test-result text-danger'; el.textContent = String(e); }
     }
+  }
+}
+
+// One-image mode switch (FoodAssistant-dzx9): a Pi Hosted appliance becomes a
+// satellite of another server (local stack paused, data kept), or switches back.
+async function switchToSatellite(btn) {
+  const out = document.getElementById('switch-satellite-result');
+  const url = (val('switch_server_url') || '').trim();
+  const key = (val('switch_upstream_api_key') || '').trim();
+  if (!url) { out.className = 'test-result text-danger'; out.textContent = 'Enter the main server URL first.'; return; }
+  if (!key) { out.className = 'test-result text-danger'; out.textContent = "Enter the main server's API key first."; return; }
+  if (!confirm('Switch this appliance to satellite mode?\n\n' +
+      'It will follow the server at ' + url + ' for inventory, recipes, and AI settings. ' +
+      'The local Grocy and Mealie stop running, but every bit of their data stays on this device. ' +
+      'You can switch back from this Settings page at any time.')) return;
+  btn.disabled = true;
+  out.className = 'test-result text-secondary';
+  out.textContent = 'Checking the server, stopping the local stack, and syncing… this can take a minute.';
+  try {
+    const r = await fetch('setup/deployment/to-satellite', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({remote_server_url: url, upstream_api_key: key}),
+    });
+    const d = await r.json();
+    out.className = 'test-result ' + (d.ok ? 'text-success' : 'text-danger');
+    out.textContent = d.ok ? (d.message + ' Reloading…') : (d.error || 'The switch failed.');
+    if (d.ok) setTimeout(() => location.reload(), 2500);
+    else btn.disabled = false;
+  } catch (e) {
+    out.className = 'test-result text-danger';
+    out.textContent = String(e);
+    btn.disabled = false;
+  }
+}
+
+async function switchToHosted(btn) {
+  const out = document.getElementById('switch-hosted-result');
+  if (!confirm('Switch this device back to running its own full stack?\n\n' +
+      'The paused local Grocy and Mealie start again with all the data they had, ' +
+      'this device stops following the main server, and its previous inventory, ' +
+      'recipe, and AI settings are restored.')) return;
+  btn.disabled = true;
+  out.className = 'test-result text-secondary';
+  out.textContent = 'Starting the local stack… this can take a minute.';
+  try {
+    const r = await fetch('setup/deployment/to-hosted', {method: 'POST'});
+    const d = await r.json();
+    out.className = 'test-result ' + (d.ok ? 'text-success' : 'text-danger');
+    out.textContent = d.ok ? (d.message + ' Reloading…') : (d.error || 'The switch failed.');
+    if (d.ok) setTimeout(() => location.reload(), 2500);
+    else btn.disabled = false;
+  } catch (e) {
+    out.className = 'test-result text-danger';
+    out.textContent = String(e);
+    btn.disabled = false;
   }
 }
 

@@ -354,6 +354,153 @@ async def satellite_sync(payload: SatelliteSyncPayload):
     }
 
 
+# --- One-image mode switch (FoodAssistant-dzx9) ----------------------------
+# A pi_hosted appliance can stand down its local Grocy/Mealie stack and run as
+# a satellite of another server, and later switch back, without reflashing.
+# The pure decision/settings logic lives in services/deployment_switch.py; the
+# container stop/start is done by the host bridge (root). Nothing is deleted
+# either way: the local inventory data stays on the device.
+
+class SwitchToSatellitePayload(BaseModel):
+    remote_server_url: str = ""
+    upstream_api_key: str = ""
+
+
+def _ensure_satellite_sync_task(request: Request) -> None:
+    """Start the periodic satellite sync task after a runtime mode flip.
+
+    The lifespan hook only starts it when the app BOOTS as a satellite, so a
+    device switched at runtime needs it started here. Idempotent: an already
+    running task is left alone.
+    """
+    from ..main import _periodic_satellite_sync
+    task = getattr(request.app.state, "sync_task", None)
+    if task is None or task.done():
+        request.app.state.sync_task = asyncio.create_task(_periodic_satellite_sync())
+
+
+@router.post("/deployment/to-satellite")
+async def switch_to_satellite(payload: SwitchToSatellitePayload, request: Request):
+    """Switch this pi_hosted appliance to satellite duty.
+
+    Order matters for safety: validate everything and prove the main server
+    accepts the key FIRST (nothing changed on failure), then park the local
+    stack via the bridge, then flip the mode and pull the server's config. The
+    pre-switch backend config is snapshotted so Switch Back restores it.
+    """
+    from ..services import deployment_switch as ds
+
+    ok, err = ds.can_switch_to_satellite(settings.deployment_mode)
+    if not ok:
+        return {"ok": False, "error": err}
+    ok, url_or_err = ds.validate_server_url(payload.remote_server_url)
+    if not ok:
+        return {"ok": False, "error": url_or_err}
+    url = url_or_err
+    key = payload.upstream_api_key or ""
+    if not key or key == _CLEAR:
+        key = settings.upstream_api_key or ""
+    if not key:
+        return {"ok": False, "error": "The main server's API key is required."}
+
+    # Prove the link works before touching anything: the same endpoint the
+    # satellite sync uses, with the same key.
+    try:
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            r = await client.get(f"{url}/api/config/satellite",
+                                 headers={"X-API-Key": key})
+        if r.status_code == 401:
+            return {"ok": False, "error":
+                    "The server rejected the API key. Copy it from the main "
+                    "server's Settings under Security."}
+        if r.status_code != 200:
+            return {"ok": False, "error": f"The server answered HTTP {r.status_code}. "
+                                          "Check the URL points at Pantry Raider."}
+    except Exception as e:
+        return {"ok": False, "error": f"Could not reach the server: {_safe_error(e, key)}"}
+
+    # Snapshot the local backend config before the satellite sync overwrites it.
+    snapshot = ds.hosted_snapshot(
+        {f: getattr(settings, f, None) for f in SATELLITE_PULL_FIELDS})
+
+    # Park the local stack (bridge, root). On failure nothing has changed yet.
+    try:
+        async with httpx.AsyncClient(timeout=310.0) as client:
+            r = await client.post(f"{_HOST_BRIDGE}/stack/standdown")
+        body = r.json()
+        if r.status_code != 200 or not body.get("ok"):
+            return {"ok": False, "error": body.get(
+                "error", "The local stack could not be stopped.")}
+    except Exception as e:
+        return {"ok": False, "error": f"Could not reach the device helper "
+                                      f"to stop the local stack: {_safe_error(e, key)}"}
+
+    settings.save(ds.satellite_switch_settings(url, key, snapshot))
+
+    # First pull from the new main server, then keep syncing periodically.
+    from ..services.satellite import sync_from_upstream
+    result = await run_in_threadpool(sync_from_upstream)
+    _ensure_satellite_sync_task(request)
+    reset_providers()
+
+    if result.get("ok"):
+        return {"ok": True, "message":
+                "This device is now a satellite. It pulled "
+                f"{len(result.get('applied', []))} settings from the main "
+                "server, and the local inventory stack is stopped with its "
+                "data kept on this device."}
+    return {"ok": True, "message":
+            "This device is now a satellite and the local stack is stopped, "
+            "but the first sync from the server failed: "
+            f"{result.get('error', 'unknown error')}. It will retry "
+            "automatically; you can also use Sync Now in Main Server settings."}
+
+
+@router.post("/deployment/to-hosted")
+async def switch_to_hosted(request: Request):
+    """Switch a parked appliance back to running its own full stack.
+
+    Only available on a device that was switched with the control above (a
+    device flashed as a plain Pi Remote has no local stack and is refused).
+    Starts the parked containers, then restores the snapshotted backend config.
+    """
+    from ..services import deployment_switch as ds
+
+    ok, err = ds.can_switch_back(settings.deployment_mode,
+                                 bool(settings.hosted_stack_parked))
+    if not ok:
+        return {"ok": False, "error": err}
+
+    try:
+        async with httpx.AsyncClient(timeout=610.0) as client:
+            r = await client.post(f"{_HOST_BRIDGE}/stack/standup")
+        body = r.json()
+        if r.status_code != 200 or not body.get("ok"):
+            return {"ok": False, "error": body.get(
+                "error", "The local stack could not be started.")}
+    except Exception as e:
+        return {"ok": False, "error": f"Could not reach the device helper "
+                                      f"to start the local stack: {_safe_error(e)}"}
+
+    snapshot = settings.hosted_config_snapshot \
+        if isinstance(settings.hosted_config_snapshot, dict) else {}
+    settings.save(ds.hosted_restore_settings(snapshot))
+    # The backend panes are editable again: nothing is server-sourced now.
+    object.__setattr__(settings, "server_sourced_fields", set())
+    reset_providers()
+
+    # Stop mirroring the old main server.
+    task = getattr(request.app.state, "sync_task", None)
+    if task is not None:
+        task.cancel()
+        request.app.state.sync_task = None
+
+    return {"ok": True, "message":
+            "This device is running its own inventory stack again. Grocy "
+            "(and Mealie, if it was enabled) may take a minute to finish "
+            "starting."}
+
+
 class TestProviderPayload(BaseModel):
     provider: str
     api_key: str = ""

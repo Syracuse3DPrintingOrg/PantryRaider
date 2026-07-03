@@ -1082,3 +1082,78 @@ def test_resume_gives_up_when_docker_never_answers(monkeypatch):
     monkeypatch.setattr(bridge.subprocess, "run", fake_run)
     assert bridge._resume_mealie_install(retries=3, delay=0, sleep=lambda _: None) is False
     assert len(calls) == 3
+
+
+# --- One-image mode switch: park / resume the local stack (FoodAssistant-dzx9)
+
+_APPLIANCE_COMPOSE = """\
+services:
+  service:
+    image: ghcr.io/syracuse3dprintingorg/pantryraider:latest
+  grocy:
+    image: lscr.io/linuxserver/grocy:4.6.0
+  mealie:
+    image: ghcr.io/mealie-recipes/mealie:v3.19.2
+    profiles: ["with-mealie"]
+  ollama:
+    image: ollama/ollama:0.30.8
+    profiles: ["with-ollama"]
+"""
+
+_REMOTE_COMPOSE = """\
+services:
+  service:
+    image: ghcr.io/syracuse3dprintingorg/pantryraider:latest
+    ports:
+      - "80:9284"
+"""
+
+
+def test_compose_backend_services_appliance():
+    assert bridge._compose_backend_services(_APPLIANCE_COMPOSE) == [
+        "grocy", "mealie", "ollama"]
+
+
+def test_compose_backend_services_never_includes_the_app_itself():
+    assert "service" not in bridge._compose_backend_services(_APPLIANCE_COMPOSE)
+
+
+def test_compose_backend_services_remote_compose_is_empty():
+    # The Pi Remote compose defines no backend services, so a device flashed as
+    # a plain satellite is never treated as a parked hosted stack.
+    assert bridge._compose_backend_services(_REMOTE_COMPOSE) == []
+
+
+def test_compose_backend_services_empty_and_missing_text():
+    assert bridge._compose_backend_services("") == []
+    assert bridge._compose_backend_services(None) == []
+
+
+def test_compose_backend_services_ignores_deeper_mentions():
+    # A grocy mention that is not a two-space service key (e.g. a volume path
+    # or comment) must not count as a service.
+    text = "services:\n  service:\n    volumes:\n      - ./grocy:/config\n# grocy: notes\n"
+    assert bridge._compose_backend_services(text) == []
+
+
+def test_stack_stop_cmd_enables_all_profiles():
+    cmd = bridge._stack_stop_cmd(["grocy", "mealie"])
+    assert cmd[:2] == ["docker", "compose"]
+    assert "--profile" in cmd and "with-mealie" in cmd and "with-ollama" in cmd
+    assert cmd[-3:] == ["stop", "grocy", "mealie"]
+
+
+def test_stack_up_cmd_is_a_plain_up():
+    # Profiles come from the persisted COMPOSE_PROFILES in the stack's .env, so
+    # up must not force them: an appliance without Mealie must not gain it.
+    assert bridge._stack_up_cmd() == ["docker", "compose", "up", "-d"]
+
+
+def test_read_stack_compose_missing_file(tmp_path):
+    assert bridge._read_stack_compose(str(tmp_path / "nope.yml")) == ""
+
+
+def test_read_stack_compose_reads_text(tmp_path):
+    p = tmp_path / "docker-compose.yml"
+    p.write_text(_APPLIANCE_COMPOSE)
+    assert bridge._read_stack_compose(str(p)) == _APPLIANCE_COMPOSE

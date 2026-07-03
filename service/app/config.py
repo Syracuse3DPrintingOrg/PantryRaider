@@ -12,7 +12,7 @@ from .hardware import is_raspberry_pi
 
 # Single source of truth for the app version (shown in the UI, used by the
 # update checker, and reported by FastAPI). Bump on each tagged release.
-APP_VERSION = "0.7.75"
+APP_VERSION = "0.7.76"
 
 # Single source of truth for the product's display name. The runtime identifiers
 # (systemd units, install paths, the foodassistant_streamdeck package, the
@@ -377,6 +377,7 @@ _SAVEABLE = [
     "update_last_checked", "update_last_latest", "update_last_available",
     "deployment_mode", "remote_server_url", "remote_server_ip", "remote_server_host", "upstream_api_key", "kiosk_pin", "kiosk_readonly_when_locked",
     "satellite_sync_minutes", "satellite_last_sync", "device_id",
+    "hosted_stack_parked", "hosted_config_snapshot",
     "secret_key", "auth_password", "totp_secret", "api_key", "extra_api_keys", "auth_required",
     "rclone_remote", "rclone_schedule_hours",
     "tunnel_mode", "tunnel_token", "tunnel_url",
@@ -535,6 +536,9 @@ SECRET_SETTING_KEYS = [
     "themealdb_api_key", "spoonacular_api_key",
     "auth_password", "totp_secret", "api_key", "extra_api_keys", "secret_key", "kiosk_pin",
     "streamdeck_ha_token",
+    # The parked-stack snapshot holds pre-switch copies of several keys above
+    # (Grocy/Mealie/AI), so it is a secret as a whole (FoodAssistant-dzx9).
+    "hosted_config_snapshot",
 ]
 
 _DEFAULT_GROCY_URL = "http://grocy:80"
@@ -1031,6 +1035,16 @@ class Settings(BaseSettings):
     def pin_lock_active(self) -> bool:
         """True when the numeric kiosk PIN should gate the UI (satellite only)."""
         return self.is_satellite() and bool(self.kiosk_pin)
+
+    # Set when a pi_hosted appliance is switched to satellite duty in Settings
+    # (FoodAssistant-dzx9): its local Grocy/Mealie containers are stopped (data
+    # kept on disk) and the mode flips to pi_remote. The flag is what allows the
+    # symmetric "return to full stack" control; a device flashed as a plain
+    # satellite never has it. The snapshot holds the pre-switch values of the
+    # backend fields the satellite sync overwrites (SATELLITE_PULL_FIELDS), so
+    # switching back restores the local stack's config exactly.
+    hosted_stack_parked: bool = False
+    hosted_config_snapshot: dict = {}
 
     # Satellite only: how often to re-pull backend config from the main server,
     # in minutes. 0 disables the periodic refresh (boot + manual sync only).

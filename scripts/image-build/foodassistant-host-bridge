@@ -33,6 +33,9 @@ POST /kiosk/install        provision the kiosk service (display attached later)
 POST /streamdeck/install   provision the Stream Deck service (attached later)
 GET  /ap/status            whether the fallback AP is active {active: bool}
 POST /ap/disable           stop hostapd+dnsmasq and remove the AP flag file
+GET  /stack/status         local backend stack presence + per-container run state
+POST /stack/standdown      stop the local backend containers (grocy/mealie/ollama); data kept
+POST /stack/standup        start the parked local backend containers again
 POST /update               git pull + redeploy app and Stream Deck + restart (Pi Remote OTA)
 POST /reboot               reboot the host (systemctl reboot, or reboot as fallback)
 POST /restore              full-stack snapshot restore (stop stack, swap data, restart)  {source}
@@ -631,6 +634,83 @@ def _resume_mealie_install(retries=30, delay=10, sleep=time.sleep):
         return False
     _launch_mealie_install()
     return True
+
+
+# --- One-image mode switch: park / resume the local stack (FoodAssistant-dzx9)
+# A pi_hosted appliance can be switched to satellite duty from Settings: the
+# app flips its own deployment_mode and asks the bridge to stop the local
+# backend containers. Stopping (never removing) is deliberate: the Grocy and
+# Mealie data directories stay on the SD card, and because the appliance
+# compose file uses restart: unless-stopped, a manually stopped container
+# stays stopped across reboots with no unit changes. Switching back is a plain
+# `docker compose up -d` (the persisted COMPOSE_PROFILES in the stack's .env
+# brings back exactly the services that were enabled before).
+#
+# The app container itself is never touched here: it keeps serving the kiosk
+# and, in satellite mode, pulls its config from the main server.
+
+# Backend services the switch parks. The app's own `service` container is
+# excluded on purpose: it must keep running in both modes.
+_STACK_BACKEND_SERVICES = ("grocy", "mealie", "ollama")
+
+
+def _compose_backend_services(compose_text):
+    """Backend service names defined in a compose file's services block.
+
+    Matches the two-space-indented `grocy:` / `mealie:` / `ollama:` service
+    keys of the appliance compose file. The Pi Remote compose defines none of
+    them, so an empty result means this device never hosted a local stack and
+    the stand-down/stand-up endpoints must refuse to act. Pure, for tests.
+    """
+    found = []
+    for name in _STACK_BACKEND_SERVICES:
+        if re.search(r"^  %s:" % name, compose_text or "", re.M):
+            found.append(name)
+    return found
+
+
+def _stack_stop_cmd(services):
+    """The docker compose argv that stops the given backend services.
+
+    Every optional profile is enabled explicitly so compose recognizes the
+    profile-gated services (mealie/ollama) even when the profile is not in the
+    stack's .env; stopping a service whose container was never created is a
+    no-op. Pure, for tests.
+    """
+    return ["docker", "compose", "--profile", "with-mealie",
+            "--profile", "with-ollama", "stop"] + list(services)
+
+
+def _stack_up_cmd():
+    """The docker compose argv that resumes the parked stack.
+
+    A plain `up -d`: the COMPOSE_PROFILES persisted in the stack's .env decides
+    which optional services come back, so an appliance that ran Mealie gets
+    Mealie again and one that never enabled it does not. Pure, for tests.
+    """
+    return ["docker", "compose", "up", "-d"]
+
+
+def _read_stack_compose(path=None):
+    """The deployed compose file's text, or "" when it does not exist."""
+    p = path or os.path.join(INSTALL_DIR, "docker-compose.yml")
+    try:
+        with open(p) as f:
+            return f.read()
+    except OSError:
+        return ""
+
+
+def _container_running(name):
+    """True when the named container exists and is running."""
+    try:
+        r = subprocess.run(
+            ["docker", "inspect", "-f", "{{.State.Running}}", name],
+            capture_output=True, text=True, timeout=10,
+        )
+        return r.returncode == 0 and r.stdout.strip() == "true"
+    except Exception:
+        return False
 
 
 # --- Full-stack restore source handling (FoodAssistant-h18b) --------------
@@ -1377,6 +1457,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._ap_status()
         elif self.path == "/activity":
             self._activity_get()
+        elif self.path == "/stack/status":
+            self._stack_status()
         else:
             self._send(404, {"error": "not found"})
 
@@ -1417,6 +1499,10 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._reboot()
         elif self.path == "/restore":
             self._restore()
+        elif self.path == "/stack/standdown":
+            self._stack_standdown()
+        elif self.path == "/stack/standup":
+            self._stack_standup()
         elif self.path == "/activity":
             self._activity_post()
         elif self.path == "/display/blank":
@@ -2135,6 +2221,80 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         try:
             subprocess.Popen(cmd)
             self._send(200, {"ok": True, "rebooting": True})
+        except Exception as e:
+            self._send(500, {"ok": False, "error": str(e)})
+
+    # --- One-image mode switch (FoodAssistant-dzx9) ------------------------
+
+    def _stack_status(self):
+        """Whether this device carries a local backend stack, and its state.
+
+        hosted_stack is True when the deployed compose file defines the backend
+        services (the appliance layout). A device flashed as a Pi Remote has no
+        such compose file (or the remote one, which defines none), so the switch
+        endpoints below can never act on it.
+        """
+        try:
+            services = _compose_backend_services(_read_stack_compose())
+            self._send(200, {
+                "ok": True,
+                "hosted_stack": bool(services),
+                "services": {
+                    name: _container_running("foodassistant-%s" % name)
+                    for name in services
+                },
+            })
+        except Exception as e:
+            self._send(500, {"ok": False, "error": str(e)})
+
+    def _stack_standdown(self):
+        """Stop the local backend containers so the device can act as a
+        satellite. Containers and data directories are kept, never removed, so
+        the stack can be resumed later exactly as it was. Idempotent: stopping
+        an already-stopped (or never-created) service is a no-op.
+        """
+        services = _compose_backend_services(_read_stack_compose())
+        if not services:
+            self._send(400, {"ok": False, "error":
+                "This device has no local inventory stack to stand down."})
+            return
+        try:
+            r = subprocess.run(
+                _stack_stop_cmd(services), cwd=INSTALL_DIR, env=_compose_env(),
+                capture_output=True, text=True, timeout=300,
+            )
+            if r.returncode != 0:
+                self._send(500, {"ok": False, "error": (r.stderr or r.stdout).strip()})
+                return
+            self._send(200, {"ok": True, "stopped": services})
+        except subprocess.TimeoutExpired:
+            self._send(500, {"ok": False, "error": "stopping the local stack timed out"})
+        except Exception as e:
+            self._send(500, {"ok": False, "error": str(e)})
+
+    def _stack_standup(self):
+        """Start the parked local backend stack again (the switch back).
+
+        A plain compose up from the install dir: the persisted COMPOSE_PROFILES
+        restores exactly the optional services (Mealie/Ollama) that were enabled
+        before the stand-down. Idempotent: running services are left alone.
+        """
+        services = _compose_backend_services(_read_stack_compose())
+        if not services:
+            self._send(400, {"ok": False, "error":
+                "This device has no parked local stack to start."})
+            return
+        try:
+            r = subprocess.run(
+                _stack_up_cmd(), cwd=INSTALL_DIR, env=_compose_env(),
+                capture_output=True, text=True, timeout=600,
+            )
+            if r.returncode != 0:
+                self._send(500, {"ok": False, "error": (r.stderr or r.stdout).strip()})
+                return
+            self._send(200, {"ok": True, "started": services})
+        except subprocess.TimeoutExpired:
+            self._send(500, {"ok": False, "error": "starting the local stack timed out"})
         except Exception as e:
             self._send(500, {"ok": False, "error": str(e)})
 

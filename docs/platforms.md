@@ -27,6 +27,21 @@ defined in `service/app/config.py`:
   (via a Python venv, or optionally Docker) and pulls its backend config from the
   main server. This is what makes a low-spec board like a Pi Zero useful.
 
+### Switching a Pi Hosted appliance to satellite duty
+
+A `pi_hosted` appliance can later become a satellite of a bigger server without
+reflashing. In Settings under Backup & Updates, "Run as a satellite" takes the
+main server's URL and API key, pauses the local Grocy and Mealie containers
+(their data stays on the SD card, nothing is deleted), and flips the device to
+`pi_remote`: the kiosk and Stream Deck keep working, now backed by the main
+server's inventory and settings.
+
+The switch is reversible. On a switched device the Main Server settings pane
+gains "Switch back to full stack", which starts the paused containers again
+and restores the backend settings the device had before the switch, inventory
+data intact. A device that was flashed as a plain Pi Remote has no local stack
+and is never offered the switch back.
+
 For exactly which settings are editable, inherited from the server, or
 device-local in each mode, see the [Settings visibility matrix](settings-matrix.md).
 

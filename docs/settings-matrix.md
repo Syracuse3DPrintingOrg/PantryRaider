@@ -221,11 +221,22 @@ The upstream link fields apply only on a Pi Remote.
 | `kiosk_readonly_when_locked` | | Not applicable | Not applicable | Editable (satellite-only) |
 | `satellite_sync_minutes` | | Not applicable | Not applicable | Editable (satellite-only) |
 | `satellite_last_sync` | | Not applicable | Not applicable | Written automatically (satellite-only) |
+| `hosted_stack_parked` | | Not applicable | Written automatically | Written automatically |
+| `hosted_config_snapshot` | Secret | Not applicable | Written automatically | Written automatically |
 | `device_id` | | Auto-generated | Auto-generated | Auto-generated |
 
 `device_id` is generated once on first run on every mode and persisted so the
 device keeps a stable identity. `remote_server_ip`, `remote_server_host`, and
 `satellite_last_sync` are written by the sync process, not edited by hand.
+
+`hosted_stack_parked` and `hosted_config_snapshot` back the mode switch on a Pi
+Hosted appliance (Settings, Backup & Updates, "Run as a satellite"). Switching
+pauses the local Grocy/Mealie containers (data kept on the device), snapshots
+the backend settings the satellite sync will overwrite, and flips the mode to
+`pi_remote`. On a switched device the Main Server pane offers "Switch back to
+full stack", which restarts the paused stack and restores the snapshot. A
+device flashed as a plain Pi Remote never has either field set and cannot be
+switched to hosting.
 
 ## Authentication and security
 
