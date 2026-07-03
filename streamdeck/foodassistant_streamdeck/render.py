@@ -1087,6 +1087,126 @@ def screensaver_logo_box(
     return (px, py, pw, ph)
 
 
+def screensaver_pill_boxes(
+    pills,
+    band: float,
+    layout: str,
+    full_w: int,
+    full_h: int,
+) -> list[tuple[float, float, float, float, str]]:
+    """Map the state channel's finished-timer pills onto deck pixels.
+
+    ``pills`` is the "pills" list from the screensaver state (dicts with x, y,
+    w, h in the same panel-normalized space as the logo box, a ``done`` flag,
+    and the food ``icon`` character). Only done pills are kept (the deck face
+    pulses the finished-alarm colours, which would misread on a running
+    timer), each mapped with the exact geometry the logo uses so a pill
+    crosses the seam at the same physical scale. Returns (x, y, w, h, icon)
+    tuples in deck full-canvas pixels for the pills that overlap the deck;
+    defensive against malformed input, never raises.
+    """
+    out: list[tuple[float, float, float, float, str]] = []
+    if not isinstance(pills, (list, tuple)):
+        return out
+    for p in pills:
+        if not isinstance(p, dict) or not p.get("done"):
+            continue
+
+        def _num(key: str) -> float:
+            v = p.get(key, 0.0)
+            return float(v) if isinstance(v, (int, float)) else 0.0
+
+        box = screensaver_logo_box(
+            _num("x"), _num("y"), _num("w"), _num("h"),
+            band, layout, full_w, full_h,
+        )
+        if box is None:
+            continue
+        out.append((box[0], box[1], box[2], box[3], str(p.get("icon") or "")))
+    return out
+
+
+# Finished-pill face colours, matched to the panel's ss-timer-pulse keyframes
+# (red #a4231b at the ends, amber #b36a00 in the middle) and its warm border.
+# The deck's 2s frame cadence makes true animation moot, so the face simply
+# alternates between the two fills keyed on time (the ``phase`` argument).
+_PILL_RED = (164, 35, 27)
+_PILL_AMBER = (179, 106, 0)
+_PILL_BORDER = (255, 200, 120)
+
+
+@lru_cache(maxsize=64)
+def _glyph_drawable(ch: str, size: int) -> bool:
+    """True when the label font really covers ``ch``.
+
+    Most food emoji sit outside DejaVu's coverage and would rasterise as the
+    .notdef tofu box; comparing the rendered mask against a guaranteed-unmapped
+    noncharacter detects that without a font-table dependency."""
+    font = _font(size)
+    if not isinstance(font, ImageFont.FreeTypeFont):
+        return False
+    try:
+        ref = font.getmask("\U000FFFFE")  # a noncharacter: always .notdef
+        got = font.getmask(ch)
+        return got.size != ref.size or got.tobytes() != ref.tobytes()
+    except Exception:  # noqa: BLE001 - an odd glyph just falls back
+        return False
+
+
+@lru_cache(maxsize=16)
+def _pill_face(w: int, h: int, icon: str, phase: int) -> Image.Image:
+    """Pre-render one finished-timer pill face at ``w`` x ``h`` deck pixels.
+
+    A rounded pill in the panel's done-pulse colours (``phase`` 0 red, 1
+    amber) with the food icon and a "Done" readout in white. The icon is drawn
+    as text when the font covers it; otherwise the bundled alarm emoji stands
+    in, and with no room for either the pill reads just "Done". Cached (a
+    timer's mapped size is stable frame to frame), so the 2s saver loop only
+    pays for the paste. Returns RGBA so the rounded corners composite cleanly
+    over the dark frame or the logo.
+    """
+    w = max(2, int(w))
+    h = max(2, int(h))
+    img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+    fill = _PILL_AMBER if phase % 2 else _PILL_RED
+    radius = h // 2
+    draw.rounded_rectangle(
+        [0, 0, w - 1, h - 1], radius=radius,
+        fill=fill + (255,), outline=_PILL_BORDER + (255,),
+        width=max(1, h // 24),
+    )
+
+    avail = max(1, w - 2 * radius)
+    size_px = max(8, int(h * 0.45))
+    glyph = icon.replace("\ufe0f", "").strip()  # drop the variation selector
+    label = "Done"
+    if glyph and _glyph_drawable(glyph, size_px):
+        label = f"{glyph} Done"
+        glyph = ""  # drawn inline; no image fallback needed
+    font = _fit_font(draw, label, size_px, avail, floor=8)
+    box = draw.textbbox((0, 0), label, font=font)
+    tw, th = box[2] - box[0], box[3] - box[1]
+    tx = (w - tw) / 2 - box[0]
+    ty = (h - th) / 2 - box[1]
+
+    if glyph:
+        # Font lacks the food glyph: the bundled alarm emoji stands in when
+        # the pill has room for it beside the text.
+        icon_img = _emoji_image("alarm", max(4, int(h * 0.55)))
+        if icon_img is not None:
+            gap = max(2, h // 10)
+            total = icon_img.width + gap + tw
+            if total <= avail:
+                ix = int((w - total) / 2)
+                img.alpha_composite(
+                    icon_img, (ix, (h - icon_img.height) // 2)
+                )
+                tx = ix + icon_img.width + gap - box[0]
+    draw.text((tx, ty), label, font=font, fill=(255, 255, 255))
+    return img
+
+
 def screensaver_tiles(
     rows: int,
     cols: int,
@@ -1094,6 +1214,8 @@ def screensaver_tiles(
     box: tuple[float, float, float, float] | None,
     spacing: int = 0,
     logo_path: "Path | str | None" = None,
+    pills=(),
+    phase: int = 0,
 ) -> list["Image.Image"]:
     """Per-key tiles of the screensaver frame: the brand mark at ``box``.
 
@@ -1103,6 +1225,11 @@ def screensaver_tiles(
     the whole key area and sliced with the same spacing-aware geometry as the
     boot splash, row-major. Pure and defensive: a missing or unreadable logo
     asset degrades to the dark frame rather than raising.
+
+    ``pills`` is the finished-timer pill list from ``screensaver_pill_boxes``
+    ((x, y, w, h, icon) in the same full-canvas pixels); each is composited
+    after (so over) the logo, in the done-pulse colour picked by ``phase``
+    (FoodAssistant-07ee). Keys neither slice touches stay dark.
     """
     kw, kh = key_size
     rows = max(0, int(rows))
@@ -1130,4 +1257,17 @@ def screensaver_tiles(
             # paste() clips a partially off-canvas mark, which is exactly the
             # sliding-onto-the-deck effect.
             canvas.paste(logo, (round(bx), round(by)), logo)
+    for pill in pills or ():
+        try:
+            px, py, pw, ph = (float(pill[0]), float(pill[1]),
+                              float(pill[2]), float(pill[3]))
+            icon = str(pill[4]) if len(pill) > 4 else ""
+        except (TypeError, ValueError, IndexError):
+            continue
+        if pw < 2 or ph < 2:
+            continue
+        # The face is cached by size/icon/phase, so the 2s loop just pastes;
+        # a pill straddling the canvas edge clips the same way the mark does.
+        face = _pill_face(round(pw), round(ph), icon, int(phase) % 2)
+        canvas.paste(face, (round(px), round(py)), face)
     return slice_full_image(canvas, rows, cols, key_size, spacing)

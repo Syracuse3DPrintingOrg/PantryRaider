@@ -658,6 +658,7 @@ async def screensaver_state_post(request: Request):
         x=_num("x"), y=_num("y"), w=_num("w"), h=_num("h"),
         band=_num("band"),
         layout=str(body.get("layout") or "off"),
+        pills=body.get("pills"),
     )
     return {"ok": True, **result}
 

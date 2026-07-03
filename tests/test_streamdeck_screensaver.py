@@ -157,3 +157,94 @@ def test_missing_logo_asset_degrades_to_dark_frame(tmp_path):
 def test_degenerate_grid_returns_empty():
     assert render.screensaver_tiles(0, 5, (72, 72), None) == []
     assert render.screensaver_tiles(3, 5, (0, 72), None) == []
+
+
+# -- finished timer pills cross into the band (FoodAssistant-07ee) -------------
+
+
+def _pill(x, y, w=0.2, h=0.08, done=True, icon="\U0001F35D", **extra):
+    return {"id": "t1", "x": x, "y": y, "w": w, "h": h,
+            "done": done, "icon": icon, **extra}
+
+
+def test_pill_boxes_map_with_the_logo_geometry():
+    # A done pill and the logo at the same normalized box land on the same
+    # deck pixels: one mapping, one physical scale across the seam.
+    pills = render.screensaver_pill_boxes(
+        [_pill(0.4, 1.05, 0.2, 0.1)], 0.3, "below", FULL_W, FULL_H)
+    logo = render.screensaver_logo_box(
+        0.4, 1.05, 0.2, 0.1, 0.3, "below", FULL_W, FULL_H)
+    assert len(pills) == 1
+    assert pills[0][:4] == logo
+    assert pills[0][4] == "\U0001F35D"
+
+
+def test_pill_boxes_keep_only_done_pills_that_overlap():
+    pills = [
+        _pill(0.4, 1.05),                 # done, in the band: kept
+        _pill(0.1, 1.05, done=False),     # running: never drawn on the deck
+        _pill(0.4, 0.5),                  # done but still on the panel
+    ]
+    out = render.screensaver_pill_boxes(pills, 0.3, "below", FULL_W, FULL_H)
+    assert len(out) == 1
+
+
+def test_pill_boxes_are_defensive_about_input():
+    assert render.screensaver_pill_boxes(None, 0.3, "below", FULL_W, FULL_H) == []
+    assert render.screensaver_pill_boxes("junk", 0.3, "below", FULL_W, FULL_H) == []
+    assert render.screensaver_pill_boxes(
+        [42, {"done": True, "x": "NaN"}], 0.3, "below", FULL_W, FULL_H) == []
+    # Zero band (deck out of the canvas): nothing maps.
+    assert render.screensaver_pill_boxes(
+        [_pill(0.4, 1.05)], 0.0, "below", FULL_W, FULL_H) == []
+
+
+def test_pill_face_is_cached_and_pulses_between_red_and_amber():
+    render._pill_face.cache_clear()
+    red = render._pill_face(120, 40, "\U0001F35D", 0)
+    amber = render._pill_face(120, 40, "\U0001F35D", 1)
+    # Alternating fills keyed on time stand in for the panel's done pulse.
+    centre_red = red.getpixel((60, 20))[:3]
+    centre_amber = amber.getpixel((60, 20))[:3]
+    assert centre_red != centre_amber
+    assert centre_red[0] > centre_red[1]          # red leads on phase 0
+    assert centre_amber[1] > centre_red[1]        # amber is brighter in green
+    # Rounded corners stay transparent so the pill composites cleanly.
+    assert red.getpixel((0, 0))[3] == 0
+    # The face is pre-rendered once per size/icon/phase (Pi 3 budget): the
+    # same args come back as the identical cached object.
+    assert render._pill_face(120, 40, "\U0001F35D", 0) is red
+
+
+def test_pill_tiles_light_the_expected_keys_and_cover_the_logo():
+    # A pill over the top-left key lights it; untouched keys stay dark.
+    tiles = render.screensaver_tiles(
+        3, 5, (72, 72), None, pills=[(4, 20, 120, 36, "\U0001F95A")], phase=0)
+    assert len(tiles) == 15
+    assert _tile_max(tiles[0]) > 40
+    assert _tile_max(tiles[-1]) < 30
+    # Pill and logo overlapping: the pill draws on top, so the overlap shows
+    # the pill's red fill rather than the raccoon mark.
+    tiles = render.screensaver_tiles(
+        3, 5, (72, 72), (0, 0, 144, 144),
+        pills=[(0, 30, 144, 40, "")], phase=0)
+    r, g, b = tiles[0].getpixel((36, 50))
+    assert r > g and r > b  # the done-pulse red, not the dark frame or logo
+
+
+def test_pill_tiles_ignore_malformed_pills_and_default_to_none():
+    # No pills argument: exactly the old dark frame.
+    tiles = render.screensaver_tiles(3, 5, (72, 72), None)
+    assert all(_tile_max(t) < 30 for t in tiles)
+    # Malformed entries are skipped, never raised.
+    tiles = render.screensaver_tiles(
+        3, 5, (72, 72), None,
+        pills=[("x", 0, 1, 1), (0,), None, (0, 0, 1, 1, "")], phase=1)
+    assert len(tiles) == 15
+
+
+def test_glyph_fallback_never_draws_tofu():
+    # DejaVu covers plain letters but not colour food emoji; the coverage
+    # probe is what keeps a missing glyph from rendering as a tofu box.
+    assert render._glyph_drawable("A", 24) is True
+    assert render._glyph_drawable("\U0001F35D", 24) is False

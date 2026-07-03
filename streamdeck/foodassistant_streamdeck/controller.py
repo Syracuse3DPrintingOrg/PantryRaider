@@ -1321,7 +1321,8 @@ class Controller:
 
     def _render_saver_frame(self, state: dict) -> None:
         """Paint one screensaver frame: the logo slice crossing this deck (or a
-        dark frame while the logo is elsewhere on the panel)."""
+        dark frame while the logo is elsewhere on the panel), plus any finished
+        timer pill that has drifted into the deck band (FoodAssistant-07ee)."""
         rows, cols = self._saver_grid()
         key_size = self.deck.key_image_format()["size"]
         full_w = cols * key_size[0]
@@ -1335,8 +1336,17 @@ class Controller:
             _num("x"), _num("y"), _num("w"), _num("h"),
             _num("band"), self.config.screensaver_layout, full_w, full_h,
         )
+        pills = render.screensaver_pill_boxes(
+            state.get("pills"), _num("band"),
+            self.config.screensaver_layout, full_w, full_h,
+        )
+        # Two alternating fills keyed on wall time approximate the panel's
+        # red/amber done pulse at this loop's 2s cadence, no extra timers.
         self._set_full_deck_tiles(
-            render.screensaver_tiles(rows, cols, key_size, box)
+            render.screensaver_tiles(
+                rows, cols, key_size, box,
+                pills=pills, phase=int(time.time() / 2) % 2,
+            )
         )
 
     async def _screensaver_loop(self) -> None:

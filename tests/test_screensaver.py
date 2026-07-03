@@ -206,7 +206,7 @@ def test_screensaver_state_round_trip_and_staleness():
     snap = st.snapshot()
     assert snap["active"] is True
     assert snap == {"active": True, "x": 0.4, "y": 1.05, "w": 0.2, "h": 0.1,
-                    "band": 0.3, "layout": "below"}
+                    "band": 0.3, "layout": "below", "pills": []}
     # The same state read past the staleness window counts as inactive, so a
     # dead kiosk never leaves the deck frozen mid-logo.
     import time as _time
@@ -286,6 +286,84 @@ def test_screensaver_config_div_carries_deck_layout(client, monkeypatch):
         monkeypatch.setattr(settings, "has_streamdeck", False, raising=False)
         r = client.get("/ui/timers")
         assert 'data-deck-layout="off"' in r.text
+
+
+# -- finished pills cross onto the deck (FoodAssistant-07ee) -------------------
+
+
+def test_sanitize_pills_is_pure_and_defensive():
+    from app.services.screensaver_state import sanitize_pills, MAX_PILLS
+
+    # Not a list, or junk entries: an empty/filtered result, never a raise.
+    assert sanitize_pills(None) == []
+    assert sanitize_pills("pills") == []
+    assert sanitize_pills([42, "x", None]) == []
+    # A well-formed pill keeps only the fields the deck needs, coerced.
+    out = sanitize_pills([{"id": "t1", "x": 0.4, "y": 1.05, "w": 0.2,
+                           "h": 0.08, "done": True, "icon": "\U0001F35D",
+                           "label": "should be dropped"}])
+    assert out == [{"id": "t1", "x": 0.4, "y": 1.05, "w": 0.2, "h": 0.08,
+                    "done": True, "icon": "\U0001F35D"}]
+    # Bad field types coerce to safe defaults; oversized strings truncate.
+    out = sanitize_pills([{"id": 7, "x": "NaN", "done": 1, "icon": "x" * 99}])
+    assert out[0]["x"] == 0.0 and out[0]["done"] is True
+    assert out[0]["id"] == "7" and len(out[0]["icon"]) <= 4
+    # The stored list is hard-capped.
+    assert len(sanitize_pills([{"id": str(i)} for i in range(20)])) == MAX_PILLS
+
+
+def test_state_channel_carries_pills():
+    from app.services import screensaver_state as st
+
+    st.reset()
+    st.update(True, band=0.3, layout="below",
+              pills=[{"id": "t1", "x": 0.4, "y": 1.05, "w": 0.2, "h": 0.08,
+                      "done": True, "icon": "\U0001F95A"}])
+    snap = st.snapshot()
+    assert snap["pills"] == [{"id": "t1", "x": 0.4, "y": 1.05, "w": 0.2,
+                              "h": 0.08, "done": True, "icon": "\U0001F95A"}]
+    # A post without pills clears the previous list (the timers were
+    # dismissed), so the deck never shows a stale Done pill.
+    st.update(True, band=0.3, layout="below")
+    assert st.snapshot()["pills"] == []
+    st.reset()
+
+
+def test_screensaver_state_endpoint_round_trips_pills(client):
+    from app.services import screensaver_state as st
+
+    st.reset()
+    with patch.object(type(settings), "is_configured", lambda self: True):
+        r = client.post("/ui/screensaver/state", json={
+            "active": True, "band": 0.3, "layout": "below",
+            "pills": [{"id": "t1", "x": 0.1, "y": 1.1, "w": 0.2, "h": 0.08,
+                       "done": True, "icon": "⏱"}]})
+        assert r.status_code == 200
+        snap = client.get("/ui/screensaver/state").json()
+        assert snap["pills"][0]["id"] == "t1"
+        assert snap["pills"][0]["done"] is True
+        # Garbage pills are a safe no-op, never a 500.
+        r = client.post("/ui/screensaver/state",
+                        json={"active": True, "pills": "junk"})
+        assert r.status_code == 200
+    st.reset()
+
+
+def test_screensaver_js_sends_done_pills_and_extends_their_walls():
+    js = (SERVICE / "app" / "static" / "js" / "screensaver.js").read_text()
+    # The kiosk's state post carries only the finished pills' boxes, in the
+    # same panel-normalized space as the mark, capped small.
+    assert "donePillBoxes" in js
+    assert "pills: donePillBoxes(w, h)" in js
+    assert "PILL_SHARE_CAP" in js
+    assert "if (!b.done) continue;" in js
+    # A done pill's walls extend into the deck band exactly like the logo's
+    # (the shared deckBandPx math), bounce mode only; running pills keep
+    # panel-only walls.
+    assert "deckBandPx" in js
+    assert "(b.done && bounceActive) ? deckBandPx(w, h) : 0" in js
+    # The pill body remembers its food icon so the deck can draw it.
+    assert "icon: parts.iconChar" in js
 
 
 # -- screensaver on any instance (FoodAssistant-xlb3) --------------------------

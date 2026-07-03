@@ -50,8 +50,14 @@
 // across the kitchen; the stage animations are CSS on the pill's inner face,
 // so the physics body underneath never changes course. At most
 // six pills are simulated (Pi 3 budget); the rest collapse into a static
-// "+N more" pill. Timers are panel-only for now: the deck's saver slice
-// stays the raccoon mark.
+// "+N more" pill.
+//
+// A FINISHED pill crosses onto the Stream Deck (FoodAssistant-07ee): with the
+// deck in the canvas, a done pill's walls extend into the deck band exactly
+// like the logo's, so it physically drifts across the seam, and the state
+// posts carry the done pills' boxes (same panel-normalized space as the mark)
+// so the deck renders its slice of them. Running pills keep panel-only walls;
+// only finished timers earn the extra surface.
 (function () {
   var kiosk = false;
   try {
@@ -128,6 +134,16 @@
     return { w: window.innerWidth / z, h: window.innerHeight / z };
   }
 
+  // Off-screen band for the deck's side of the canvas, in layout px. For
+  // above/below the deck's width spans the panel width, so the band is that
+  // width times the deck grid's height/width ratio; left/right is the same
+  // idea against the panel height. 0 when no deck is in the canvas.
+  function deckBandPx(w, h) {
+    if (DECK_LAYOUT === 'above' || DECK_LAYOUT === 'below') return w * DECK_ASPECT;
+    if (DECK_LAYOUT === 'left' || DECK_LAYOUT === 'right') return h / DECK_ASPECT;
+    return 0;
+  }
+
   // Old-school DVD bounce: the block travels in a dead-straight line at
   // constant speed until it HITS an edge, then reflects (angle in = angle
   // out) and carries on; nothing else ever changes its course. Frame-time
@@ -150,16 +166,7 @@
       var vp = layoutSize();
       var w = vp.w, h = vp.h;
       var bw = block.offsetWidth, bh = block.offsetHeight;
-      // Off-screen band for the deck's side of the canvas, in layout px. For
-      // above/below the deck's width spans the panel width, so the band is
-      // that width times the deck grid's height/width ratio; left/right is
-      // the same idea against the panel height.
-      var bandPx = 0;
-      if (DECK_LAYOUT === 'above' || DECK_LAYOUT === 'below') {
-        bandPx = w * DECK_ASPECT;
-      } else if (DECK_LAYOUT === 'left' || DECK_LAYOUT === 'right') {
-        bandPx = h / DECK_ASPECT;
-      }
+      var bandPx = deckBandPx(w, h);
       var vw = w + ((DECK_LAYOUT === 'left' || DECK_LAYOUT === 'right') ? bandPx : 0);
       var vh = h + ((DECK_LAYOUT === 'above' || DECK_LAYOUT === 'below') ? bandPx : 0);
       var maxX = Math.max(0, vw - bw);
@@ -201,7 +208,10 @@
         lastPost = ts;
         // Share just the raccoon mark's box (not the clock under it), in
         // panel-normalized units: the panel is 0..1 on each axis and the
-        // deck band extends past that range on its side.
+        // deck band extends past that range on its side. Finished timer
+        // pills ride along in the same units (FoodAssistant-07ee): only the
+        // done ones, so an expired timer grabs attention on the deck too
+        // while the payload stays a handful of numbers.
         postSaverState({
           active: true,
           x: (sx + (mark ? mark.offsetLeft : 0)) / w,
@@ -211,6 +221,7 @@
           band: (DECK_LAYOUT === 'above' || DECK_LAYOUT === 'below')
             ? bandPx / h : bandPx / w,
           layout: DECK_LAYOUT,
+          pills: donePillBoxes(w, h),
         });
       }
       rafId = requestAnimationFrame(step);
@@ -311,10 +322,11 @@
       'border-radius:999px;background:rgba(24,26,32,0.88);' +
       'border:1px solid rgba(255,255,255,0.18);color:#e8eaed;' +
       'white-space:nowrap;';
+    var iconChar = timerFoodIcon(t.label);
     var icon = document.createElement('span');
     icon.className = 'ss-timer-icon';
     icon.style.cssText = 'font-size:4.2vmin;line-height:1;';
-    icon.textContent = timerFoodIcon(t.label);
+    icon.textContent = iconChar;
     var col = document.createElement('div');
     col.style.cssText = 'text-align:left;';
     var lab = document.createElement('div');
@@ -331,7 +343,7 @@
     face.appendChild(icon);
     face.appendChild(col);
     el.appendChild(face);
-    return { el: el, iconEl: icon, labelEl: lab, timeEl: time };
+    return { el: el, iconEl: icon, labelEl: lab, timeEl: time, iconChar: iconChar };
   }
 
   // A finished timer (expired, still listed until dismissed) must read from
@@ -372,7 +384,7 @@
     // Same 30-60 degree launch as the logo, at the configured glide speed.
     var ang = (30 + Math.random() * 30) * Math.PI / 180;
     var b = {
-      id: t.id, el: parts.el, timeEl: parts.timeEl,
+      id: t.id, el: parts.el, timeEl: parts.timeEl, icon: parts.iconChar,
       x: x, y: y, w: pw, h: ph,
       vx: (Math.random() < 0.5 ? -1 : 1) * Math.cos(ang) * SPEED,
       vy: (Math.random() < 0.5 ? -1 : 1) * Math.sin(ang) * SPEED,
@@ -506,11 +518,19 @@
     for (i = 0; i < timerBodies.length; i++) {
       b = timerBodies[i];
       // Walls last, so a collision separation can never leave a pill drawn
-      // past the edge: reflect exactly at the wall, like the logo does.
-      var maxX = Math.max(0, w - b.w), maxY = Math.max(0, h - b.h);
-      if (b.x <= 0) { b.x = 0; b.vx = Math.abs(b.vx); }
+      // past the edge: reflect exactly at the wall, like the logo does. A
+      // DONE pill's walls extend into the deck band the same way the logo's
+      // do (bounce mode only, the mode that drives the shared canvas), so a
+      // finished timer physically drifts across the seam onto the deck keys;
+      // running pills keep panel-only walls (FoodAssistant-07ee).
+      var band = (b.done && bounceActive) ? deckBandPx(w, h) : 0;
+      var minX = DECK_LAYOUT === 'left' ? -band : 0;
+      var minY = DECK_LAYOUT === 'above' ? -band : 0;
+      var maxX = Math.max(minX, w - b.w + (DECK_LAYOUT === 'right' ? band : 0));
+      var maxY = Math.max(minY, h - b.h + (DECK_LAYOUT === 'below' ? band : 0));
+      if (b.x <= minX) { b.x = minX; b.vx = Math.abs(b.vx); }
       else if (b.x >= maxX) { b.x = maxX; b.vx = -Math.abs(b.vx); }
-      if (b.y <= 0) { b.y = 0; b.vy = Math.abs(b.vy); }
+      if (b.y <= minY) { b.y = minY; b.vy = Math.abs(b.vy); }
       else if (b.y >= maxY) { b.y = maxY; b.vy = -Math.abs(b.vy); }
       b.el.style.transform = 'translate(' + b.x + 'px,' + b.y + 'px)';
       if (b.done) continue;
@@ -537,6 +557,23 @@
       timerRafId = requestAnimationFrame(tstep);
     }
     timerRafId = requestAnimationFrame(tstep);
+  }
+
+  // The done pills' boxes for the shared state post, panel-normalized: the
+  // panel is 0..1 on each axis and a pill inside the deck band sits past that
+  // range, exactly like the mark's box. Only FINISHED pills are shared (the
+  // point is attention for an expired timer), capped so the 300ms post stays
+  // a handful of numbers.
+  var PILL_SHARE_CAP = 4;
+  function donePillBoxes(w, h) {
+    var out = [];
+    for (var i = 0; i < timerBodies.length && out.length < PILL_SHARE_CAP; i++) {
+      var b = timerBodies[i];
+      if (!b.done) continue;
+      out.push({ id: b.id, x: b.x / w, y: b.y / h, w: b.w / w, h: b.h / h,
+                 done: true, icon: b.icon });
+    }
+    return out;
   }
 
   // Test-only view of the simulated pills (layout px, px/s), sampled by the
