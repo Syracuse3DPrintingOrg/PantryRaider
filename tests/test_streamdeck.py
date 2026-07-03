@@ -388,10 +388,11 @@ class _Resp:
 class _FakeClient:
     """Minimal async stand-in for httpx.AsyncClient."""
 
-    def __init__(self, get_map=None, post_map=None, put_map=None):
+    def __init__(self, get_map=None, post_map=None, put_map=None, delete_map=None):
         self.get_map = get_map or {}
         self.post_map = post_map or {}
         self.put_map = put_map or {}
+        self.delete_map = delete_map or {}
         self.calls = []
         # Captured request bodies, keyed by (method, suffix-or-url), so a test can
         # assert what was sent (e.g. the checked flag on a shopping item PUT).
@@ -416,6 +417,13 @@ class _FakeClient:
         self.calls.append(("PUT", url))
         self.bodies.append(("PUT", url, kwargs.get("json")))
         for suffix, resp in self.put_map.items():
+            if url.endswith(suffix):
+                return resp
+        return _Resp(404, {})
+
+    async def delete(self, url, **kwargs):
+        self.calls.append(("DELETE", url))
+        for suffix, resp in self.delete_map.items():
             if url.endswith(suffix):
                 return resp
         return _Resp(404, {})
@@ -461,20 +469,38 @@ def test_poll_status_tolerates_errors():
     assert out == {"expiring": 0, "pending": 0, "shopping": 0, "ready": 0}
 
 
-def test_start_server_timer_posts_to_timers():
-    # A preset deck timer mirrors to the shared server registry via POST /timers
-    # so the web UI /timers page reflects it (Pantry Raider).
-    client = _FakeClient(post_map={"/timers": _Resp(200, {"id": 1})})
-    ok = asyncio.run(actions.start_server_timer(client, "http://x", "Eggs", 360))
-    assert ok is True
+def test_create_server_timer_posts_and_returns_timer():
+    # A deck timer key creates its countdown in the shared server registry via
+    # POST /timers; the returned dict (id + deadline_epoch) is what the key
+    # face binds to, so the web UI shows the exact same timer.
+    client = _FakeClient(post_map={"/timers": _Resp(
+        200, {"timer": {"id": 7, "label": "Eggs", "deadline_epoch": 1000.0}}
+    )})
+    timer = asyncio.run(actions.create_server_timer(client, "http://x", "Eggs", 360))
+    assert timer == {"id": 7, "label": "Eggs", "deadline_epoch": 1000.0}
     assert ("POST", "http://x/timers") in client.calls
 
 
-def test_start_server_timer_tolerates_failure():
-    # A non-200 (or unreachable server) returns False so the press still drives
-    # the deck's own local countdown.
-    ok = asyncio.run(actions.start_server_timer(_FakeClient(), "http://x", "Eggs", 360))
-    assert ok is False
+def test_create_server_timer_tolerates_failure():
+    # A non-200 (or unreachable server) returns None so the press can fall
+    # back to a deck-local countdown.
+    timer = asyncio.run(actions.create_server_timer(_FakeClient(), "http://x", "Eggs", 360))
+    assert timer is None
+
+
+def test_cancel_server_timer_deletes_by_id():
+    # A long press (or alert dismissal) removes the shared timer, so the web
+    # UI clears on its next poll. A 404 counts as done: someone else already
+    # removed it, which is the same outcome.
+    client = _FakeClient(delete_map={"/timers/7": _Resp(200, {"ok": True})})
+    assert asyncio.run(actions.cancel_server_timer(client, "http://x", 7)) is True
+    assert ("DELETE", "http://x/timers/7") in client.calls
+    assert asyncio.run(actions.cancel_server_timer(_FakeClient(), "http://x", 9)) is True
+
+
+def test_cancel_server_timer_rejects_bad_ids():
+    assert asyncio.run(actions.cancel_server_timer(_FakeClient(), "http://x", None)) is False
+    assert asyncio.run(actions.cancel_server_timer(_FakeClient(), "http://x", "nope")) is False
 
 
 def test_poll_status_includes_shopping_and_ready_counts():
@@ -1354,87 +1380,80 @@ def test_timer_idle_shows_base_label():
     assert t.label("Timer 1") == "Timer 1"
     assert not t.is_running()
     assert not t.alerting
+    assert t.timer_id is None
 
 
-def test_timer_short_press_starts_at_one_minute():
+def test_timer_bind_adopts_server_timer():
+    # The server registry is the source of truth: binding a created (or
+    # adopted) server timer drives the face from its shared epoch deadline.
     t = actions.TimerState()
-    t.short_press()
-    assert t.is_running()
-    assert t._minutes == 1
-    assert t.remaining_seconds() > 55
+    t.bind({"id": 4, "label": "Eggs", "deadline_epoch": 1360.0})
+    assert t.timer_id == 4
+    assert t.is_running(now=1000.0)
+    assert t.remaining_seconds(now=1000.0) == 360
+    assert t.label("Eggs", now=1000.0) == "6:00"
 
 
-def test_timer_rapid_presses_accumulate():
+def test_timer_start_local_runs_offline():
+    # With the app unreachable a press still runs the countdown on the deck
+    # alone: no server id, same face behaviour.
     t = actions.TimerState()
-    t.short_press()  # 1 min
-    t.short_press()  # 2 min
-    t.short_press()  # 3 min
-    assert t._minutes == 3
-    assert t.is_running()
+    t.start_local(90, now=1000.0)
+    assert t.timer_id is None
+    assert t.is_running(now=1000.0)
+    assert t.remaining_seconds(now=1005.0) == 85
+    assert t.label("Timer", now=1005.0) == "1:25"
 
 
-def test_timer_press_alias_works():
+def test_timer_clear_resets_to_idle():
     t = actions.TimerState()
-    t.press()  # same as short_press
-    assert t._minutes == 1
-    assert t.is_running()
-
-
-def test_timer_long_press_resets_to_idle():
-    t = actions.TimerState()
-    t.short_press()
-    assert t.is_running()
-    t.long_press()
-    assert not t.is_running()
-    assert t._minutes == 0
+    t.bind({"id": 4, "deadline_epoch": 1360.0})
+    t.cycle_idx = 2
+    t.clear()
+    assert not t.is_running(now=1000.0)
+    assert t.timer_id is None
+    assert t.cycle_idx == -1
     assert t.label("T") == "T"
 
 
-def test_timer_label_shows_countdown():
+def test_timer_cycle_walks_the_stages_then_stops():
+    # A plain timer key steps through the preset cycle, one press per stage,
+    # and the press after the last stage stops (0 seconds), resetting the
+    # cycle for the next run.
     t = actions.TimerState()
-    t.short_press()  # 1 min
-    label = t.label("Timer")
-    assert ":" in label  # MM:SS format
+    stages = [t.next_cycle_seconds() for _ in actions.TIMER_CYCLE_MINUTES]
+    assert stages == [m * 60 for m in actions.TIMER_CYCLE_MINUTES]
+    assert t.next_cycle_seconds() == 0
+    assert t.cycle_idx == -1
+    assert t.next_cycle_seconds() == actions.TIMER_CYCLE_MINUTES[0] * 60
 
 
 def test_timer_alerting_on_expiry():
     t = actions.TimerState()
-    t.short_press()
-    # Force expiry by backdating the deadline
-    t._deadline = t._deadline - 400
-    expired = t.tick()
-    assert expired
+    t.bind({"id": 4, "deadline_epoch": 1360.0})
+    assert t.tick(now=1000.0) is False    # still running: no alert yet
+    assert t.tick(now=1360.0) is True     # deadline reached: alert flips on
     assert t.alerting
     assert t.label("T") == "Done!"
+    # The server id is kept so the dismissal can remove the finished timer.
+    assert t.timer_id == 4
+    assert t.tick(now=1400.0) is False    # only the flip itself reports True
 
 
-def test_timer_dismiss_alert_via_short_press():
+def test_timer_clear_dismisses_alert():
     t = actions.TimerState()
-    t.short_press()
-    t._deadline = t._deadline - 400
-    t.tick()
+    t.start_local(10, now=1000.0)
+    t.tick(now=2000.0)
     assert t.alerting
-    t.short_press()  # dismiss
+    t.clear()
     assert not t.alerting
     assert t.label("T") == "T"
 
 
-def test_timer_long_press_dismisses_alert():
-    t = actions.TimerState()
-    t.short_press()
-    t._deadline = t._deadline - 400
-    t.tick()
-    assert t.alerting
-    t.long_press()
-    assert not t.alerting
-    assert t._minutes == 0
-
-
 def test_timer_alert_blinks_bright_and_dim_by_phase():
     t = actions.TimerState()
-    t.short_press()
-    t._deadline = t._deadline - 400
-    t.tick()
+    t.start_local(10, now=1000.0)
+    t.tick(now=2000.0)
     assert t.alerting
     bright = t.alert_color(0)
     dim = t.alert_color(1)
@@ -1447,9 +1466,8 @@ def test_timer_alert_blinks_bright_and_dim_by_phase():
 
 def test_timer_color_uses_blink_phase_while_alerting():
     t = actions.TimerState()
-    t.short_press()
-    t._deadline = t._deadline - 400
-    t.tick()
+    t.start_local(10, now=1000.0)
+    t.tick(now=2000.0)
     assert t.color("#000000", blink_phase=0) == t.alert_color(0)
     assert t.color("#000000", blink_phase=1) == t.alert_color(1)
     assert t.color("#000000", blink_phase=0) != t.color("#000000", blink_phase=1)
@@ -1460,9 +1478,11 @@ def test_timer_color_ignores_blink_phase_when_not_alerting():
     # Idle: phase must never change the resting colour.
     assert t.color("#123456", blink_phase=0) == "#123456"
     assert t.color("#123456", blink_phase=1) == "#123456"
-    # Running: countdown colour is phase-independent.
-    t.short_press()
-    assert t.color("#123456", blink_phase=0) == t.color("#123456", blink_phase=1)
+    # Running: countdown colour is phase-independent, and goes amber under a
+    # minute left.
+    t.bind({"id": 1, "deadline_epoch": 2000.0})
+    assert t.color("#123456", 0, now=1000.0) == t.color("#123456", 1, now=1000.0)
+    assert t.color("#123456", 0, now=1000.0) != t.color("#123456", 0, now=1950.0)
 
 
 def test_timer_action_registered():
@@ -1513,6 +1533,30 @@ def test_timer_long_press_via_action_context():
     asyncio.run(actions.run_action(actions.ACTIONS["timer_1"], ctx, long_press=True))
     assert pressed.get("name") == "timer_1"
     assert pressed.get("long") is True
+
+
+def test_timer_press_awaits_async_handler():
+    # The controller's press handler is async (it talks to the shared server
+    # registry); run_action must await it so the server call completes before
+    # the press is reported done.
+    pressed = {}
+
+    async def fake_timer_press(name, long_press=False):
+        pressed["name"] = name
+        pressed["long"] = long_press
+
+    ctx = actions.ActionContext(
+        client=None,
+        base_url="http://x",
+        refresh=lambda: None,
+        navigate=lambda _: None,
+        cycle_brightness=lambda: 80,
+        page_next=lambda: None,
+        page_prev=lambda: None,
+        timer_press=fake_timer_press,
+    )
+    asyncio.run(actions.run_action(actions.ACTIONS["timer_1"], ctx))
+    assert pressed == {"name": "timer_1", "long": False}
 
 
 # -- recipe timer key specs (FoodAssistant-sbu3) ---------------------------
@@ -1614,36 +1658,24 @@ def test_fetch_timer_suggestions_tolerates_errors_and_no_recipe():
     assert out == []
 
 
-def test_start_recipe_timer_posts_and_reports_success():
-    client = _FakeClient(post_map={"/current-recipe/timers/start": _Resp(200, {"timer": {}})})
-    ok = asyncio.run(
-        actions.start_recipe_timer(client, "http://x", step_index=1, label="Pasta", seconds=600)
+def test_create_recipe_timer_posts_and_returns_timer():
+    client = _FakeClient(post_map={"/current-recipe/timers/start": _Resp(
+        200, {"timer": {"id": 3, "label": "Pasta", "deadline_epoch": 900.0}}
+    )})
+    timer = asyncio.run(
+        actions.create_recipe_timer(client, "http://x", step_index=1, label="Pasta", seconds=600)
     )
-    assert ok is True
+    assert timer == {"id": 3, "label": "Pasta", "deadline_epoch": 900.0}
     assert client.calls == [("POST", "http://x/current-recipe/timers/start")]
 
 
-def test_start_recipe_timer_tolerates_failure():
+def test_create_recipe_timer_tolerates_failure():
     client = _FakeClient(post_map={"/current-recipe/timers/start": _Resp(404, {})})
-    ok = asyncio.run(actions.start_recipe_timer(client, "http://x", step_index=9))
-    assert ok is False
+    timer = asyncio.run(actions.create_recipe_timer(client, "http://x", step_index=9))
+    assert timer is None
 
 
-# -- running shared timer sync (FoodAssistant-y7ud) ------------------------
-
-
-def test_set_seconds_starts_second_granular_countdown():
-    t = actions.TimerState()
-    t.set_seconds(95)
-    assert t.is_running()
-    # Remaining is second-granular, not rounded to a whole minute.
-    assert 93 <= t.remaining_seconds() <= 95
-    label = t.label("Add ginger")
-    assert label == "1:35" or label == "1:34"
-    # Zero (or negative) resets the timer to idle.
-    t.set_seconds(0)
-    assert not t.is_running()
-    assert t.label("Add ginger") == "Add ginger"
+# -- shared timer sync (FoodAssistant-y7ud, -39w8) --------------------------
 
 
 def test_fetch_timers_returns_list():
@@ -1663,33 +1695,122 @@ def test_fetch_timers_tolerates_errors():
     assert asyncio.run(actions.fetch_timers(_FakeClient(), "http://x")) == []
 
 
-def test_running_timer_remaining_matches_cleaned_label():
-    # The deck key shows a truncated suggestion; the server timer (started from
-    # the recipe page) carries the full step text. They join on cleaned labels.
-    server = [{"label": "Add ginger and garlic to the pan",
-               "deadline_epoch": 1000.0, "expired": False}]
-    deck_label = actions.clean_timer_label("Add ginger and garlic to the pan")
-    remaining = actions.running_timer_remaining(server, deck_label, now_epoch=940.0)
-    assert remaining == 60
+def test_sync_clears_key_when_timer_cancelled_elsewhere():
+    # The reported bug: a deck long-press (or a web cancel) must clear the
+    # OTHER surface too. When the bound server timer disappears from the poll,
+    # the key returns to idle on that pass.
+    binding = actions.TimerState()
+    binding.bind({"id": 5, "deadline_epoch": 2000.0})
+    changed = actions.sync_timer_bindings(
+        {"timer_1": binding}, {"timer_1": "Timer 1"}, [], now_epoch=1000.0
+    )
+    assert changed is True
+    assert binding.timer_id is None
+    assert not binding.is_running(now=1000.0)
 
 
-def test_running_timer_remaining_none_when_expired_absent_or_elapsed():
+def test_sync_clears_undismissed_alert_when_dismissed_elsewhere():
+    # An expired timer blinks on the deck until dismissed; dismissing it from
+    # the web (DELETE) stops the blink on the deck's next poll.
+    binding = actions.TimerState()
+    binding.bind({"id": 5, "deadline_epoch": 1500.0})
+    binding.tick(now=1600.0)
+    assert binding.alerting
+    changed = actions.sync_timer_bindings(
+        {"timer_1": binding}, {"timer_1": "Timer 1"}, [], now_epoch=1600.0
+    )
+    assert changed is True
+    assert not binding.alerting
+
+
+def test_sync_keeps_alert_while_expired_timer_still_listed():
+    # The server keeps an expired timer listed until someone dismisses it, so
+    # the deck's blink survives the poll.
+    binding = actions.TimerState()
+    binding.bind({"id": 5, "deadline_epoch": 1500.0})
+    binding.tick(now=1600.0)
+    server = [{"id": 5, "label": "Timer 1", "deadline_epoch": 1500.0, "expired": True}]
+    changed = actions.sync_timer_bindings(
+        {"timer_1": binding}, {"timer_1": "Timer 1"}, server, now_epoch=1600.0
+    )
+    assert changed is False
+    assert binding.alerting
+
+
+def test_sync_adopts_running_timer_by_cleaned_label():
+    # A timer started on another surface lands on the matching idle key: the
+    # deck key shows a truncated label, the server timer carries the full step
+    # text, and they join on cleaned labels.
+    binding = actions.TimerState()
+    server = [{"id": 9, "label": "Add ginger and garlic to the pan",
+               "deadline_epoch": 2000.0, "expired": False}]
+    key_label = actions.clean_timer_label("Add ginger and garlic to the pan")
+    changed = actions.sync_timer_bindings(
+        {"timer_1": binding}, {"timer_1": key_label}, server, now_epoch=1000.0
+    )
+    assert changed is True
+    assert binding.timer_id == 9
+    assert binding.remaining_seconds(now=1000.0) == 1000
+
+
+def test_sync_does_not_adopt_expired_elapsed_claimed_or_mismatched():
     now = 1000.0
+    idle = actions.TimerState()
     # Expired timer is ignored.
-    assert actions.running_timer_remaining(
-        [{"label": "Pasta", "deadline_epoch": 1100.0, "expired": True}], "Pasta", now
-    ) is None
-    # A deadline already in the past yields None.
-    assert actions.running_timer_remaining(
-        [{"label": "Pasta", "deadline_epoch": 900.0, "expired": False}], "Pasta", now
-    ) is None
+    assert actions.sync_timer_bindings(
+        {"k": idle}, {"k": "Pasta"},
+        [{"id": 1, "label": "Pasta", "deadline_epoch": 1100.0, "expired": True}], now,
+    ) is False
+    # A deadline already in the past is ignored.
+    assert actions.sync_timer_bindings(
+        {"k": idle}, {"k": "Pasta"},
+        [{"id": 2, "label": "Pasta", "deadline_epoch": 900.0, "expired": False}], now,
+    ) is False
     # No label match.
-    assert actions.running_timer_remaining(
-        [{"label": "Rice", "deadline_epoch": 1100.0, "expired": False}], "Pasta", now
-    ) is None
-    # Empty inputs.
-    assert actions.running_timer_remaining([], "Pasta", now) is None
-    assert actions.running_timer_remaining([{"label": "Pasta"}], "", now) is None
+    assert actions.sync_timer_bindings(
+        {"k": idle}, {"k": "Pasta"},
+        [{"id": 3, "label": "Rice", "deadline_epoch": 1100.0, "expired": False}], now,
+    ) is False
+    assert idle.timer_id is None
+    # A timer already bound to one key never lands on a second key too.
+    bound = actions.TimerState()
+    bound.bind({"id": 4, "deadline_epoch": 1100.0})
+    other = actions.TimerState()
+    server = [{"id": 4, "label": "Pasta", "deadline_epoch": 1100.0, "expired": False}]
+    actions.sync_timer_bindings(
+        {"a": bound, "b": other}, {"a": "Pasta", "b": "Pasta"}, server, now,
+    )
+    assert other.timer_id is None
+
+
+def test_sync_leaves_local_offline_run_alone():
+    # A local-only countdown (started while the server was unreachable) keeps
+    # its face: nothing on the server can claim or clear it.
+    binding = actions.TimerState()
+    binding.start_local(120, now=1000.0)
+    changed = actions.sync_timer_bindings(
+        {"k": binding}, {"k": "Pasta"},
+        [{"id": 8, "label": "Pasta", "deadline_epoch": 1060.0, "expired": False}],
+        now_epoch=1000.0,
+    )
+    assert changed is False
+    assert binding.timer_id is None
+    assert binding.remaining_seconds(now=1000.0) == 120
+
+
+def test_sync_refreshes_deadline_when_timer_replaced():
+    # A bound timer whose shared deadline moved (restarted elsewhere, clock
+    # drift) refreshes the face; a steady countdown does not force a redraw.
+    binding = actions.TimerState()
+    binding.bind({"id": 5, "deadline_epoch": 2000.0})
+    server = [{"id": 5, "label": "Pasta", "deadline_epoch": 2600.0, "expired": False}]
+    assert actions.sync_timer_bindings(
+        {"k": binding}, {"k": "Pasta"}, server, now_epoch=1000.0
+    ) is True
+    assert binding.deadline_epoch == 2600.0
+    assert actions.sync_timer_bindings(
+        {"k": binding}, {"k": "Pasta"}, server, now_epoch=1001.0
+    ) is False
 
 
 # -- weather widget ---------------------------------------------------------
@@ -2556,47 +2677,112 @@ def test_watchdog_retries_until_deck_replugged():
     loop.close()
 
 
-# -- running recipe timer sync + navigation (FoodAssistant-y7ud) ----------
+# -- server-backed timer keys (FoodAssistant-y7ud, -39w8) ------------------
 
 
-def test_sync_recipe_timer_runtime_drives_local_countdown():
+def test_press_starts_server_timer_and_binds_face():
+    # The core of the unification: ANY deck timer press creates a shared
+    # server timer, so the web UI sees it too, and the key face renders from
+    # the returned shared deadline.
     import time as _time
     ctrl, deck, loop = _make_controller()
-    # A recipe is active: timer_1 carries the "Add ginger" suggestion.
-    ctrl.recipe_timer_specs = {
-        "timer_1": {"label": "Add ginger", "seconds": 120, "step_index": 1}
-    }
-    # A running shared timer for that step, started elsewhere, 90s left.
-    server = [{"label": "Add ginger", "deadline_epoch": _time.time() + 90,
-               "expired": False}]
-    assert ctrl._sync_recipe_timer_runtime(server) is True
+    deadline = _time.time() + 300
+    ctrl.client = _FakeClient(post_map={"/timers": _Resp(
+        200, {"timer": {"id": 11, "label": "Timer 1", "deadline_epoch": deadline}}
+    )})
+    loop.run_until_complete(ctrl._timer_press("timer_1", long_press=False))
     t = ctrl.timers["timer_1"]
-    assert t.is_running()
-    assert 88 <= t.remaining_seconds() <= 90
-    # A steady countdown a moment later does not force another redraw.
-    assert ctrl._sync_recipe_timer_runtime(server) is False
+    assert t.timer_id == 11
+    assert 298 <= t.remaining_seconds() <= 300
+    # The first cycle stage (5 min) is what was requested.
+    body = next(b for b in ctrl.client.bodies if b[1].endswith("/timers"))
+    assert body[2]["seconds"] == actions.TIMER_CYCLE_MINUTES[0] * 60
     loop.close()
 
 
-def test_sync_recipe_timer_runtime_ignores_unmatched():
+def test_press_running_cycle_key_replaces_server_timer_with_next_stage():
+    import time as _time
     ctrl, deck, loop = _make_controller()
-    ctrl.recipe_timer_specs = {"timer_1": {"label": "Add ginger", "seconds": 120}}
-    # No matching running timer: nothing changes and no idle timer is created.
-    assert ctrl._sync_recipe_timer_runtime([]) is False
-    assert "timer_1" not in ctrl.timers
+    ctrl.client = _FakeClient(post_map={"/timers": _Resp(
+        200, {"timer": {"id": 12, "deadline_epoch": _time.time() + 600}}
+    )})
+    t = ctrl.timers["timer_1"] = actions.TimerState()
+    t.bind({"id": 11, "deadline_epoch": _time.time() + 200})
+    t.cycle_idx = 0  # currently on the 5-minute stage
+    loop.run_until_complete(ctrl._timer_press("timer_1", long_press=False))
+    # The old server timer was cancelled and the next stage (10 min) created.
+    assert ("DELETE", ctrl.config.base_url.rstrip("/") + "/timers/11") in ctrl.client.calls
+    body = next(b for b in ctrl.client.bodies if b[1].endswith("/timers"))
+    assert body[2]["seconds"] == actions.TIMER_CYCLE_MINUTES[1] * 60
+    assert t.timer_id == 12
+    assert t.cycle_idx == 1
+    loop.close()
+
+
+def test_press_after_last_cycle_stage_stops_everywhere():
+    import time as _time
+    ctrl, deck, loop = _make_controller()
+    ctrl.client = _FakeClient()
+    t = ctrl.timers["timer_1"] = actions.TimerState()
+    t.bind({"id": 11, "deadline_epoch": _time.time() + 200})
+    t.cycle_idx = len(actions.TIMER_CYCLE_MINUTES) - 1  # on the last stage
+    loop.run_until_complete(ctrl._timer_press("timer_1", long_press=False))
+    assert ("DELETE", ctrl.config.base_url.rstrip("/") + "/timers/11") in ctrl.client.calls
+    assert not t.is_running()
+    assert t.timer_id is None
+    loop.close()
+
+
+def test_long_press_cancels_server_timer_too():
+    # The reported bug: resetting a timer from the deck must clear it in the
+    # web UI, so the long press DELETEs the shared server timer.
+    import time as _time
+    ctrl, deck, loop = _make_controller()
+    ctrl.client = _FakeClient()
+    t = ctrl.timers["timer_eggs"] = actions.TimerState()
+    t.bind({"id": 21, "deadline_epoch": _time.time() + 120})
+    loop.run_until_complete(ctrl._timer_press("timer_eggs", long_press=True))
+    assert ("DELETE", ctrl.config.base_url.rstrip("/") + "/timers/21") in ctrl.client.calls
+    assert not t.is_running()
+    loop.close()
+
+
+def test_alert_dismissal_removes_finished_server_timer():
+    ctrl, deck, loop = _make_controller()
+    ctrl.client = _FakeClient()
+    t = ctrl.timers["timer_1"] = actions.TimerState()
+    t.bind({"id": 31, "deadline_epoch": 1.0})
+    t.tick()  # long past: flips to alerting
+    assert t.alert_active()
+    loop.run_until_complete(ctrl._timer_press("timer_1", long_press=False))
+    # Dismissing the blink also deletes the expired timer, so the web clears.
+    assert ("DELETE", ctrl.config.base_url.rstrip("/") + "/timers/31") in ctrl.client.calls
+    assert not t.alert_active()
+    loop.close()
+
+
+def test_preset_key_starts_full_duration_and_offline_fallback():
+    # A preset key posts its whole duration; with no client (server down) the
+    # countdown still runs locally so the kitchen timer keeps working.
+    ctrl, deck, loop = _make_controller()
+    loop.run_until_complete(ctrl._timer_press("timer_eggs", long_press=False))
+    t = ctrl.timers["timer_eggs"]
+    assert t.timer_id is None
+    assert 358 <= t.remaining_seconds() <= 360
     loop.close()
 
 
 def test_press_running_recipe_timer_navigates_to_current_recipe():
+    import time as _time
     ctrl, deck, loop = _make_controller()
     jumped = []
     ctrl._navigate_async = lambda path: jumped.append(path)
     ctrl.recipe_timer_specs = {"timer_1": {"label": "Add ginger", "seconds": 120}}
     # Mark the key as already running (as if synced from the server).
     t = ctrl.timers["timer_1"] = actions.TimerState()
-    t.set_seconds(90)
+    t.bind({"id": 41, "deadline_epoch": _time.time() + 90})
     before = t.remaining_seconds()
-    ctrl._timer_press("timer_1", long_press=False)
+    loop.run_until_complete(ctrl._timer_press("timer_1", long_press=False))
     # The press jumped to the recipe and left the countdown untouched.
     assert jumped == ["ui/current-recipe"]
     assert t.is_running()
@@ -2604,31 +2790,58 @@ def test_press_running_recipe_timer_navigates_to_current_recipe():
     loop.close()
 
 
-def test_press_idle_recipe_timer_starts_countdown_not_navigation():
+def test_press_idle_recipe_timer_starts_shared_timer_not_navigation():
+    import time as _time
     ctrl, deck, loop = _make_controller()
     jumped = []
     ctrl._navigate_async = lambda path: jumped.append(path)
-    ctrl.recipe_timer_specs = {"timer_1": {"label": "Add ginger", "seconds": 120}}
-    ctrl._timer_press("timer_1", long_press=False)
-    # An idle recipe timer starts its countdown (no jump) at second precision.
+    ctrl.recipe_timer_specs = {"timer_1": {"label": "Add ginger", "seconds": 120,
+                                           "step_index": 1}}
+    ctrl.client = _FakeClient(post_map={"/current-recipe/timers/start": _Resp(
+        200, {"timer": {"id": 42, "label": "Add ginger",
+                        "deadline_epoch": _time.time() + 120}}
+    )})
+    loop.run_until_complete(ctrl._timer_press("timer_1", long_press=False))
+    # An idle recipe timer starts the shared suggestion timer (no jump).
     assert jumped == []
     t = ctrl.timers["timer_1"]
-    assert t.is_running()
+    assert t.timer_id == 42
     assert 118 <= t.remaining_seconds() <= 120
     loop.close()
 
 
 def test_long_press_running_recipe_timer_resets_instead_of_navigating():
+    import time as _time
     ctrl, deck, loop = _make_controller()
     jumped = []
     ctrl._navigate_async = lambda path: jumped.append(path)
     ctrl.recipe_timer_specs = {"timer_1": {"label": "Add ginger", "seconds": 120}}
     t = ctrl.timers["timer_1"] = actions.TimerState()
-    t.set_seconds(90)
-    ctrl._timer_press("timer_1", long_press=True)
+    t.start_local(90)
+    loop.run_until_complete(ctrl._timer_press("timer_1", long_press=True))
     # A long press resets the timer and never navigates.
     assert jumped == []
     assert not t.is_running()
+    loop.close()
+
+
+def test_refresh_server_timers_reconciles_and_adopts():
+    # The poll piggyback: one GET /timers reconciles every key. A cancelled
+    # timer clears its key, and a running one started elsewhere is adopted by
+    # the key whose label matches.
+    import time as _time
+    ctrl, deck, loop = _make_controller()
+    gone = ctrl.timers["timer_1"] = actions.TimerState()
+    gone.bind({"id": 51, "deadline_epoch": _time.time() + 300})
+    ctrl.client = _FakeClient(get_map={"/timers": _Resp(200, {"timers": [
+        {"id": 52, "label": "Pasta", "deadline_epoch": _time.time() + 500,
+         "running": True, "expired": False},
+    ]})})
+    loop.run_until_complete(ctrl._refresh_server_timers())
+    assert gone.timer_id is None and not gone.is_running()
+    pasta = ctrl.timers["timer_pasta"]
+    assert pasta.timer_id == 52
+    assert pasta.is_running()
     loop.close()
 
 

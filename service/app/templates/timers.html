@@ -6,9 +6,31 @@
   <h4 class="mb-0"><i class="bi bi-stopwatch me-2"></i>Timers</h4>
 </div>
 
+<div class="card mb-3">
+  <div class="card-body">
+    <div class="d-flex flex-wrap align-items-center gap-2">
+      <span class="text-secondary">Start a timer:</span>
+      <button type="button" class="btn btn-outline-light timer-preset" data-minutes="1">1 min</button>
+      <button type="button" class="btn btn-outline-light timer-preset" data-minutes="5">5 min</button>
+      <button type="button" class="btn btn-outline-light timer-preset" data-minutes="10">10 min</button>
+      <button type="button" class="btn btn-outline-light timer-preset" data-minutes="15">15 min</button>
+      <button type="button" class="btn btn-outline-light timer-preset" data-minutes="30">30 min</button>
+      <button type="button" class="btn btn-outline-light timer-preset" data-minutes="60">60 min</button>
+      <form id="timerCustomForm" class="d-flex flex-wrap align-items-center gap-2 ms-md-auto">
+        <input type="text" id="timerCustomLabel" class="form-control" style="max-width: 11rem;"
+               maxlength="40" placeholder="Name (optional)" autocomplete="off">
+        <input type="number" id="timerCustomMinutes" class="form-control" style="max-width: 8rem;"
+               min="1" max="1440" step="1" placeholder="Minutes" required>
+        <button type="submit" class="btn btn-primary"><i class="bi bi-play-fill me-1"></i>Start</button>
+      </form>
+    </div>
+  </div>
+</div>
+
 <div id="timersEmpty" class="text-center text-secondary py-5">
   <div style="font-size:3rem;"><i class="bi bi-stopwatch"></i></div>
   <p class="fs-3 mb-0">No timers running</p>
+  <p class="mb-0">Timers started here also show on the Stream Deck and every other screen.</p>
 </div>
 
 <div id="timersGrid" class="row g-3 d-none"></div>
@@ -40,6 +62,9 @@
 
   var grid = document.getElementById("timersGrid");
   var empty = document.getElementById("timersEmpty");
+  var customForm = document.getElementById("timerCustomForm");
+  var customLabel = document.getElementById("timerCustomLabel");
+  var customMinutes = document.getElementById("timerCustomMinutes");
 
   // Latest snapshot from the server. Each entry carries deadline_epoch so we can
   // tick locally between polls (the timers API publishes an absolute wall-clock
@@ -89,6 +114,8 @@
       var badge = expired
         ? '<span class="badge bg-danger fs-5">Done</span>'
         : '<span class="badge bg-success fs-5">Running</span>';
+      var cancel = '<button type="button" class="btn btn-outline-danger timer-cancel" data-id="' +
+        t.id + '">' + (expired ? "Dismiss" : "Cancel") + '</button>';
       html += '<div class="col-12 col-md-6 col-xl-4">' +
         '<div class="card h-100 ' + cls + '">' +
         '<div class="card-body text-center">' +
@@ -96,6 +123,7 @@
         '<span class="timer-label">' + safe + '</span>' + badge +
         '</div>' +
         '<div class="timer-count">' + fmt(remaining) + '</div>' +
+        '<div class="mt-2">' + cancel + '</div>' +
         '</div></div></div>';
     }
     grid.innerHTML = html;
@@ -114,6 +142,49 @@
     }
     render();
   }
+
+  async function startTimer(label, minutes) {
+    var m = parseFloat(minutes);
+    if (!isFinite(m) || m <= 0) return;
+    try {
+      await fetch("timers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ label: label || "", seconds: Math.round(m * 60) })
+      });
+    } catch (e) {
+      // Unreachable: the next poll shows whatever the server actually has.
+    }
+    await poll();
+  }
+
+  async function cancelTimer(id) {
+    try {
+      await fetch("timers/" + encodeURIComponent(id), { method: "DELETE" });
+    } catch (e) { }
+    await poll();
+  }
+
+  // Preset buttons start unnamed timers (the server numbers them). The custom
+  // form takes an optional name and a minute count.
+  document.querySelectorAll(".timer-preset").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      startTimer("", btn.getAttribute("data-minutes"));
+    });
+  });
+
+  customForm.addEventListener("submit", function (ev) {
+    ev.preventDefault();
+    startTimer(customLabel.value.trim(), customMinutes.value);
+    customLabel.value = "";
+    customMinutes.value = "";
+  });
+
+  // Cancel/Dismiss buttons are re-rendered every tick, so delegate the click.
+  grid.addEventListener("click", function (ev) {
+    var btn = ev.target.closest ? ev.target.closest(".timer-cancel") : null;
+    if (btn && btn.getAttribute("data-id")) cancelTimer(btn.getAttribute("data-id"));
+  });
 
   // Tick locally every second for a smooth countdown, and refresh the snapshot
   // from the server every second so newly created or cancelled timers appear.

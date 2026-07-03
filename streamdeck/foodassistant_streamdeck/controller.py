@@ -730,61 +730,113 @@ class Controller:
         await self._refresh_shopping_check()
         return face
 
-    def _timer_press(self, name: str, long_press: bool = False) -> None:
+    async def _timer_press(self, name: str, long_press: bool = False) -> None:
+        """Handle a timer key press against the shared server registry.
+
+        The server registry is the single source of truth: a press that
+        starts, restarts, or stops a countdown creates or cancels the matching
+        server timer, and the key face only mirrors it, so the web UI and
+        satellites always agree with the deck. Short press from idle starts
+        the key's duration (the active recipe's suggestion, the key's preset,
+        or the first cycle stage); a short press while running restarts a
+        preset, advances a plain key to its next cycle stage (stopping after
+        the last), or, on a recipe key, jumps the kiosk to the recipe
+        (FoodAssistant-y7ud). A long press cancels; a press on an expired
+        alert dismisses it, removing the finished timer everywhere. When the
+        server cannot be reached the countdown still runs on this deck alone.
+        """
         if name not in self.timers:
             self.timers[name] = TimerState()
         timer = self.timers[name]
-        # When a recipe is active and this key carries a suggestion, a fresh
-        # short press starts the suggested duration locally AND fires a shared
-        # server timer so other surfaces (web UI, satellites) see the same
-        # countdown. Otherwise fall back to a timer-override preset, then to the
-        # stock count-up behaviour.
         recipe_spec = self.recipe_timer_specs.get(name)
-        recipe_seconds = recipe_spec.get("seconds") if recipe_spec else None
         preset = self._override_timer_minutes(name)
-        starting_fresh = not timer.is_running() and not timer.alert_active()
-        # A short press on an already-running recipe timer is a shortcut to the
-        # recipe: jump the kiosk to the Current Recipe page and leave the
-        # countdown untouched (FoodAssistant-y7ud). A long press still resets it.
-        if recipe_spec is not None and timer.is_running() and not long_press:
-            self._navigate_async("ui/current-recipe")
-            return
-        if long_press:
-            timer.long_press()
-        elif recipe_seconds and starting_fresh:
-            # Drive the local countdown from the suggestion at second precision
-            # (the existing rendering keeps working) and start the shared server
-            # timer too so other surfaces show the same countdown.
-            timer.set_seconds(float(recipe_seconds))
-            self._start_recipe_server_timer(recipe_spec)
-        elif preset > 0 and starting_fresh:
-            # A preset key loads its whole duration on one press, so it maps
-            # cleanly onto a shared server countdown; start one so the web UI
-            # /timers page and satellites see it too (FoodAssistant).
-            timer.set_minutes(preset)
-            self._start_server_timer(self._timer_label(name), preset * 60)
-        else:
-            timer.short_press()
-        # Reset the blink phase so a fresh alert starts on its bright frame.
-        self._blink_phase = 0
-        self._draw_page()
+        try:
+            if long_press or timer.alert_active():
+                # Reset or dismiss: drop the server timer so every surface clears.
+                await self._cancel_deck_timer(timer)
+            elif timer.is_running():
+                if recipe_spec is not None:
+                    # Shortcut to the recipe; leave the countdown untouched.
+                    self._navigate_async("ui/current-recipe")
+                    return
+                if preset > 0:
+                    # Press again to restart the preset from the top.
+                    await self._cancel_bound_server_timer(timer)
+                    await self._start_deck_timer(timer, name, preset * 60)
+                else:
+                    # Cycle key: replace the countdown with the next stage, or
+                    # stop after the last one.
+                    seconds = timer.next_cycle_seconds()
+                    await self._cancel_bound_server_timer(timer)
+                    if seconds > 0:
+                        await self._start_deck_timer(timer, name, seconds)
+                    else:
+                        timer.clear()
+            elif recipe_spec is not None and recipe_spec.get("seconds"):
+                await self._start_deck_recipe_timer(timer, recipe_spec)
+            elif preset > 0:
+                await self._start_deck_timer(timer, name, preset * 60)
+            else:
+                await self._start_deck_timer(timer, name, timer.next_cycle_seconds())
+        finally:
+            # Reset the blink phase so a fresh alert starts on its bright frame.
+            self._blink_phase = 0
+            self._draw_page()
 
-    def _start_recipe_server_timer(self, recipe_spec: dict) -> None:
-        """Fire-and-forget POST that starts the shared server timer for a recipe
-        suggestion, so surfaces beyond this deck reflect it too. Best-effort and
-        only when the event loop is live (skipped in unit tests with no loop)."""
-        if self.client is None or self.loop is None or not self.loop.is_running():
+    async def _start_deck_timer(self, timer: TimerState, name: str,
+                                seconds: float) -> None:
+        """Start a shared server timer for a key and bind its face to it.
+
+        Falls back to a deck-local countdown when the server cannot be reached
+        (or there is no client, as in unit tests), so the kitchen timer keeps
+        working offline. The key's cycle position is untouched: bind and
+        start_local only set the countdown, so a cycling key keeps its stage.
+        """
+        if seconds <= 0:
             return
-        asyncio.run_coroutine_threadsafe(
-            actions.start_recipe_timer(
+        created = None
+        if self.client is not None:
+            created = await actions.create_server_timer(
+                self.client, self.config.base_url, self._timer_label(name), seconds
+            )
+        if created is not None:
+            timer.bind(created)
+        else:
+            timer.start_local(seconds)
+
+    async def _start_deck_recipe_timer(self, timer: TimerState,
+                                       recipe_spec: dict) -> None:
+        """Start the shared server timer for a recipe suggestion and bind the
+        key's face to it, falling back to a deck-local countdown offline."""
+        created = None
+        if self.client is not None:
+            created = await actions.create_recipe_timer(
                 self.client,
                 self.config.base_url,
                 step_index=recipe_spec.get("step_index"),
                 label=recipe_spec.get("label", ""),
                 seconds=recipe_spec.get("seconds"),
-            ),
-            self.loop,
-        )
+            )
+        if created is not None:
+            timer.bind(created)
+        else:
+            timer.start_local(float(recipe_spec.get("seconds") or 0))
+
+    async def _cancel_bound_server_timer(self, timer: TimerState) -> None:
+        """Best-effort DELETE of a key's bound server timer, keeping the rest
+        of the key's local state (used mid-cycle before starting the next
+        stage). A local-only run has nothing to cancel remotely."""
+        if timer.timer_id is not None and self.client is not None:
+            await actions.cancel_server_timer(
+                self.client, self.config.base_url, timer.timer_id
+            )
+        timer.timer_id = None
+
+    async def _cancel_deck_timer(self, timer: TimerState) -> None:
+        """Cancel a key's timer everywhere: the server registry entry (so the
+        web UI clears on its next poll) and the local face."""
+        await self._cancel_bound_server_timer(timer)
+        timer.clear()
 
     def _timer_label(self, name: str) -> str:
         """Best-effort display label for a timer key (per-key override first,
@@ -797,17 +849,6 @@ class Controller:
         if spec is not None and spec.kind == "timer":
             return actions.clean_timer_label(spec.label) or "Timer"
         return "Timer"
-
-    def _start_server_timer(self, label: str, seconds: float) -> None:
-        """Fire-and-forget POST that starts a shared server countdown for a preset
-        timer key, so surfaces beyond this deck reflect it too. Best-effort and
-        only when the event loop is live (skipped in unit tests with no loop)."""
-        if self.client is None or self.loop is None or not self.loop.is_running():
-            return
-        asyncio.run_coroutine_threadsafe(
-            actions.start_server_timer(self.client, self.config.base_url, label, seconds),
-            self.loop,
-        )
 
     def _timer_key_names(self) -> list[str]:
         """Timer action names in page order, deduplicated, first occurrence wins.
@@ -849,43 +890,40 @@ class Controller:
             self.recipe_timer_specs = new_map
             self._draw_page()
 
-    def _sync_recipe_timer_runtime(self, server_timers: list[dict]) -> bool:
-        """Mirror running shared timers onto their recipe timer keys.
+    def _timer_key_labels(self) -> dict[str, str]:
+        """Label each timer key answers to when adopting a shared server timer.
 
-        For each timer key carrying an active-recipe suggestion, find the
-        matching running server timer (joined by cleaned label) and drive the
-        key's local TimerState from its remaining time, so a recipe timer started
-        on another surface (the recipe page, a satellite) shows a live countdown
-        on the deck too (FoodAssistant-y7ud). Re-sync only when the local face is
-        off by more than a second, so a steady countdown does not force a redraw
-        every poll. Returns True when something changed. Pure of I/O: the caller
-        fetches the timer list."""
-        changed = False
-        now = time.time()
-        for name, spec in self.recipe_timer_specs.items():
-            remaining = actions.running_timer_remaining(
-                server_timers, spec.get("label", ""), now
-            )
-            if remaining is None or remaining <= 0:
-                continue
-            timer = self.timers.get(name)
-            if timer is None:
-                timer = self.timers[name] = TimerState()
-            if not timer.is_running() or abs(timer.remaining_seconds() - remaining) > 1:
-                timer.set_seconds(remaining)
-                changed = True
-        return changed
+        The active recipe's suggestion label wins (so a step timer started on
+        the recipe page lands on the key showing that step), falling back to
+        the key's own display label (so a "Pasta" timer started from the web
+        lands on the deck's Pasta key)."""
+        labels: dict[str, str] = {}
+        for name in self._timer_key_names():
+            spec = self.recipe_timer_specs.get(name)
+            labels[name] = (spec or {}).get("label") or self._timer_label(name)
+        return labels
 
-    async def _refresh_recipe_timer_runtime(self) -> None:
-        """Poll the shared timers and reflect any running recipe timer on its key.
+    async def _refresh_server_timers(self) -> None:
+        """Reconcile every timer key with the shared server registry, on poll.
 
-        Best-effort and only when a recipe is active (there are suggestion specs
-        to match against), so a deck with no active recipe never pays for the
-        call. Redraws when a face changed."""
-        if self.client is None or not self.recipe_timer_specs:
+        Piggybacks on the existing status poll (one GET /timers, no extra
+        loop, kind to a Pi 3). A timer cancelled from the web UI clears its
+        deck key on this pass, a running timer started elsewhere lands on the
+        matching key by label, and a bound key's deadline is corrected if the
+        timer was replaced. Skipped when the deck shows no timer keys and
+        holds no bindings, so such a deck never pays for the call."""
+        if self.client is None:
+            return
+        names = self._timer_key_names()
+        if not names and not self.timers:
             return
         server_timers = await actions.fetch_timers(self.client, self.config.base_url)
-        if self._sync_recipe_timer_runtime(server_timers):
+        for name in names:
+            if name not in self.timers:
+                self.timers[name] = TimerState()
+        if actions.sync_timer_bindings(
+            self.timers, self._timer_key_labels(), server_timers, time.time()
+        ):
             self._draw_page()
 
     def _has_kind(self, *kinds: str) -> bool:
@@ -1533,9 +1571,10 @@ class Controller:
         # status counts (sbu3). Defensive inside, so a failure never disturbs the
         # status poll above.
         await self._refresh_recipe_timers()
-        # Reflect any running shared recipe timer (possibly started on another
-        # surface) onto its deck key as a live countdown, same cadence (y7ud).
-        await self._refresh_recipe_timer_runtime()
+        # Reconcile the timer keys with the shared server registry (the single
+        # source of countdown truth), same cadence: a timer cancelled from the
+        # web clears its key, one started elsewhere lands on the matching key.
+        await self._refresh_server_timers()
         # Refresh today's planned meal for any meal_today info key, on the same
         # cadence. Skipped when no such key is shown so the poll stays cheap.
         await self._refresh_meal_today()
@@ -1553,9 +1592,12 @@ class Controller:
         await self._refresh_shopping_check()
 
     def _tick_timers(self) -> bool:
-        """Advance all active timers. Returns True if any expired this tick."""
-        expired = any(t.tick() for t in self.timers.values())
-        return expired
+        """Advance all active timers. Returns True if any expired this tick.
+
+        The list comprehension (not a bare any() over a generator) makes sure
+        every timer ticks even when an earlier one expires the same second.
+        """
+        return any([t.tick() for t in self.timers.values()])
 
     async def _poll_forever(self) -> None:
         tick = 0

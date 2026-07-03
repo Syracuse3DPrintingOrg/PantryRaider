@@ -10,6 +10,7 @@ paging, kiosk navigation).
 """
 from __future__ import annotations
 
+import inspect
 import time
 from dataclasses import dataclass, field, replace
 from typing import Any, Awaitable, Callable, Optional
@@ -56,34 +57,114 @@ def meal_today_label(mealplan: dict, fallback: str = "No meal") -> str:
     return fallback
 
 
-class TimerState:
-    """Mutable per-key countdown timer.
+# Stages a plain timer key cycles through, one short press per stage. A press
+# after the last stage stops the timer. Preset keys (timer_minutes > 0) skip
+# the cycle and load their whole duration on a single press instead.
+TIMER_CYCLE_MINUTES: tuple[int, ...] = (5, 10, 15, 30, 60)
 
-    Short press: add 1 minute (starts from idle; rapid presses accumulate).
-    Long press: reset to idle immediately.
-    When the countdown expires, ``alerting`` flips to True; the next short
-    press dismisses it.
+
+class TimerState:
+    """Per-key view of one shared server timer.
+
+    The server registry (POST/GET/DELETE /timers) is the single source of
+    truth: a key press creates or cancels a server timer, and this object only
+    remembers which timer id the key is bound to plus the timer's shared
+    ``deadline_epoch``. Remaining time is always deadline_epoch minus the
+    deck's own wall clock, the same satellite-shareable formula every other
+    surface uses, so the deck, the web UI, and satellites agree on the
+    countdown.
+
+    When the app cannot be reached a press falls back to a deck-local run
+    (``timer_id`` None) so the kitchen timer still works offline; the face and
+    expiry behave identically, there is just nothing to show elsewhere.
+
+    When the countdown reaches zero ``alerting`` flips True (via ``tick``) and
+    the key blinks until the next short press dismisses it.
     """
 
     def __init__(self) -> None:
-        self._minutes: int = 0       # 0 = idle; positive = minutes set
-        self._deadline: float = 0.0  # monotonic clock target
+        self.timer_id: Optional[int] = None  # server timer id; None = local run
+        self.deadline_epoch: float = 0.0     # wall-clock deadline; 0 = idle
         self.alerting: bool = False
+        self.cycle_idx: int = -1             # -1 = not in the press cycle
 
-    def is_running(self) -> bool:
-        return self._minutes > 0 and not self.alerting
+    # -- state ---------------------------------------------------------------
 
-    def remaining_seconds(self) -> int:
-        if not self.is_running():
+    def is_running(self, now: Optional[float] = None) -> bool:
+        if self.alerting or self.deadline_epoch <= 0:
+            return False
+        now = time.time() if now is None else now
+        return self.deadline_epoch > now
+
+    def remaining_seconds(self, now: Optional[float] = None) -> int:
+        if self.alerting or self.deadline_epoch <= 0:
             return 0
-        return max(0, int(self._deadline - time.monotonic()))
+        now = time.time() if now is None else now
+        return max(0, int(self.deadline_epoch - now))
 
-    def label(self, base_label: str) -> str:
+    def alert_active(self) -> bool:
+        return self.alerting
+
+    # -- transitions -----------------------------------------------------
+
+    def bind(self, timer: dict) -> None:
+        """Adopt a server timer dict (id + deadline_epoch) as this key's
+        countdown. The face then renders from the shared deadline alone."""
+        try:
+            self.timer_id = int(timer.get("id"))
+        except (TypeError, ValueError):
+            self.timer_id = None
+        try:
+            self.deadline_epoch = float(timer.get("deadline_epoch") or 0.0)
+        except (TypeError, ValueError):
+            self.deadline_epoch = 0.0
+        self.alerting = False
+
+    def start_local(self, seconds: float, now: Optional[float] = None) -> None:
+        """Offline fallback: run the countdown on this deck alone."""
+        now = time.time() if now is None else now
+        self.timer_id = None
+        self.deadline_epoch = now + max(0.0, float(seconds))
+        self.alerting = False
+
+    def clear(self) -> None:
+        """Back to idle. Cancelling the bound server timer, if any, is the
+        caller's job (the registry owns the countdown)."""
+        self.timer_id = None
+        self.deadline_epoch = 0.0
+        self.alerting = False
+        self.cycle_idx = -1
+
+    def next_cycle_seconds(self) -> int:
+        """Advance the press cycle and return the next stage in seconds.
+
+        Returns 0 after the last stage (the press stops the timer) and resets
+        the cycle so the following press starts over at the first stage.
+        """
+        self.cycle_idx += 1
+        if self.cycle_idx >= len(TIMER_CYCLE_MINUTES):
+            self.cycle_idx = -1
+            return 0
+        return TIMER_CYCLE_MINUTES[self.cycle_idx] * 60
+
+    def tick(self, now: Optional[float] = None) -> bool:
+        """Return True (and set alerting) if the timer just expired."""
+        now = time.time() if now is None else now
+        if not self.alerting and 0 < self.deadline_epoch <= now:
+            self.alerting = True
+            self.deadline_epoch = 0.0
+            self.cycle_idx = -1
+            return True
+        return False
+
+    # -- face --------------------------------------------------------------
+
+    def label(self, base_label: str, now: Optional[float] = None) -> str:
         if self.alerting:
             return "Done!"
-        if self._minutes == 0:
+        if self.deadline_epoch <= 0:
             return base_label
-        secs = self.remaining_seconds()
+        secs = self.remaining_seconds(now)
         if secs <= 0:
             return "Done!"
         return f"{secs // 60}:{secs % 60:02d}"
@@ -94,13 +175,13 @@ class TimerState:
     _ALERT_BRIGHT = "#ef4444"
     _ALERT_DIM = "#450a0a"
 
-    def color(self, base_color: str, blink_phase: int = 0) -> str:
+    def color(self, base_color: str, blink_phase: int = 0,
+              now: Optional[float] = None) -> str:
         if self.alerting:
             return self.alert_color(blink_phase)
-        if self._minutes == 0:
+        if self.deadline_epoch <= 0:
             return base_color
-        secs = self.remaining_seconds()
-        return "#f59e0b" if secs < 60 else "#0d9488"
+        return "#f59e0b" if self.remaining_seconds(now) < 60 else "#0d9488"
 
     def alert_color(self, blink_phase: int) -> str:
         """Colour for an expired alert at the given blink phase.
@@ -109,64 +190,6 @@ class TimerState:
         flash the key. Only meaningful while ``alerting`` is True.
         """
         return self._ALERT_BRIGHT if blink_phase % 2 == 0 else self._ALERT_DIM
-
-    def alert_active(self) -> bool:
-        return self.alerting
-
-    def short_press(self) -> None:
-        """Add one minute. Dismisses the alert if one is active."""
-        if self.alerting:
-            self.alerting = False
-            self._minutes = 0
-            self._deadline = 0.0
-            return
-        self._minutes += 1
-        self._deadline = time.monotonic() + self._minutes * 60
-
-    def set_minutes(self, minutes: int) -> None:
-        """Start (or restart) the countdown at a fixed number of minutes.
-
-        Used by timer-override keys that carry a preset duration: one short
-        press loads the whole preset rather than adding a single minute.
-        """
-        minutes = max(0, int(minutes))
-        self.alerting = False
-        self._minutes = minutes
-        self._deadline = time.monotonic() + minutes * 60 if minutes else 0.0
-
-    def set_seconds(self, seconds: float) -> None:
-        """Start (or restart) the countdown at a fixed number of seconds.
-
-        Second-granular sibling of ``set_minutes`` used to mirror a running
-        shared server timer onto a recipe timer key, so the key shows the same
-        live countdown whether the timer was started on this deck or from
-        another surface (the recipe page, a satellite). A non-positive value
-        resets to idle. ``_minutes`` is only a nonzero "is set" sentinel here so
-        ``is_running()`` stays True; the actual remaining time comes from the
-        monotonic deadline.
-        """
-        seconds = max(0, int(seconds))
-        self.alerting = False
-        self._minutes = 1 if seconds > 0 else 0
-        self._deadline = time.monotonic() + seconds if seconds else 0.0
-
-    def long_press(self) -> None:
-        """Reset the timer to idle immediately."""
-        self.alerting = False
-        self._minutes = 0
-        self._deadline = 0.0
-
-    def press(self) -> None:
-        """Backward-compatible alias for short_press."""
-        self.short_press()
-
-    def tick(self) -> bool:
-        """Return True (and set alerting) if the timer just expired."""
-        if self.is_running() and self.remaining_seconds() <= 0:
-            self.alerting = True
-            self._minutes = 0
-            return True
-        return False
 
 
 # How many characters of a recipe-derived label fit comfortably on a timer key
@@ -1029,7 +1052,8 @@ ACTIONS: dict[str, ActionSpec] = {
         label="Timer 1",
         color="#0d9488",
         kind="timer",
-        description="Countdown timer (press to cycle: 5/10/15/30/60 min or stop).",
+        description="Shared countdown timer (press to cycle: 5/10/15/30/60 min "
+        "or stop; hold to reset). Shows on every screen too.",
     ),
     "timer_2": ActionSpec(
         name="timer_2",
@@ -1795,38 +1819,84 @@ async def fetch_timers(client: Any, base_url: str) -> list[dict]:
     return []
 
 
-def running_timer_remaining(
-    server_timers: list[dict], label: str, now_epoch: float,
-) -> Optional[int]:
-    """Whole seconds left on a running shared timer matching ``label``, or None.
+def _timer_deadline(timer: dict) -> float:
+    """The shared wall-clock deadline of a server timer dict, or 0.0."""
+    try:
+        return float(timer.get("deadline_epoch") or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
 
-    Joins a deck recipe timer key to a server timer by their cleaned labels, so
-    a suggestion shown as "Add ginger" on the deck (truncated from the full step
-    text) matches the server timer the recipe page started from that same step.
-    Remaining is computed from the timer's shared ``deadline_epoch`` against the
-    surface's own wall clock, the satellite-shareable formula, so a timer started
-    anywhere shows the same countdown here. Expired, label-mismatched, and
-    already-elapsed timers yield None. Pure, so it is unit-testable without I/O.
+
+def sync_timer_bindings(
+    bindings: dict[str, TimerState],
+    key_labels: dict[str, str],
+    server_timers: list[dict],
+    now_epoch: float,
+) -> bool:
+    """Reconcile per-key timer bindings against the polled server registry.
+
+    The registry is the single source of truth, so this runs on every status
+    poll: a bound timer that has vanished from the server (cancelled from the
+    web UI or another surface) clears its key back to idle, a bound timer
+    still present refreshes the key's deadline (clock drift, or the timer was
+    restarted elsewhere), and an idle key adopts a running, unclaimed server
+    timer whose cleaned label matches the key's, so a "Pasta" timer started
+    from the web lands on the deck's Pasta key. Local-only runs (timer_id
+    None with a live deadline, the offline fallback) and undismissed expiry
+    alerts keep their face. Returns True when any face changed so the caller
+    can redraw. Pure: the caller fetches the timer list and supplies the
+    clock, so it is unit-testable without I/O.
     """
-    want = clean_timer_label(label)
-    if not want:
-        return None
+    changed = False
+    by_id: dict[int, dict] = {}
     for t in server_timers or []:
-        if not isinstance(t, dict) or t.get("expired"):
+        if isinstance(t, dict) and isinstance(t.get("id"), int):
+            by_id[t["id"]] = t
+    claimed = {b.timer_id for b in bindings.values() if b.timer_id is not None}
+
+    for binding in bindings.values():
+        if binding.timer_id is None:
             continue
-        if clean_timer_label(t.get("label", "")) != want:
+        t = by_id.get(binding.timer_id)
+        if t is None:
+            # Cancelled elsewhere: clear the face (and any expired alert).
+            if binding.deadline_epoch > 0 or binding.alerting:
+                changed = True
+            binding.clear()
             continue
-        deadline = t.get("deadline_epoch")
-        if deadline is None:
+        if binding.alerting or t.get("expired"):
+            # Expiry is driven locally by tick(); an expired server timer stays
+            # listed until dismissed, so leave the blinking alert alone.
             continue
-        try:
-            remaining = float(deadline) - now_epoch
-        except (TypeError, ValueError):
+        deadline = _timer_deadline(t)
+        if deadline > 0 and abs(deadline - binding.deadline_epoch) > 1.0:
+            binding.deadline_epoch = deadline
+            changed = True
+
+    for name, want_label in key_labels.items():
+        binding = bindings.get(name)
+        if binding is None or binding.timer_id is not None:
             continue
-        if remaining <= 0:
+        if binding.deadline_epoch > 0 or binding.alerting:
+            continue  # a local-only run or an undismissed alert owns this face
+        want = clean_timer_label(want_label)
+        if not want:
             continue
-        return int(remaining)
-    return None
+        for t in server_timers or []:
+            if not isinstance(t, dict) or t.get("expired"):
+                continue
+            tid = t.get("id")
+            if not isinstance(tid, int) or tid in claimed:
+                continue
+            if clean_timer_label(t.get("label", "")) != want:
+                continue
+            if _timer_deadline(t) <= now_epoch:
+                continue
+            binding.bind(t)
+            claimed.add(tid)
+            changed = True
+            break
+    return changed
 
 
 async def fetch_meal_today(client: Any, base_url: str, fallback: str = "No meal") -> str:
@@ -1956,32 +2026,45 @@ async def check_shopping_item(client: Any, base_url: str, item: dict) -> str:
         return "Failed"
 
 
-async def start_server_timer(
-    client: Any, base_url: str, label: str, seconds: float,
-) -> bool:
-    """Start a shared server countdown (POST /timers). Returns True on 200.
+def _timer_from_response(resp: Any) -> Optional[dict]:
+    """Extract the created timer dict from a 200 timer-create response."""
+    if resp.status_code != 200:
+        return None
+    try:
+        timer = (resp.json() or {}).get("timer")
+    except Exception:  # noqa: BLE001 - malformed body means no timer
+        return None
+    return timer if isinstance(timer, dict) else None
 
-    Used for preset timer keys so a timer started on the deck also appears on
-    the web UI /timers page and on satellites. Best-effort: any failure returns
-    False so the press still drives the deck's own local TimerState."""
+
+async def create_server_timer(
+    client: Any, base_url: str, label: str, seconds: float,
+) -> Optional[dict]:
+    """Create a shared server timer (POST /timers). Returns its dict or None.
+
+    The returned dict carries the id and deadline_epoch the deck key binds to,
+    so every surface (web UI, satellites, this deck) renders the same
+    countdown. Best-effort: any failure returns None so the press can fall
+    back to a deck-local countdown."""
     base = base_url.rstrip("/")
     try:
         r = await client.post(f"{base}/timers", json={"label": label, "seconds": seconds})
-        return r.status_code == 200
+        return _timer_from_response(r)
     except Exception:  # noqa: BLE001 - shared timer is best-effort
-        return False
+        return None
 
 
-async def start_recipe_timer(
+async def create_recipe_timer(
     client: Any, base_url: str, step_index: Any = None,
     label: str = "", seconds: Any = None,
-) -> bool:
-    """Start a shared server timer from a recipe suggestion. Returns True on 200.
+) -> Optional[dict]:
+    """Create a shared server timer from a recipe suggestion. Returns its dict
+    or None.
 
-    Posts to /current-recipe/timers/start so every surface (web UI, satellites)
-    sees the same countdown. Identify the suggestion by step_index or label;
-    seconds, when given, is passed through. Best-effort: any failure returns
-    False so a press still drives the local TimerState for the deck's own face.
+    Posts to /current-recipe/timers/start so every surface (web UI,
+    satellites) sees the same countdown. Identify the suggestion by step_index
+    or label; seconds, when given, is passed through. Best-effort: any failure
+    returns None so a press can fall back to a deck-local countdown.
     """
     base = base_url.rstrip("/")
     payload: dict[str, Any] = {}
@@ -1993,8 +2076,24 @@ async def start_recipe_timer(
         payload["seconds"] = seconds
     try:
         r = await client.post(f"{base}/current-recipe/timers/start", json=payload)
-        return r.status_code == 200
+        return _timer_from_response(r)
     except Exception:  # noqa: BLE001 - shared timer is best-effort
+        return None
+
+
+async def cancel_server_timer(client: Any, base_url: str, timer_id: Any) -> bool:
+    """Cancel a shared server timer (DELETE /timers/{id}). Returns True when
+    the timer is gone (a 404 means someone else already removed it, which is
+    the same outcome). Best-effort: any network failure returns False."""
+    try:
+        tid = int(timer_id)
+    except (TypeError, ValueError):
+        return False
+    base = base_url.rstrip("/")
+    try:
+        r = await client.delete(f"{base}/timers/{tid}")
+        return r.status_code in (200, 404)
+    except Exception:  # noqa: BLE001 - cancel is best-effort
         return False
 
 
@@ -2114,7 +2213,11 @@ class ActionContext:
     cycle_brightness: Callable[[], int]           # returns the new percent
     page_next: Callable[[], None]
     page_prev: Callable[[], None]
-    timer_press: Callable[[str, bool], None] = field(default=lambda _name, _long=False: None)
+    # Handle a timer key press (kind=="timer"); args are the pressed spec's
+    # name and whether it was a long press. May return an awaitable (the
+    # controller's handler talks to the shared server registry); run_action
+    # awaits it when it does, so a plain sync callable also works in tests.
+    timer_press: Callable[[str, bool], Any] = field(default=lambda _name, _long=False: None)
     weather_refresh: Callable[[], Awaitable[None]] = field(
         default=lambda: __import__("asyncio").sleep(0)
     )
@@ -2213,8 +2316,10 @@ async def run_action(spec: ActionSpec, ctx: ActionContext, long_press: bool = Fa
         return "prev page"
 
     if spec.kind == "timer":
-        ctx.timer_press(spec.name, long_press)
-        return f"{spec.name} {'reset' if long_press else '+1min'}"
+        result = ctx.timer_press(spec.name, long_press)
+        if inspect.isawaitable(result):
+            await result
+        return f"{spec.name} {'reset' if long_press else 'pressed'}"
 
     if spec.kind == "pin":
         ctx.keypad_enter()
