@@ -551,19 +551,22 @@ async def weather_page(request: Request):
 
 
 @router.get("/weather/data")
-async def weather_data(location: str | None = None):
-    """Server-side forecast for the kiosk weather page (FoodAssistant-afqd).
+async def weather_data(location: str | None = None, units: str | None = None):
+    """Server-side forecast for the kiosk weather page and the Stream Deck
+    weather tiles (FoodAssistant-afqd, 34k7).
 
-    Fetches wttr.in's reliable JSON API on the server (the same path the Stream
-    Deck weather widget uses) so the page does not depend on the flaky PNG
-    endpoint or the kiosk's own internet access. ``location`` overrides the saved
-    one (handy for diagnosing). Returns {ok, forecast} or {ok: false, error}
-    with the reason it failed, so the page can show something actionable."""
+    Fetches Open-Meteo first (honouring weather_api_base) with wttr.in as the
+    fallback, so neither surface depends on a single flaky provider or the
+    kiosk's own internet access. ``location`` and ``units`` override the saved
+    ones (per-key deck overrides carry their own). Returns {ok, forecast} or
+    {ok: false, error} with the reason it failed, so callers can show
+    something actionable."""
     from ..services import weather as weather_svc
     loc = location if location is not None else (settings.streamdeck_weather_location or "")
-    forecast, error = await weather_svc.fetch_forecast(
-        loc, settings.streamdeck_weather_units or "f",
-    )
+    u = (units or "").strip().lower()
+    if u not in ("f", "c"):
+        u = settings.streamdeck_weather_units or "f"
+    forecast, error = await weather_svc.fetch_forecast(loc, u)
     if forecast is None:
         return {"ok": False, "error": error, "location": loc}
     return {"ok": True, "forecast": forecast, "location": loc}

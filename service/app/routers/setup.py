@@ -1550,6 +1550,12 @@ async def maintenance_reboot():
     try:
         async with httpx.AsyncClient(timeout=15.0) as c:
             r = await c.post(f"{_HOST_BRIDGE}/reboot")
+        if r.status_code != 200:
+            # An out-of-date bridge answers 404 {"error": "not found"} for a
+            # route it predates; surface something actionable instead of the
+            # bare bridge body (FoodAssistant-pnz4).
+            return JSONResponse({"ok": False, "error":
+                "The device helper does not support this yet; run Update, then try again."})
         return r.json()
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)})

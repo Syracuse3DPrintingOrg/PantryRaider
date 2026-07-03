@@ -24,10 +24,12 @@ fi
 
 # Find the kiosk Wayland socket and the connected output, retrying while the
 # compositor starts. The socket lives under /run/user/<uid>/wayland-N; skip the
-# matching .lock files.
+# matching .lock files. The window is generous (30s) because on a cold boot
+# cage can bring the output up well after ExecStartPost fires; a 10s window
+# silently lost the rotation on slower Pis (FoodAssistant-prqg).
 sock=""
 out=""
-for _ in $(seq 1 20); do
+for _ in $(seq 1 60); do
   sock="$(ls /run/user/*/wayland-* 2>/dev/null | grep -v '\.lock$' | head -1 || true)"
   if [ -n "$sock" ]; then
     export XDG_RUNTIME_DIR="$(dirname "$sock")"

@@ -121,7 +121,8 @@ class Controller:
         self._blink_phase: int = 0
         self._key_down_time: dict[int, float] = {}  # physical key -> press timestamp
         self.weather: WeatherState = WeatherState(
-            location=config.weather_location, units=config.weather_units
+            location=config.weather_location, units=config.weather_units,
+            base_url=config.base_url,
         )
         # Host-bridge system health shown on a health key. Refreshed on the
         # status poll; neutral grey until first fetched (and when off-Pi).
@@ -156,7 +157,8 @@ class Controller:
             if spec.kind in ("weather", "forecast"):
                 self.override_weather[spec.name] = WeatherState(
                     location=spec.weather_location or config.weather_location,
-                    units=config.weather_units,
+                    units=spec.weather_units or config.weather_units,
+                    base_url=config.base_url,
                 )
             elif spec.kind == "ha_entity" and spec.ha_entity_id:
                 # Honour any per-override on/off colours; empty strings fall back

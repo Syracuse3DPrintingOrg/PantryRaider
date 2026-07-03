@@ -189,6 +189,22 @@ done
 # schedule a DETACHED restart a few seconds out so our JSON result reaches the UI
 # first and the restart runs outside our (soon-to-be-killed) cgroup. Done before
 # the Pi Hosted Docker branch below so both hosted and remote devices get it.
+# Devices imaged before the kiosk unit gained its rotation ExecStartPost never
+# re-apply the saved display rotation on boot: the unit file is written once at
+# firstboot and no update path rewrites it, so the 2026-06-24 fix never reached
+# already-deployed devices (FoodAssistant-prqg). The unit is generated with
+# device-specific values, so it cannot be reinstalled from the repo like the
+# bridge unit; instead the one missing line is patched in place.
+KIOSK_UNIT="${KIOSK_UNIT:-/etc/systemd/system/foodassistant-kiosk.service}"
+if [ -f "$KIOSK_UNIT" ] && ! grep -q "foodassistant-apply-rotation" "$KIOSK_UNIT"; then
+  if sed -i '/^Restart=/i ExecStartPost=-/usr/local/bin/foodassistant-apply-rotation' "$KIOSK_UNIT" 2>/dev/null; then
+    systemctl daemon-reload 2>/dev/null || true
+    log "Patched $KIOSK_UNIT: saved rotation now re-applies on every kiosk start."
+  else
+    log "WARN: could not patch $KIOSK_UNIT for rotation re-apply."
+  fi
+fi
+
 _bsrc="$REPO/scripts/image-build/foodassistant-host-bridge"
 _bdst="$BIN_DIR/foodassistant-host-bridge"
 if [ -f "$_bsrc" ]; then

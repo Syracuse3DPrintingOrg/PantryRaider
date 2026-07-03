@@ -3360,3 +3360,56 @@ def test_refresh_shopping_check_noop_when_not_open():
     loop.run_until_complete(ctrl._refresh_shopping_check())
     assert ctrl.client.calls == []
     loop.close()
+
+
+# -- weather via the app endpoint (FoodAssistant-34k7) ----------------------
+
+
+def test_weather_apply_forecast_maps_normalized_shape():
+    # The deck now consumes the app's normalized /ui/weather/data forecast
+    # (Open-Meteo primary) instead of calling wttr.in directly. apply_forecast
+    # is the pure mapping from that shape onto the tile fields.
+    w = actions.WeatherState(location="Syracuse", units="f", base_url="http://x")
+    w.apply_forecast({
+        "current": {"temp": 72, "feels": 70, "humidity": 40, "wind": 8,
+                    "desc": "Sunny", "unit": "F"},
+        "days": [
+            {"hi": 75, "lo": 58, "date": "2026-07-03"},
+            {"hi": 80, "lo": 60, "date": "2026-07-04"},
+            {"hi": 71, "lo": 55, "date": "2026-07-05"},
+            {"hi": 68, "lo": 51, "date": "2026-07-06"},
+        ],
+    })
+    assert w._label == "72°F Sunny"
+    assert w._error is False
+    # The stat renderers still read wttr-style keys, synthesized here.
+    assert w._stat_feels_like()[0] == "Feels\n70°F"
+    assert w._stat_humidity()[0] == "Humid\n40%"
+    assert w._stat_wind()[0] == "Wind\n8\nmph"
+    assert [d["tag"] for d in w._forecast_days] == ["Today", "Tmrw", "Day 3", "2026-07-06"]
+    assert w._fc_label == "H75 L58"
+
+
+def test_weather_apply_forecast_celsius_units():
+    w = actions.WeatherState(units="c")
+    w.apply_forecast({"current": {"temp": 21, "feels": 20, "humidity": 55,
+                                  "wind": 12, "desc": "Cloudy"},
+                      "days": [{"hi": 22, "lo": 14}]})
+    assert w._label == "21°C Cloudy"
+    assert w._stat_wind()[0] == "Wind\n12\nkph"
+    assert w._fc_label == "H22 L14"
+
+
+def test_weather_apply_forecast_empty_days_keeps_forecast_face():
+    w = actions.WeatherState()
+    w.apply_forecast({"current": {"temp": 60, "desc": "Fog"}, "days": []})
+    assert w._label == "60°F Fog"
+    assert w._fc_label == "Forecast"
+
+
+def test_weather_no_signal_face():
+    w = actions.WeatherState()
+    w._set_no_signal()
+    assert w._label == "No signal"
+    assert w._fc_label == "No signal"
+    assert w._error is True

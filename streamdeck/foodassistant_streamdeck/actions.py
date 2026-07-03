@@ -481,11 +481,17 @@ def should_auto_reset(now: float, last_interaction: float,
 
 
 class WeatherState:
-    """Fetches and caches current weather from wttr.in (no API key required).
+    """Fetches and caches current weather from the app's /ui/weather/data.
+
+    The app prefers Open-Meteo (honouring weather_api_base) and falls back to
+    wttr.in; the deck previously called wttr.in directly, which is frequently
+    rate-limited and left the tiles on "No signal" while the web UI's weather
+    worked fine on the same device (FoodAssistant-34k7).
 
     ``location`` is any city name, zip code, or lat,lon string. When empty,
-    wttr.in auto-detects the location from the requester's IP address.
-    ``units`` is 'f' (Fahrenheit) or 'c' (Celsius).
+    the server picks the saved location (or geolocates by IP on the wttr.in
+    fallback). ``units`` is 'f' (Fahrenheit) or 'c' (Celsius). ``base_url`` is
+    the app's base URL, the same one the controller uses for every other call.
 
     The weather key cycles through a list of stat renderers (current temp plus
     condition at index 0, then feels-like, humidity, and wind) and the forecast
@@ -495,9 +501,11 @@ class WeatherState:
     can return it to the default after ``WEATHER_AUTO_RESET_SECS``.
     """
 
-    def __init__(self, location: str = "", units: str = "f") -> None:
+    def __init__(self, location: str = "", units: str = "f",
+                 base_url: str = "http://127.0.0.1:9284") -> None:
         self.location = location
         self.units = units.lower()
+        self.base_url = base_url
         self._label: str = "Weather"
         self._color: str = "#1e40af"
         self._fetched_at: float = 0.0
@@ -626,55 +634,71 @@ class WeatherState:
         self._day_idx = 0
         self.last_interaction = 0.0
 
+    def _set_no_signal(self) -> None:
+        self._label = "No signal"
+        self._color = "#6b7280"
+        self._error = True
+        self._fc_label = "No signal"
+
+    def apply_forecast(self, forecast: dict) -> None:
+        """Populate the tile fields from the app's normalized forecast dict
+        ({current: {temp, feels, humidity, wind, desc, ...}, days: [...]}).
+        Pure, so the mapping is unit-testable without HTTP."""
+        cur = forecast.get("current") or {}
+        unit_sym = "F" if self.units == "f" else "C"
+        temp = cur.get("temp", "?")
+        desc = str(cur.get("desc", "") or "")
+        self._label = f"{temp}°{unit_sym} {desc}".rstrip()
+        self._color = "#1e40af"
+        self._error = False
+        # The stat renderers still read the wttr-style keys; synthesize them
+        # from the normalized current block. Wind is already in the requested
+        # units' convention (mph for f, km/h for c), so both keys get it.
+        feels = str(cur.get("feels", "?"))
+        wind = str(cur.get("wind", "?"))
+        self._cond = {
+            "FeelsLikeF": feels, "FeelsLikeC": feels,
+            "humidity": str(cur.get("humidity", "?")),
+            "windspeedMiles": wind, "windspeedKmph": wind,
+        }
+        # Cache every returned day so the forecast key can cycle through them;
+        # tag the first three with friendly names (the rest fall back to the
+        # bare date).
+        tags = ("Today", "Tmrw", "Day 3")
+        days: list[dict[str, str]] = []
+        for i, day in enumerate(forecast.get("days") or []):
+            if not isinstance(day, dict):
+                continue
+            days.append({
+                "hi": str(day.get("hi", "?")),
+                "lo": str(day.get("lo", "?")),
+                "tag": tags[i] if i < len(tags) else str(day.get("date", "")),
+            })
+        self._forecast_days = days
+        if days:
+            self._fc_label = f"H{days[0]['hi']} L{days[0]['lo']}"
+            self._fc_color = "#0e7490"
+
     async def refresh(self) -> None:
         try:
             import httpx
-            loc = self.location.strip().replace(" ", "+") if self.location.strip() else ""
-            url = f"https://wttr.in/{loc}?format=j1"
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                r = await client.get(url, headers={"User-Agent": "foodassistant-streamdeck/1.0"})
+            base = (self.base_url or "http://127.0.0.1:9284").rstrip("/")
+            params: dict[str, str] = {"units": self.units}
+            if self.location.strip():
+                params["location"] = self.location.strip()
+            async with httpx.AsyncClient(timeout=12.0) as client:
+                r = await client.get(f"{base}/ui/weather/data", params=params)
             if r.status_code != 200:
-                self._label = "No signal"
-                self._color = "#6b7280"
-                self._error = True
-                self._fc_label = "No signal"
+                self._set_no_signal()
                 return
             data = r.json()
-            cond = data["current_condition"][0]
-            self._cond = cond
-            temp_key = "temp_F" if self.units == "f" else "temp_C"
-            temp = cond.get(temp_key, "?")
-            unit_sym = "F" if self.units == "f" else "C"
-            code = int(cond.get("weatherCode", 113))
-            desc = _WEATHER_CONDITION_CODES.get(code, cond.get("weatherDesc", [{}])[0].get("value", ""))
-            self._label = f"{temp}°{unit_sym} {desc}"
-            self._color = "#1e40af"
-            self._error = False
-            try:
-                hi_key = "maxtempF" if self.units == "f" else "maxtempC"
-                lo_key = "mintempF" if self.units == "f" else "mintempC"
-                # Cache every returned day so the forecast key can cycle through
-                # them; tag the first three with friendly names (the rest, if
-                # any, fall back to the bare date).
-                tags = ("Today", "Tmrw", "Day 3")
-                days: list[dict[str, str]] = []
-                for i, day in enumerate(data.get("weather", [])):
-                    days.append({
-                        "hi": str(day.get(hi_key, "?")),
-                        "lo": str(day.get(lo_key, "?")),
-                        "tag": tags[i] if i < len(tags) else str(day.get("date", "")),
-                    })
-                self._forecast_days = days
-                if days:
-                    self._fc_label = f"H{days[0]['hi']} L{days[0]['lo']}"
-                    self._fc_color = "#0e7490"
-            except Exception:
-                self._fc_label = "Forecast"
+            forecast = data.get("forecast") if data.get("ok") else None
+            if not isinstance(forecast, dict):
+                self._set_no_signal()
+                return
+            self.apply_forecast(forecast)
         except Exception:
-            self._label = "No signal"
-            self._color = "#6b7280"
-            self._error = True
-            self._fc_label = "No signal"
+            self._set_no_signal()
         finally:
             self._fetched_at = time.monotonic()
 

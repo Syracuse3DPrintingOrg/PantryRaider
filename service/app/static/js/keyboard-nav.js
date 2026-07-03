@@ -117,7 +117,26 @@
   // Exposed so the navbar keyboard-icon hint can open the help overlay too.
   window.__kbdNavHelp = toggleOverlay;
 
+  // A USB HID barcode scanner types its code into the page as a fast keystroke
+  // burst. Navigating on the first digit hijacked every scan to whatever tab
+  // owned that number (usually Inventory in slot 1, sometimes Weather),
+  // regardless of scanner mode (FoodAssistant-lth6). So a digit shortcut only
+  // navigates after a short quiet delay, and ANY further keystroke inside that
+  // window cancels it: scanner keystrokes arrive within a few milliseconds of
+  // each other (the global barcode capture in base.html then consumes the
+  // burst), while a human shortcut press is a single keystroke, for which the
+  // delay is imperceptible. A digit that itself arrives hot on the heels of
+  // another keystroke is part of a burst, never a shortcut.
+  var pendingNav = null;
+  var lastKeyAt = 0;
+  var NAV_DELAY_MS = 200;
+  var BURST_GAP_MS = 250;
+
   document.addEventListener('keydown', function (ev) {
+    var sinceLast = Date.now() - lastKeyAt;
+    lastKeyAt = Date.now();
+    if (pendingNav) { clearTimeout(pendingNav); pendingNav = null; }
+
     // Never interfere with typing or browser shortcuts.
     if (ev.ctrlKey || ev.altKey || ev.metaKey) { return; }
     if (isEditable(ev.target)) { return; }
@@ -136,11 +155,13 @@
 
     var idx = indexForKey(ev.key);
     if (idx < 0) { return; }
+    if (sinceLast < BURST_GAP_MS) { return; }
     var links = navLinks();
     if (idx >= links.length) { return; }
-    ev.preventDefault();
     hideOverlay();
-    var href = links[idx].getAttribute('href');
-    if (href) { window.location.href = links[idx].href || href; }
+    var target = links[idx].href || links[idx].getAttribute('href');
+    if (target) {
+      pendingNav = setTimeout(function () { window.location.href = target; }, NAV_DELAY_MS);
+    }
   });
 })();

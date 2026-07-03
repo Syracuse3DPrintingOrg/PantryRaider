@@ -188,3 +188,37 @@ def test_unreachable_remote_keeps_the_current_checkout(rig):
     assert result["remote_recovered"] is False
     assert result["after"] == before
     assert "continuing with the current checkout" in out
+
+
+def test_stale_kiosk_unit_gains_the_rotation_execstartpost(rig, tmp_path):
+    # A device imaged before the kiosk unit had the rotation ExecStartPost
+    # never re-applied rotation on boot; the updater patches the line in
+    # (FoodAssistant-prqg). The unit is device-generated, so it is patched in
+    # place rather than reinstalled.
+    unit = tmp_path / "foodassistant-kiosk.service"
+    unit.write_text(
+        "[Unit]\nDescription=kiosk\n\n[Service]\nExecStart=/usr/bin/cage\n"
+        "Restart=always\nRestartSec=5\n\n[Install]\nWantedBy=multi-user.target\n")
+    rig["env"]["KIOSK_UNIT"] = str(unit)
+    run_update(rig)
+    lines = unit.read_text().splitlines()
+    idx = lines.index("ExecStartPost=-/usr/local/bin/foodassistant-apply-rotation")
+    assert lines[idx + 1] == "Restart=always"
+
+
+def test_current_kiosk_unit_is_left_alone(rig, tmp_path):
+    unit = tmp_path / "foodassistant-kiosk.service"
+    content = ("[Service]\nExecStart=/usr/bin/cage\n"
+               "ExecStartPost=-/usr/local/bin/foodassistant-apply-rotation\n"
+               "Restart=always\n")
+    unit.write_text(content)
+    rig["env"]["KIOSK_UNIT"] = str(unit)
+    run_update(rig)
+    assert unit.read_text() == content
+
+
+def test_missing_kiosk_unit_is_not_created(rig, tmp_path):
+    unit = tmp_path / "no-kiosk.service"
+    rig["env"]["KIOSK_UNIT"] = str(unit)
+    run_update(rig)
+    assert not unit.exists()
