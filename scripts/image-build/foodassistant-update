@@ -47,6 +47,9 @@ SD_SERVICE="${SD_SERVICE:-foodassistant-streamdeck.service}"
 # The kiosk browser caches the loaded page, so after redeploying the app we
 # restart it (when present) to reload fresh CSS/JS. Absent on headless installs.
 KIOSK_SERVICE="${KIOSK_SERVICE:-foodassistant-kiosk.service}"
+# Where the helper scripts are installed. Overridable so the update logic can be
+# exercised in tests without root.
+BIN_DIR="${BIN_DIR:-/usr/local/bin}"
 
 # Plain stdout log lines (the bridge tails stdout for a human summary too).
 log() { printf '%s\n' "$*"; }
@@ -59,9 +62,10 @@ log() { printf '%s\n' "$*"; }
 # restarted keep working since those keys are unchanged.
 _result() {
   local ok="$1" error="$2" before="$3" after="$4" restarted="$5" \
-        service_synced="${6:-0}" streamdeck_synced="${7:-0}" deps="${8:-0}"
+        service_synced="${6:-0}" streamdeck_synced="${7:-0}" deps="${8:-0}" \
+        recovered="${9:-0}"
   OK="$ok" ERR="$error" BEFORE="$before" AFTER="$after" RESTARTED="$restarted" \
-  SVC="$service_synced" SD="$streamdeck_synced" DEPS="$deps" \
+  SVC="$service_synced" SD="$streamdeck_synced" DEPS="$deps" REC="$recovered" \
   python3 -c '
 import json, os
 print(json.dumps({
@@ -73,6 +77,7 @@ print(json.dumps({
     "service_synced": os.environ.get("SVC", "") == "1",
     "streamdeck_synced": os.environ.get("SD", "") == "1",
     "deps_installed": os.environ.get("DEPS", "") == "1",
+    "remote_recovered": os.environ.get("REC", "") == "1",
 }))'
   if [ "$ok" = "1" ]; then exit 0; fi
   exit 1
@@ -112,11 +117,34 @@ log "Current commit: $before"
 # the worst case is we redeploy the commit that is already checked out, which is
 # exactly what we want after a manual pull or when offline.
 log "Fetching and fast-forwarding..."
+recovered=0
 if pull_out="$(git -C "$REPO" pull --ff-only 2>&1)"; then
   log "$pull_out"
 else
-  log "git pull did not fast-forward (continuing with the current checkout):"
+  log "git pull did not fast-forward:"
   log "$pull_out"
+  # A rewritten remote (force-push), a diverged local branch, or a dirty tree
+  # would otherwise strand the device on this checkout forever: every future
+  # update would fail the ff-only pull the same way. The checkout is purely an
+  # update SOURCE (the deployed app, deck package, and compose file all live
+  # outside it), so when the remote is reachable it is safe to make the
+  # checkout match origin exactly and carry on.
+  branch="$(git -C "$REPO" rev-parse --abbrev-ref HEAD 2>/dev/null || echo HEAD)"
+  if [ "$branch" = "HEAD" ]; then
+    log "Detached HEAD; continuing with the current checkout."
+  elif fetch_out="$(git -C "$REPO" fetch origin "$branch" 2>&1)"; then
+    if reset_out="$(git -C "$REPO" reset --hard "origin/$branch" 2>&1)"; then
+      log "Recovered: reset the checkout to origin/$branch."
+      log "$reset_out"
+      recovered=1
+    else
+      log "WARN: could not reset to origin/$branch (continuing with the current checkout):"
+      log "$reset_out"
+    fi
+  else
+    log "Could not fetch origin/$branch (offline or no upstream); continuing with the current checkout:"
+    log "$fetch_out"
+  fi
 fi
 
 after="$(git -C "$REPO" rev-parse --short HEAD 2>/dev/null || echo unknown)"
@@ -127,16 +155,28 @@ svc_synced=0
 sd_synced=0
 deps=0
 
-# Keep the installed helper scripts current so future runs use the latest
-# version. A plain git pull does not refresh /usr/local/bin, and overwriting the
+# Keep ALL installed helper scripts current so future runs use the latest
+# versions. A plain git pull does not refresh the bin dir, and overwriting the
 # running script in place is safe (the open inode keeps executing). Done before
 # the deploy branches so both the Docker (Pi Hosted) and venv (Pi Remote) paths
-# pick up newer helpers.
-for _h in foodassistant-update foodassistant-restore; do
-  _hsrc="$REPO/scripts/image-build/$_h"
-  if [ -f "$_hsrc" ]; then
-    install -m 755 "$_hsrc" "/usr/local/bin/$_h" 2>/dev/null \
-      && log "Refreshed /usr/local/bin/$_h" || true
+# pick up newer helpers. Every extensionless foodassistant-* file in
+# scripts/image-build is a bin helper (display-power, set-rotation,
+# apply-rotation, accel-rotation, restore, this script); syncing the whole set
+# also INSTALLS helpers that did not exist when the device was imaged, which
+# previously never reached deployed devices at all (FoodAssistant-2ty6). The
+# host bridge is excluded here: it is a long-running daemon with its own
+# refresh-and-scheduled-restart block below.
+for _hsrc in "$REPO/scripts/image-build/foodassistant-"*; do
+  [ -f "$_hsrc" ] || continue
+  _h="$(basename "$_hsrc")"
+  case "$_h" in
+    foodassistant-host-bridge) continue ;;
+    *.*) continue ;;  # unit files and provisioning scripts, not bin helpers
+  esac
+  if ! cmp -s "$_hsrc" "$BIN_DIR/$_h"; then
+    install -m 755 "$_hsrc" "$BIN_DIR/$_h" 2>/dev/null \
+      && log "Refreshed $BIN_DIR/$_h" \
+      || log "WARN: could not refresh $BIN_DIR/$_h"
   fi
 done
 
@@ -150,7 +190,7 @@ done
 # first and the restart runs outside our (soon-to-be-killed) cgroup. Done before
 # the Pi Hosted Docker branch below so both hosted and remote devices get it.
 _bsrc="$REPO/scripts/image-build/foodassistant-host-bridge"
-_bdst="/usr/local/bin/foodassistant-host-bridge"
+_bdst="$BIN_DIR/foodassistant-host-bridge"
 if [ -f "$_bsrc" ]; then
   _bs="$(sha1sum "$_bsrc" 2>/dev/null | cut -d' ' -f1)"
   _bd="$(sha1sum "$_bdst" 2>/dev/null | cut -d' ' -f1)"
@@ -187,7 +227,7 @@ COMPOSE_FILE="$INSTALL_DIR/docker-compose.yml"
 if [ -f "$COMPOSE_FILE" ] && command -v docker >/dev/null 2>&1; then
   log "Pi Hosted deployment detected at $INSTALL_DIR; updating via Docker."
   if ! cd "$INSTALL_DIR"; then
-    _result 0 "Could not enter $INSTALL_DIR to run the Docker update." "$before" "$after" 0 0 0 0
+    _result 0 "Could not enter $INSTALL_DIR to run the Docker update." "$before" "$after" 0 0 0 0 "$recovered"
   fi
 
   # One-time image migration: the project moved to a GitHub organization, and
@@ -222,7 +262,7 @@ if [ -f "$COMPOSE_FILE" ] && command -v docker >/dev/null 2>&1; then
       built_from_source=1
     else
       log "$build_log"
-      _result 0 "Image pull and local build both failed; the running version is unchanged." "$before" "$after" 0 0 0 0
+      _result 0 "Image pull and local build both failed; the running version is unchanged." "$before" "$after" 0 0 0 0 "$recovered"
     fi
   fi
 
@@ -231,7 +271,7 @@ if [ -f "$COMPOSE_FILE" ] && command -v docker >/dev/null 2>&1; then
     log "$up_log"
   else
     log "$up_log"
-    _result 0 "Could not recreate the service container; the running version may be unchanged." "$before" "$after" 0 0 0 0
+    _result 0 "Could not recreate the service container; the running version may be unchanged." "$before" "$after" 0 0 0 0 "$recovered"
   fi
 
   img_after="$(docker compose images -q service 2>/dev/null | head -n1)"
@@ -243,10 +283,10 @@ if [ -f "$COMPOSE_FILE" ] && command -v docker >/dev/null 2>&1; then
   if [ -n "$img_after" ] && [ "$img_before" != "$img_after" ]; then changed=1; fi
   if [ "$changed" = "1" ]; then
     log "Pi Hosted update complete (service image refreshed)."
-    _result 1 "" "$before" "$after" 1 1 0 0
+    _result 1 "" "$before" "$after" 1 1 0 0 "$recovered"
   else
     log "Pi Hosted already up to date (service image unchanged)."
-    _result 1 "" "$before" "$after" "$restarted" 0 0 0
+    _result 1 "" "$before" "$after" "$restarted" 0 0 0 "$recovered"
   fi
 fi
 
@@ -275,7 +315,7 @@ if [ -d "$svc_src" ]; then
       deps=1
     else
       log "pip install failed; leaving the running version in place."
-      _result 0 "Dependency install failed; the old version is still running." "$before" "$after" 0 0 0 0
+      _result 0 "Dependency install failed; the old version is still running." "$before" "$after" 0 0 0 0 "$recovered"
     fi
   else
     log "requirements unchanged; skipping pip install."
@@ -341,8 +381,8 @@ fi
 
 if [ "$svc_synced" = "0" ] && [ "$sd_synced" = "0" ]; then
   log "Nothing to deploy (no service or Stream Deck source found)."
-  _result 0 "Nothing to deploy; no app or Stream Deck source found on this device." "$before" "$after" "$restarted" "$svc_synced" "$sd_synced" "$deps"
+  _result 0 "Nothing to deploy; no app or Stream Deck source found on this device." "$before" "$after" "$restarted" "$svc_synced" "$sd_synced" "$deps" "$recovered"
 fi
 
 log "Update complete (service=$svc_synced streamdeck=$sd_synced deps=$deps restarted=$restarted)."
-_result 1 "" "$before" "$after" "$restarted" "$svc_synced" "$sd_synced" "$deps"
+_result 1 "" "$before" "$after" "$restarted" "$svc_synced" "$sd_synced" "$deps" "$recovered"
