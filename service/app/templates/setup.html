@@ -2836,6 +2836,15 @@ docker compose up -d</code></pre>
               <div class="form-text">Blanks the kiosk screen after inactivity. A touch, key press, or a Stream Deck button press wakes it. The Stream Deck has its own separate timeout. 0 disables.</div>
             </div>
             <div class="mb-3">
+              <label class="form-label" for="wake_on_motion">Wake on motion</label>
+              <select class="form-select form-select-sm" style="max-width:280px" id="wake_on_motion">
+                <option value="auto" {{ 'selected' if s.wake_on_motion == 'auto' or not s.wake_on_motion else '' }}>Auto (on when a motion sensor is fitted)</option>
+                <option value="on" {{ 'selected' if s.wake_on_motion == 'on' else '' }}>On</option>
+                <option value="off" {{ 'selected' if s.wake_on_motion == 'off' else '' }}>Off</option>
+              </select>
+              <div class="form-text">Wakes a sleeping screen when the device is moved or bumped, using the built-in accelerometer on kits that include one. A screen touch or a Stream Deck button press always wakes the display, with or without this. Auto keeps it off on devices without the sensor.</div>
+            </div>
+            <div class="mb-3">
               <label class="form-label" for="screensaver_minutes">Screensaver after N minutes idle (0 = off)</label>
               <input class="form-control form-control-sm" style="max-width:120px" type="number"
                      id="screensaver_minutes" min="0" max="120" step="1"
@@ -4776,6 +4785,7 @@ function buildPayload() {
     display_touch:   document.getElementById('display_touch')?.checked || false,
     display_idle_timeout: parseInt(document.getElementById('display_idle_timeout')?.value || '0', 10),
     screensaver_minutes: parseInt(document.getElementById('screensaver_minutes')?.value || '0', 10),
+    wake_on_motion:  document.getElementById('wake_on_motion')?.value || 'auto',
     auth_required:   document.getElementById('auth_required')?.checked ?? true,
     auth_password:   secretVal('auth_password'),
     api_key:         secretVal('api_key'),
@@ -6118,6 +6128,7 @@ async function saveDisplaySettings() {
   const display_type = document.getElementById('display_type')?.value || 'generic';
   const display_idle_timeout = parseInt(document.getElementById('display_idle_timeout')?.value || '0', 10);
   const screensaver_minutes = parseInt(document.getElementById('screensaver_minutes')?.value || '0', 10);
+  const wake_on_motion = document.getElementById('wake_on_motion')?.value || 'auto';
   try {
     await fetch('setup/scale', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
@@ -6125,7 +6136,7 @@ async function saveDisplaySettings() {
     });
     const saveResp = await (await fetch('setup/save', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({display_touch, display_type, display_idle_timeout, screensaver_minutes}),
+      body: JSON.stringify({display_touch, display_type, display_idle_timeout, screensaver_minutes, wake_on_motion}),
     })).json();
     fetch('setup/kiosk/restart', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'}).catch(() => {});
     if (saveResp && saveResp.touch_needs_reboot) {

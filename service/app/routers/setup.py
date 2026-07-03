@@ -256,6 +256,7 @@ class SetupPayload(BaseModel):
     streamdeck_idle_timeout: int = 0
     display_idle_timeout: int = 0
     screensaver_minutes: int = 0
+    wake_on_motion: str = "auto"
     streamdeck_key_overrides: list = []
     streamdeck_weather_location: str = ""
     streamdeck_weather_units: str = "f"
@@ -1136,6 +1137,9 @@ async def save_setup(payload: SetupPayload):
     # an empty/absent mode leaves the existing choice untouched.
     if data.get("deployment_mode") and data["deployment_mode"] not in DEPLOYMENT_MODES:
         data.pop("deployment_mode", None)
+    # Same for an unknown wake-on-motion mode: keep the stored value.
+    if "wake_on_motion" in data and data["wake_on_motion"] not in ("auto", "on", "off"):
+        data.pop("wake_on_motion", None)
     if data.get("remote_server_url"):
         data["remote_server_url"] = data["remote_server_url"].rstrip("/")
     settings.save(data)
@@ -1145,7 +1149,7 @@ async def save_setup(payload: SetupPayload):
     reset_staple_cache()
     # Mirror the kiosk display idle timeout to the host bridge, which owns the
     # blanking loop (FoodAssistant-otiy). Best-effort and Pi-only.
-    if "display_idle_timeout" in data:
+    if "display_idle_timeout" in data or "wake_on_motion" in data:
         await _push_display_idle()
     # Auto-provision the touch overlay when the display type is (re)chosen, so an
     # ADS7846 SPI panel gets SPI + its overlay written without a separate button
@@ -1446,17 +1450,22 @@ _HOST_BRIDGE = "http://127.0.0.1:9299"
 
 
 async def _push_display_idle() -> bool:
-    """Push the display idle timeout to the host bridge (Pi only, best-effort).
+    """Push the display idle timeout and wake-on-motion mode to the host
+    bridge (Pi only, best-effort).
 
-    The bridge owns the kiosk display blanking loop and persists this value, so
-    the browser does not need its own timer (FoodAssistant-otiy)."""
+    The bridge owns the kiosk display blanking loop and the accelerometer
+    motion poll, and persists both values (FoodAssistant-otiy, fr5). An older
+    bridge simply ignores the wake_on_motion field."""
     if not is_raspberry_pi():
         return False
     try:
         async with httpx.AsyncClient(timeout=4.0) as c:
             r = await c.post(
                 f"{_HOST_BRIDGE}/display/idle",
-                json={"minutes": settings.display_idle_timeout},
+                json={
+                    "minutes": settings.display_idle_timeout,
+                    "wake_on_motion": settings.wake_on_motion,
+                },
             )
         return r.status_code == 200
     except Exception:

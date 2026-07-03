@@ -12,7 +12,7 @@ from .hardware import is_raspberry_pi
 
 # Single source of truth for the app version (shown in the UI, used by the
 # update checker, and reported by FastAPI). Bump on each tagged release.
-APP_VERSION = "0.7.82"
+APP_VERSION = "0.7.83"
 
 # Single source of truth for the product's display name. The runtime identifiers
 # (systemd units, install paths, the foodassistant_streamdeck package, the
@@ -366,6 +366,7 @@ _SAVEABLE = [
     "has_streamdeck", "streamdeck_key_count", "display_touch",
     "start_page_enabled", "start_page_keys", "start_page_layout",
     "display_idle_timeout", "streamdeck_idle_timeout", "screensaver_minutes",
+    "wake_on_motion",
     "streamdeck_key_overrides",
     "streamdeck_weather_location", "streamdeck_weather_units", "weather_api_base",
     "streamdeck_key_style", "streamdeck_icon_color",
@@ -962,6 +963,13 @@ class Settings(BaseSettings):
     # a key press.
     display_idle_timeout: int = 0
     streamdeck_idle_timeout: int = 0
+
+    # Wake the sleeping display when the device is physically moved or bumped
+    # (Pi appliance with an LSM6DSOX accelerometer fitted). "auto" turns it on
+    # exactly when the sensor is present; "on" and "off" force it. Pushed to
+    # the host bridge together with the display sleep timeout, and harmless on
+    # hardware without the sensor.
+    wake_on_motion: str = "auto"
 
     # On-screen kiosk screensaver (FoodAssistant-y65x), minutes idle before it
     # shows, 0 = off. Unlike display_idle_timeout (which powers the panel off

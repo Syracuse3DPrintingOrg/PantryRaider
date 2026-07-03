@@ -43,7 +43,7 @@ GET  /activity             shared activity/display state (polled by the deck)
 POST /activity             report user activity; wakes the display  {source?}
 POST /display/blank        blank the kiosk display now
 POST /display/wake         wake the kiosk display now
-POST /display/idle         set+persist the display idle timeout  {minutes}
+POST /display/idle         set+persist the display idle timeout and motion wake  {minutes, wake_on_motion?}
 GET  /usb/status           attached USB flash drive: mounted? free space? last backup?
 POST /usb/backup           snapshot the data dirs into pantryraider-backups/ on the drive
 """
@@ -255,11 +255,30 @@ _LOG_TAIL_BYTES = 8192
 # The display idle timeout (minutes, 0 = off) is pushed by the app on settings
 # save and persisted here so it survives a bridge restart.
 _DISPLAY_IDLE_FILE = "/etc/foodassistant/display-idle"
+
+# Wake on motion (FoodAssistant-fr5). When an LSM6DSOX accelerometer is fitted
+# (the same part the boot rotation helper reads), physically moving or bumping
+# the device counts as user activity and wakes a blanked display. The mode is
+# pushed by the app on settings save and persisted here: "auto" turns it on
+# exactly when the sensor is present, "on" and "off" force it. On hardware
+# without the sensor every mode is a safe no-op.
+_WAKE_ON_MOTION_FILE = "/etc/foodassistant/wake-on-motion"
+_WAKE_ON_MOTION_MODES = ("auto", "on", "off")
+
+# Minimum change of the acceleration vector between samples, in g, that counts
+# as motion. At rest the sensor reports a steady ~1 g gravity vector with noise
+# well under 0.02 g, so 0.08 g means a real nudge, tilt, or lift.
+_MOTION_THRESHOLD_G = 0.08
+
 _activity_lock = threading.Lock()
 _activity_state = {
     "last_activity": time.time(),
     "display_blanked": False,
     "idle_minutes": 0,
+    "wake_on_motion": "auto",
+    # True once the motion loop has actually read a sample, so the app can see
+    # whether "auto" resolved to on for this device.
+    "motion_sensor": False,
 }
 
 
@@ -374,6 +393,182 @@ def _schedule_kiosk_restart(delay_seconds=2):
         return True
     except Exception:
         return False
+
+
+def _read_persisted_wake_on_motion(path=_WAKE_ON_MOTION_FILE):
+    """Read the persisted wake-on-motion mode ("auto" if unset or bad)."""
+    try:
+        with open(path) as f:
+            mode = f.read().strip().lower()
+        return mode if mode in _WAKE_ON_MOTION_MODES else "auto"
+    except OSError:
+        return "auto"
+
+
+def _write_persisted_wake_on_motion(mode, path=_WAKE_ON_MOTION_FILE):
+    """Persist the wake-on-motion mode so a bridge restart keeps it."""
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as f:
+            f.write(str(mode))
+        return True
+    except OSError:
+        return False
+
+
+def _motion_wake_enabled(mode, sensor_present):
+    """Whether motion should count as wake-worthy activity.
+
+    Pure helper: "off" always disables; "auto" and "on" both need the sensor
+    to actually be readable, so a device without one never wakes on phantom
+    motion regardless of the setting.
+    """
+    if mode == "off":
+        return False
+    return bool(sensor_present)
+
+
+def _motion_exceeds(prev, cur, threshold=_MOTION_THRESHOLD_G):
+    """True when the acceleration vector moved more than ``threshold`` g
+    between two samples.
+
+    Pure helper: compares the magnitude of the vector delta, so a tilt, lift,
+    or knock all register while a device at rest (a steady gravity vector)
+    does not. A missing or malformed sample never counts as motion.
+    """
+    if not prev or not cur:
+        return False
+    try:
+        dx = float(cur[0]) - float(prev[0])
+        dy = float(cur[1]) - float(prev[1])
+        dz = float(cur[2]) - float(prev[2])
+    except (TypeError, ValueError, IndexError):
+        return False
+    return (dx * dx + dy * dy + dz * dz) ** 0.5 >= threshold
+
+
+def _accel_iio_device(iio_root="/sys/bus/iio/devices"):
+    """Sysfs directory of an LSM6-family IIO accelerometer, or "".
+
+    Empty is the usual case: the rotation helper talks raw I2C because no
+    kernel driver is bound on these devices, but if an overlay ever binds
+    lsm6dsx the IIO path is preferred (no bus contention with other readers).
+    """
+    try:
+        import glob
+        for name_path in sorted(glob.glob(os.path.join(iio_root, "iio:device*", "name"))):
+            if "lsm6" in _read_sysfs(name_path).lower():
+                return os.path.dirname(name_path)
+    except Exception:
+        pass
+    return ""
+
+
+def _read_iio_accel(device_dir):
+    """One (x, y, z) sample in g from an IIO accelerometer dir, or None."""
+    try:
+        scale = float(_read_sysfs(os.path.join(device_dir, "in_accel_scale")))
+        out = []
+        for axis in ("x", "y", "z"):
+            raw = _read_sysfs(os.path.join(device_dir, "in_accel_%s_raw" % axis))
+            # IIO reports raw * scale in m/s^2; convert to g so both read
+            # paths and the threshold share one unit.
+            out.append(int(raw) * scale / 9.80665)
+        return tuple(out)
+    except (TypeError, ValueError, OSError):
+        return None
+
+
+# LSM6DSOX I2C addresses: 0x6A with SDO low (the Adafruit default), 0x6B high.
+_LSM6DSOX_ADDRS = (0x6A, 0x6B)
+
+
+def _read_i2c_accel(bus_num=1):
+    """One (x, y, z) sample in g straight from the LSM6DSOX over I2C, or None.
+
+    Mirrors foodassistant-accel-rotation: no kernel driver is bound on these
+    devices, so the bridge reads the registers itself. smbus2 is installed by
+    firstboot when the sensor is detected at provision time; without it (or
+    without the sensor) this returns None and motion wake stays off.
+    """
+    try:
+        import smbus2  # type: ignore[import]
+    except ImportError:
+        return None
+    CTRL1_XL = 0x10
+    OUTX_L_XL = 0x28
+    for addr in _LSM6DSOX_ADDRS:
+        try:
+            with smbus2.SMBus(bus_num) as bus:
+                # 104 Hz output rate, +/-2 g range (idempotent re-arm).
+                bus.write_byte_data(addr, CTRL1_XL, 0x40)
+                time.sleep(0.02)
+                raw = bus.read_i2c_block_data(addr, OUTX_L_XL, 6)
+        except (OSError, ValueError):
+            continue
+
+        def _s16(lo, hi):
+            v = (hi << 8) | lo
+            return v - 65536 if v >= 32768 else v
+
+        sens = 0.061 / 1000  # g per LSB at +/-2 g
+        return (
+            _s16(raw[0], raw[1]) * sens,
+            _s16(raw[2], raw[3]) * sens,
+            _s16(raw[4], raw[5]) * sens,
+        )
+    return None
+
+
+def _read_accel_sample():
+    """One accelerometer sample in g, IIO first then raw I2C. None when no
+    sensor is readable, which is what gates motion wake on plain hardware."""
+    device_dir = _accel_iio_device()
+    if device_dir:
+        sample = _read_iio_accel(device_dir)
+        if sample is not None:
+            return sample
+    return _read_i2c_accel()
+
+
+def _motion_wake_loop():
+    """Background tick: treat real device motion as user activity.
+
+    Polls the accelerometer about once a second while wake-on-motion is
+    enabled and wakes the display through the normal activity path when the
+    reading jumps. Cheap and safe everywhere else: with the mode off or no
+    readable sensor the loop just sleeps on a long back-off, so hardware
+    without the part never pays for the probe.
+    """
+    prev = None
+    delay = 1.0
+    while True:
+        try:
+            with _activity_lock:
+                mode = _activity_state["wake_on_motion"]
+            if mode == "off":
+                prev = None
+                delay = 30.0
+            else:
+                sample = _read_accel_sample()
+                present = sample is not None
+                with _activity_lock:
+                    _activity_state["motion_sensor"] = present
+                if not present:
+                    # No sensor (or a wedged bus): back off up to five minutes
+                    # so a sensorless device is not probed every second, while
+                    # a hot-fixed sensor is still picked up eventually.
+                    prev = None
+                    delay = min(300.0, max(30.0, delay * 2))
+                else:
+                    if (_motion_wake_enabled(mode, present)
+                            and _motion_exceeds(prev, sample)):
+                        _record_activity()
+                    prev = sample
+                    delay = 1.0
+        except Exception:
+            delay = 30.0
+        time.sleep(delay)
 
 
 def _should_blank(now, last_activity, idle_minutes, already_blanked):
@@ -1678,6 +1873,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 "last_activity": _activity_state["last_activity"],
                 "display_blanked": _activity_state["display_blanked"],
                 "idle_minutes": _activity_state["idle_minutes"],
+                "wake_on_motion": _activity_state["wake_on_motion"],
+                "motion_sensor": _activity_state["motion_sensor"],
             })
 
     def _activity_post(self):
@@ -1710,17 +1907,34 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._send(500, {"ok": False, "error": _DISPLAY_POWER_ERROR})
 
     def _display_idle_set(self):
-        """Set (and persist) the display idle timeout in minutes."""
+        """Set (and persist) the display idle timeout, and optionally the
+        wake-on-motion mode pushed alongside it."""
         body = self._body()
         try:
             minutes = max(0, int(body.get("minutes", 0)))
         except (TypeError, ValueError):
             self._send(400, {"ok": False, "error": "minutes must be an integer"})
             return
+        mode = body.get("wake_on_motion")
+        if mode is not None:
+            mode = str(mode).strip().lower()
+            if mode not in _WAKE_ON_MOTION_MODES:
+                self._send(400, {
+                    "ok": False,
+                    "error": "wake_on_motion must be auto, on, or off",
+                })
+                return
         with _activity_lock:
             _activity_state["idle_minutes"] = minutes
+            if mode is not None:
+                _activity_state["wake_on_motion"] = mode
         persisted = _write_persisted_idle_minutes(minutes)
-        self._send(200, {"ok": True, "minutes": minutes, "persisted": persisted})
+        if mode is not None:
+            persisted = _write_persisted_wake_on_motion(mode) and persisted
+        resp = {"ok": True, "minutes": minutes, "persisted": persisted}
+        if mode is not None:
+            resp["wake_on_motion"] = mode
+        self._send(200, resp)
 
     def do_GET(self):
         if self.path == "/wifi/status":
@@ -2721,6 +2935,10 @@ if __name__ == "__main__":
     # Restore the persisted display idle timeout and start the blanking loop.
     _activity_state["idle_minutes"] = _read_persisted_idle_minutes()
     threading.Thread(target=_display_idle_loop, daemon=True).start()
+    # Wake on motion: restore the persisted mode and start the accelerometer
+    # poll. A no-op on hardware without the sensor (FoodAssistant-fr5).
+    _activity_state["wake_on_motion"] = _read_persisted_wake_on_motion()
+    threading.Thread(target=_motion_wake_loop, daemon=True).start()
     # Finish an interrupted Mealie install, if the stack's .env recorded one.
     threading.Thread(target=_resume_mealie_install, daemon=True).start()
     # Light up the kiosk when a display is attached after provisioning.

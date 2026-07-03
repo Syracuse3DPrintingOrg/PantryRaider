@@ -154,6 +154,7 @@ and are device-local. They do not apply to a server install.
 | `streamdeck_key_count` | | Not applicable | Editable | Device-local |
 | `display_touch` | | Not applicable | Editable | Device-local |
 | `display_idle_timeout` | | Not applicable | Editable | Device-local |
+| `wake_on_motion` | | Not applicable | Editable | Device-local |
 | `screensaver_minutes` | | Not applicable | Editable | Device-local |
 | `streamdeck_idle_timeout` | | Not applicable | Editable | Device-local |
 
@@ -164,6 +165,10 @@ mode because it controls how browser links are built.
 `display_idle_timeout` switches the panel itself off after the idle period;
 `screensaver_minutes` is the softer on-screen layer (the page dims to a
 floating clock, a touch brings it back) for panels that should stay powered.
+`wake_on_motion` wakes a sleeping panel when the device is moved or bumped,
+read from the LSM6DSOX accelerometer on kits that include one; `auto` (the
+default) enables it exactly when the sensor is present. A screen touch or a
+Stream Deck button press always wakes the display regardless of this setting.
 
 ## Stream Deck
 

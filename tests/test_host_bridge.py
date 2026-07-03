@@ -767,6 +767,90 @@ def test_record_activity_noop_when_awake(monkeypatch):
     assert calls == []  # no power command when already awake
 
 
+# --- wake on motion (FoodAssistant-fr5) -------------------------------------
+
+def test_persist_wake_on_motion_roundtrip(tmp_path):
+    p = tmp_path / "wake-on-motion"
+    assert bridge._write_persisted_wake_on_motion("off", path=str(p)) is True
+    assert bridge._read_persisted_wake_on_motion(path=str(p)) == "off"
+
+
+def test_read_persisted_wake_on_motion_defaults_to_auto(tmp_path):
+    assert bridge._read_persisted_wake_on_motion(path=str(tmp_path / "missing")) == "auto"
+    # A garbage value on disk also falls back to auto rather than raising.
+    p = tmp_path / "wake-on-motion"
+    p.write_text("sometimes\n")
+    assert bridge._read_persisted_wake_on_motion(path=str(p)) == "auto"
+
+
+def test_motion_wake_enabled_truth_table():
+    # off always disables, even with the sensor present.
+    assert bridge._motion_wake_enabled("off", True) is False
+    assert bridge._motion_wake_enabled("off", False) is False
+    # auto and on both follow the hardware: no sensor, no phantom wakes.
+    assert bridge._motion_wake_enabled("auto", True) is True
+    assert bridge._motion_wake_enabled("auto", False) is False
+    assert bridge._motion_wake_enabled("on", True) is True
+    assert bridge._motion_wake_enabled("on", False) is False
+
+
+def test_motion_exceeds_detects_a_nudge_not_rest():
+    at_rest = (0.01, 0.02, 1.00)
+    # Sensor noise around the gravity vector stays below the threshold.
+    assert bridge._motion_exceeds(at_rest, (0.02, 0.01, 0.99)) is False
+    # A real bump or tilt moves the vector well past it.
+    assert bridge._motion_exceeds(at_rest, (0.15, 0.02, 0.95)) is True
+    # Identical samples are never motion.
+    assert bridge._motion_exceeds(at_rest, at_rest) is False
+
+
+def test_motion_exceeds_safe_on_missing_or_bad_samples():
+    assert bridge._motion_exceeds(None, (0.0, 0.0, 1.0)) is False
+    assert bridge._motion_exceeds((0.0, 0.0, 1.0), None) is False
+    assert bridge._motion_exceeds((0.0, 0.0), (0.0, 0.0, 1.0)) is False
+    assert bridge._motion_exceeds(("x", 0.0, 1.0), (0.0, 0.0, 1.0)) is False
+
+
+def test_motion_exceeds_honours_custom_threshold():
+    prev = (0.0, 0.0, 1.0)
+    cur = (0.05, 0.0, 1.0)
+    assert bridge._motion_exceeds(prev, cur, threshold=0.04) is True
+    assert bridge._motion_exceeds(prev, cur, threshold=0.06) is False
+
+
+def test_accel_iio_device_finds_lsm6_by_name(tmp_path):
+    dev = tmp_path / "iio:device0"
+    dev.mkdir()
+    (dev / "name").write_text("lsm6dsx_accel\n")
+    other = tmp_path / "iio:device1"
+    other.mkdir()
+    (other / "name").write_text("cpu_thermal\n")
+    assert bridge._accel_iio_device(iio_root=str(tmp_path)) == str(dev)
+
+
+def test_accel_iio_device_empty_when_absent(tmp_path):
+    assert bridge._accel_iio_device(iio_root=str(tmp_path)) == ""
+
+
+def test_read_iio_accel_converts_raw_to_g(tmp_path):
+    dev = tmp_path / "iio:device0"
+    dev.mkdir()
+    # scale is m/s^2 per LSB; raw * scale / 9.80665 gives g.
+    (dev / "in_accel_scale").write_text("0.000598\n")
+    (dev / "in_accel_x_raw").write_text("0\n")
+    (dev / "in_accel_y_raw").write_text("0\n")
+    (dev / "in_accel_z_raw").write_text("16400\n")
+    sample = bridge._read_iio_accel(str(dev))
+    assert sample is not None
+    x, y, z = sample
+    assert abs(x) < 0.001 and abs(y) < 0.001
+    assert 0.98 <= z <= 1.02  # one gravity on the Z axis
+
+
+def test_read_iio_accel_none_on_missing_files(tmp_path):
+    assert bridge._read_iio_accel(str(tmp_path / "iio:device9")) is None
+
+
 # --- Full-stack restore source helpers (FoodAssistant-h18b) ----------------
 
 def test_classify_restore_source_absolute_path():
