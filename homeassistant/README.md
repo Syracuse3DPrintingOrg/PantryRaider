@@ -39,7 +39,62 @@ Before pasting, replace the two placeholder hostnames in the file:
 - `YOUR_HOST` — your Pantry Raider address (e.g. `https://food.yourdomain.com` for Pangolin, or `http://192.168.1.170:9284` for LAN-only)
 - `YOUR_GROCY_HOST` — your Grocy address (e.g. `https://grocy.yourdomain.com` or `http://192.168.1.170:9383`); set **Grocy Public URL** in `/setup` so Pantry Raider itself also uses this for Grocy browser links
 
-## 4. Grocy HACS Integration (optional but recommended)
+## 4. Verify your setup
+
+Work through this list after wiring up a new Home Assistant install (or after
+an HA upgrade) to confirm every part of the integration is alive. Each check
+stands alone, so you can stop at the pieces you actually use.
+
+**Sensors**
+
+- [ ] After a full HA restart, open **Developer Tools - States** and confirm
+  the seven `sensor.food_*` / shopping / meal-plan sensors exist and show
+  numbers, not `Unknown`. A sensor stuck on `Unknown` almost always means the
+  REST resource URL is wrong or points at a public reverse-proxy address; use
+  the LAN address (see the note at the top of `configuration.yaml`).
+- [ ] If Pantry Raider has an API key set, confirm `foodassistant_api_key` is
+  in HA's `secrets.yaml` and the `headers:` blocks are uncommented; without
+  the header the sensors read 401 responses as `Unknown`.
+- [ ] Add an item with a short best-by date in Pantry Raider, wait for the
+  next poll (up to 5 minutes), and watch `sensor.food_expiring_today` count it.
+
+**Barcode scanner**
+
+- [ ] In **Developer Tools - Events**, listen to
+  `keyboard_remote_command_received` and pull the scanner trigger: one event
+  per digit plus Enter (`key_code` 28) should appear.
+- [ ] Scan a real product and confirm it shows up on `/ui/pending` with a
+  name filled in. If the automation fires but nothing arrives, see the
+  debugging tips in `barcode-scanner.md`.
+- [ ] Scan two products back to back and confirm they arrive as two separate
+  pending items, not one concatenated code.
+
+**Notifications and automations**
+
+- [ ] With at least one expired item in stock, confirm the "Items Expired"
+  automation sends a notification to your `notify` target.
+- [ ] If you use the scan-received notification, confirm a scan bumps
+  `sensor.food_pending_scans` and the notification arrives.
+
+**On-screen events (kiosk)**
+
+- [ ] From HA, call the Pantry Raider events endpoint (`POST /events/notify`)
+  or trigger an automation that does, and confirm the toast appears on the
+  kiosk screen. On-screen events can be turned on or off per device in
+  Settings under Home Assistant.
+- [ ] If you use camera pop-ups (`POST /events/camera-popup`), trigger one
+  and confirm the feed appears on the kiosk and dismisses itself.
+
+**Lovelace dashboard**
+
+- [ ] Open the Food dashboard and confirm the counts match the sensors and
+  the inventory cards list items by storage location.
+- [ ] Tap each button on the dashboard from a phone or browser and confirm it
+  opens the right Pantry Raider or Grocy page. Buttons use your public URL
+  (the `YOUR_HOST` placeholder), so this also proves the reverse proxy path
+  works where the sensors deliberately avoid it.
+
+## 5. Grocy HACS Integration (optional but recommended)
 
 Adds native Grocy sensors directly into HA entity registry.
 

@@ -50,6 +50,10 @@ KIOSK_SERVICE="${KIOSK_SERVICE:-foodassistant-kiosk.service}"
 # Where the helper scripts are installed. Overridable so the update logic can be
 # exercised in tests without root.
 BIN_DIR="${BIN_DIR:-/usr/local/bin}"
+# The Wi-Fi fallback AP watchdog is the one helper that runs from sbin: its
+# systemd unit was written at firstboot pointing at /usr/local/sbin, so the
+# copy there is the one that actually executes.
+SBIN_DIR="${SBIN_DIR:-/usr/local/sbin}"
 
 # Plain stdout log lines (the bridge tails stdout for a human summary too).
 log() { printf '%s\n' "$*"; }
@@ -376,6 +380,23 @@ if [ -f "$KIOSK_UNIT" ]; then
     fi
     break
   done
+fi
+
+# Keep the Wi-Fi fallback AP watchdog current too. The generic sync above
+# installs the repo copy under BIN_DIR like any other helper, but the watchdog
+# unit written at firstboot executes /usr/local/sbin/foodassistant-ap-watchdog,
+# so that copy must be refreshed separately or deployed devices keep running
+# the version they were imaged with (FoodAssistant-fuat). Gated on the unit
+# file so a device without the AP fallback never grows a stray sbin script.
+AP_WATCHDOG_UNIT="${AP_WATCHDOG_UNIT:-/etc/systemd/system/foodassistant-ap-watchdog.service}"
+_wsrc="$REPO/scripts/image-build/foodassistant-ap-watchdog"
+if [ -f "$AP_WATCHDOG_UNIT" ] && [ -f "$_wsrc" ] \
+    && ! cmp -s "$_wsrc" "$SBIN_DIR/foodassistant-ap-watchdog"; then
+  if install -m 755 "$_wsrc" "$SBIN_DIR/foodassistant-ap-watchdog" 2>/dev/null; then
+    log "Refreshed $SBIN_DIR/foodassistant-ap-watchdog (AP fallback watchdog)"
+  else
+    log "WARN: could not refresh $SBIN_DIR/foodassistant-ap-watchdog"
+  fi
 fi
 
 _bsrc="$REPO/scripts/image-build/foodassistant-host-bridge"

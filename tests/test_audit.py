@@ -1,12 +1,15 @@
 """Tests for pantry audit mode (FoodAssistant-ugku).
 
-Covers the pure in-memory session logic (start/record/status/stop, matching,
-missing/unexpected) and the /audit endpoints via TestClient with Grocy stock
+Covers the pure session logic (start/record/status/stop, matching,
+missing/unexpected), its state-file persistence across workers and restarts
+(FoodAssistant-60hl), and the /audit endpoints via TestClient with Grocy stock
 mocked, plus the scanner-mode "audit" dispatch in /pending/scan. The audit is
 read only: no test asserts any Grocy write, because the code never makes one.
 """
 from __future__ import annotations
 
+import importlib
+import json
 import os
 import sys
 from pathlib import Path
@@ -21,7 +24,11 @@ from app.services import scanner_mode  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
-def _reset():
+def _reset(monkeypatch, tmp_path):
+    # Point the state files at a per-test dir so persistence is exercised
+    # without touching a real data_dir.
+    from app.config import settings
+    monkeypatch.setattr(settings, "data_dir", str(tmp_path), raising=False)
     audit.reset()
     scanner_mode.reset()
     yield
@@ -102,6 +109,92 @@ def test_start_replaces_previous_session():
     audit.start("Pantry", [{"name": "Rice"}])
     assert audit.get_location() == "Pantry"
     assert audit.status()["scanned"] == []
+
+
+# State-file persistence (FoodAssistant-60hl) --------------------------------
+
+def _forget_in_memory_state():
+    """Simulate a different worker process (or a restart): the module-level
+    state is back at its import-time default, only the file remains."""
+    audit._state.clear()
+    audit._state["active"] = False
+    audit._mtime = None
+
+
+def test_session_is_shared_across_workers(tmp_path):
+    audit.start("Fridge", [{"name": "Milk", "amount": 2}])
+    audit.record_scan("Milk")
+    assert (tmp_path / "audit_session.json").exists()
+    _forget_in_memory_state()
+    # A worker that never saw the start still sees the same session.
+    assert audit.is_active() is True
+    assert audit.get_location() == "Fridge"
+    s = audit.status()
+    assert s["counts"] == {"expected": 1, "seen": 1, "missing": 0, "unexpected": 0}
+
+
+def test_scan_recorded_by_another_worker_lands_in_the_session(tmp_path):
+    # Worker A starts the audit; worker B (fresh in-memory state) records a
+    # scan; worker A's next status must include it.
+    audit.start("Fridge", [{"name": "Milk"}, {"name": "Eggs"}])
+    _forget_in_memory_state()
+    assert audit.record_scan("Eggs")["status"] == "matched"
+    _forget_in_memory_state()
+    assert audit.status()["missing"] == ["Milk"]
+
+
+def test_session_survives_module_reimport(tmp_path):
+    audit.start("Pantry", [{"name": "Rice"}])
+    audit.record_scan("Rice")
+    # A fresh module load (a restarted app) re-reads the persisted session.
+    importlib.reload(audit)
+    assert audit.is_active() is True
+    assert audit.get_location() == "Pantry"
+    assert audit.status()["counts"]["seen"] == 1
+
+
+def test_stop_clears_the_session_for_every_worker(tmp_path):
+    audit.start("Fridge", [{"name": "Milk"}])
+    audit.stop()
+    _forget_in_memory_state()
+    assert audit.is_active() is False
+
+
+def test_corrupt_state_file_degrades_safely(tmp_path):
+    audit.start("Fridge", [{"name": "Milk"}])
+    (tmp_path / "audit_session.json").write_text("{not json")
+    # A fresh worker facing only the corrupt file starts inactive, not dead.
+    _forget_in_memory_state()
+    assert audit.is_active() is False
+    assert audit.status()["active"] is False
+
+
+def test_corrupt_state_file_never_breaks_the_active_worker(tmp_path):
+    audit.start("Fridge", [{"name": "Milk"}])
+    (tmp_path / "audit_session.json").write_text("{not json")
+    # A torn/corrupt file never breaks a call: the in-memory session carries
+    # on, and the next successful write repairs the file for other workers.
+    assert audit.is_active() is True
+    assert audit.record_scan("Milk")["status"] == "matched"
+    _forget_in_memory_state()
+    assert audit.status()["counts"]["seen"] == 1
+
+
+def test_wrong_shape_state_file_is_ignored(tmp_path):
+    (tmp_path / "audit_session.json").write_text(json.dumps(["not", "a", "session"]))
+    assert audit.is_active() is False
+
+
+def test_unwritable_data_dir_degrades_to_in_memory(monkeypatch):
+    from app.config import settings
+    monkeypatch.setattr(settings, "data_dir", "/nonexistent/nowhere", raising=False)
+    audit._state.clear()
+    audit._state["active"] = False
+    audit._mtime = None
+    # No file can be written or read, but the session still works process-locally.
+    audit.start("Fridge", [{"name": "Milk"}])
+    assert audit.record_scan("Milk")["status"] == "matched"
+    assert audit.status()["counts"]["seen"] == 1
 
 
 # Endpoints -----------------------------------------------------------------

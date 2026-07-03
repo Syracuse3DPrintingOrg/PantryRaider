@@ -38,6 +38,7 @@ HELPERS = [
     "foodassistant-update", "foodassistant-restore", "foodassistant-host-bridge",
     "foodassistant-display-power", "foodassistant-set-rotation",
     "foodassistant-apply-rotation", "foodassistant-accel-rotation",
+    "foodassistant-ap-watchdog",
 ]
 NON_HELPERS = [
     "foodassistant-host-bridge.service", "foodassistant-firstboot.service",
@@ -430,6 +431,52 @@ def test_reexec_guard_prevents_loops(rig, tmp_path):
     rig["env"]["FA_UPDATE_REEXEC"] = "1"
     result, out = run_update(rig)
     assert "remote_recovered" in result  # the real script's JSON, not a re-exec
+
+
+def test_ap_watchdog_sbin_copy_refreshes_when_unit_exists(rig, tmp_path):
+    # The AP fallback watchdog unit (written at firstboot) executes the copy
+    # in /usr/local/sbin, which the generic bin sync never touches; the
+    # dedicated block must refresh it from the repo file (FoodAssistant-fuat).
+    unit = tmp_path / "foodassistant-ap-watchdog.service"
+    unit.write_text("[Service]\nExecStart=/usr/local/sbin/foodassistant-ap-watchdog\n")
+    sbin = tmp_path / "sbin"
+    sbin.mkdir()
+    stale = sbin / "foodassistant-ap-watchdog"
+    stale.write_text("#!/usr/bin/env bash\n# stale imaged watchdog\n")
+    rig["env"]["AP_WATCHDOG_UNIT"] = str(unit)
+    rig["env"]["SBIN_DIR"] = str(sbin)
+    run_update(rig)
+    body = stale.read_text()
+    assert "stale imaged watchdog" not in body
+    assert "# foodassistant-ap-watchdog v1" in body
+    assert os.access(stale, os.X_OK)
+
+
+def test_ap_watchdog_sbin_copy_skipped_without_unit(rig, tmp_path):
+    # No watchdog unit means the device never got the AP fallback (or is not a
+    # Pi); the sbin copy must not appear. The bin copy still syncs like any
+    # other helper.
+    sbin = tmp_path / "sbin"
+    sbin.mkdir()
+    rig["env"]["AP_WATCHDOG_UNIT"] = str(tmp_path / "no-such-unit.service")
+    rig["env"]["SBIN_DIR"] = str(sbin)
+    run_update(rig)
+    assert not (sbin / "foodassistant-ap-watchdog").exists()
+    assert (rig["bin"] / "foodassistant-ap-watchdog").is_file()
+
+
+def test_ap_watchdog_sbin_copy_untouched_when_current(rig, tmp_path):
+    unit = tmp_path / "foodassistant-ap-watchdog.service"
+    unit.write_text("[Service]\nExecStart=/usr/local/sbin/foodassistant-ap-watchdog\n")
+    sbin = tmp_path / "sbin"
+    sbin.mkdir()
+    rig["env"]["AP_WATCHDOG_UNIT"] = str(unit)
+    rig["env"]["SBIN_DIR"] = str(sbin)
+    run_update(rig)
+    installed = sbin / "foodassistant-ap-watchdog"
+    before = installed.stat().st_mtime_ns
+    _, out = run_update(rig)
+    assert installed.stat().st_mtime_ns == before
 
 
 def test_cec_pointer_ignore_rule_installed(rig, tmp_path):
