@@ -65,6 +65,91 @@ MEALIE_PORT = 9285
 # active. Checked by GET /ap/status and removed by POST /ap/disable.
 _AP_FLAG = "/run/foodassistant-ap-active"
 
+# Interface name prefixes that never count as wired LAN connectivity: Wi-Fi
+# (handled separately), Docker bridges, veth pairs, tunnels, and libvirt.
+# Mirrors the skip list in the foodassistant-ap-watchdog script.
+_NON_WIRED_PREFIXES = ("wlan", "docker", "br-", "veth", "tun", "tap", "vir")
+
+
+def _is_wired_iface(name):
+    """Whether an interface name looks like a real wired NIC (eth0, end0, ...)."""
+    if name == "lo":
+        return False
+    return not name.startswith(_NON_WIRED_PREFIXES)
+
+
+def _connectivity_from(default_route, wired_ifaces):
+    """Pure decision: does this network state amount to real connectivity?
+
+    default_route: `ip route show default` output (any non-blank line means a
+    gateway exists). wired_ifaces: iterable of (name, carrier_up, has_ipv4)
+    tuples for the machine's interfaces. The fallback hotspot assigns wlan0 a
+    static address but never a default route, so a genuinely stranded device
+    fails both checks and this stays False while the AP is legitimately up.
+    """
+    if (default_route or "").strip():
+        return True
+    for name, carrier_up, has_ipv4 in wired_ifaces:
+        if _is_wired_iface(name) and carrier_up and has_ipv4:
+            return True
+    return False
+
+
+def _has_lan_connectivity():
+    """Whether the device already has a usable network (default route, or a
+    wired interface up with an IPv4 address). Same checks as the AP watchdog,
+    re-evaluated live so a cable plugged in after boot is seen."""
+    try:
+        route = subprocess.run(
+            ["ip", "route", "show", "default"],
+            capture_output=True, text=True, timeout=5,
+        ).stdout
+    except Exception:
+        route = ""
+    ifaces = []
+    try:
+        for dev in Path("/sys/class/net").iterdir():
+            name = dev.name
+            if not _is_wired_iface(name):
+                continue
+            try:
+                carrier_up = (dev / "carrier").read_text().strip() == "1"
+            except Exception:
+                carrier_up = False
+            has_ipv4 = False
+            if carrier_up:
+                try:
+                    out = subprocess.run(
+                        ["ip", "-4", "addr", "show", "dev", name],
+                        capture_output=True, text=True, timeout=5,
+                    ).stdout
+                    has_ipv4 = "inet " in out
+                except Exception:
+                    has_ipv4 = False
+            ifaces.append((name, carrier_up, has_ipv4))
+    except Exception:
+        pass
+    return _connectivity_from(route, ifaces)
+
+
+def _ap_stand_down():
+    """Stop the fallback hotspot and clear its flag file (best effort)."""
+    subprocess.run(["systemctl", "stop", "hostapd"], timeout=10)
+    subprocess.run(["systemctl", "stop", "dnsmasq"], timeout=10)
+    try:
+        subprocess.run(
+            ["ip", "addr", "del", "192.168.99.1/24", "dev", "wlan0"],
+            timeout=5
+        )
+    except Exception:
+        pass
+    try:
+        Path(_AP_FLAG).unlink(missing_ok=True)
+    except TypeError:
+        # missing_ok added in Python 3.8; fall back for older versions.
+        if Path(_AP_FLAG).exists():
+            Path(_AP_FLAG).unlink()
+
 # Candidate locations for the provisioner script (curl-installer clone first,
 # then a baked-image asset dir, then the legacy home-dir clone).
 _FIRSTBOOT_CANDIDATES = [
@@ -1712,9 +1797,23 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._send(500, {"ok": False, "error": str(e)})
 
     def _ap_status(self):
-        """Return whether the fallback AP is active."""
+        """Return whether the fallback AP is active.
+
+        The flag file alone is not trusted: a device that has real network
+        connectivity (a wired link, or any default route) does not need the
+        setup hotspot, even if an earlier watchdog run raised it. In that case
+        the AP is stood down here and reported inactive, so the settings page
+        never shows the Wi-Fi setup banner on an ethernet-connected device
+        (FoodAssistant-xt9b).
+        """
         try:
             active = Path(_AP_FLAG).exists()
+            if active and _has_lan_connectivity():
+                try:
+                    _ap_stand_down()
+                except Exception:
+                    pass
+                active = False
             self._send(200, {"ok": True, "active": active})
         except Exception as e:
             self._send(500, {"ok": False, "error": str(e)})
@@ -1722,21 +1821,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
     def _ap_disable(self):
         """Stop the fallback AP and remove the flag file."""
         try:
-            subprocess.run(["systemctl", "stop", "hostapd"], timeout=10)
-            subprocess.run(["systemctl", "stop", "dnsmasq"], timeout=10)
-            try:
-                subprocess.run(
-                    ["ip", "addr", "del", "192.168.99.1/24", "dev", "wlan0"],
-                    timeout=5
-                )
-            except Exception:
-                pass
-            try:
-                Path(_AP_FLAG).unlink(missing_ok=True)
-            except TypeError:
-                # missing_ok added in Python 3.8; fall back for older versions.
-                if Path(_AP_FLAG).exists():
-                    Path(_AP_FLAG).unlink()
+            _ap_stand_down()
             self._send(200, {"ok": True})
         except Exception as e:
             self._send(500, {"ok": False, "error": str(e)})

@@ -741,3 +741,99 @@ def test_rclone_pull_cmd_custom_binary():
     assert bridge._rclone_pull_cmd("remote:x", "/tmp/out.tar.gz", rclone="/usr/bin/rclone") == [
         "/usr/bin/rclone", "copyto", "remote:x", "/tmp/out.tar.gz"
     ]
+
+
+# --- Fallback AP connectivity gate (FoodAssistant-xt9b) ---------------------
+# The setup-mode banner must never show on a device with real connectivity, so
+# GET /ap/status trusts the flag file only when the device has no default route
+# and no wired link. These cover the pure decision helpers behind that gate.
+
+def test_is_wired_iface_accepts_real_nics():
+    for name in ("eth0", "eth1", "end0", "enp1s0", "eno1", "usb0"):
+        assert bridge._is_wired_iface(name) is True, name
+
+
+def test_is_wired_iface_rejects_loopback_wifi_and_virtual():
+    for name in ("lo", "wlan0", "wlan1", "docker0", "br-abc123", "veth1a2b",
+                 "tun0", "tap0", "virbr0"):
+        assert bridge._is_wired_iface(name) is False, name
+
+
+def test_connectivity_default_route_wins():
+    # Any gateway (wired or Wi-Fi) means the device is on a network.
+    route = "default via 192.168.1.1 dev eth0 proto dhcp metric 100"
+    assert bridge._connectivity_from(route, []) is True
+
+
+def test_connectivity_wired_up_with_ip():
+    assert bridge._connectivity_from("", [("eth0", True, True)]) is True
+
+
+def test_connectivity_wired_up_without_ip_is_not_enough():
+    # Carrier without an address (cable in, DHCP not done) is not connectivity.
+    assert bridge._connectivity_from("", [("eth0", True, False)]) is False
+
+
+def test_connectivity_wired_down_is_not_enough():
+    assert bridge._connectivity_from("", [("eth0", False, False)]) is False
+
+
+def test_connectivity_virtual_ifaces_do_not_count():
+    # Docker bridges and veths always have carrier + IP; they must not mask a
+    # genuinely stranded device.
+    ifaces = [("docker0", True, True), ("br-1f2e3d", True, True),
+              ("veth99", True, True), ("virbr0", True, True)]
+    assert bridge._connectivity_from("", ifaces) is False
+
+
+def test_connectivity_stranded_device_stays_false():
+    # AP mode proper: no default route, wlan0 holds the static AP address,
+    # ethernet unplugged. The hotspot must still report active here.
+    assert bridge._connectivity_from("", [("eth0", False, False)]) is False
+    assert bridge._connectivity_from("\n", []) is False
+
+
+def test_ap_status_stands_down_when_flag_set_but_connected(tmp_path, monkeypatch):
+    # Wire the handler's decision path end to end without HTTP: flag present
+    # plus live connectivity must stand the AP down and report inactive.
+    flag = tmp_path / "foodassistant-ap-active"
+    flag.write_text("")
+    monkeypatch.setattr(bridge, "_AP_FLAG", str(flag))
+    monkeypatch.setattr(bridge, "_has_lan_connectivity", lambda: True)
+    stood_down = []
+    monkeypatch.setattr(bridge, "_ap_stand_down", lambda: stood_down.append(True))
+
+    sent = {}
+
+    class FakeHandler:
+        _ap_status = bridge._Handler._ap_status
+
+        def _send(self, code, body):
+            sent["code"] = code
+            sent["body"] = body
+
+    FakeHandler()._ap_status()
+    assert sent["code"] == 200
+    assert sent["body"]["active"] is False
+    assert stood_down == [True]
+
+
+def test_ap_status_active_when_flag_set_and_no_connectivity(tmp_path, monkeypatch):
+    flag = tmp_path / "foodassistant-ap-active"
+    flag.write_text("")
+    monkeypatch.setattr(bridge, "_AP_FLAG", str(flag))
+    monkeypatch.setattr(bridge, "_has_lan_connectivity", lambda: False)
+
+    sent = {}
+
+    class FakeHandler:
+        _ap_status = bridge._Handler._ap_status
+
+        def _send(self, code, body):
+            sent["code"] = code
+            sent["body"] = body
+
+    FakeHandler()._ap_status()
+    assert sent["code"] == 200
+    assert sent["body"]["active"] is True
+    assert flag.exists()
