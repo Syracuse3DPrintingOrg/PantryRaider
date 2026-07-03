@@ -3,7 +3,7 @@
 The [Waveshare Barcode Scanner Module](https://www.waveshare.com/barcode-scanner-module.htm)
 is a small 1D/2D scan engine with onboard USB and UART. Plugged into a USB port it
 acts as a **HID keyboard ("keyboard wedge")**: it types the scanned code into whatever
-field is focused, so it works on the Add Food page out of the box with no software setup.
+field is focused, so it works on the Manage Pantry page out of the box with no software setup.
 
 By default it only scans while you hold the button. For a kitchen kiosk you usually want
 it **hands-free**: present a product and it scans on its own. This page has the
@@ -127,7 +127,7 @@ redo the recommended codes above.
 
 ## Using it with Pantry Raider
 
-Once the module is in Sensing Mode, open the **Add Food** page and present a barcode. The
+Once the module is in Sensing Mode, open the **Manage Pantry** page and present a barcode. With the **Add stock** tab active, the
 code is captured anywhere on the page (you do not need to click into a field first), looked
 up against Open Food Facts with your defaults applied, and saved to **Pending**. Review and
 commit from the Pending page. On a Pi Remote the scan is saved on the main server, so it

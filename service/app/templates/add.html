@@ -1,11 +1,51 @@
 {% extends "base.html" %}
-{% block title %}Add Food: Pantry Raider{% endblock %}
+{% block title %}Manage Pantry: Pantry Raider{% endblock %}
 {% block content %}
 <div class="d-flex justify-content-between align-items-center my-3">
-  <h4 class="mb-0"><i class="bi bi-plus-circle me-2"></i>Add Food</h4>
+  <h4 class="mb-0"><i class="bi bi-plus-circle me-2"></i>Manage Pantry</h4>
+  <button class="btn btn-outline-secondary btn-sm" data-bs-toggle="modal" data-bs-target="#qrModal"
+          id="openOnPhoneBtn" title="Show a QR code that opens this page on your phone">
+    <i class="bi bi-qr-code me-1"></i>Open on phone
+  </button>
 </div>
 
-<!-- Input tabs -->
+<!-- Mode tabs: these ARE the shared scanner mode. Picking a tab changes the
+     mode for every scanner on the network (USB wedge, Stream Deck key, this
+     page), and the page follows along when the mode is changed elsewhere. -->
+<ul class="nav nav-pills mb-3" id="modeTabs">
+  <li class="nav-item">
+    <button class="nav-link active" id="mode-tab-inventory" onclick="selectMode('inventory')">
+      <i class="bi bi-plus-circle me-1"></i>Add stock
+    </button>
+  </li>
+  <li class="nav-item">
+    <button class="nav-link" id="mode-tab-consume" onclick="selectMode('consume')">
+      <i class="bi bi-dash-circle me-1"></i>Consume stock
+    </button>
+  </li>
+  <li class="nav-item">
+    <button class="nav-link" id="mode-tab-shopping" onclick="selectMode('shopping')">
+      <i class="bi bi-cart-plus me-1"></i>Add to shopping list
+    </button>
+  </li>
+  <li class="nav-item">
+    <button class="nav-link" id="mode-tab-audit" onclick="selectMode('audit')">
+      <i class="bi bi-clipboard-check me-1"></i>Audit stock
+    </button>
+  </li>
+</ul>
+
+<!-- Kiosk hint: shown on an attached kiosk screen, where the USB scanner is
+     the input and there is no camera or file picker. -->
+<div id="kiosk-scan-hint" class="alert alert-info py-2 small d-none">
+  <i class="bi bi-upc-scan me-1"></i>
+  Scan with the barcode scanner, or tap <strong>Open on phone</strong> to use your phone's camera.
+</div>
+
+<!-- ============================ Add stock ============================ -->
+<div id="mode-pane-inventory">
+
+<!-- Input-method tabs (within Add stock): barcode, photo, manual -->
 <ul class="nav nav-tabs mb-3" id="inputTabs">
   <li class="nav-item">
     <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tab-barcode">
@@ -13,7 +53,7 @@
     </button>
   </li>
   {% if ai_configured %}
-  <li class="nav-item">
+  <li class="nav-item" id="photoTabItem">
     <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-photo">
       <i class="bi bi-camera me-1"></i>Photo / Receipt
     </button>
@@ -31,7 +71,7 @@
   <!-- Barcode Tab -->
   <div class="tab-pane fade show active" id="tab-barcode">
     <div class="row g-3">
-      <div class="col-md-6">
+      <div class="col-md-6" id="camera-scan-card">
         <div class="card">
           <div class="card-body">
             <h6 class="card-title">Camera Scanner</h6>
@@ -52,7 +92,7 @@
                      class="d-none" onchange="decodeBarcodePhoto(this)">
             </div>
             <div class="form-text mt-1">
-              Live scanning requires HTTPS — on HTTP use "Snap Barcode Photo" instead.
+              Live scanning requires HTTPS. On HTTP use "Snap Barcode Photo" instead.
             </div>
           </div>
         </div>
@@ -74,7 +114,7 @@
             <div id="barcode-saved-count" class="mt-2 d-none">
               <span class="badge bg-success" id="barcode-saved-badge">0</span>
               saved to
-              <a href="ui/pending">Pending</a> &mdash; review and import from there.
+              <a href="ui/pending">Pending</a>: review and import from there.
             </div>
           </div>
         </div>
@@ -94,7 +134,7 @@
              ondrop="handleDrop(event)">
           <i class="bi bi-cloud-upload fs-2 d-block mb-2 text-muted"></i>
           <div>Drag &amp; drop an image here, or <a href="#" onclick="document.getElementById('photoInput').click(); return false">browse</a></div>
-          <div class="text-muted small mt-1">Supports: food photos, receipt photos — JPG, PNG, WEBP</div>
+          <div class="text-muted small mt-1">Supports food and receipt photos: JPG, PNG, WEBP</div>
           <input type="file" id="photoInput" accept="image/*" class="d-none" onchange="handleFileSelect(this)">
         </div>
 
@@ -214,6 +254,117 @@
   <div id="import-status" class="mt-2"></div>
 </div>
 
+</div><!-- /mode-pane-inventory -->
+
+<!-- ============================ Consume stock ============================ -->
+<div id="mode-pane-consume" class="d-none">
+  <div class="card">
+    <div class="card-body">
+      <h6 class="card-title">Consume stock</h6>
+      <p class="text-muted small mb-2">
+        Scan an item to use it up: each scan takes one off your Grocy stock.
+        You can also type the barcode below.
+      </p>
+      <div class="input-group" style="max-width:400px;">
+        <input type="text" id="consumeInput" class="form-control" placeholder="Barcode"
+               inputmode="numeric" pattern="[0-9]*"
+               onkeydown="if(event.key==='Enter'){event.preventDefault();consumeScan();}">
+        <button class="btn btn-primary" onclick="consumeScan()">
+          <i class="bi bi-dash-circle me-1"></i>Consume
+        </button>
+      </div>
+      <div id="consume-status" class="mt-2"></div>
+      <ul class="list-group list-group-flush mt-2 d-none" id="consume-recent"></ul>
+    </div>
+  </div>
+</div>
+
+<!-- ========================= Add to shopping list ========================= -->
+<div id="mode-pane-shopping" class="d-none">
+  {% if mealie_configured %}
+  <div class="card">
+    <div class="card-body">
+      <h6 class="card-title">Add to shopping list</h6>
+      <p class="text-muted small mb-2">
+        Scan an item to put it on your Mealie shopping list, type a barcode,
+        or add any item by name.
+      </p>
+      <div class="row g-3">
+        <div class="col-md-6">
+          <label class="form-label small" for="shoppingBarcodeInput">By barcode</label>
+          <div class="input-group">
+            <input type="text" id="shoppingBarcodeInput" class="form-control" placeholder="Barcode"
+                   inputmode="numeric" pattern="[0-9]*"
+                   onkeydown="if(event.key==='Enter'){event.preventDefault();shoppingScan();}">
+            <button class="btn btn-primary" onclick="shoppingScan()">
+              <i class="bi bi-cart-plus me-1"></i>Add
+            </button>
+          </div>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label small" for="shoppingNameInput">By name</label>
+          <div class="input-group">
+            <input type="text" id="shoppingNameInput" class="form-control" placeholder="e.g. Olive oil"
+                   onkeydown="if(event.key==='Enter'){event.preventDefault();addShoppingByName();}">
+            <button class="btn btn-primary" onclick="addShoppingByName()">
+              <i class="bi bi-plus-lg me-1"></i>Add
+            </button>
+          </div>
+        </div>
+      </div>
+      <div id="shopping-status" class="mt-2"></div>
+      <ul class="list-group list-group-flush mt-2 d-none" id="shopping-recent"></ul>
+      <div class="form-text mt-2">
+        See the full list on the <a href="ui/shopping">Shopping</a> page.
+      </div>
+    </div>
+  </div>
+  {% else %}
+  <div class="alert alert-secondary" id="shopping-unconfigured">
+    <i class="bi bi-cart-x me-1"></i>
+    The shopping list lives in Mealie, which is not connected yet.
+    Connect it in <a href="setup#pane-recipes">Settings</a> to add items from here.
+  </div>
+  {% endif %}
+</div>
+
+<!-- ============================ Audit stock ============================ -->
+<div id="mode-pane-audit" class="d-none">
+  <div class="card">
+    <div class="card-body">
+      <h6 class="card-title">Audit stock</h6>
+      <div id="audit-inactive" class="d-none">
+        <p class="text-muted small mb-2">
+          An audit is a read-only stock count for one storage location: scan
+          everything on the shelf and see what matches, what is missing, and
+          what does not belong. Nothing is written back to Grocy.
+        </p>
+        <a class="btn btn-primary" href="ui/audit">
+          <i class="bi bi-clipboard-check me-1"></i>Pick a location and start
+        </a>
+      </div>
+      <div id="audit-active" class="d-none">
+        <p class="mb-2">
+          Counting <strong id="audit-location"></strong>:
+          <span id="audit-counts" class="text-muted small"></span>
+        </p>
+        <div class="input-group" style="max-width:400px;">
+          <input type="text" id="auditInput" class="form-control" placeholder="Barcode"
+                 inputmode="numeric" pattern="[0-9]*"
+                 onkeydown="if(event.key==='Enter'){event.preventDefault();auditScan();}">
+          <button class="btn btn-primary" onclick="auditScan()">
+            <i class="bi bi-upc-scan me-1"></i>Record
+          </button>
+        </div>
+        <div id="audit-scan-status" class="mt-2"></div>
+        <a class="btn btn-outline-secondary btn-sm mt-2" href="ui/audit">
+          <i class="bi bi-clipboard-check me-1"></i>Open the full audit view
+        </a>
+      </div>
+    </div>
+  </div>
+</div>
+
 {% endblock %}
 
 {% block scripts %}
@@ -223,21 +374,282 @@ let scanner = null;
 let pendingFile = null;
 let queue = [];   // array of item objects
 
-// Barcode Scanner
-// Live camera streaming (getUserMedia) requires a secure context (HTTPS).
-// On HTTP, hide the live-scan button — the photo-snap fallback still works.
-if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-  document.addEventListener('DOMContentLoaded', () => {
-    document.getElementById('startScanBtn').classList.add('d-none');
+// ------------------------------------------------------------------ modes --
+// The four mode tabs ARE the shared scanner mode (pending/scanner-mode): the
+// same mode routes a USB scanner's scans on every device and shows on the
+// Stream Deck's mode key. Picking a tab POSTs the mode; the page also polls
+// so a mode changed from the deck (or another screen) moves the tab here.
+const MODES = ['inventory', 'consume', 'shopping', 'audit'];
+let currentMode = 'inventory';
+
+function applyMode(mode) {
+  if (!MODES.includes(mode)) mode = 'inventory';
+  currentMode = mode;
+  MODES.forEach(m => {
+    const tab = document.getElementById('mode-tab-' + m);
+    const pane = document.getElementById('mode-pane-' + m);
+    if (tab) tab.classList.toggle('active', m === mode);
+    if (pane) pane.classList.toggle('d-none', m !== mode);
   });
+  if (mode === 'audit') refreshAuditSummary();
 }
 
+async function selectMode(mode) {
+  applyMode(mode);   // switch instantly; the POST confirms
+  try {
+    const r = await fetch('pending/scanner-mode', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ mode }),
+    });
+    if (r.ok) {
+      const state = await r.json();
+      if (state.mode && state.mode !== currentMode) applyMode(state.mode);
+    }
+  } catch (e) { /* offline: the poll will reconcile */ }
+}
+
+async function refreshMode() {
+  try {
+    const r = await fetch('pending/scanner-mode');
+    if (!r.ok) return;
+    const state = await r.json();
+    if (state.mode && state.mode !== currentMode) applyMode(state.mode);
+  } catch (e) { /* ignore */ }
+}
+
+refreshMode();
+setInterval(refreshMode, 5000);
+window.addEventListener('focus', refreshMode);
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) refreshMode();
+});
+
+// -------------------------------------------------------- client adaption --
+// A kiosk panel has no camera and no file picker: the USB scanner (or a
+// phone via the QR code) is the input there, so the camera-scanner card and
+// the Photo/Receipt tab are hidden. Elsewhere, camera controls stay but the
+// live-scan button is feature-detected (getUserMedia needs a secure context).
+const isKiosk = (() => {
+  try { return localStorage.getItem('kioskMode') === 'true'; } catch (e) { return false; }
+})();
+const hasCamera = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+
+document.addEventListener('DOMContentLoaded', () => {
+  if (!hasCamera) {
+    const b = document.getElementById('startScanBtn');
+    if (b) b.classList.add('d-none');
+  }
+  if (isKiosk) {
+    const card = document.getElementById('camera-scan-card');
+    if (card) card.classList.add('d-none');
+    const photoTab = document.getElementById('photoTabItem');
+    if (photoTab) photoTab.classList.add('d-none');
+    const hint = document.getElementById('kiosk-scan-hint');
+    if (hint) hint.classList.remove('d-none');
+  }
+});
+
+// ------------------------------------------------------------------- scan --
+// One entry point for every barcode on this page (manual fields, wedge
+// bursts, camera decodes). The server routes the scan by the shared mode;
+// the response's status tells us which pane's feedback to update, so a scan
+// that raced a mode change still lands its message somewhere sensible.
+async function submitScan(code) {
+  code = (code || '').trim();
+  if (!code) return;
+  const statusId = {
+    inventory: 'barcode-status', consume: 'consume-status',
+    shopping: 'shopping-status', audit: 'audit-scan-status',
+  }[currentMode] || 'barcode-status';
+  const statusEl = document.getElementById(statusId);
+  if (statusEl) showStatus(statusId, '<span class="spinner-border spinner-border-sm me-1"></span>Working...', 'info');
+  let result;
+  try {
+    const r = await fetch('pending/scan', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ barcode: code, quantity: 1, source: 'scanner' }),
+    });
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      if (statusEl) showStatus(statusId, `Error: ${esc(err.detail || r.statusText)}`, 'warning');
+      return;
+    }
+    result = await r.json();
+  } catch (e) {
+    if (statusEl) showStatus(statusId, 'Scan failed: ' + esc(String(e)), 'danger');
+    return;
+  }
+  handleScanResult(code, result);
+}
+
+function handleScanResult(code, result) {
+  switch (result.status) {
+    case 'queued':
+    case 'merged':
+      showInventoryResult(result);
+      break;
+    case 'consumed':
+      showStatus('consume-status', `Consumed <strong>${esc(code)}</strong> (1 off stock)`, 'success');
+      addRecent('consume-recent', `<i class="bi bi-check-circle text-success me-1"></i>${esc(code)}`);
+      break;
+    case 'consume_failed':
+      showStatus('consume-status', `Could not consume <strong>${esc(code)}</strong>: ${esc(result.error || 'unknown barcode or no stock')}`, 'warning');
+      break;
+    case 'shopping_added':
+      showStatus('shopping-status', `Added <strong>${esc(result.name || code)}</strong> to the shopping list`, 'success');
+      addRecent('shopping-recent', `<i class="bi bi-cart-plus text-success me-1"></i>${esc(result.name || code)}`);
+      break;
+    case 'shopping_failed':
+      showStatus('shopping-status', `Could not add <strong>${esc(result.name || code)}</strong>: ${esc(result.error || '')}`, 'warning');
+      break;
+    case 'matched':
+      showStatus('audit-scan-status', `<strong>${esc(result.name || code)}</strong> matched (count ${result.count})`, 'success');
+      refreshAuditSummary();
+      break;
+    case 'unexpected':
+      showStatus('audit-scan-status', `<strong>${esc(result.name || code)}</strong> is not expected at this location (count ${result.count})`, 'warning');
+      refreshAuditSummary();
+      break;
+    case 'no_audit_session':
+      showStatus('audit-scan-status', 'No audit in progress. Pick a location first.', 'warning');
+      refreshAuditSummary();
+      break;
+    case 'rejected':
+      showStatus({
+        inventory: 'barcode-status', consume: 'consume-status',
+        shopping: 'shopping-status', audit: 'audit-scan-status',
+      }[currentMode] || 'barcode-status', 'That scan looked like several barcodes run together; try again.', 'warning');
+      break;
+    default:
+      showInventoryResult(result);
+  }
+}
+
+function addRecent(listId, html) {
+  const list = document.getElementById(listId);
+  if (!list) return;
+  list.classList.remove('d-none');
+  const li = document.createElement('li');
+  li.className = 'list-group-item py-1 px-0 small bg-transparent';
+  li.innerHTML = html;
+  list.insertBefore(li, list.firstChild);
+  while (list.children.length > 8) list.removeChild(list.lastChild);
+}
+
+var _barcodeSavedCount = 0;
+
+function showInventoryResult(result) {
+  const name = result.item ? result.item.name : '';
+  const merged = result.status === 'merged';
+  showStatus('barcode-status',
+    merged ? `<strong>${esc(name)}</strong> (quantity bumped, already pending)`
+            : `Saved: <strong>${esc(name)}</strong>`,
+    'success');
+  _barcodeSavedCount++;
+  const badge = document.getElementById('barcode-saved-badge');
+  const wrap = document.getElementById('barcode-saved-count');
+  if (badge) badge.textContent = _barcodeSavedCount;
+  if (wrap) wrap.classList.remove('d-none');
+  // Refresh the navbar pending badge
+  fetch('pending/count').then(r => r.json()).then(d => {
+    const b = document.getElementById('pending-nav-badge');
+    if (b && d.count > 0) { b.textContent = d.count; b.classList.remove('d-none'); }
+  }).catch(() => {});
+}
+
+function lookupBarcode() {
+  const input = document.getElementById('barcodeInput');
+  const code = input.value.trim();
+  if (!code) return;
+  input.value = '';
+  submitScan(code);
+}
+
+function consumeScan() {
+  const input = document.getElementById('consumeInput');
+  const code = input.value.trim();
+  if (!code) return;
+  input.value = '';
+  submitScan(code);
+}
+
+function shoppingScan() {
+  const input = document.getElementById('shoppingBarcodeInput');
+  if (!input) return;
+  const code = input.value.trim();
+  if (!code) return;
+  input.value = '';
+  submitScan(code);
+}
+
+function auditScan() {
+  const input = document.getElementById('auditInput');
+  const code = input.value.trim();
+  if (!code) return;
+  input.value = '';
+  submitScan(code);
+}
+
+// ------------------------------------------------------- shopping by name --
+// Quick-add a named item straight to the first Mealie shopping list, the
+// same list a shopping-mode scan lands on.
+async function addShoppingByName() {
+  const input = document.getElementById('shoppingNameInput');
+  if (!input) return;
+  const note = input.value.trim();
+  if (!note) return;
+  showStatus('shopping-status', '<span class="spinner-border spinner-border-sm me-1"></span>Adding...', 'info');
+  try {
+    const lr = await fetch('mealie/shopping');
+    if (!lr.ok) throw new Error('shopping list unavailable');
+    const data = await lr.json();
+    const listId = data.list && data.list.id;
+    if (!listId) throw new Error('no shopping list in Mealie');
+    const r = await fetch('mealie/shopping/items', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ list_id: listId, note }),
+    });
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.statusText);
+    showStatus('shopping-status', `Added <strong>${esc(note)}</strong> to the shopping list`, 'success');
+    addRecent('shopping-recent', `<i class="bi bi-cart-plus text-success me-1"></i>${esc(note)}`);
+    input.value = '';
+  } catch (e) {
+    showStatus('shopping-status', 'Could not add item: ' + esc(String(e.message || e)), 'warning');
+  }
+}
+
+// ------------------------------------------------------------ audit state --
+// The Audit tab is a front door to the existing audit flow: it shows whether
+// a count is running (and where) and hands off to /ui/audit for the location
+// pick and the full matched/missing/unexpected view.
+async function refreshAuditSummary() {
+  const inactive = document.getElementById('audit-inactive');
+  const active = document.getElementById('audit-active');
+  if (!inactive || !active) return;
+  let s = { active: false };
+  try {
+    const r = await fetch('audit/status');
+    if (r.ok) s = await r.json();
+  } catch (e) { /* leave inactive */ }
+  inactive.classList.toggle('d-none', !!s.active);
+  active.classList.toggle('d-none', !s.active);
+  if (s.active) {
+    document.getElementById('audit-location').textContent = s.location || '';
+    const c = s.counts || {};
+    document.getElementById('audit-counts').textContent =
+      `${c.seen || 0} of ${c.expected || 0} seen, ${c.missing || 0} missing, ${c.unexpected || 0} unexpected`;
+  }
+}
+
+// ------------------------------------------------------- keyboard wedge ----
 // Global keyboard-wedge capture. USB and Bluetooth HID barcode scanners type
 // the code as a fast burst of keystrokes ending in Enter. Capture that burst
-// anywhere on this page (not just when the manual field is focused) so a
-// scanner attached to any instance — server, pi host, or a pi remote — works
-// the same way, all at once. Only a rapid burst is treated as a scan, so
-// ordinary typing into a field is never hijacked.
+// anywhere on this page (not just when a field is focused) and route it
+// through submitScan, so the scan follows the active mode tab. Only a rapid
+// burst is treated as a scan, so ordinary typing is never hijacked.
 (function () {
   var buf = '';
   var last = 0;
@@ -251,12 +663,8 @@ if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
     last = now;
     if (e.key === 'Enter') {
       if (!inField && buf.length >= 6) {
-        var input = document.getElementById('barcodeInput');
-        if (input) {
-          input.value = buf;
-          lookupBarcode();
-          e.preventDefault();
-        }
+        submitScan(buf);
+        e.preventDefault();
       }
       buf = '';
       return;
@@ -273,8 +681,7 @@ async function decodeBarcodePhoto(input) {
   try {
     const decoder = new Html5Qrcode("reader");
     const result = await decoder.scanFileV2(file, /* showImage */ false);
-    document.getElementById('barcodeInput').value = result.decodedText;
-    await lookupBarcode();  // saves to pending/scan DB immediately
+    await submitScan(result.decodedText);
   } catch(e) {
     showStatus('barcode-status',
       'No barcode found in photo. Get closer, fill the frame with the barcode, and avoid glare.', 'warning');
@@ -290,8 +697,7 @@ function startScanner() {
     { fps: 10, qrbox: { width: 280, height: 120 } },
     (decodedText) => {
       stopScanner();
-      document.getElementById('barcodeInput').value = decodedText;
-      lookupBarcode();  // now saves to pending/scan DB immediately
+      submitScan(decodedText);
     },
     () => {}
   ).catch(err => {
@@ -307,47 +713,6 @@ function stopScanner() {
   }
   document.getElementById('startScanBtn').classList.remove('d-none');
   document.getElementById('stopScanBtn').classList.add('d-none');
-}
-
-var _barcodeSavedCount = 0;
-
-async function lookupBarcode() {
-  const input = document.getElementById('barcodeInput');
-  const code = input.value.trim();
-  if (!code) return;
-  showStatus('barcode-status', '<span class="spinner-border spinner-border-sm me-1"></span>Looking up...', 'info');
-  try {
-    const r = await fetch('pending/scan', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ barcode: code, quantity: 1, source: 'scanner' }),
-    });
-    if (!r.ok) {
-      const err = await r.json();
-      showStatus('barcode-status', `Error: ${err.detail || r.statusText}`, 'warning');
-      return;
-    }
-    const result = await r.json();
-    const name = result.item ? result.item.name : code;
-    const merged = result.status === 'merged';
-    showStatus('barcode-status',
-      merged ? `<strong>${name}</strong> &mdash; quantity bumped (already pending)`
-              : `Saved: <strong>${name}</strong>`,
-      'success');
-    input.value = '';
-    _barcodeSavedCount++;
-    const badge = document.getElementById('barcode-saved-badge');
-    const wrap = document.getElementById('barcode-saved-count');
-    if (badge) badge.textContent = _barcodeSavedCount;
-    if (wrap) wrap.classList.remove('d-none');
-    // Refresh the navbar pending badge
-    fetch('pending/count').then(r => r.json()).then(d => {
-      const b = document.getElementById('pending-nav-badge');
-      if (b && d.count > 0) { b.textContent = d.count; b.classList.remove('d-none'); }
-    }).catch(() => {});
-  } catch(e) {
-    showStatus('barcode-status', 'Lookup failed: ' + e, 'danger');
-  }
 }
 
 // Photo Upload
@@ -554,17 +919,13 @@ function storageOptions(selected) {
 }
 
 function showStatus(id, html, type) {
-  document.getElementById(id).innerHTML =
-    `<div class="alert alert-${type} py-1 px-2 mb-0 small">${html}</div>`;
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.innerHTML = `<div class="alert alert-${type} py-1 px-2 mb-0 small">${html}</div>`;
 }
 
 function esc(s) {
-  return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
+  return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
 }
-
-// Enter key on barcode input
-document.getElementById('barcodeInput').addEventListener('keydown', e => {
-  if (e.key === 'Enter') lookupBarcode();
-});
 </script>
 {% endblock %}

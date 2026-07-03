@@ -12,7 +12,7 @@ from .config import settings
 NAV_TABS = [
     {"key": "inventory", "label": "Inventory", "icon": "bi-grid",            "href": "ui/"},
     {"key": "expiring",  "label": "Expiring",  "icon": "bi-clock-history",   "href": "ui/expiring"},
-    {"key": "add",       "label": "Add Food",  "icon": "bi-plus-circle",     "href": "ui/add"},
+    {"key": "add",       "label": "Manage Pantry", "icon": "bi-plus-circle", "href": "ui/add"},
     {"key": "pending",   "label": "Inbox",     "icon": "bi-inbox",          "href": "ui/pending"},
     {"key": "audit",     "label": "Audit",     "icon": "bi-clipboard-check", "href": "ui/audit"},
     {"key": "recipes",   "label": "Recipes",   "icon": "bi-journal-richtext","href": "ui/recipes",  "requires": "mealie"},

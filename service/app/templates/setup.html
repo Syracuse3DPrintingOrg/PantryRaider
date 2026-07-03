@@ -709,11 +709,11 @@
         <i class="bi bi-chevron-down ms-auto"></i>
       </button>
       <div class="collapse mt-3" id="scanner-collapse">
-        <p class="text-secondary small">A USB or Bluetooth scanner plugged into any device — this server, a Pi host, or a Pi Remote — works on the Add Food page automatically, all at the same time, alongside the in-browser camera scanner. This setting is just a hint for which method you reach for first; nothing here turns the others off.</p>
+        <p class="text-secondary small">A USB or Bluetooth scanner plugged into any device — this server, a Pi host, or a Pi Remote — works on the Manage Pantry page automatically, all at the same time, alongside the in-browser camera scanner. This setting is just a hint for which method you reach for first; nothing here turns the others off.</p>
         <div class="mb-3">
           <label class="form-label">Scanner type</label>
           <select class="form-select" id="wiz-scanner_type" onchange="wizScannerTypeChanged()">
-            <option value=""    {{ 'selected' if not s.scanner_type else '' }}>Not set (pick on Add Food page)</option>
+            <option value=""    {{ 'selected' if not s.scanner_type else '' }}>Not set (pick on Manage Pantry page)</option>
             <option value="usb" {{ 'selected' if s.scanner_type == 'usb' else '' }}>USB / Bluetooth HID (keyboard wedge)</option>
             <option value="camera" {{ 'selected' if s.scanner_type == 'camera' else '' }}>Camera / built-in scan module</option>
           </select>
@@ -733,7 +733,7 @@
             to make it scan on sight without the button.</p>
         </div>
         <div id="wiz-scanner-camera-hint" class="d-none">
-          <p class="text-secondary small">Camera scanning runs in the browser on the Add Food page — no server-side setup needed.
+          <p class="text-secondary small">Camera scanning runs in the browser on the Manage Pantry page — no server-side setup needed.
             Make sure your browser has camera permission for this site.</p>
         </div>
       </div>
@@ -2693,11 +2693,11 @@ docker compose up -d</code></pre>
 
           <div class="section-card">
             <div class="section-title"><i class="bi bi-upc-scan text-success"></i> Barcode Scanner</div>
-            <p class="text-secondary small">A USB or Bluetooth scanner plugged into any device (this server, a Pi host, or a Pi Remote) works on the Add Food page automatically, all at once, alongside the in-browser camera scanner. USB and Bluetooth HID scanners act as keyboard wedges, so no drivers are needed. This setting is just a hint for which method to reach for first; it does not turn the others off.</p>
+            <p class="text-secondary small">A USB or Bluetooth scanner plugged into any device (this server, a Pi host, or a Pi Remote) works on the Manage Pantry page automatically, all at once, alongside the in-browser camera scanner. USB and Bluetooth HID scanners act as keyboard wedges, so no drivers are needed. This setting is just a hint for which method to reach for first; it does not turn the others off.</p>
             <div class="mb-3">
               <label class="form-label">Scanner type</label>
               <select class="form-select" id="scanner_type" onchange="scannerTypeChanged()">
-                <option value=""    {{ 'selected' if not s.scanner_type else '' }}>Not set (pick on Add Food page)</option>
+                <option value=""    {{ 'selected' if not s.scanner_type else '' }}>Not set (pick on Manage Pantry page)</option>
                 <option value="usb" {{ 'selected' if s.scanner_type == 'usb' else '' }}>USB / Bluetooth HID (keyboard wedge)</option>
                 <option value="camera" {{ 'selected' if s.scanner_type == 'camera' else '' }}>Camera / built-in scan module</option>
               </select>
@@ -2706,7 +2706,7 @@ docker compose up -d</code></pre>
               <input class="form-check-input" type="checkbox" role="switch" id="barcode_global_capture"
                      {{ 'checked' if s.barcode_global_capture else '' }}>
               <label class="form-check-label" for="barcode_global_capture">Scan from any page</label>
-              <div class="form-text">When on, a barcode scanned on any screen is saved to Pending and the app jumps to Add Food. When off, scanning only works on the Add Food page.</div>
+              <div class="form-text">When on, a barcode scanned on any screen is saved to Pending and the app jumps to Manage Pantry. When off, scanning only works on the Manage Pantry page.</div>
             </div>
             <div id="scanner-usb-hint" class="{{ '' if s.scanner_type == 'usb' else 'd-none' }}">
               <p class="text-secondary small mb-2">Plug in the scanner and test below — click the field and scan a barcode.</p>

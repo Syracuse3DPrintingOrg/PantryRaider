@@ -734,7 +734,7 @@
   <script>
     // Global barcode capture (any page except Add, which has its own handler).
     // A USB/Bluetooth HID scanner types the code as a fast keystroke burst. When
-    // one is seen here, save it to the pending list and jump to the Add Food
+    // one is seen here, save it to the pending list and jump to the Manage Pantry
     // page. Off when the "Scan from any page" setting is disabled. Only a rapid
     // burst counts, and never while a field is focused, so typing is untouched.
     (function () {
@@ -751,7 +751,7 @@
           headers: {'Content-Type': 'application/json'},
           body: JSON.stringify({ barcode: code, quantity: 1, source: 'scanner' }),
         }).then(function () {
-          // Land on Add Food, where the saved-to-Pending count is shown.
+          // Land on Manage Pantry, where the saved-to-Pending count is shown.
           window.location.href = 'ui/add';
         }).catch(function () {});
       }

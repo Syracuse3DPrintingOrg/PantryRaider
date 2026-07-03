@@ -11,7 +11,7 @@ Interactive docs (Swagger UI) are available at `/docs` when the app is running.
 | `GET /setup` | Web setup wizard |
 | `GET /ui/` | Inventory dashboard |
 | `GET /ui/expiring` | Expiring items view |
-| `GET /ui/add` | Add food (barcode, photo, manual) |
+| `GET /ui/add` | Manage Pantry (add, consume, shopping list, audit; barcode, photo, manual) |
 | `GET /ui/pending` | Pending scans inbox |
 | `GET /ui/audit` | Pantry audit (read-only, location-scoped stock count) |
 | `GET /ui/journal` | Stock journal (recent Grocy transactions) |

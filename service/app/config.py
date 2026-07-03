@@ -12,7 +12,7 @@ from .hardware import is_raspberry_pi
 
 # Single source of truth for the app version (shown in the UI, used by the
 # update checker, and reported by FastAPI). Bump on each tagged release.
-APP_VERSION = "0.7.84"
+APP_VERSION = "0.7.85"
 
 # Single source of truth for the product's display name. The runtime identifiers
 # (systemd units, install paths, the foodassistant_streamdeck package, the
@@ -742,12 +742,12 @@ class Settings(BaseSettings):
     ai_token_budget: int = 0
 
     # How barcodes are scanned: "usb" = USB/BT HID keyboard-wedge, "camera" =
-    # Pi camera / scan engine, "" = not set (user picks on Add Food page).
+    # Pi camera / scan engine, "" = not set (user picks on Manage Pantry page).
     scanner_type: str = ""
 
     # When True, a keyboard-wedge barcode scanned on ANY page is captured,
-    # saved to the pending list, and the browser jumps to the Add Food page.
-    # When False, wedge capture only happens on the Add Food page itself.
+    # saved to the pending list, and the browser jumps to the Manage Pantry page.
+    # When False, wedge capture only happens on the Manage Pantry page itself.
     barcode_global_capture: bool = True
 
     # Barcode-scan enrichment: "llm" cleans up name/category/storage/shelf-life
