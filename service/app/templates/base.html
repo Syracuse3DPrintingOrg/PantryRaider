@@ -103,6 +103,8 @@
       document.head.appendChild(_kl);
     }
   </script>
+  {# Kiosk boot intro: pre-paint blackout guard + intro.js (FoodAssistant-a8xy) #}
+  {% include "_intro.html" %}
   <!-- ?v={{ app_version }} busts the browser cache on every update so a kiosk
        picks up new CSS/JS instead of serving stale copies. -->
   <!-- Applies scale + orientation on the attached kiosk display only -->
