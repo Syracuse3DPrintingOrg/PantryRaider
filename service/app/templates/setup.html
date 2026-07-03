@@ -6497,13 +6497,15 @@ async function _sdLoadCatalog() {
     const r = await fetch('setup/streamdeck/actions').then(x => x.json());
     if (r.ok && Array.isArray(r.actions)) { _sdCatalog = r.actions; return _sdCatalog; }
   } catch (e) { /* fall through to fallback */ }
-  // Fallback list so the editor still renders if the bridge is unreachable.
+  // Last-resort list so the editor still renders if the fetch itself fails.
+  // The server endpoint already falls back to the bundled generated catalog
+  // (service/app/data/deck_catalog.json) off-Pi, so this rarely runs.
   _sdCatalog = [
     {name:'blank',label:'Empty',kind:'blank',group:'System',color:'#1f2937'},
     {name:'expiring',label:'Expiring',kind:'status',group:'Status',color:'#b54708'},
     {name:'pending',label:'Pending',kind:'status',group:'Status',color:'#1d4ed8'},
     {name:'commit',label:'Commit',kind:'trigger',group:'Actions',color:'#15803d'},
-    {name:'add',label:'Add',kind:'nav',group:'Navigation',color:'#b45309'},
+    {name:'add',label:'Pantry',kind:'nav',group:'Navigation',color:'#b45309'},
     {name:'inventory',label:'Stock',kind:'nav',group:'Navigation',color:'#0f766e'},
     {name:'cook',label:'Cook',kind:'nav',group:'Navigation',color:'#7e22ce'},
     {name:'recipes',label:'Recipes',kind:'nav',group:'Navigation',color:'#7e22ce'},

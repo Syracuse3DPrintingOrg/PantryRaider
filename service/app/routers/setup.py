@@ -2238,15 +2238,25 @@ async def ha_discover_cameras(payload: HaCameraDiscoverPayload):
 
 @router.get("/streamdeck/actions")
 async def streamdeck_actions():
-    """List assignable Stream Deck actions for the grid editor (Pi only)."""
-    if not is_raspberry_pi():
-        return {"ok": False, "error": "Not available on this platform."}
-    try:
-        async with httpx.AsyncClient(timeout=12.0) as c:
-            r = (await c.get(f"{_HOST_BRIDGE}/streamdeck/actions")).json()
-        return r
-    except Exception as e:
-        return {"ok": False, "error": str(e)}
+    """List assignable Stream Deck actions for the grid editors.
+
+    On a Pi the live catalog comes from the host bridge. Everywhere else (and
+    when the bridge is unreachable) the bundled generated catalog is served, so
+    the Start Page editor on a plain server shows the same full palette a Pi
+    gets."""
+    if is_raspberry_pi():
+        try:
+            async with httpx.AsyncClient(timeout=12.0) as c:
+                r = (await c.get(f"{_HOST_BRIDGE}/streamdeck/actions")).json()
+            if r.get("ok") and isinstance(r.get("actions"), list):
+                return r
+        except Exception:
+            pass
+    from ..services.start_page import bundled_catalog
+    actions = bundled_catalog()
+    if actions:
+        return {"ok": True, "actions": actions, "source": "bundled"}
+    return {"ok": False, "error": "Action catalog unavailable."}
 
 
 @router.post("/streamdeck/install")

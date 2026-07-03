@@ -14,6 +14,9 @@ tests stay simple; browser behaviour for a key press lives in the template.
 """
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 # Grid shapes per key count, mirroring the Stream Deck hardware (cols x rows).
 GRID_SHAPES = {6: (3, 2), 15: (5, 3), 32: (8, 4)}
 VALID_KEY_COUNTS = tuple(GRID_SHAPES.keys())
@@ -31,16 +34,57 @@ ACTION_HREF: dict[str, str] = {
     "defaults": "ui/defaults", "convert": "ui/convert", "guide": "ui/kitchen-guide",
     "camera": "ui/camera", "camera_full": "ui/camera", "nutrition": "ui/nutrition",
     "audit": "ui/audit", "shop": "ui/shop", "settings": "setup",
-    "weather": "ui/weather", "forecast": "ui/weather", "health": "ui/nutrition",
+    "weather": "ui/weather", "forecast": "ui/weather",
     "meal_today": "ui/mealplan",
     "timer_1": "ui/timers", "timer_2": "ui/timers", "timer_3": "ui/timers",
     "timer_eggs": "ui/timers", "timer_pasta": "ui/timers", "timer_rice": "ui/timers",
     "timers_view": "ui/timers",
+    # Cookable-recipe count: the deck opens the Cook page on press, so does the
+    # on-screen key.
+    "ready": "ui/cook",
+    # Current Recipe controls: pressing them on the deck acts on the active
+    # recipe, so on screen they open the page that carries those controls.
+    "cooked": "ui/current-recipe",
+    "scale_half": "ui/current-recipe", "scale_1x": "ui/current-recipe",
+    "scale_2x": "ui/current-recipe",
+    # Scanner mode now lives on Manage Pantry, so the on-screen key goes there.
+    "scan_mode": "ui/add",
+    # Check-off takes over the deck with shopping-list keys; the on-screen
+    # equivalent is the shopping list itself.
+    "shopping_check": "ui/shopping",
+    # System health status key: the deck opens Setup on press.
+    "health": "setup",
+    # Not mapped on purpose, so they render as deck-only: clock (a live key
+    # face; the kiosk already shows the time), the paging/brightness/screen
+    # power keys, pin, and the bridge actions (kiosk_restart, update, reboot).
 }
 
-# Fallback catalog used off-Pi (or when the host bridge is unreachable), matching
-# the JS fallback in setup.html's _sdLoadCatalog so the editor and /ui/start show
-# the same keys. On a Pi the real catalog comes from the host bridge.
+# Bundled copy of the full deck action catalog, generated from the controller
+# package by scripts/gen-deck-catalog.py (tests/test_deck_catalog.py keeps it in
+# sync). It is what off-Pi servers use, so the Start Page and Stream Deck
+# editors show the same palette everywhere; on a Pi the live catalog still
+# comes from the host bridge.
+_BUNDLED_CATALOG_PATH = Path(__file__).resolve().parent.parent / "data" / "deck_catalog.json"
+_bundled_catalog_cache: list[dict] | None = None
+
+
+def bundled_catalog() -> list[dict]:
+    """The generated deck catalog shipped with the app, loaded once.
+
+    Returns an empty list if the file is missing or unreadable, so callers can
+    fall through to FALLBACK_CATALOG."""
+    global _bundled_catalog_cache
+    if _bundled_catalog_cache is None:
+        try:
+            data = json.loads(_BUNDLED_CATALOG_PATH.read_text(encoding="utf-8"))
+            _bundled_catalog_cache = data if isinstance(data, list) else []
+        except Exception:
+            _bundled_catalog_cache = []
+    return _bundled_catalog_cache
+
+
+# Last-resort catalog, used only if the bundled JSON is missing or unreadable
+# (the bundled catalog above is the normal off-Pi source).
 FALLBACK_CATALOG: list[dict] = [
     {"name": "expiring",  "label": "Expiring", "icon": "clock-history",   "color": "#b54708", "group": "Status"},
     {"name": "pending",   "label": "Pending",  "icon": "inbox",           "color": "#1d4ed8", "group": "Status"},
@@ -68,8 +112,9 @@ FALLBACK_CATALOG: list[dict] = [
 
 async def fetch_deck_catalog() -> list[dict]:
     """The Stream Deck action catalog: the live one from the host bridge on a Pi
-    appliance (identical to what the editor loads), else the static fallback. So
-    /ui/start renders every key with the same face as the editor and the deck."""
+    appliance (identical to what the editor loads), else the bundled generated
+    copy, else the static last-resort list. So /ui/start renders every key with
+    the same face as the editor and the deck."""
     from ..hardware import is_raspberry_pi
     if is_raspberry_pi():
         try:
@@ -81,7 +126,7 @@ async def fetch_deck_catalog() -> list[dict]:
                 return r["actions"]
         except Exception:
             pass
-    return FALLBACK_CATALOG
+    return bundled_catalog() or FALLBACK_CATALOG
 
 
 def normalize_key_count(value) -> int:
@@ -157,7 +202,7 @@ def resolve_layout(layout: list | None, key_count: int,
     "blank". An action with no on-screen page renders as deck-only."""
     key_count = normalize_key_count(key_count)
     customs = {c["id"]: c for c in custom_buttons(overrides)}
-    cat = {a["name"]: a for a in (catalog or FALLBACK_CATALOG)
+    cat = {a["name"]: a for a in (catalog or bundled_catalog() or FALLBACK_CATALOG)
            if isinstance(a, dict) and a.get("name")}
     slots = list(layout or [])[:key_count]
     out: list[dict] = []
