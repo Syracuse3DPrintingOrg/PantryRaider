@@ -329,3 +329,34 @@ def test_cursor_dropin_respects_hide_cursor_false(rig, tmp_path):
     rig["env"]["CURSOR_THEME_DIR"] = str(tmp_path / "icons" / "foodassistant-hidden")
     run_update(rig)
     assert not (tmp_path / "kiosk.d" / "20-foodassistant-cursor.conf").exists()
+
+
+def test_self_update_reexecs_the_new_version(rig):
+    # The updater replaces itself, then must re-exec the NEW version so steps
+    # added in it apply on the same press (previously one press behind). The
+    # device starts with an OLD updater installed; upstream ships a new one
+    # that writes a marker when run.
+    old = rig["bin"] / "foodassistant-update"
+    old.write_text("#!/usr/bin/env bash\n# stale installed updater\n")
+    new_src = rig["work"] / "scripts" / "image-build" / "foodassistant-update"
+    new_src.write_text(
+        "#!/usr/bin/env bash\n"
+        "echo \"REEXEC_MARKER guard=${FA_UPDATE_REEXEC:-unset}\"\n"
+        "echo '{\"ok\": true}'\n")
+    _git(rig["work"], "add", "-A")
+    _git(rig["work"], "commit", "-m", "new updater")
+    _git(rig["work"], "push", "origin", "main")
+
+    # Run the REAL updater script (as the bridge would); it syncs helpers,
+    # sees itself changed, and must exec the new installed copy.
+    result, out = run_update(rig)
+    assert "REEXEC_MARKER guard=1" in out
+    assert result == {"ok": True}
+
+
+def test_reexec_guard_prevents_loops(rig, tmp_path):
+    # With the guard env set (already re-exec'd once), a self-refresh must NOT
+    # exec again; the run carries on and emits the normal result JSON.
+    rig["env"]["FA_UPDATE_REEXEC"] = "1"
+    result, out = run_update(rig)
+    assert "remote_recovered" in result  # the real script's JSON, not a re-exec

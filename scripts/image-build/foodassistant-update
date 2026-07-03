@@ -166,6 +166,7 @@ deps=0
 # previously never reached deployed devices at all (FoodAssistant-2ty6). The
 # host bridge is excluded here: it is a long-running daemon with its own
 # refresh-and-scheduled-restart block below.
+_self_updated=0
 for _hsrc in "$REPO/scripts/image-build/foodassistant-"*; do
   [ -f "$_hsrc" ] || continue
   _h="$(basename "$_hsrc")"
@@ -173,12 +174,34 @@ for _hsrc in "$REPO/scripts/image-build/foodassistant-"*; do
     foodassistant-host-bridge) continue ;;
     *.*) continue ;;  # unit files and provisioning scripts, not bin helpers
   esac
+  _h_existed=0
+  [ -f "$BIN_DIR/$_h" ] && _h_existed=1
   if ! cmp -s "$_hsrc" "$BIN_DIR/$_h"; then
-    install -m 755 "$_hsrc" "$BIN_DIR/$_h" 2>/dev/null \
-      && log "Refreshed $BIN_DIR/$_h" \
-      || log "WARN: could not refresh $BIN_DIR/$_h"
+    if install -m 755 "$_hsrc" "$BIN_DIR/$_h" 2>/dev/null; then
+      log "Refreshed $BIN_DIR/$_h"
+      # Only a REPLACED updater warrants a re-exec; a first-time install means
+      # this very run is already the newest version.
+      if [ "$_h" = "foodassistant-update" ] && [ "$_h_existed" = "1" ]; then
+        _self_updated=1
+      fi
+    else
+      log "WARN: could not refresh $BIN_DIR/$_h"
+    fi
   fi
 done
+
+# When THIS script just replaced itself, the rest of this run would still
+# execute the old version (the shell keeps the old inode), so any step added
+# in the new version would only apply on the NEXT update press. That
+# one-press-behind gap has bitten repeatedly (the image-name migration, the
+# helper sync itself, the cursor retrofit). Re-exec the fresh copy once; the
+# guard env stops a loop, and the re-run's pull is a cheap no-op since the
+# checkout is already current.
+if [ "$_self_updated" = "1" ] && [ -z "${FA_UPDATE_REEXEC:-}" ] \
+    && [ -x "$BIN_DIR/foodassistant-update" ]; then
+  log "Updater refreshed itself; re-running the new version so every new step applies now."
+  FA_UPDATE_REEXEC=1 exec "$BIN_DIR/foodassistant-update"
+fi
 
 # Keep the host bridge current too. It is a long-running root daemon (on
 # 127.0.0.1:9299), NOT a re-exec'd helper, so a new file only takes effect after
