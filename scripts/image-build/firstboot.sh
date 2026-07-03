@@ -363,11 +363,25 @@ install_docker() {
   systemctl enable --now docker || warn "Could not enable docker service"
 }
 
+# Comma-separated compose profile names for COMPOSE_PROFILES (may be empty).
+# Persisting this in the stack's .env means every later `docker compose`
+# command run from INSTALL_DIR (a manual `up -d`, the host bridge, the OTA
+# helper) operates on the same services without needing --profile flags, so
+# an enabled Mealie can never be silently dropped by a profile-less call.
+compose_profiles_csv() {
+  local csv=""
+  is_true "$ENABLE_MEALIE" && csv="with-mealie"
+  is_true "$ENABLE_OLLAMA" && csv="${csv:+$csv,}with-ollama"
+  printf '%s' "$csv"
+}
+
 # Step: deploy the stack
 write_env_file() {
   local env_path="$1"
+  local profiles_csv
+  profiles_csv="$(compose_profiles_csv)"
   if [ "$DRY_RUN" = "1" ]; then
-    log "DRY_RUN would write $env_path (TZ, FOODASSISTANT_TAG)"
+    log "DRY_RUN would write $env_path (TZ, FOODASSISTANT_TAG, COMPOSE_PROFILES=$profiles_csv)"
     return 0
   fi
   # Only create if absent so a re-run does not clobber user edits / secrets.
@@ -381,6 +395,7 @@ write_env_file() {
 # add API keys.
 TZ=$TZ
 FOODASSISTANT_TAG=$FOODASSISTANT_TAG
+COMPOSE_PROFILES=$profiles_csv
 EOF
 }
 

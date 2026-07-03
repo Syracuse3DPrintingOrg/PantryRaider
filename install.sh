@@ -146,7 +146,11 @@ HAS_DECK=false; has_streamdeck && HAS_DECK=true
 
 DEPLOYMENT_MODE="${DEPLOYMENT_MODE:-}"
 REMOTE_SERVER_URL="${REMOTE_SERVER_URL:-}"
-ENABLE_MEALIE="${ENABLE_MEALIE:-false}"
+# Mealie defaults are mode-dependent, and the mode is not known yet. Leave the
+# flag empty here and resolve it in main() once the mode is chosen: on by
+# default for a full local stack (matching firstboot.sh), off for a thin
+# remote. An explicit ENABLE_MEALIE in the environment always wins.
+ENABLE_MEALIE="${ENABLE_MEALIE:-}"
 ENABLE_OLLAMA="${ENABLE_OLLAMA:-false}"
 ENABLE_KIOSK="${ENABLE_KIOSK:-}"
 ENABLE_STREAMDECK="${ENABLE_STREAMDECK:-}"
@@ -171,8 +175,9 @@ interactive_config() {
   have_tty || die "No terminal for prompts. Run over SSH, or set NONINTERACTIVE=1 with the choices as env vars (see the header of this script)."
 
   # Mode is the only question asked interactively. Everything else (kiosk,
-  # Stream Deck, display rotation, Mealie, Ollama) is auto-detected or set
-  # later via the web setup wizard at /setup.
+  # Stream Deck, display rotation, Ollama) is auto-detected or set later via
+  # the web setup wizard at /setup. Mealie installs by default on a full local
+  # stack; set ENABLE_MEALIE=false in the environment to skip it.
   if [ "$IS_PI" = true ]; then
     DEPLOYMENT_MODE="$(prompt_choice "How will this device be used?" \
       "pi_hosted:Pi Hosted  - run the full Pantry Raider stack on this Pi" \
@@ -294,6 +299,17 @@ main() {
   # Pi Remote never runs Mealie/Ollama regardless of how flags arrived.
   if [ "$DEPLOYMENT_MODE" = "pi_remote" ]; then
     ENABLE_MEALIE=false; ENABLE_OLLAMA=false
+  fi
+  # Resolve the Mealie default now that the mode is known, mirroring
+  # firstboot.sh: a full local stack ships recipes and meal planning on by
+  # default (FoodAssistant-3t3c/xn9x: passing an unconditional "false" here
+  # used to override firstboot's pi_hosted default and skip Mealie entirely).
+  if [ -z "$ENABLE_MEALIE" ]; then
+    if [ "$DEPLOYMENT_MODE" = "pi_remote" ]; then
+      ENABLE_MEALIE=false
+    else
+      ENABLE_MEALIE=true
+    fi
   fi
   confirm_plan
 

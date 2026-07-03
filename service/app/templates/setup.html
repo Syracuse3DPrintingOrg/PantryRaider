@@ -739,6 +739,7 @@
       <i class="bi bi-box-arrow-up-right me-1"></i>Open Mealie
     </a>
   </div>
+  <p class="text-secondary small mb-2">The first start downloads Mealie and can take several minutes. Keep this page open to watch the progress; if you do leave, the download keeps running on the device and this section reconnects to it when you come back.</p>
   <div class="test-result mb-2" id="mealie-start-result"></div>
   <pre class="install-log d-none bg-body-tertiary border rounded p-2 small mb-2" data-log="mealie"></pre>
   <p class="text-secondary small" id="mealie-token-hint">Start Mealie, open it in a new tab, sign in as admin, go to User Profile, and create an API token. Paste the token below.</p>
@@ -1427,6 +1428,7 @@
                 <i class="bi bi-box-arrow-up-right me-1"></i>Open Mealie
               </a>
               {% endif %}
+              <p class="text-secondary small mt-2 mb-0">The first start downloads Mealie and can take several minutes. Keep this page open to watch the progress; if you do leave, the download keeps running on the device and this section reconnects to it when you come back.</p>
               <div class="test-result mt-1" id="mealie-start-result"></div>
               <pre class="install-log d-none bg-body-tertiary border rounded p-2 small mt-2 mb-0" data-log="mealie"></pre>
             </div>
@@ -3550,31 +3552,16 @@ function _enableMealieLinks() {
 
 const _sleep = ms => new Promise(r => setTimeout(r, ms));
 
-// Start Mealie, then poll its status until it actually answers HTTP before
-// claiming success. The bridge runs the image pull/up in the background, so on
-// first run this can take a minute; we keep a progress state and live log
+// Poll Mealie's status until it actually answers HTTP before claiming
+// success. The bridge runs the image pull/up in the background, so on first
+// run this can take a few minutes; we keep a progress state and live log
 // visible until state == "running", then reveal the Open Mealie link
-// (FoodAssistant-28z + 59z).
-async function startMealie(btn) {
-  const orig = btn.innerHTML;
-  btn.disabled = true;
-  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Starting...';
+// (FoodAssistant-28z + 59z). Shared by startMealie and the page-load
+// re-attach below (FoodAssistant-nqpb).
+async function _watchMealie() {
   let running = false;
   const stopLog = _startLogPolling('mealie', () => running);
   try {
-    const r = await fetch('setup/mealie/start', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'});
-    const d = await r.json();
-    if (!d.ok) {
-      setResult('mealie-start-result', false, d.error || 'Failed to start Mealie.');
-      return;
-    }
-    if (d.state === 'running') {
-      running = true;
-      setResult('mealie-start-result', true, 'Mealie is running. Open it to create an API token, then paste it below.');
-      _enableMealieLinks();
-      return;
-    }
-    setResult('mealie-start-result', true, 'Starting Mealie (this can take a minute on first run)…');
     // Poll status every ~2s. Mealie reports "running" only once it serves HTTP.
     for (let i = 0; i < 150 && !running; i++) {
       await _sleep(2000);
@@ -3599,15 +3586,54 @@ async function startMealie(btn) {
       running = true;
       setResult('mealie-start-result', false, 'Mealie is taking longer than expected. Check the log above; it may still come up.');
     }
-  } catch(e) {
+  } finally {
     running = true;
+    stopLog();
+  }
+}
+
+async function startMealie(btn) {
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Starting...';
+  try {
+    const r = await fetch('setup/mealie/start', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'});
+    const d = await r.json();
+    if (!d.ok) {
+      setResult('mealie-start-result', false, d.error || 'Failed to start Mealie.');
+      return;
+    }
+    if (d.state === 'running') {
+      setResult('mealie-start-result', true, 'Mealie is running. Open it to create an API token, then paste it below.');
+      _enableMealieLinks();
+      return;
+    }
+    setResult('mealie-start-result', true, 'Starting Mealie (the first start downloads it and can take a few minutes)…');
+    await _watchMealie();
+  } catch(e) {
     setResult('mealie-start-result', false, e.message);
   } finally {
-    stopLog();
     btn.disabled = false;
     btn.innerHTML = orig;
   }
 }
+
+// If a Mealie start is already running (the page was left and reopened
+// mid-download), pick it back up: show the progress state and log again
+// instead of sitting idle until the button is clicked a second time.
+async function resumeMealieWatch() {
+  if (!document.querySelector('.install-log[data-log="mealie"]')) return;
+  let s;
+  try {
+    s = await fetch('setup/mealie/status').then(x => x.json());
+  } catch (e) {
+    return;
+  }
+  if (!s || s.ok === false || s.state !== 'starting') return;
+  setResult('mealie-start-result', true, 'Mealie is still starting from an earlier request; reconnected to its progress…');
+  await _watchMealie();
+}
+document.addEventListener('DOMContentLoaded', resumeMealieWatch);
 
 async function testMealie() {
   setResult('mealie-result', true, 'Testing…');

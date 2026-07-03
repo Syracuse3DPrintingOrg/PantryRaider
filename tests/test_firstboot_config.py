@@ -653,3 +653,25 @@ def test_read_minmax_ignores_pressure_axis():
 
     assert ranges["X"]["Max"] == 4095, ranges
     assert ranges["Y"]["Max"] == 4095, "ABS_PRESSURE Max=255 contaminated ABS_Y range"
+
+
+def test_env_file_persists_compose_profiles(tmp_path):
+    # The generated .env records the enabled profiles as COMPOSE_PROFILES so
+    # every later plain `docker compose` command from the install dir (manual,
+    # host bridge, OTA helper) keeps operating on the same services.
+    rc, out = run_firstboot(tmp_path, "HOSTNAME=foodassistant\n")
+    assert rc == 0, out
+    assert "COMPOSE_PROFILES=with-mealie" in out
+
+
+def test_env_file_profiles_empty_when_mealie_off(tmp_path):
+    rc, out = run_firstboot(tmp_path, "ENABLE_MEALIE=false\n")
+    assert rc == 0, out
+    assert "COMPOSE_PROFILES=)" in out  # empty value in the DRY_RUN write line
+    assert "with-mealie" not in out
+
+
+def test_env_file_profiles_include_ollama(tmp_path):
+    rc, out = run_firstboot(tmp_path, "ENABLE_MEALIE=true\nENABLE_OLLAMA=true\n")
+    assert rc == 0, out
+    assert "COMPOSE_PROFILES=with-mealie,with-ollama" in out

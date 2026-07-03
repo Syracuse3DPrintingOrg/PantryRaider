@@ -932,3 +932,94 @@ def test_display_power_commands_path_helper_wins_over_healed_path():
         True, which=lambda n: True, helper_path="/usr/local/bin/x")
     assert cmds[0] == ["foodassistant-display-power", "on"]
     assert ["/usr/local/bin/x", "on"] not in cmds
+# --- Mealie install persistence + resume (FoodAssistant-nqpb) ---------------
+
+
+def test_env_profiles_empty_text():
+    assert bridge._env_profiles("") == []
+    assert bridge._env_profiles(None) == []
+
+
+def test_env_profiles_parses_csv():
+    text = "TZ=UTC\nCOMPOSE_PROFILES=with-mealie,with-ollama\nFOO=bar\n"
+    assert bridge._env_profiles(text) == ["with-mealie", "with-ollama"]
+
+
+def test_env_profiles_strips_quotes_and_spaces():
+    assert bridge._env_profiles('COMPOSE_PROFILES=" with-mealie , with-ollama "') == [
+        "with-mealie", "with-ollama"
+    ]
+
+
+def test_add_env_profile_appends_line_when_missing():
+    out = bridge._add_env_profile("TZ=UTC\n", "with-mealie")
+    assert "COMPOSE_PROFILES=with-mealie" in out
+    assert out.startswith("TZ=UTC\n")
+    assert out.endswith("\n")
+
+
+def test_add_env_profile_extends_existing_line():
+    out = bridge._add_env_profile("COMPOSE_PROFILES=with-ollama\n", "with-mealie")
+    assert bridge._env_profiles(out) == ["with-ollama", "with-mealie"]
+
+
+def test_add_env_profile_idempotent():
+    text = "TZ=UTC\nCOMPOSE_PROFILES=with-mealie\n"
+    assert bridge._add_env_profile(text, "with-mealie") == text
+
+
+def test_add_env_profile_empty_env():
+    assert bridge._add_env_profile("", "with-mealie") == "COMPOSE_PROFILES=with-mealie\n"
+
+
+def test_persist_compose_profile_creates_file(tmp_path):
+    path = tmp_path / ".env"
+    assert bridge._persist_compose_profile("with-mealie", path=str(path)) is True
+    assert bridge._env_profiles(path.read_text()) == ["with-mealie"]
+
+
+def test_persist_compose_profile_preserves_existing_keys(tmp_path):
+    path = tmp_path / ".env"
+    path.write_text("TZ=UTC\nFOODASSISTANT_TAG=latest\n")
+    assert bridge._persist_compose_profile("with-mealie", path=str(path)) is True
+    text = path.read_text()
+    assert "TZ=UTC" in text and "FOODASSISTANT_TAG=latest" in text
+    assert bridge._env_profiles(text) == ["with-mealie"]
+
+
+def test_persist_compose_profile_second_call_is_noop(tmp_path):
+    path = tmp_path / ".env"
+    bridge._persist_compose_profile("with-mealie", path=str(path))
+    before = path.read_text()
+    bridge._persist_compose_profile("with-mealie", path=str(path))
+    assert path.read_text() == before
+
+
+def test_should_resume_mealie_when_requested_and_absent():
+    assert bridge._should_resume_mealie(["with-mealie"], False, False) is True
+
+
+def test_should_resume_mealie_skips_when_container_up():
+    assert bridge._should_resume_mealie(["with-mealie"], True, False) is False
+
+
+def test_should_resume_mealie_skips_when_install_in_flight():
+    assert bridge._should_resume_mealie(["with-mealie"], False, True) is False
+
+
+def test_should_resume_mealie_skips_when_never_requested():
+    assert bridge._should_resume_mealie([], False, False) is False
+    assert bridge._should_resume_mealie(["with-ollama"], False, False) is False
+
+
+def test_resume_gives_up_when_docker_never_answers(monkeypatch):
+    # No docker daemon: the resume loop must give up quietly, never raise.
+    calls = []
+
+    def fake_run(cmd, **kw):
+        calls.append(cmd)
+        raise OSError("no docker")
+
+    monkeypatch.setattr(bridge.subprocess, "run", fake_run)
+    assert bridge._resume_mealie_install(retries=3, delay=0, sleep=lambda _: None) is False
+    assert len(calls) == 3

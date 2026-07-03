@@ -78,9 +78,10 @@ question:
     that server's URL.
 
 The kiosk browser and Stream Deck controller are auto-enabled when the hardware
-is detected at install time. Everything else (Mealie, Ollama, display rotation,
-AI provider, password, Grocy key) is configured in the browser after the install
-completes.
+is detected at install time, and Mealie (recipes, meal plans, shopping lists)
+installs by default on a hosted device (set `ENABLE_MEALIE=false` to skip it).
+Everything else (Ollama, display rotation, AI provider, password, Grocy key) is
+configured in the browser after the install completes.
 
 When it finishes, the terminal prints the URL to open in your browser.
 

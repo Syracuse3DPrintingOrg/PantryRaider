@@ -448,6 +448,138 @@ def _compose_env():
     return env
 
 
+# --- Mealie install persistence + resume (FoodAssistant-nqpb) --------------
+# The first Mealie start pulls a large image, and the pull used to live only
+# in this process's memory (_INSTALL_PROCS): a bridge restart or reboot mid
+# pull lost the intent and left the install half done with nothing to finish
+# it. The intent is therefore persisted as a COMPOSE_PROFILES entry in the
+# stack's .env (which also makes every later plain `docker compose` command
+# from INSTALL_DIR include Mealie), and the bridge re-runs an interrupted
+# install on startup. `docker compose up -d` itself is idempotent: the pull
+# resumes from cached layers and an existing container is reused, so re-running
+# it converges rather than duplicating anything.
+
+_ENV_FILE = f"{INSTALL_DIR}/.env"
+
+
+def _env_profiles(env_text):
+    """Parse COMPOSE_PROFILES from compose .env text into a list of names."""
+    for line in (env_text or "").splitlines():
+        s = line.strip()
+        if s.startswith("COMPOSE_PROFILES="):
+            val = s.split("=", 1)[1].strip().strip('"').strip("'")
+            return [p.strip() for p in val.split(",") if p.strip()]
+    return []
+
+
+def _add_env_profile(env_text, profile):
+    """Return env_text with `profile` listed in COMPOSE_PROFILES.
+
+    Pure: appends to an existing COMPOSE_PROFILES line, or adds the line when
+    missing. Returns the text unchanged when the profile is already listed.
+    """
+    text = env_text or ""
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        if line.strip().startswith("COMPOSE_PROFILES="):
+            existing = _env_profiles(line)
+            if profile in existing:
+                return env_text
+            existing.append(profile)
+            lines[i] = "COMPOSE_PROFILES=" + ",".join(existing)
+            return "\n".join(lines) + ("\n" if text.endswith("\n") else "")
+    lines.append(f"COMPOSE_PROFILES={profile}")
+    return "\n".join(lines) + "\n"
+
+
+def _persist_compose_profile(profile, path=_ENV_FILE):
+    """Best-effort: record `profile` in the stack's .env.
+
+    Survives bridge restarts and reboots, so the startup resume knows Mealie
+    was requested, and future compose commands include it without --profile.
+    """
+    try:
+        text = ""
+        if os.path.exists(path):
+            with open(path) as f:
+                text = f.read()
+        new = _add_env_profile(text, profile)
+        if new != text:
+            with open(path, "w") as f:
+                f.write(new)
+        return True
+    except OSError:
+        return False
+
+
+def _should_resume_mealie(profiles, container_up, installing):
+    """True when a previously requested Mealie install should be re-run.
+
+    Pure decision helper for the startup resume: resume only when the .env
+    profiles record the intent, the container never came up (the install was
+    interrupted mid-pull), and no install is currently in flight.
+    """
+    return "with-mealie" in profiles and not container_up and not installing
+
+
+def _mealie_container_exists():
+    """True when the Mealie container exists (compose service 'mealie')."""
+    try:
+        r = subprocess.run(
+            ["docker", "compose", "ps", "--format=json", "mealie"],
+            cwd=INSTALL_DIR,
+            capture_output=True, text=True, timeout=10
+        )
+        return bool(r.stdout.strip()) and r.returncode == 0
+    except Exception:
+        return False
+
+
+def _launch_mealie_install():
+    """Start `docker compose --profile with-mealie up -d` in the background,
+    streaming output into the mealie log, and track it in _INSTALL_PROCS."""
+    log = open(_LOG_PATHS["mealie"], "ab")
+    p = subprocess.Popen(
+        ["docker", "compose", "--profile", "with-mealie", "up", "-d"],
+        cwd=INSTALL_DIR,
+        env=_compose_env(),
+        stdout=log, stderr=subprocess.STDOUT,
+    )
+    _INSTALL_PROCS["mealie"] = p
+    return p
+
+
+def _resume_mealie_install(retries=30, delay=10, sleep=time.sleep):
+    """Finish an interrupted Mealie install after a bridge restart or reboot.
+
+    Runs once in a background thread at startup: waits for the docker daemon
+    (the bridge can start before docker at boot), then re-runs the compose up
+    when the stack's .env says Mealie belongs but its container never came up.
+    Returns True when a resume was launched.
+    """
+    for _ in range(retries):
+        try:
+            r = subprocess.run(["docker", "info"], capture_output=True, timeout=15)
+            if r.returncode == 0:
+                break
+        except Exception:
+            pass
+        sleep(delay)
+    else:
+        return False
+    try:
+        with open(_ENV_FILE) as f:
+            profiles = _env_profiles(f.read())
+    except OSError:
+        return False
+    if not _should_resume_mealie(
+        profiles, _mealie_container_exists(), _installing("mealie")
+    ):
+        return False
+    _launch_mealie_install()
+    return True
+
+
 # --- Full-stack restore source handling (FoodAssistant-h18b) --------------
 # The restore helper (/usr/local/bin/foodassistant-restore) accepts a snapshot
 # that is either already on the device (an absolute path) or pulled first from
@@ -1733,15 +1865,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
 
     def _mealie_container_up(self):
         """True when the Mealie container exists (compose service 'mealie')."""
-        try:
-            r = subprocess.run(
-                ["docker", "compose", "ps", "--format=json", "mealie"],
-                cwd=INSTALL_DIR,
-                capture_output=True, text=True, timeout=10
-            )
-            return bool(r.stdout.strip()) and r.returncode == 0
-        except Exception:
-            return False
+        return _mealie_container_exists()
 
     def _mealie_serving(self):
         """True when Mealie actually answers HTTP on its port.
@@ -1788,7 +1912,9 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         # Pulling the Mealie image on first run can take several minutes on a
         # Pi, far longer than any reasonable HTTP timeout. Run the pull/up in
         # the background (mirroring the install provisioner) and return
-        # immediately; the web UI polls /mealie/status for progress.
+        # immediately; the web UI polls /mealie/status for progress. Calling
+        # this again while a start is in flight (or after Mealie is up) is a
+        # no-op, so the UI can safely re-attach after a page reload.
         if self._mealie_running():
             self._send(200, {"ok": True, "started": False, "state": "running"})
             return
@@ -1796,15 +1922,10 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._send(200, {"ok": True, "started": False, "state": "starting"})
             return
         try:
-            log_path = "/var/log/foodassistant-mealie-start.log"
-            log = open(log_path, "ab")
-            p = subprocess.Popen(
-                ["docker", "compose", "--profile", "with-mealie", "up", "-d"],
-                cwd=INSTALL_DIR,
-                env=_compose_env(),
-                stdout=log, stderr=subprocess.STDOUT,
-            )
-            _INSTALL_PROCS["mealie"] = p
+            # Persist the intent first: if this install is interrupted (bridge
+            # restart, reboot mid-pull), the startup resume finishes it.
+            _persist_compose_profile("with-mealie")
+            _launch_mealie_install()
             self._send(200, {"ok": True, "started": True, "state": "starting"})
         except Exception as e:
             self._send(500, {"ok": False, "error": str(e)})
@@ -2046,6 +2167,8 @@ if __name__ == "__main__":
     # Restore the persisted display idle timeout and start the blanking loop.
     _activity_state["idle_minutes"] = _read_persisted_idle_minutes()
     threading.Thread(target=_display_idle_loop, daemon=True).start()
+    # Finish an interrupted Mealie install, if the stack's .env recorded one.
+    threading.Thread(target=_resume_mealie_install, daemon=True).start()
     server = http.server.HTTPServer((LISTEN_HOST, LISTEN_PORT), _Handler)
     print(f"FoodAssistant host bridge listening on {LISTEN_HOST}:{LISTEN_PORT}", flush=True)
     try:

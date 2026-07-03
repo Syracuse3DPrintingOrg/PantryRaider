@@ -138,3 +138,23 @@ def test_repo_dir_default_is_on_device():
     p = plan({"FORCE_PI": "1"})
     # Never the user's PC working copy; an on-device path.
     assert p["repo_dir"].startswith("/opt/")
+
+
+def test_mealie_defaults_on_for_pi_hosted():
+    # FoodAssistant-3t3c/xn9x: the installer used to pass ENABLE_MEALIE=false
+    # by default, overriding firstboot's pi_hosted default of true. Unset must
+    # now resolve to on for a full local stack.
+    p = plan({"FORCE_PI": "1"})
+    assert p["mealie"] == "true"
+
+
+def test_mealie_defaults_on_for_server():
+    # Same rule as firstboot: any non-remote mode ships Mealie on by default.
+    p = plan()
+    assert p["mode"] == "server"
+    assert p["mealie"] == "true"
+
+
+def test_mealie_explicit_false_respected():
+    p = plan({"FORCE_PI": "1", "ENABLE_MEALIE": "false"})
+    assert p["mealie"] == "false"
