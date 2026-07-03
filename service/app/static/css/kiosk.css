@@ -184,6 +184,14 @@ html, body {
   -webkit-overflow-scrolling: touch;
   overscroll-behavior-y: contain;
 }
+/* The page itself never scrolls sideways on a kiosk panel (a portrait 600px
+ * screen made this visible: one over-wide row put the whole page on a
+ * horizontal scroll and content hung off the right edge). Vertical stays the
+ * single page scroll; anything genuinely wide (a table) scrolls inside its
+ * own container instead. */
+html {
+  overflow-x: hidden;
+}
 body {
   padding-top: 50px;   /* matches the slimmer navbar below (was 60px) */
 }

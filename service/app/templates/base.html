@@ -263,13 +263,17 @@
     }
     /* The grip handle from the draggable version is hidden in docked mode. */
     .float-nav-handle { display: none; }
-    /* Bottom dock: a full-width horizontal bar that scrolls if it overflows. */
+    /* Bottom dock: a full-width horizontal bar. Icons wrap to extra rows when
+       the screen is narrower than the row (a portrait kiosk panel); a centered
+       flex row must never overflow, because the left half would hang past the
+       screen edge with no way to scroll to it. floating-nav.js re-measures the
+       bar height on resize, so the body padding tracks the wrapped rows. */
     .float-nav-dock-bottom {
       left: 0; right: 0; bottom: 0;
       flex-direction: row;
+      flex-wrap: wrap;
       justify-content: center;
       align-items: center;
-      overflow-x: auto;
       border-top: 1px solid var(--bs-border-color, rgba(255, 255, 255, 0.15));
     }
     /* Left/right docks: a full-height vertical bar below the top navbar that
