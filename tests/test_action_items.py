@@ -75,14 +75,51 @@ def test_archive_and_resolve_remove_from_inbox(db):
     assert ai.count_active(db) == 0
 
 
-def test_dedupe_revives_archived_item(db):
+def test_dedupe_refreshes_without_reviving(db):
+    # An archived item for a still-expired product STAYS archived when the
+    # generator re-fires (FoodAssistant-wf62: reviving here undid every archive
+    # on the next inbox poll, because an expired product stays expired).
     a = ai.create(db, ai.KIND_FOOD_EXPIRED, "Eggs expired", dedupe_key="k2")
     ai.archive(db, a["id"])
     assert ai.count_active(db) == 0
-    # Still expiring on the next sweep: the archived item is revived, not duped.
-    again = ai.create(db, ai.KIND_FOOD_EXPIRED, "Eggs expired", dedupe_key="k2")
-    assert again["id"] == a["id"]
-    assert ai.count_active(db) == 1
+    again = ai.create(db, ai.KIND_FOOD_EXPIRED, "Eggs expired (2d)", dedupe_key="k2")
+    assert again["id"] == a["id"]           # deduped onto the same row
+    assert again["title"] == "Eggs expired (2d)"  # content refreshed
+    assert ai.count_active(db) == 0         # but the archive sticks
+
+
+def test_snooze_sticks_across_generator_sweeps(db):
+    # A snoozed item must stay hidden through generator re-fires and only come
+    # back when the snooze elapses (FoodAssistant-wf62).
+    items = [{"product_id": 9, "product": {"name": "Ham"}, "days_remaining": -1,
+              "best_before_date": "2026-06-30"}]
+    ai.sync_food_expired(db, items)
+    item = ai.list_active(db)[0]
+    ai.snooze(db, item["id"], hours=24)
+    assert ai.count_active(db) == 0
+    ai.sync_food_expired(db, items)         # product still expired
+    assert ai.count_active(db) == 0         # snooze holds
+    row = db.query(ActionItem).get(item["id"])
+    row.snooze_until = "2000-01-01T00:00:00+00:00"
+    db.commit()
+    ai.sync_food_expired(db, items)
+    assert ai.count_active(db) == 1         # due again: alert returns
+
+
+def test_new_expiry_after_recovery_raises_a_fresh_item(db):
+    # Product expires, user archives, product gets consumed (leaves the expired
+    # set, key retired), then a NEW batch expires: a fresh alert must appear
+    # instead of being swallowed by the old archived row.
+    items = [{"product_id": 5, "product": {"name": "Milk"}, "days_remaining": -1,
+              "best_before_date": "2026-06-30"}]
+    ai.sync_food_expired(db, items)
+    first = ai.list_active(db)[0]
+    ai.archive(db, first["id"])
+    ai.sync_food_expired(db, [])            # consumed: key retired
+    ai.sync_food_expired(db, items)         # new batch expired
+    active = ai.list_active(db)
+    assert len(active) == 1
+    assert active[0]["id"] != first["id"]
 
 
 # -- food-expired generator -------------------------------------------------

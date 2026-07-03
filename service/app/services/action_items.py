@@ -64,13 +64,18 @@ def _row_dict(row: ActionItem) -> dict:
 def create(db: Session, kind: str, title: str, *, body: str = "",
            dedupe_key: str | None = None, level: str = "info",
            payload: dict | None = None) -> dict:
-    """Create an action item, or revive/update an existing one with the same
+    """Create an action item, or refresh an existing one with the same
     ``dedupe_key``.
 
     Dedupe is what keeps the inbox sane: the expired-food generator can run every
     poll and call create() for each expiring product, but a product that already
-    has an item only refreshes that row (and an archived/snoozed one for the same
-    key is re-opened, since it is expiring again). Returns the row dict.
+    has an item only refreshes that row's content. The row's STATUS is never
+    touched here: a snooze stays snoozed until it is due (list_active reveals it
+    then), and an archive or done sticks for as long as the same occurrence
+    persists. Reviving here undid every snooze and archive on the very next
+    inbox poll, because an expired product stays expired (FoodAssistant-wf62).
+    A resolved occurrence retires its dedupe key (see sync_food_expired), so a
+    later recurrence creates a fresh open item. Returns the row dict.
     """
     lvl = level if level in _VALID_LEVELS else "info"
     body = body or ""
@@ -86,17 +91,11 @@ def create(db: Session, kind: str, title: str, *, body: str = "",
             .first()
         )
     if existing is not None:
-        # Refresh the content; revive a dismissed/snoozed item back to open since
-        # the underlying condition (still expiring) recurred. A user-resolved
-        # ("done") item is left alone so an explicit dismissal sticks.
         existing.title = title
         existing.body = body
         existing.level = lvl
         existing.kind = kind
         existing.payload = payload_json
-        if existing.status in ("archived", "snoozed"):
-            existing.status = "open"
-            existing.snooze_until = None
         existing.updated_at = now
         db.commit()
         db.refresh(existing)
@@ -208,9 +207,12 @@ def sync_food_expired(db: Session, expiring_items: list[dict]) -> int:
 
     ``expiring_items`` is the Grocy expiring list filtered to ``days_remaining
     <= 0`` (the caller does the fetch so this stays pure of network and testable).
-    Returns the number of active expired items. An item already snoozed/archived
-    for a still-expired product is revived by ``create``'s dedupe path, so a
-    snooze that elapses brings the alert back.
+    Returns the number of active expired items. A snoozed or archived item for a
+    still-expired product keeps its status (create only refreshes content); a
+    snooze that elapses reappears via list_active. When a product stops being
+    expired, its items are auto-archived AND their dedupe key is retired, so a
+    genuinely new expiry later raises a fresh alert even if the old item was
+    archived or resolved (FoodAssistant-wf62).
     """
     seen: set[str] = set()
     for it in expiring_items or []:
@@ -232,20 +234,26 @@ def sync_food_expired(db: Session, expiring_items: list[dict]) -> int:
         create(db, KIND_FOOD_EXPIRED, title, body=body.strip(), dedupe_key=key,
                level=level, payload={"product_id": pid, "name": name,
                                      "days_remaining": days, "best_before_date": bb})
-    # Auto-archive expired items whose product is no longer expired (consumed,
-    # removed, or its date was pushed out), so the inbox does not keep stale ones.
+    # The occurrence resolved (consumed, removed, or its date pushed out):
+    # auto-archive still-visible items so the inbox drops them, and retire the
+    # dedupe key on EVERY row for that product (whatever its status) so the
+    # next expiry starts a fresh item instead of being swallowed by an old
+    # archived or resolved row.
     stale = (
         db.query(ActionItem)
         .filter(ActionItem.kind == KIND_FOOD_EXPIRED,
-                ActionItem.status.in_(("open", "snoozed")))
+                ActionItem.dedupe_key.isnot(None))
         .all()
     )
     changed = False
     for row in stale:
-        if row.dedupe_key not in seen:
+        if row.dedupe_key in seen:
+            continue
+        if row.status in ("open", "snoozed"):
             row.status = "archived"
-            row.updated_at = _iso(_now())
-            changed = True
+        row.dedupe_key = None
+        row.updated_at = _iso(_now())
+        changed = True
     if changed:
         db.commit()
     return len(seen)
