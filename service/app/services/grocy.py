@@ -309,12 +309,47 @@ class GrocyClient:
                             {"location_id": to_id})
         return {"product_id": product_id, "moved_amount": moved, "location_id": to_id}
 
+    async def product_id_by_name(self, name: str) -> int | None:
+        """The id of the product named ``name`` (case-insensitive), or None."""
+        for p in await self.get_products():
+            if p["name"].lower() == name.lower():
+                return int(p["id"])
+        return None
+
+    async def ensure_product_barcode(self, product_id: int, barcode: str) -> bool:
+        """Register ``barcode`` on ``product_id`` unless it is already known.
+
+        Grocy's by-barcode endpoints only resolve barcodes recorded in its
+        product_barcodes table; without this, an item added through the app
+        could never be consumed by scanning it. Returns True when a new
+        barcode row was created.
+        """
+        barcode = (barcode or "").strip()
+        if not barcode:
+            return False
+        existing = await self._get(
+            f"/objects/product_barcodes?query%5B%5D=barcode%3D{barcode}"
+        )
+        if existing:
+            return False
+        await self._post("/objects/product_barcodes",
+                         {"product_id": product_id, "barcode": barcode})
+        return True
+
     async def import_item(self, item: FoodItem) -> dict:
         storage_name = _STORAGE_LABEL[item.storage_type.value]
         location_id = await self.ensure_location(storage_name)
         group_id = await self.ensure_product_group(item.category.value)
         product_id = await self.ensure_product(item, location_id, group_id)
         await self.add_stock(product_id, item)
+        # Link the scanned barcode to the product so a later consume-mode scan
+        # can resolve it. Best effort: a failure here must not lose the stock
+        # add that already happened.
+        if getattr(item, "barcode", None):
+            try:
+                await self.ensure_product_barcode(product_id, item.barcode)
+            except Exception:  # noqa: BLE001
+                pass
         return {"product_id": product_id, "name": item.name}
 
     async def get_shopping_lists(self) -> list[dict]:

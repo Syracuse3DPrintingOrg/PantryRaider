@@ -37,6 +37,9 @@ class FoodItem(BaseModel):
     brand: Optional[str] = None
     notes: Optional[str] = None
     confidence: float = Field(default=1.0, ge=0.0, le=1.0)
+    # The scanned barcode, when the item came in through a scan. Registered on
+    # the Grocy product at import so consume-by-barcode can resolve it later.
+    barcode: Optional[str] = None
 
 
 class FoodItemOverride(BaseModel):

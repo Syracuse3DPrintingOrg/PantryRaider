@@ -245,12 +245,31 @@ async def scan_barcode(body: ScanRequest, request: Request, db: Session = Depend
         result = audit.record_scan(name, barcode)
         return {"mode": mode, **result}
     if mode == "consume":
+        grocy = GrocyClient()
         try:
-            await GrocyClient().consume_by_barcode(barcode, body.quantity)
+            await grocy.consume_by_barcode(barcode, body.quantity)
             return {"status": "consumed", "barcode": barcode, "mode": mode}
         except Exception as e:  # noqa: BLE001 - unknown barcode / no stock
+            # Legacy stock: items imported before barcodes were registered in
+            # Grocy have nothing for the by-barcode endpoint to match. Resolve
+            # the code through the same lookup that named the product when it
+            # was added; an exact name match identifies the product, the
+            # barcode is linked for next time, and the consume retries.
+            try:
+                item = await lookup_barcode(barcode, db)
+                pid = await grocy.product_id_by_name(item.name)
+                if pid is not None:
+                    await grocy.ensure_product_barcode(pid, barcode)
+                    await grocy.consume_by_barcode(barcode, body.quantity)
+                    return {"status": "consumed", "barcode": barcode,
+                            "mode": mode, "linked": item.name}
+            except Exception:  # noqa: BLE001 - fall through to the report
+                pass
             return JSONResponse(
-                {"status": "consume_failed", "barcode": barcode, "mode": mode, "error": str(e)},
+                {"status": "consume_failed", "barcode": barcode, "mode": mode,
+                 "error": "No stocked product is linked to this barcode. "
+                          "Add the item once through Manage Pantry and the "
+                          "barcode links automatically. (" + str(e) + ")"},
                 status_code=200,
             )
     if mode == "shopping":

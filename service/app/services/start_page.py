@@ -45,7 +45,7 @@ FALLBACK_CATALOG: list[dict] = [
     {"name": "expiring",  "label": "Expiring", "icon": "clock-history",   "color": "#b54708", "group": "Status"},
     {"name": "pending",   "label": "Pending",  "icon": "inbox",           "color": "#1d4ed8", "group": "Status"},
     {"name": "commit",    "label": "Commit",   "icon": "check2-circle",   "color": "#15803d", "group": "Actions"},
-    {"name": "add",       "label": "Add",      "icon": "plus-circle",     "color": "#b45309", "group": "Navigation"},
+    {"name": "add",       "label": "Pantry",   "icon": "plus-circle",     "color": "#b45309", "group": "Navigation"},
     {"name": "inventory", "label": "Stock",    "icon": "grid",            "color": "#0f766e", "group": "Navigation"},
     {"name": "cook",      "label": "Cook",     "icon": "fire",            "color": "#7e22ce", "group": "Navigation"},
     {"name": "recipes",   "label": "Recipes",  "icon": "journal-richtext","color": "#7e22ce", "group": "Navigation"},

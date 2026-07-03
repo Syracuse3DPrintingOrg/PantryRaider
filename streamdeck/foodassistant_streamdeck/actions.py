@@ -902,11 +902,11 @@ ACTIONS: dict[str, ActionSpec] = {
     ),
     "add": ActionSpec(
         name="add",
-        label="Add",
+        label="Pantry",
         color="#b45309",
         kind="nav",
         target_path="ui/add",
-        description="Open the add-item page on the attached display.",
+        description="Open the Manage Pantry page on the attached display.",
     ),
     "inventory": ActionSpec(
         name="inventory",
