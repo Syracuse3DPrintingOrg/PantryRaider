@@ -382,6 +382,28 @@ if [ -f "$KIOSK_UNIT" ]; then
   done
 fi
 
+# Kiosk devices imaged before firstboot installed a colour emoji font render
+# every emoji in the UI as an empty box (Chromium under cage has no desktop
+# font stack to fall back on; FoodAssistant-438t). Fresh provisions get
+# fonts-noto-color-emoji at firstboot; retrofit it here. Gated on the kiosk
+# unit (headless boxes skip it) and the package being absent, best-effort and
+# time-bounded so an offline device never stalls or fails the update. The
+# kiosk restart later in this run makes the font take effect.
+if [ -f "$KIOSK_UNIT" ] && command -v dpkg-query >/dev/null 2>&1 \
+    && ! dpkg-query -W -f='${Status}' fonts-noto-color-emoji 2>/dev/null \
+       | grep -q "install ok installed"; then
+  if DEBIAN_FRONTEND=noninteractive timeout 120 apt-get install -y \
+      --no-install-recommends fonts-noto-color-emoji >/dev/null 2>&1; then
+    log "Installed fonts-noto-color-emoji; emoji show after the kiosk restarts."
+  elif DEBIAN_FRONTEND=noninteractive timeout 120 apt-get update >/dev/null 2>&1 \
+      && DEBIAN_FRONTEND=noninteractive timeout 120 apt-get install -y \
+         --no-install-recommends fonts-noto-color-emoji >/dev/null 2>&1; then
+    log "Installed fonts-noto-color-emoji (after an apt update); emoji show after the kiosk restarts."
+  else
+    log "WARN: could not install fonts-noto-color-emoji (offline?); emoji stay as boxes until a later update."
+  fi
+fi
+
 # Keep the Wi-Fi fallback AP watchdog current too. The generic sync above
 # installs the repo copy under BIN_DIR like any other helper, but the watchdog
 # unit written at firstboot executes /usr/local/sbin/foodassistant-ap-watchdog,

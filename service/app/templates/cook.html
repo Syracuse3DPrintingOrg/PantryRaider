@@ -54,6 +54,12 @@
 {% endif %}
 
 <!-- Preference tuning panel -->
+<!-- Icon compatibility note (FoodAssistant-438t): every icon in this panel is a
+     plain emoji character rendered by the client's emoji font, so stick to
+     glyphs from Emoji 12.0 (2019) or older. Newer glyphs (the Unicode 13/14
+     food emoji) and flag sequences render as empty boxes or bare letters on
+     Windows and on devices with an older Noto Color Emoji. A pure test
+     (tests/test_cook_emoji.py) enforces this. -->
 <div class="cook-prefs-bar mb-3" id="cook-prefs-bar">
   <button class="cook-prefs-toggle" onclick="togglePrefs()">
     🎛️ Tune My Suggestions <span id="prefs-active-badge" class="badge text-bg-primary ms-1 d-none">●</span>
@@ -73,7 +79,7 @@
     <!-- Spice -->
     <div class="pref-row">
       <input type="checkbox" class="pref-toggle" id="on-spice" title="Include this factor" checked>
-      <span class="end-label">Midwest Mayo 🫙</span>
+      <span class="end-label">Midwest Mayo 🥪</span>
       <input type="range" class="pref-slider" id="pref-spice" min="1" max="5" value="3">
       <span class="end-label right">Asian Fury 🌶️</span>
     </div>
@@ -123,7 +129,7 @@
     <div class="cuisine-pills" id="cuisine-pills">
       <span class="cuisine-group-label">Regions</span>
       <span class="cuisine-pill" data-cuisine="Asian" onclick="toggleCuisine(this)">🥢 Asian</span>
-      <span class="cuisine-pill" data-cuisine="Mediterranean" onclick="toggleCuisine(this)">🫒 Mediterranean</span>
+      <span class="cuisine-pill" data-cuisine="Mediterranean" onclick="toggleCuisine(this)">🥙 Mediterranean</span>
       <span class="cuisine-pill" data-cuisine="European" onclick="toggleCuisine(this)">🏰 European</span>
       <span class="cuisine-pill" data-cuisine="Latin American" onclick="toggleCuisine(this)">🌮 Latin American</span>
       <span class="cuisine-pill" data-cuisine="Middle Eastern" onclick="toggleCuisine(this)">🧆 Middle Eastern</span>
@@ -134,7 +140,7 @@
       <span class="cuisine-group-label">Cuisines</span>
       <span class="cuisine-pill" data-cuisine="Italian" onclick="toggleCuisine(this)">🍝 Italian</span>
       <span class="cuisine-pill" data-cuisine="French" onclick="toggleCuisine(this)">🥐 French</span>
-      <span class="cuisine-pill" data-cuisine="Greek" onclick="toggleCuisine(this)">🇬🇷 Greek</span>
+      <span class="cuisine-pill" data-cuisine="Greek" onclick="toggleCuisine(this)">🏛️ Greek</span>
       <span class="cuisine-pill" data-cuisine="Spanish" onclick="toggleCuisine(this)">🥘 Spanish</span>
       <span class="cuisine-pill" data-cuisine="Chinese" onclick="toggleCuisine(this)">🥟 Chinese</span>
       <span class="cuisine-pill" data-cuisine="Japanese" onclick="toggleCuisine(this)">🍣 Japanese</span>
@@ -142,11 +148,11 @@
       <span class="cuisine-pill" data-cuisine="Vietnamese" onclick="toggleCuisine(this)">🍜 Vietnamese</span>
       <span class="cuisine-pill" data-cuisine="Indian" onclick="toggleCuisine(this)">🍛 Indian</span>
       <span class="cuisine-pill" data-cuisine="Mexican" onclick="toggleCuisine(this)">🌯 Mexican</span>
-      <span class="cuisine-pill" data-cuisine="Korean" onclick="toggleCuisine(this)">🇰🇷 Korean</span>
-      <span class="cuisine-pill" data-cuisine="Filipino" onclick="toggleCuisine(this)">🇵🇭 Filipino</span>
+      <span class="cuisine-pill" data-cuisine="Korean" onclick="toggleCuisine(this)">🥩 Korean</span>
+      <span class="cuisine-pill" data-cuisine="Filipino" onclick="toggleCuisine(this)">🍧 Filipino</span>
       <span class="cuisine-pill" data-cuisine="African American (Soul Food)" onclick="toggleCuisine(this)">🍗 Soul Food</span>
       <span class="cuisine-pill" data-cuisine="Cajun and Creole" onclick="toggleCuisine(this)">🦞 Cajun &amp; Creole</span>
-      <span class="cuisine-pill" data-cuisine="British" onclick="toggleCuisine(this)">🇬🇧 British</span>
+      <span class="cuisine-pill" data-cuisine="British" onclick="toggleCuisine(this)">🥧 British</span>
     </div>
 
     <!-- Occasion / dish-type / extra tags (FoodAssistant-stqb, -n9aq, -qaes,

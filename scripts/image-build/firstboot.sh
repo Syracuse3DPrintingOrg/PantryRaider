@@ -1257,6 +1257,12 @@ configure_kiosk() {
   # access to tty0/DRM and the unit crash-loops. seatd runs as root and hands a
   # session to members of the _seatd group, which is the reliable fix here.
   apt_install seatd || warn "seatd install failed; kiosk may not get a DRM session"
+  # A Pi OS Lite image ships no colour emoji font, so every emoji in the web UI
+  # (the Cook page preference pills, weather icons, Stream Deck labels) renders
+  # as an empty box in the kiosk Chromium (FoodAssistant-438t). Noto Color
+  # Emoji covers the full set the UI uses; fontconfig picks it up automatically.
+  apt_install --no-install-recommends fonts-noto-color-emoji \
+    || warn "fonts-noto-color-emoji install failed; emoji will render as boxes"
 
   # Bake absolute binary paths into the unit. cage execs the browser via PATH,
   # but a systemd service runs with a minimal environment, so we resolve full

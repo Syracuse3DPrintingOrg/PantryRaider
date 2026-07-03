@@ -976,9 +976,21 @@ async def clear_background():
 
 @router.get("/ai-usage")
 async def ai_usage():
-    """Current AI token usage + budget for the AI settings panel (Pantry Raider)."""
-    from ..services import usage
-    return {"ok": True, **usage.get_usage()}
+    """Current AI token usage + budget for the AI settings panel (Pantry Raider).
+
+    Also attaches an approximate dollar cost for this month and all time,
+    priced with the currently selected provider's model (services/ai_pricing).
+    The tracker stores combined input+output totals, so the figures are
+    blended estimates; an unrecognised model gets no estimate at all.
+    """
+    from ..services import ai_pricing, usage
+    data = usage.get_usage()
+    provider = getattr(settings, "vision_provider", "") or ""
+    model = getattr(settings, f"{provider}_model", "") or ""
+    data["cost_model"] = model
+    data["cost_month"] = ai_pricing.estimate_cost(data["month"], model)
+    data["cost_total"] = ai_pricing.estimate_cost(data["total"], model)
+    return {"ok": True, **data}
 
 
 @router.post("/ai-usage/reset")

@@ -4333,16 +4333,23 @@ async function _loadAiUsage() {
     const d = await fetch('setup/ai-usage').then(r => r.json());
     if (!d.ok) { el.textContent = 'Usage unavailable.'; return; }
     const fmt = n => (n || 0).toLocaleString();
+    // Approximate spend, priced with the selected model's list prices. Null
+    // means the model is not in the price table: show tokens only, no guess.
+    const money = v => (v == null) ? '' :
+      ' <span class="text-secondary">(~$' + (v > 0 && v < 0.01 ? '0.01' : v.toFixed(2)) + ')</span>';
     const by = Object.entries(d.by_provider || {}).filter(([, v]) => v)
       .map(([k, v]) => k + ' ' + fmt(v)).join(', ');
-    let html = '<div><i class="bi bi-graph-up me-1"></i>This month (' + d.month_key + '): <strong>' + fmt(d.month) + '</strong> tokens';
+    let html = '<div><i class="bi bi-graph-up me-1"></i>This month (' + d.month_key + '): <strong>' + fmt(d.month) + '</strong> tokens' + money(d.cost_month);
     if (d.budget) {
       const pct = Math.min(100, Math.round(d.month / d.budget * 100));
       const bar = d.over_budget ? 'bg-danger' : (pct >= 80 ? 'bg-warning' : 'bg-success');
       html += ' of ' + fmt(d.budget) + ' budget' + (d.over_budget ? ' <span class="text-danger">(reached)</span>' : '')
         + '</div><div class="progress mt-1" style="max-width:420px;height:8px"><div class="progress-bar ' + bar + '" style="width:' + pct + '%"></div></div>';
     } else { html += '</div>'; }
-    html += '<div class="mt-1">All time: ' + fmt(d.total) + ' tokens' + (by ? ' (' + by + ')' : '') + '</div>';
+    html += '<div class="mt-1">All time: ' + fmt(d.total) + ' tokens' + money(d.cost_total) + (by ? ' (' + by + ')' : '') + '</div>';
+    if (d.cost_total != null && (d.total || d.month)) {
+      html += '<div class="mt-1 text-secondary" style="font-size:.85em">Dollar figures are rough estimates: input and output tokens are counted together, so they are priced at a blended rate from the list prices for ' + (d.cost_model || 'your selected model').replace(/[<>&"]/g, '') + ', which may have changed since this version shipped. Your provider\'s bill is the real number.</div>';
+    }
     el.innerHTML = html;
   } catch (e) { el.textContent = 'Usage unavailable.'; }
 }
