@@ -86,6 +86,7 @@ def test_satellite_forwards_every_timer_call(sat_client):
         client.get("/timers/7"),
         client.post("/timers/7/extend", json={"seconds": 60}),
         client.delete("/timers/7"),
+        client.delete("/timers"),  # the Timers page Clear all
     ]
     assert [(c["method"], c["url"]) for c in recorder.calls] == [
         ("GET", "http://main.server:9284/timers"),
@@ -93,6 +94,7 @@ def test_satellite_forwards_every_timer_call(sat_client):
         ("GET", "http://main.server:9284/timers/7"),
         ("POST", "http://main.server:9284/timers/7/extend"),
         ("DELETE", "http://main.server:9284/timers/7"),
+        ("DELETE", "http://main.server:9284/timers"),
     ]
     # Every call authenticates with the satellite's upstream key and returns
     # the server's answer verbatim.
@@ -125,6 +127,22 @@ def test_satellite_passes_upstream_error_statuses_through(sat_client):
     r = client.delete("/timers/99")
     assert r.status_code == 404
     assert r.json()["detail"] == "Timer not found"
+
+
+def test_satellite_clear_all_forwards_and_never_clears_locally(sat_client):
+    # Clear all (DELETE on the /timers collection) is timer traffic like any
+    # other: forwarded verbatim, answered by the server, local registry
+    # untouched.
+    client, recorder = sat_client
+    recorder.response = httpx.Response(200, json={"ok": True, "cleared": 3})
+    timers.create_timer("Local-only artifact", 60)  # must survive the forward
+    r = client.delete("/timers")
+    assert (recorder.calls[0]["method"], recorder.calls[0]["url"]) == (
+        "DELETE", "http://main.server:9284/timers")
+    assert recorder.calls[0]["api_key"] == "sat-key"
+    assert r.status_code == 200
+    assert r.json() == {"ok": True, "cleared": 3}
+    assert len(timers.list_timers()) == 1
 
 
 def test_satellite_reports_unreachable_server_as_502(sat_client):
@@ -210,6 +228,19 @@ def test_server_mode_still_uses_the_local_registry(server_client):
     ).json()["timer"]["total_seconds"] == 660
     assert server_client.delete(f"/timers/{created['id']}").json() == {"ok": True}
     assert timers.list_timers() == []
+
+
+def test_server_mode_clear_all_empties_the_registry(server_client):
+    server_client.post("/timers", json={"label": "Pasta", "seconds": 600})
+    server_client.post("/timers", json={"label": "Rice", "seconds": 900})
+    r = server_client.delete("/timers")
+    assert r.status_code == 200
+    assert r.json() == {"ok": True, "cleared": 2}
+    assert timers.list_timers() == []
+    # Clearing an already-empty registry succeeds and reports zero.
+    assert server_client.delete("/timers").json() == {"ok": True, "cleared": 0}
+    # The collection route never shadows the per-timer delete.
+    assert server_client.delete("/timers/999").status_code == 404
 
 
 # Deck reconciliation over a forwarded GET /timers -----------------------------

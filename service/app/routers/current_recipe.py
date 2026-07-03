@@ -451,3 +451,12 @@ async def delete_timer(timer_id: int, request: Request):
     if not timers.cancel_timer(timer_id):
         return JSONResponse({"detail": "Timer not found"}, status_code=404)
     return {"ok": True}
+
+
+@timers_router.delete("")
+async def delete_all_timers(request: Request):
+    """Cancel and remove every timer at once (the Timers page Clear all).
+    Clearing an already-empty registry succeeds with cleared 0."""
+    if _upstream():
+        return await _forward(request, "/timers")
+    return {"ok": True, "cleared": timers.clear_all()}

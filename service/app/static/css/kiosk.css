@@ -59,6 +59,7 @@ a.btn {
  * controls, often pressed mid-cook with messy hands: give them a bigger hit
  * area than the generic .btn minimum. */
 .timer-preset,
+.timer-clear-all,
 .timer-card .btn {
   min-height: 56px;
   min-width: 88px;

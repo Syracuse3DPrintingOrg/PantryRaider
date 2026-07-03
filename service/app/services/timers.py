@@ -148,7 +148,10 @@ def cancel_timer(timer_id: int) -> bool:
         return _timers.pop(timer_id, None) is not None
 
 
-def clear_all() -> None:
-    """Drop every timer. Primarily for tests."""
+def clear_all() -> int:
+    """Drop every timer at once (the Timers page Clear all button, and test
+    cleanup). Returns how many timers were removed."""
     with _lock:
+        count = len(_timers)
         _timers.clear()
+        return count

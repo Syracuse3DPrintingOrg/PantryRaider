@@ -44,8 +44,11 @@
 // bounce mode also carom off the logo block (which never changes course, so
 // the classic straight-line glide survives). The registry is polled every few
 // seconds; between polls each pill counts down locally from deadline_epoch,
-// the same shareable formula the Stream Deck uses. A finished timer pulses
-// red/amber with a Done readout so it reads from across the kitchen. At most
+// the same shareable formula the Stream Deck uses. In a countdown's last
+// minute the pill's face hops gently, and a finished timer pulses red/amber
+// with a Done readout while the pill turns slowly, so both stages read from
+// across the kitchen; the stage animations are CSS on the pill's inner face,
+// so the physics body underneath never changes course. At most
 // six pills are simulated (Pi 3 budget); the rest collapse into a static
 // "+N more" pill. Timers are panel-only for now: the deck's saver slice
 // stays the raccoon mark.
@@ -292,14 +295,22 @@
   function timerRadius(b) { return (b.w + b.h) / 4; }
 
   function makeTimerPill(t) {
+    // Two layers on purpose: the outer shell only ever carries the physics
+    // translate(), so its layout box stays the deterministic collision body,
+    // while the inner face holds the pill visuals and any CSS animation (the
+    // last-minute hop, the finished spin). Animating the face never bends the
+    // drift underneath.
     var el = document.createElement('div');
     el.className = 'ss-timer';
     el.style.cssText =
-      'position:absolute;left:0;top:0;z-index:4;display:flex;' +
-      'align-items:center;gap:1.4vmin;padding:1.1vmin 2.4vmin;' +
+      'position:absolute;left:0;top:0;z-index:4;will-change:transform;';
+    var face = document.createElement('div');
+    face.className = 'ss-timer-face';
+    face.style.cssText =
+      'display:flex;align-items:center;gap:1.4vmin;padding:1.1vmin 2.4vmin;' +
       'border-radius:999px;background:rgba(24,26,32,0.88);' +
       'border:1px solid rgba(255,255,255,0.18);color:#e8eaed;' +
-      'white-space:nowrap;will-change:transform;';
+      'white-space:nowrap;';
     var icon = document.createElement('span');
     icon.className = 'ss-timer-icon';
     icon.style.cssText = 'font-size:4.2vmin;line-height:1;';
@@ -317,18 +328,21 @@
       'font-variant-numeric:tabular-nums;';
     col.appendChild(lab);
     col.appendChild(time);
-    el.appendChild(icon);
-    el.appendChild(col);
+    face.appendChild(icon);
+    face.appendChild(col);
+    el.appendChild(face);
     return { el: el, iconEl: icon, labelEl: lab, timeEl: time };
   }
 
   // A finished timer (expired, still listed until dismissed) must read from
-  // across the kitchen: the pill pulses red/amber (the ss-timer-done rule
-  // injected in show()), the countdown swaps to "Done", the food icon stays,
-  // and the drift picks up a little.
+  // across the kitchen: the pill pulses red/amber and turns slowly (the
+  // ss-timer-done rules injected in show()), the countdown swaps to "Done",
+  // the food icon stays, and the drift picks up a little. The last-minute hop
+  // hands off to the spin here.
   function markTimerDone(b) {
     if (b.done) return;
     b.done = true;
+    b.el.classList.remove('ss-timer-ending');
     b.el.classList.add('ss-timer-done');
     b.timeEl.textContent = 'Done';
     b.vx *= DONE_SPEEDUP;
@@ -500,8 +514,14 @@
       else if (b.y >= maxY) { b.y = maxY; b.vy = -Math.abs(b.vy); }
       b.el.style.transform = 'translate(' + b.x + 'px,' + b.y + 'px)';
       if (b.done) continue;
-      if (b.deadline - nowSec <= 0) { markTimerDone(b); continue; }
-      var txt = fmtRemaining(b.deadline - nowSec);
+      var remaining = b.deadline - nowSec;
+      if (remaining <= 0) { markTimerDone(b); continue; }
+      // Last-minute stage: inside the final 60 seconds the pill's face starts
+      // a gentle hop (a CSS animation on the face only, so the physics body
+      // keeps its straight line). Extending the timer past a minute again
+      // calms it back down.
+      b.el.classList.toggle('ss-timer-ending', remaining <= 60);
+      var txt = fmtRemaining(remaining);
       if (txt !== b.shown) { b.shown = txt; b.timeEl.textContent = txt; }
     }
   }
@@ -650,8 +670,20 @@
       '@keyframes ss-timer-pulse{' +
       '0%,100%{background:#a4231b;box-shadow:0 0 3vmin rgba(255,80,40,0.8);}' +
       '50%{background:#b36a00;box-shadow:0 0 5.5vmin rgba(255,170,0,0.9);}}' +
-      '#kiosk-screensaver .ss-timer-done{' +
-      'animation:ss-timer-pulse 1.1s ease-in-out infinite;' +
+      // Last minute of a countdown: a gentle vertical hop. Both stage
+      // animations run on the pill's face, never its physics shell, so the
+      // drift and collisions stay deterministic.
+      '@keyframes ss-timer-hop{' +
+      '0%,100%{transform:translateY(0);}45%{transform:translateY(-1.2vmin);}}' +
+      // Finished: the whole pill turns slowly, 5 seconds per revolution, slow
+      // enough that the food icon and Done stay readable mid-spin.
+      '@keyframes ss-timer-spin{' +
+      'from{transform:rotate(0deg);}to{transform:rotate(360deg);}}' +
+      '#kiosk-screensaver .ss-timer-ending .ss-timer-face{' +
+      'animation:ss-timer-hop 0.9s ease-in-out infinite;}' +
+      '#kiosk-screensaver .ss-timer-done .ss-timer-face{' +
+      'animation:ss-timer-pulse 1.1s ease-in-out infinite,' +
+      'ss-timer-spin 5s linear infinite;' +
       'border-color:rgba(255,200,120,0.85);color:#fff;}';
     document.head.appendChild(style);
     document.body.classList.add('ss-active');

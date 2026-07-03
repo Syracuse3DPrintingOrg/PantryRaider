@@ -110,6 +110,38 @@ def test_screensaver_js_floats_timer_pills():
     assert "window.__screensaverTimers" in js
 
 
+def test_screensaver_pills_animate_last_minute_and_done_stages():
+    js = (SERVICE / "app" / "static" / "js" / "screensaver.js").read_text()
+    # The stage animations run on the pill's inner face, never the physics
+    # shell, so the drift and collisions stay deterministic.
+    assert "ss-timer-face" in js
+    # Last minute of a countdown: a gentle hop, toggled by the local tick and
+    # cleared again if the timer is extended past a minute.
+    assert "ss-timer-ending" in js
+    assert "ss-timer-hop" in js
+    assert "remaining <= 60" in js
+    # Finished: a slow continuous spin layered with the red/amber pulse.
+    assert "ss-timer-spin" in js
+    assert "ss-timer-spin 5s linear infinite" in js
+    # markTimerDone hands the hop off to the spin.
+    assert "classList.remove('ss-timer-ending')" in js
+
+
+def test_timers_page_has_clear_all_and_screensaver_buttons(client):
+    # FoodAssistant-ax5f / FoodAssistant-19xu: Clear all (confirm names the
+    # count, DELETE on the /timers collection) and the on-demand screensaver
+    # start, which only appears when the saver script's hook is present.
+    with patch.object(type(settings), "is_configured", lambda self: True):
+        r = client.get("/ui/timers")
+        assert r.status_code == 200
+        assert 'id="timersClearAll"' in r.text
+        assert "Clear all" in r.text
+        assert 'fetch("timers", { method: "DELETE" })' in r.text
+        assert "window.confirm(msg)" in r.text
+        assert 'id="startScreensaver"' in r.text
+        assert "window.__screensaverTest" in r.text
+
+
 def test_screensaver_js_maps_timer_labels_to_food_icons():
     js = (SERVICE / "app" / "static" / "js" / "screensaver.js").read_text()
     # A "Pasta" timer should read as pasta from across the room: a pure

@@ -4,6 +4,12 @@
 {% block content %}
 <div class="mt-3 mb-3 d-flex align-items-center justify-content-between">
   <h4 class="mb-0"><i class="bi bi-stopwatch me-2"></i>Timers</h4>
+  {# Only shown when the screensaver script is on this page: mid-cook you can
+     set the timers going, then send the display straight to the saver where
+     they float. Works even with the idle timeout set to off. #}
+  <button type="button" id="startScreensaver" class="btn btn-outline-secondary btn-sm d-none">
+    <i class="bi bi-moon-stars me-1"></i>Screensaver
+  </button>
 </div>
 
 <div class="card mb-3">
@@ -16,6 +22,11 @@
       <button type="button" class="btn btn-outline-light timer-preset" data-minutes="15">15 min</button>
       <button type="button" class="btn btn-outline-light timer-preset" data-minutes="30">30 min</button>
       <button type="button" class="btn btn-outline-light timer-preset" data-minutes="60">60 min</button>
+      {# Hidden until at least one timer exists; the confirm names the count so
+         a stray tap mid-cook cannot silently wipe the kitchen. #}
+      <button type="button" id="timersClearAll" class="btn btn-outline-danger timer-clear-all d-none">
+        <i class="bi bi-x-lg me-1"></i>Clear all
+      </button>
       <form id="timerCustomForm" class="d-flex flex-wrap align-items-center gap-2 ms-md-auto">
         <input type="text" id="timerCustomLabel" class="form-control" style="max-width: 11rem;"
                maxlength="40" placeholder="Name (optional)" autocomplete="off">
@@ -65,6 +76,8 @@
   var customForm = document.getElementById("timerCustomForm");
   var customLabel = document.getElementById("timerCustomLabel");
   var customMinutes = document.getElementById("timerCustomMinutes");
+  var clearAllBtn = document.getElementById("timersClearAll");
+  var saverBtn = document.getElementById("startScreensaver");
 
   // Latest snapshot from the server. Each entry carries deadline_epoch so we can
   // tick locally between polls (the timers API publishes an absolute wall-clock
@@ -86,6 +99,8 @@
   }
 
   function render() {
+    // Clear all only makes sense once something is running (or done).
+    if (clearAllBtn) clearAllBtn.classList.toggle("d-none", !timers.length);
     if (!timers.length) {
       grid.classList.add("d-none");
       grid.innerHTML = "";
@@ -188,6 +203,30 @@
       startTimer("", btn.getAttribute("data-minutes"));
     });
   });
+
+  // Clear all stops every timer at once, finished ones included. The confirm
+  // names the count so the tap is deliberate.
+  clearAllBtn.addEventListener("click", async function () {
+    var n = timers.length;
+    if (!n) return;
+    var msg = n === 1 ? "Stop and clear the timer?"
+                      : "Stop and clear all " + n + " timers?";
+    if (!window.confirm(msg)) return;
+    try {
+      await fetch("timers", { method: "DELETE" });
+    } catch (e) { }
+    await poll();
+  });
+
+  // Start the screensaver right away: nice mid-cook, with the timers floating
+  // across the dimmed screen. The button only appears when the screensaver
+  // script is on this page; its hook works even with the idle timeout off.
+  if (saverBtn && typeof window.__screensaverTest === "function") {
+    saverBtn.classList.remove("d-none");
+    saverBtn.addEventListener("click", function () {
+      window.__screensaverTest();
+    });
+  }
 
   customForm.addEventListener("submit", function (ev) {
     ev.preventDefault();
