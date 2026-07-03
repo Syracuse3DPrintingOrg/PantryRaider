@@ -1030,3 +1030,104 @@ def splash_tiles(
             logo,
         )
     return slice_full_image(canvas, rows, cols, key_size, spacing)
+
+
+# -- shared screensaver canvas (FoodAssistant-3fdq) -------------------------
+#
+# While the kiosk screensaver's bouncing logo is up and the deck is configured
+# as part of the canvas (screensaver_layout above/below/left/right), the
+# controller polls the app for the logo's position and paints the slice that
+# crosses the deck. The geometry and compositing here are pure so the
+# virtual-canvas mapping is fully unit-testable without hardware.
+#
+# Coordinate contract (set by the kiosk, which drives the animation): the
+# panel spans x 0..1 and y 0..1 in panel-normalized units, and the deck band
+# extends past that range on its side by ``band`` (the band's size along its
+# axis, also in panel-normalized units, computed by the kiosk from the deck's
+# key-grid aspect so the two surfaces share one physical scale). The logo box
+# (x, y, w, h) arrives in the same units and may straddle the boundary.
+
+
+def screensaver_logo_box(
+    x: float, y: float, w: float, h: float,
+    band: float, layout: str,
+    full_w: int, full_h: int,
+) -> tuple[float, float, float, float] | None:
+    """Map the panel-normalized logo box onto deck full-canvas pixels.
+
+    ``full_w`` x ``full_h`` is the deck's whole key area in pixels (as built by
+    ``slice_full_image``). Returns the logo's (x, y, w, h) in those pixels, or
+    None when the logo does not overlap the deck band at all (the keys stay
+    dark). The band's long side always maps onto the deck's matching span
+    (width for above/below, height for left/right), so motion crosses the gap
+    between panel and deck at a consistent physical speed.
+    """
+    if band <= 0 or w <= 0 or h <= 0 or full_w <= 0 or full_h <= 0:
+        return None
+    if layout in ("above", "below"):
+        # Band-local vertical position: 0 at the band edge nearest the top of
+        # the deck image. For "below" the band runs y 1..1+band; for "above"
+        # it runs y -band..0.
+        offset = 1.0 if layout == "below" else -band
+        px = x * full_w
+        py = (y - offset) / band * full_h
+        pw = w * full_w
+        ph = h / band * full_h
+    elif layout in ("left", "right"):
+        offset = 1.0 if layout == "right" else -band
+        px = (x - offset) / band * full_w
+        py = y * full_h
+        pw = w / band * full_w
+        ph = h * full_h
+    else:
+        return None
+    # No overlap with the deck's pixel canvas: nothing to draw.
+    if px + pw <= 0 or py + ph <= 0 or px >= full_w or py >= full_h:
+        return None
+    return (px, py, pw, ph)
+
+
+def screensaver_tiles(
+    rows: int,
+    cols: int,
+    key_size: tuple[int, int],
+    box: tuple[float, float, float, float] | None,
+    spacing: int = 0,
+    logo_path: "Path | str | None" = None,
+) -> list["Image.Image"]:
+    """Per-key tiles of the screensaver frame: the brand mark at ``box``.
+
+    ``box`` is the logo's (x, y, w, h) in deck full-canvas pixels (from
+    ``screensaver_logo_box``); None paints a plain dark frame (the logo is
+    elsewhere on the panel). The mark is drawn onto a dark canvas the size of
+    the whole key area and sliced with the same spacing-aware geometry as the
+    boot splash, row-major. Pure and defensive: a missing or unreadable logo
+    asset degrades to the dark frame rather than raising.
+    """
+    kw, kh = key_size
+    rows = max(0, int(rows))
+    cols = max(0, int(cols))
+    spacing = max(0, int(spacing))
+    if rows == 0 or cols == 0 or kw <= 0 or kh <= 0:
+        return []
+    full_w = cols * kw + (cols - 1) * spacing
+    full_h = rows * kh + (rows - 1) * spacing
+    canvas = Image.new("RGB", (full_w, full_h), _SPLASH_BG)
+    if box is not None:
+        path = Path(logo_path) if logo_path else _SPLASH_PATH
+        logo = None
+        try:
+            with Image.open(path) as src:
+                src.load()
+                logo = src.convert("RGBA")
+        except (OSError, ValueError):
+            logo = None
+        bx, by, bw, bh = box
+        if logo is not None and bw >= 1 and bh >= 1:
+            logo = logo.resize(
+                (max(1, round(bw)), max(1, round(bh))), Image.LANCZOS
+            )
+            # paste() clips a partially off-canvas mark, which is exactly the
+            # sliding-onto-the-deck effect.
+            canvas.paste(logo, (round(bx), round(by)), logo)
+    return slice_full_image(canvas, rows, cols, key_size, spacing)

@@ -205,6 +205,13 @@ class Controller:
         self._camera_full_active: bool = False
         self._camera_full_task: Optional[asyncio.Task] = None
         self._camera_full_name: str = ""
+        # Shared screensaver canvas (FoodAssistant-3fdq). While the kiosk's
+        # bouncing-logo saver is up and screensaver_layout is not "off", a
+        # dedicated task polls the app for the logo position and paints the
+        # slice crossing this deck; any key press exits it and dismisses the
+        # saver on the panel too.
+        self._saver_active: bool = False
+        self._saver_task: Optional[asyncio.Task] = None
 
     # -- lifecycle ---------------------------------------------------------
 
@@ -371,9 +378,10 @@ class Controller:
         return self.pages[self.page % len(self.pages)]
 
     def _draw_page(self) -> None:
-        # The full-deck camera overlay owns every key while active; its own loop
-        # paints them, so the normal page draw stays out of the way until exit.
-        if self._camera_full_active:
+        # The full-deck camera overlay and the shared screensaver each own
+        # every key while active; their own loops paint them, so the normal
+        # page draw stays out of the way until exit.
+        if self._camera_full_active or self._saver_active:
             return
         from StreamDeck.ImageHelpers import PILHelper
 
@@ -562,6 +570,15 @@ class Controller:
                 self._last_activity = time.monotonic()
                 self._key_down_time.pop(key, None)
                 self.loop.call_soon_threadsafe(self._exit_camera_full)
+            return
+        # Same for the shared screensaver: any press wakes both surfaces (the
+        # exit dismisses the kiosk overlay and reports bridge activity) and is
+        # otherwise swallowed so it never fires the action underneath.
+        if self._saver_active:
+            if pressed:
+                self._last_activity = time.monotonic()
+                self._key_down_time.pop(key, None)
+                self.loop.call_soon_threadsafe(self._exit_screensaver, True)
             return
         if pressed:
             # Record when this key went down so we can measure hold duration.
@@ -1210,6 +1227,143 @@ class Controller:
         except asyncio.CancelledError:  # noqa: PERF203 - normal exit path
             pass
 
+    # -- shared screensaver canvas (FoodAssistant-3fdq) ---------------------
+
+    async def _fetch_saver_state(self) -> Optional[dict]:
+        """The app's current screensaver state, or None when unreachable.
+
+        The kiosk posts the bouncing logo's position a few times a second while
+        the saver is up; the app applies staleness itself, so an ``active``
+        True here means the saver really is on screen right now."""
+        if self.client is None:
+            return None
+        try:
+            r = await self.client.get(
+                f"{self.config.base_url.rstrip('/')}/ui/screensaver/state",
+                timeout=4.0,
+            )
+            data = r.json() if r.status_code == 200 else None
+        except Exception:  # noqa: BLE001 - app unreachable: no saver
+            return None
+        return data if isinstance(data, dict) else None
+
+    async def _check_screensaver(self) -> None:
+        """Join the kiosk screensaver when it is up, on the idle-loop cadence.
+
+        Only when this deck is configured as part of the saver canvas
+        (screensaver_layout not "off"). The camera overlay wins: someone is
+        watching a feed, which is intentionally idle."""
+        if (self.config.screensaver_layout == "off" or self._saver_active
+                or self._camera_full_active):
+            return
+        state = await self._fetch_saver_state()
+        if state and state.get("active"):
+            self._enter_screensaver()
+
+    def _enter_screensaver(self) -> None:
+        """Take over the whole deck as part of the screensaver canvas.
+
+        The deck joins the saver INSTEAD of idle-blanking: the constant motion
+        is the burn-in guard, same as on the panel, so brightness is restored
+        if the deck had already blanked on its own timer."""
+        if self._saver_active or self.loop is None or not self.loop.is_running():
+            return
+        self._saver_active = True
+        if self._idle_blanked:
+            self._idle_blanked = False
+            try:
+                self.deck.set_brightness(BRIGHTNESS_STEPS[self._bright_idx])
+            except Exception:  # noqa: BLE001 - best-effort wake
+                pass
+        self._saver_task = self.loop.create_task(self._screensaver_loop())
+
+    def _exit_screensaver(self, dismiss_kiosk: bool = False) -> None:
+        """Leave the saver and redraw the normal page.
+
+        ``dismiss_kiosk`` is set on a key press: the press wakes both surfaces,
+        so the kiosk overlay is told to hide and the bridge sees activity."""
+        if not self._saver_active:
+            return
+        self._saver_active = False
+        task, self._saver_task = self._saver_task, None
+        if task is not None:
+            task.cancel()
+        self._last_activity = time.monotonic()
+        if dismiss_kiosk and self.loop is not None and self.loop.is_running():
+            self.loop.create_task(self._dismiss_kiosk_saver())
+            self.loop.create_task(self._report_activity())
+        self._draw_page()
+
+    async def _dismiss_kiosk_saver(self) -> None:
+        """Tell the app a deck press ended the saver; the kiosk's next state
+        post picks the mark up and hides the overlay. Best-effort."""
+        if self.client is None:
+            return
+        try:
+            await self.client.post(
+                f"{self.config.base_url.rstrip('/')}/ui/screensaver/dismiss",
+                timeout=4.0,
+            )
+        except Exception:  # noqa: BLE001 - the kiosk still dismisses on touch
+            pass
+
+    def _saver_grid(self) -> tuple[int, int]:
+        """(rows, cols) of the key grid as the user sees it after rotation.
+
+        The saver frame is composed for the displayed grid and pushed through
+        ``_set_full_deck_tiles``, which rotates each tile onto its physical
+        key, so a turned deck shows the logo the right way up."""
+        if self.key_count in layout.GRID:
+            d_cols, d_rows = layout.display_dims(self.key_count, self.config.rotation)
+            return d_rows, d_cols
+        rows, cols = self.deck.key_layout()
+        return rows, cols
+
+    def _render_saver_frame(self, state: dict) -> None:
+        """Paint one screensaver frame: the logo slice crossing this deck (or a
+        dark frame while the logo is elsewhere on the panel)."""
+        rows, cols = self._saver_grid()
+        key_size = self.deck.key_image_format()["size"]
+        full_w = cols * key_size[0]
+        full_h = rows * key_size[1]
+
+        def _num(key: str) -> float:
+            v = state.get(key, 0.0)
+            return float(v) if isinstance(v, (int, float)) else 0.0
+
+        box = render.screensaver_logo_box(
+            _num("x"), _num("y"), _num("w"), _num("h"),
+            _num("band"), self.config.screensaver_layout, full_w, full_h,
+        )
+        self._set_full_deck_tiles(
+            render.screensaver_tiles(rows, cols, key_size, box)
+        )
+
+    async def _screensaver_loop(self) -> None:
+        """Track the kiosk saver until it ends or a key press exits.
+
+        A 2-second cadence is deliberate: the deck is a slower echo of the
+        logo crossing it, cheap enough for a Pi 3, and the panel keeps the
+        smooth 60 fps original."""
+        try:
+            while self._saver_active:
+                state = await self._fetch_saver_state()
+                if not state or not state.get("active"):
+                    # Saver ended on the panel (touch, or the kiosk went
+                    # away): return to the normal page. The idle blanker
+                    # takes over again from here if the deck stays untouched.
+                    self._saver_active = False
+                    self._saver_task = None
+                    self._draw_page()
+                    return
+                try:
+                    self._render_saver_frame(state)
+                except Exception:  # noqa: BLE001 - a bad frame must not kill the loop
+                    pass
+                await asyncio.sleep(2)
+        except asyncio.CancelledError:  # noqa: PERF203 - normal exit path
+            pass
+
     def _timer_default_label(self, name: str) -> str:
         """The stock label a timer key shows with no recipe suggestion."""
         spec = actions.ACTIONS.get(name)
@@ -1336,8 +1490,11 @@ class Controller:
         self._reset_weather_cycles_if_idle()
         timeout_mins = self.config.idle_timeout_minutes
         # The camera overlay treats each refresh tick as activity, but guard here
-        # too so the blanker never fights a live overlay.
-        if timeout_mins <= 0 or self._idle_blanked or self._camera_full_active:
+        # too so the blanker never fights a live overlay. The screensaver owns
+        # the deck the same way: while it is up, the moving logo IS the idle
+        # face, so the blanker stays out of the way.
+        if (timeout_mins <= 0 or self._idle_blanked or self._camera_full_active
+                or self._saver_active):
             return
         idle_secs = time.monotonic() - self._last_activity
         if idle_secs >= timeout_mins * 60:
@@ -1384,6 +1541,9 @@ class Controller:
             await asyncio.sleep(10)
             # Adopt activity from the other surface before deciding to blank.
             await self._poll_shared_activity()
+            # Join the kiosk screensaver when it is up and this deck is part
+            # of the canvas; otherwise fall through to the normal blanker.
+            await self._check_screensaver()
             await self._idle_loop_once()
 
     # -- watchdog / config watch -------------------------------------------

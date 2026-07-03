@@ -3056,6 +3056,16 @@ docker compose up -d</code></pre>
                            value="{{ s.streamdeck_idle_timeout }}">
                   </div>
                   <div class="col-auto">
+                    <label class="form-label" for="streamdeck_screensaver_layout">Screensaver position{{ info('Lets the bouncing screensaver logo glide off the screen and across the deck keys. Pick the side of the screen the deck sits on; Off keeps the screensaver on the display only.') }}</label>
+                    <select class="form-select form-select-sm" id="streamdeck_screensaver_layout" style="max-width:190px">
+                      <option value="off"   {{ 'selected' if s.streamdeck_screensaver_layout == 'off' or not s.streamdeck_screensaver_layout else '' }}>Off</option>
+                      <option value="above" {{ 'selected' if s.streamdeck_screensaver_layout == 'above' else '' }}>Deck above the screen</option>
+                      <option value="below" {{ 'selected' if s.streamdeck_screensaver_layout == 'below' else '' }}>Deck below the screen</option>
+                      <option value="left"  {{ 'selected' if s.streamdeck_screensaver_layout == 'left' else '' }}>Deck left of the screen</option>
+                      <option value="right" {{ 'selected' if s.streamdeck_screensaver_layout == 'right' else '' }}>Deck right of the screen</option>
+                    </select>
+                  </div>
+                  <div class="col-auto">
                     <label class="form-label" for="streamdeck_key_style">Key style{{ info('Rich and Glass have depth; Clean drops the coloured background so the icons stand out; Minimalist is flat.') }}</label>
                     <select class="form-select form-select-sm" id="streamdeck_key_style" style="max-width:180px">
                       <option value="rich"    {{ 'selected' if s.streamdeck_key_style == 'rich' else '' }}>Rich (gradient)</option>
@@ -7469,6 +7479,7 @@ async function saveStreamDeckSettings() {
   const has_streamdeck = document.getElementById('has_streamdeck')?.checked || false;
   const streamdeck_key_count = parseInt(document.getElementById('streamdeck_key_count')?.value || '15', 10);
   const streamdeck_idle_timeout = parseInt(document.getElementById('streamdeck_idle_timeout')?.value || '0', 10);
+  const streamdeck_screensaver_layout = document.getElementById('streamdeck_screensaver_layout')?.value || 'off';
   const rotation = parseInt(document.getElementById('streamdeck_rotation')?.value || '0', 10);
   const brightness = parseInt(document.getElementById('streamdeck_brightness')?.value || '60', 10);
   const keys = _sdCollectKeys();
@@ -7486,6 +7497,7 @@ async function saveStreamDeckSettings() {
     await fetch('setup/save', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({has_streamdeck, streamdeck_key_count, streamdeck_idle_timeout,
+                            streamdeck_screensaver_layout,
                             streamdeck_key_overrides: key_overrides,
                             streamdeck_weather_location: weather_location,
                             streamdeck_weather_units: weather_units,
@@ -8766,7 +8778,7 @@ async function cancelTouchCalibration() {
 </script>
 {# The screensaver script backs the Display pane's Test button
    (window.__screensaverTest) and, on a kiosk, the normal idle behaviour. #}
-<div id="screensaver-config" data-minutes="{{ s.screensaver_minutes }}" data-speed="{{ s.screensaver_speed }}" data-mode="{{ s.screensaver_mode }}" hidden></div>
+<div id="screensaver-config" data-minutes="{{ s.screensaver_minutes }}" data-speed="{{ s.screensaver_speed }}" data-mode="{{ s.screensaver_mode }}" data-deck-layout="{{ streamdeck_screensaver_layout }}" data-deck-aspect="{{ streamdeck_grid_aspect }}" hidden></div>
 <script src="static/js/screensaver.js?v={{ version }}"></script>
 </body>
 </html>

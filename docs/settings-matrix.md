@@ -168,6 +168,7 @@ and are device-local. They do not apply to a server install.
 | `screensaver_speed` | | Not applicable | Editable | Device-local |
 | `screensaver_mode` | | Not applicable | Editable | Device-local |
 | `streamdeck_idle_timeout` | | Not applicable | Editable | Device-local |
+| `streamdeck_screensaver_layout` | | Not applicable | Editable | Device-local |
 
 The display and Stream Deck panes are shown only on the Pi modes (the
 `peripherals` feature flag is Pi-only). `device_hostname` is offered on every
@@ -183,6 +184,12 @@ which falls back to the logo when no drive or no photos are present.
 read from the LSM6DSOX accelerometer on kits that include one; `auto` (the
 default) enables it exactly when the sensor is present. A screen touch or a
 Stream Deck button press always wakes the display regardless of this setting.
+
+`streamdeck_screensaver_layout` tells the screensaver where the Stream Deck
+sits relative to the screen (above, below, left, or right). With a position
+set, the bouncing logo glides off the panel and across the deck keys as if
+the two were one surface, and the deck joins the screensaver instead of
+blanking; `off` (the default) keeps the screensaver on the display only.
 
 ## Stream Deck
 

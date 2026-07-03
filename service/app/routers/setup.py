@@ -23,6 +23,7 @@ from ..config import (
     NAV_VISIBILITY,
     COMMON_TIMEZONES, format_local,
     STREAMDECK_KEY_STYLES, STREAMDECK_ICON_COLORS,
+    STREAMDECK_SCREENSAVER_LAYOUTS,
     DEPLOYMENT_MODES, _DEFAULT_DEPLOYMENT_MODE,
     AI_MODELS, SATELLITE_PULL_FIELDS,
     KITCHEN_APPLIANCES, KITCHEN_APPLIANCE_KEYS,
@@ -260,6 +261,7 @@ class SetupPayload(BaseModel):
     screensaver_minutes: int = 0
     screensaver_speed: str | None = None
     screensaver_mode: str | None = None
+    streamdeck_screensaver_layout: str | None = None
     wake_on_motion: str = "auto"
     streamdeck_key_overrides: list = []
     streamdeck_weather_location: str = ""
@@ -1123,6 +1125,11 @@ async def save_setup(payload: SetupPayload):
         data.pop("streamdeck_key_style", None)
     if "streamdeck_icon_color" in data and data["streamdeck_icon_color"] not in STREAMDECK_ICON_COLORS:
         data.pop("streamdeck_icon_color", None)
+    # Same for the screensaver deck-position choice: an unknown value keeps
+    # the stored one (None means the field was not submitted at all).
+    if "streamdeck_screensaver_layout" in data and (
+            data["streamdeck_screensaver_layout"] not in STREAMDECK_SCREENSAVER_LAYOUTS):
+        data.pop("streamdeck_screensaver_layout", None)
     # Keep only known appliance ids, de-duplicated in catalog order, so a stale
     # or hand-crafted id never reaches the AI prompt. An empty list is preserved
     # (the user owns none); the field absent leaves the stored choice untouched.
@@ -2039,6 +2046,14 @@ async def streamdeck_config_set(request: Request):
                 payload["config"]["theme"] = settings.ui_theme
                 payload["config"]["key_style"] = settings.streamdeck_key_style
                 payload["config"]["icon_color"] = settings.streamdeck_icon_color
+                # The idle timeout and screensaver deck position live in app
+                # settings; stamp them so they actually reach the controller.
+                # The timeout was saved but never written to config.toml before
+                # (FoodAssistant-3fdq), which is why the deck never blanked.
+                payload["config"]["idle_timeout_minutes"] = int(
+                    settings.streamdeck_idle_timeout or 0)
+                payload["config"]["screensaver_layout"] = (
+                    settings.streamdeck_screensaver_layout or "off")
                 # Home Assistant credentials, key map, and cameras live in app
                 # settings (one source of truth, server or Pi). Stamp them so the
                 # deck always gets the server's values regardless of what the page

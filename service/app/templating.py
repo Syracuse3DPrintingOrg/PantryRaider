@@ -2,7 +2,7 @@
 from fastapi import Request
 from fastapi.templating import Jinja2Templates
 
-from .config import settings, theme_info, ui_scale_factor, resolve_custom_colors, nav_chrome_hidden, APP_NAME, APP_VERSION
+from .config import settings, theme_info, ui_scale_factor, resolve_custom_colors, nav_chrome_hidden, streamdeck_grid_aspect, APP_NAME, APP_VERSION
 from .hardware import is_raspberry_pi
 from .ingress import template_globals
 from .navigation import visible_tabs, auto_hidden_groups, build_nav_tree
@@ -89,6 +89,14 @@ def theme_context(request: Request) -> dict:
         "screensaver_minutes": settings.screensaver_minutes,
         "screensaver_speed": settings.screensaver_speed,
         "screensaver_mode": settings.screensaver_mode,
+        # Where the Stream Deck sits next to the panel, plus its key-grid
+        # aspect, so the bouncing logo can glide across both surfaces as one
+        # canvas (FoodAssistant-3fdq). "off" (or no deck) keeps the walls at
+        # the panel edges.
+        "streamdeck_screensaver_layout": (
+            settings.streamdeck_screensaver_layout
+            if settings.has_streamdeck else "off"),
+        "streamdeck_grid_aspect": streamdeck_grid_aspect(settings.streamdeck_key_count),
         # Cache-buster for static assets so a kiosk browser fetches fresh CSS/JS
         # after an update instead of serving a stale cached copy.
         "app_version": APP_VERSION,

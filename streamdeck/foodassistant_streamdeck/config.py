@@ -24,6 +24,11 @@ BRIGHTNESS_STEPS: tuple[int, ...] = (20, 40, 60, 80, 100)
 # The only rotations we support, in degrees clockwise.
 ALLOWED_ROTATIONS: tuple[int, ...] = (0, 90, 180, 270)
 
+# Where the deck physically sits relative to the kiosk panel for the shared
+# screensaver canvas (FoodAssistant-3fdq). "off" keeps the deck out of the
+# screensaver; the rest name the side of the panel the deck is mounted on.
+ALLOWED_SCREENSAVER_LAYOUTS: tuple[str, ...] = ("off", "above", "below", "left", "right")
+
 # Key face rendering style. "rich" (the default) draws a subtle vertical
 # gradient with an inner border; "glass" draws a glassmorphism panel; "minimal"
 # keeps the old flat fill; "clean" draws no coloured background (a dark face with
@@ -105,6 +110,12 @@ class Config:
     # How often the full-deck camera overlay refreshes its frame, in seconds.
     # Clamped to at least 1 so a stray 0 cannot spin the refresh loop.
     camera_full_refresh_seconds: int = 5
+    # Screensaver canvas position (FoodAssistant-3fdq): where this deck sits
+    # relative to the kiosk panel. When not "off" and the kiosk screensaver's
+    # bouncing logo is up, the controller polls the app for the logo position
+    # and renders the slice crossing the deck instead of blanking. Stamped into
+    # config.toml by the app from the Stream Deck settings page.
+    screensaver_layout: str = "off"
 
     def validated(self) -> "Config":
         """Drop unknown action names and clamp numbers into sane ranges."""
@@ -123,6 +134,8 @@ class Config:
         if self.icon_color not in ALLOWED_ICON_COLORS:
             self.icon_color = DEFAULT_ICON_COLOR
         self.camera_full_refresh_seconds = max(1, int(self.camera_full_refresh_seconds))
+        if self.screensaver_layout not in ALLOWED_SCREENSAVER_LAYOUTS:
+            self.screensaver_layout = "off"
         return self
 
 
@@ -174,7 +187,7 @@ def load(path: str | os.PathLike | None = None) -> Config:
 def _apply(cfg: Config, data: dict) -> None:
     for name in ("base_url", "api_key", "kiosk_cdp_url", "weather_location", "weather_units",
                  "theme", "ha_base_url", "ha_token", "host_bridge_url",
-                 "key_style", "icon_color"):
+                 "key_style", "icon_color", "screensaver_layout"):
         if isinstance(data.get(name), str):
             setattr(cfg, name, data[name])
     for name in ("brightness", "poll_seconds", "soon_days", "rotation",

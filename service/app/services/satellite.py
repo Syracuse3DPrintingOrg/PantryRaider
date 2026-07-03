@@ -118,6 +118,11 @@ _STREAMDECK_SYNCED_FIELDS = (
     # Custom keys, so a button built on the server shows on every satellite deck
     # (FoodAssistant-n0r1).
     "streamdeck_key_overrides",
+    # streamdeck_idle_timeout and streamdeck_screensaver_layout are intentionally
+    # absent, like key_style: the blank timeout and the deck's physical position
+    # next to the panel are per-device concerns, edited on the device itself.
+    # They are still written into config.toml by _push_streamdeck_settings from
+    # this device's own settings (FoodAssistant-3fdq).
 )
 
 
@@ -126,9 +131,11 @@ def _merge_streamdeck_settings(config: dict, location: str, units: str, theme: s
                                ha_base_url: str = "", ha_token: str = "",
                                ha_slots: list | None = None,
                                cameras: list | None = None,
-                               key_overrides: list | None = None) -> dict:
-    """Return config with the synced weather, theme, key style, HA, cameras, and
-    custom keys overlaid.
+                               key_overrides: list | None = None,
+                               idle_timeout_minutes: int = 0,
+                               screensaver_layout: str = "off") -> dict:
+    """Return config with the synced weather, theme, key style, HA, cameras,
+    custom keys, idle timeout, and screensaver deck position overlaid.
 
     The bridge rewrites the whole config.toml from the posted dict, so a caller
     must read the current config, overlay just these keys, and post the whole
@@ -151,6 +158,12 @@ def _merge_streamdeck_settings(config: dict, location: str, units: str, theme: s
     # Custom keys are applied to the deck by slot, so overlaying them is enough
     # for a server-built button to appear on the satellite (FoodAssistant-n0r1).
     merged["key_overrides"] = [o for o in (key_overrides or []) if isinstance(o, dict)]
+    # Device-local fields the controller still only learns via config.toml: the
+    # idle blank timeout (saved in app settings but never written to the deck
+    # before, so it never blanked, FoodAssistant-3fdq) and where the deck sits
+    # for the shared screensaver canvas.
+    merged["idle_timeout_minutes"] = max(0, int(idle_timeout_minutes or 0))
+    merged["screensaver_layout"] = screensaver_layout or "off"
     return merged
 
 
@@ -182,6 +195,8 @@ def _push_streamdeck_settings(timeout: float = 4.0) -> bool:
             settings.streamdeck_ha_slots,
             settings.streamdeck_cameras,
             settings.streamdeck_key_overrides,
+            settings.streamdeck_idle_timeout,
+            settings.streamdeck_screensaver_layout,
         )
         resp = httpx.post(
             f"{_HOST_BRIDGE}/streamdeck/config", json={"config": merged}, timeout=timeout

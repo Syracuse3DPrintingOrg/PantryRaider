@@ -25,8 +25,14 @@
 // (FoodAssistant-ysf6): the camera page or an ha-events camera pop-up means
 // someone is watching a feed, which is intentionally idle.
 //
-// Planned phase (separate bead): a mode that spans the Stream Deck keys and
-// the panel as one large canvas.
+// Shared canvas with the Stream Deck (FoodAssistant-3fdq): when the deck's
+// screensaver position setting says the deck sits above/below/left/right of
+// the panel, the bounce walls extend past that edge by a band sized from the
+// deck's key grid, and the logo's position is posted to ui/screensaver/state
+// a few times a second so the deck controller can render the slice crossing
+// its keys. The kiosk stays the animation driver; the deck is a slower echo.
+// The state replies also carry a dismiss flag, so a deck key press wakes the
+// panel's saver too.
 (function () {
   var kiosk = false;
   try {
@@ -42,6 +48,12 @@
   var SPEEDS = { slow: 18, normal: 32, fast: 60 };
   var SPEED = SPEEDS[cfg.getAttribute('data-speed') || 'normal'] || SPEEDS.normal;
   var MODE = cfg.getAttribute('data-mode') === 'photos' ? 'photos' : 'bounce';
+  // Stream Deck canvas position (off disables the shared canvas) and the
+  // deck's key-grid height/width ratio, used to size the off-screen band.
+  var DECK_LAYOUT = cfg.getAttribute('data-deck-layout') || 'off';
+  if (['above', 'below', 'left', 'right'].indexOf(DECK_LAYOUT) === -1) DECK_LAYOUT = 'off';
+  var DECK_ASPECT = parseFloat(cfg.getAttribute('data-deck-aspect') || '0.6') || 0.6;
+  var STATE_POST_MS = 300;  // how often the logo position is shared while up
   var PHOTO_MS = 25000;   // how long each slideshow photo stays up
   var FADE_MS = 2000;     // crossfade length between photos
   var lastActivity = Date.now();
@@ -63,23 +75,71 @@
     });
   }
 
+  // Post the shared saver state (the logo mark's box, panel-normalized) so
+  // the Stream Deck can render its slice of the canvas. A reply carrying
+  // dismiss=true means a deck key press ended the saver: hide it here too.
+  function postSaverState(body) {
+    fetch('ui/screensaver/state', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      keepalive: true,
+      cache: 'no-store',
+    }).then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (data && data.dismiss && overlay) hide();
+      })
+      .catch(function () { });
+  }
+
   // Old-school DVD bounce: the block travels in a dead-straight line at
   // constant speed until it HITS an edge, then reflects (angle in = angle
   // out) and carries on; nothing else ever changes its course. Frame-time
   // based so the speed is identical on a slow Pi and a fast desktop, and the
   // block size is measured each frame so a viewport resize or font load just
   // tightens the walls without a jump. Transform keeps motion compositor-side.
-  function startBounce(block) {
+  //
+  // Every measurement here lives in LAYOUT pixels, the space the translate()
+  // coordinates render in: the visual viewport divided by the kiosk interface
+  // scale's zoom for the walls, and offsetWidth/Height for the block. Mixing
+  // window.innerWidth (visual pixels) with translate coordinates (layout
+  // pixels) broke the walls whenever a zoom applied, stopping the bounce
+  // short of (or past) the right and bottom edges (FoodAssistant-vf4f).
+  //
+  // With a Stream Deck in the canvas (DECK_LAYOUT not 'off'), the wall on the
+  // deck's side moves out by a band sized from the deck's key grid, so the
+  // logo glides off the panel, across the deck, and back.
+  function startBounce(block, mark) {
     var x = null, y = null, dx = 0, dy = 0, last = null;
+    var lastPost = 0;
     function step(ts) {
       if (!overlay) return;
-      var w = window.innerWidth, h = window.innerHeight;
-      var r = block.getBoundingClientRect();
-      var maxX = Math.max(0, w - r.width);
-      var maxY = Math.max(0, h - r.height);
+      // Effective zoom from the kiosk interface scale (kiosk-display.js sets
+      // html.style.zoom); 1 everywhere else. Read each frame so a live scale
+      // change just tightens the walls without a jump.
+      var z = 1;
+      try {
+        z = parseFloat(getComputedStyle(document.documentElement).zoom) || 1;
+      } catch (e) { /* keep 1 */ }
+      var w = window.innerWidth / z, h = window.innerHeight / z;
+      var bw = block.offsetWidth, bh = block.offsetHeight;
+      // Off-screen band for the deck's side of the canvas, in layout px. For
+      // above/below the deck's width spans the panel width, so the band is
+      // that width times the deck grid's height/width ratio; left/right is
+      // the same idea against the panel height.
+      var bandPx = 0;
+      if (DECK_LAYOUT === 'above' || DECK_LAYOUT === 'below') {
+        bandPx = w * DECK_ASPECT;
+      } else if (DECK_LAYOUT === 'left' || DECK_LAYOUT === 'right') {
+        bandPx = h / DECK_ASPECT;
+      }
+      var vw = w + ((DECK_LAYOUT === 'left' || DECK_LAYOUT === 'right') ? bandPx : 0);
+      var vh = h + ((DECK_LAYOUT === 'above' || DECK_LAYOUT === 'below') ? bandPx : 0);
+      var maxX = Math.max(0, vw - bw);
+      var maxY = Math.max(0, vh - bh);
       if (x === null) {
-        x = Math.random() * maxX;
-        y = Math.random() * maxY;
+        x = Math.random() * Math.max(0, w - bw);
+        y = Math.random() * Math.max(0, h - bh);
         // A fixed 30-60 degree launch keeps the path visibly diagonal (the
         // classic look) and never so flat that one axis barely moves.
         var ang = (30 + Math.random() * 30) * Math.PI / 180;
@@ -98,7 +158,28 @@
         else if (y >= maxY) { y = maxY; dy = -Math.abs(dy); }
       }
       last = ts;
-      block.style.transform = 'translate(' + x + 'px,' + y + 'px)';
+      // Virtual coords put the deck band past the panel edge; for a deck
+      // above or to the left, on-screen coordinates shift back so the panel
+      // still occupies its own 0..w / 0..h.
+      var sx = x - (DECK_LAYOUT === 'left' ? bandPx : 0);
+      var sy = y - (DECK_LAYOUT === 'above' ? bandPx : 0);
+      block.style.transform = 'translate(' + sx + 'px,' + sy + 'px)';
+      if (DECK_LAYOUT !== 'off' && bandPx > 0 && ts - lastPost >= STATE_POST_MS) {
+        lastPost = ts;
+        // Share just the raccoon mark's box (not the clock under it), in
+        // panel-normalized units: the panel is 0..1 on each axis and the
+        // deck band extends past that range on its side.
+        postSaverState({
+          active: true,
+          x: (sx + (mark ? mark.offsetLeft : 0)) / w,
+          y: (sy + (mark ? mark.offsetTop : 0)) / h,
+          w: (mark ? mark.offsetWidth : bw) / w,
+          h: (mark ? mark.offsetHeight : bh) / h,
+          band: (DECK_LAYOUT === 'above' || DECK_LAYOUT === 'below')
+            ? bandPx / h : bandPx / w,
+          layout: DECK_LAYOUT,
+        });
+      }
       rafId = requestAnimationFrame(step);
     }
     rafId = requestAnimationFrame(step);
@@ -128,7 +209,7 @@
     block.appendChild(date);
     overlay.appendChild(block);
     updateClock();
-    startBounce(block);
+    startBounce(block, mark);
   }
 
   // Photo slideshow. Each image is cover-fit and drifts with a slow Ken Burns
@@ -253,6 +334,8 @@
     if (!overlay) return;
     var el = overlay;
     overlay = null;
+    // Tell the deck the saver ended so it returns to its keys promptly.
+    if (DECK_LAYOUT !== 'off') postSaverState({ active: false });
     clearInterval(clockTimer);
     if (rafId) cancelAnimationFrame(rafId);
     rafId = null;
@@ -331,6 +414,9 @@
   window.__screensaverTest = function (opts) {
     opts = opts || {};
     if (opts.speed && SPEEDS[opts.speed]) SPEED = SPEEDS[opts.speed];
+    // Exact pixels-per-second override, used by the automated wall probe so a
+    // test run can cross the screen in a couple of seconds.
+    if (opts.speedPx > 0) SPEED = opts.speedPx;
     if (opts.mode) MODE = opts.mode === 'photos' ? 'photos' : 'bounce';
     motionGraceUntil = Date.now() + 1500;
     show();
