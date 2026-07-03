@@ -467,6 +467,15 @@
         <div class="form-text sd-autodetect-hint text-success d-none"><i class="bi bi-check-circle me-1"></i>Auto-detected from the attached deck.</div>
         <div class="form-text">Used to fill the key layout correctly. You can also set this in <code>config.toml</code>.</div>
       </div>
+      {% if is_pi %}
+      <div id="wiz-hwdetect-streamdeck-hint" class="d-none mt-2">
+        <div class="text-warning small mb-1"><i class="bi bi-exclamation-circle me-1"></i>Stream Deck detected, but its service is not set up.</div>
+        <button type="button" class="btn btn-outline-info btn-sm" onclick="_installHw('streamdeck', this, 'wiz-hwdetect-streamdeck-result')">
+          <i class="bi bi-grid-3x3-gap me-1"></i>Enable Stream Deck
+        </button>
+        <div class="test-result mt-1" id="wiz-hwdetect-streamdeck-result"></div>
+      </div>
+      {% endif %}
     </div>
 
     <div class="section-card mb-3">
@@ -513,6 +522,15 @@
           <label class="form-check-label" for="display_touch">Touch-compatible display</label>
         </div>
       </div>
+      {% if is_pi %}
+      <div id="wiz-hwdetect-kiosk-hint" class="d-none mt-2">
+        <div class="text-warning small mb-1"><i class="bi bi-exclamation-circle me-1"></i>Display detected, but the kiosk is not set up.</div>
+        <button type="button" class="btn btn-outline-info btn-sm" onclick="_installHw('kiosk', this, 'wiz-hwdetect-kiosk-result')">
+          <i class="bi bi-display me-1"></i>Enable kiosk
+        </button>
+        <div class="test-result mt-1" id="wiz-hwdetect-kiosk-result"></div>
+      </div>
+      {% endif %}
     </div>
 
     <div class="d-flex justify-content-between">
@@ -2709,6 +2727,22 @@ docker compose up -d</code></pre>
                 <span id="hwdetect-streamdeck"><span class="badge bg-secondary">Checking...</span></span>
               </div>
             </div>
+            {# Detected-but-not-set-up hints: shown only when the hardware is
+               attached and the matching service was never provisioned, with a
+               one-click enable (FoodAssistant-92e.3). #}
+            <div id="hwdetect-kiosk-hint" class="d-none mb-2">
+              <div class="text-warning small mb-1"><i class="bi bi-exclamation-circle me-1"></i>Display detected, but the kiosk is not set up.</div>
+              <button type="button" class="btn btn-outline-info btn-sm" onclick="_installHw('kiosk', this, 'hwdetect-enable-result')">
+                <i class="bi bi-display me-1"></i>Enable kiosk
+              </button>
+            </div>
+            <div id="hwdetect-streamdeck-hint" class="d-none mb-2">
+              <div class="text-warning small mb-1"><i class="bi bi-exclamation-circle me-1"></i>Stream Deck detected, but its service is not set up.</div>
+              <button type="button" class="btn btn-outline-info btn-sm" onclick="_installHw('streamdeck', this, 'hwdetect-enable-result')">
+                <i class="bi bi-grid-3x3-gap me-1"></i>Enable Stream Deck
+              </button>
+            </div>
+            <div class="test-result mb-2" id="hwdetect-enable-result"></div>
             <button type="button" class="btn btn-outline-secondary btn-sm" onclick="loadHardwareDetect()">
               <i class="bi bi-arrow-repeat me-1"></i>Refresh
             </button>
@@ -7779,20 +7813,35 @@ async function _sdDeleteProfile() {
 function _renderHwRow(name, st) {
   const row = document.getElementById(name + '-status-row');
   const btn = document.getElementById('btn-install-' + name);
+  const showBtn = (show) => { if (btn) btn.classList.toggle('d-none', !show); };
   if (!row) return;
-  if (!st) { row.innerHTML = '<span class="text-secondary small">Status unavailable.</span>'; return; }
+  if (!st) { row.innerHTML = '<span class="text-secondary small">Status unavailable.</span>'; showBtn(false); return; }
+  const hw = name === 'kiosk' ? 'Display' : 'Stream Deck';
   if (st.active) {
     row.innerHTML = '<span class="text-success small"><i class="bi bi-check-circle-fill me-1"></i>Service installed and running.</span>';
-    if (btn) btn.classList.add('d-none');
+    showBtn(false);
   } else if (st.installing) {
     row.innerHTML = '<span class="text-info small"><span class="spinner-border spinner-border-sm me-1"></span>Installing, this can take a few minutes...</span>';
-    if (btn) btn.classList.add('d-none');
+    showBtn(false);
+  } else if (st.installed && st.present) {
+    // Installed but not running with hardware attached. The kiosk starts on
+    // its own (the appliance watches for a connected display); the Stream
+    // Deck pane has its own Restart service button.
+    row.innerHTML = '<span class="text-warning small"><i class="bi bi-exclamation-circle me-1"></i>Service installed but not running.' +
+      (name === 'kiosk'
+        ? ' It starts on its own within a minute of a display being connected; reboot the device if it does not.'
+        : ' Use Restart service below, or reboot the device.') + '</span>';
+    showBtn(false);
+  } else if (st.installed) {
+    row.innerHTML = '<span class="text-secondary small"><i class="bi bi-dash-circle me-1"></i>Service installed. No ' +
+      (name === 'kiosk' ? 'display' : 'Stream Deck') + ' detected right now; it starts when one is attached.</span>';
+    showBtn(false);
   } else if (st.present) {
-    row.innerHTML = '<span class="text-warning small"><i class="bi bi-exclamation-circle me-1"></i>Hardware detected but the service is not installed.</span>';
-    if (btn) btn.classList.remove('d-none');
+    row.innerHTML = '<span class="text-warning small"><i class="bi bi-exclamation-circle me-1"></i>' + hw + ' detected, but the service is not set up.</span>';
+    showBtn(true);
   } else {
     row.innerHTML = '<span class="text-secondary small"><i class="bi bi-dash-circle me-1"></i>No hardware detected. Plug it in, then refresh.</span>';
-    if (btn) btn.classList.add('d-none');
+    showBtn(false);
   }
 }
 
@@ -7877,8 +7926,10 @@ async function _installHw(name, btn, resultId) {
         done = true;
         stopLog();
         loadHardwareStatus();
+        loadHardwareDetect();
       })();
       loadHardwareStatus();
+      loadHardwareDetect();
     } else {
       setResult(resultId, false, d.error || 'Failed to start installation.');
     }
@@ -8210,7 +8261,36 @@ async function loadHardwareDetect() {
       sEl.innerHTML = '<span class="badge bg-secondary">Not detected</span>';
     }
   }
+  _renderEnableHint('kiosk', display.present, r && r.kiosk);
+  _renderEnableHint('streamdeck', sd.present, r && r.streamdeck);
   _applyDeckAutodetect(sd);
+  _applyDisplayAutodetect(display);
+}
+
+// Prefill the wizard's display switch from live detection: a connected
+// display flips "HDMI display connected to this device" on and reveals the
+// display options, mirroring the Stream Deck auto-detect. Never flips the
+// switch off, so a manual choice sticks.
+function _applyDisplayAutodetect(display) {
+  if (!display || !display.present) return;
+  const sw = document.getElementById('wiz_has_display');
+  if (sw && !sw.checked) {
+    sw.checked = true;
+    sw.dispatchEvent(new Event('change'));
+  }
+}
+
+// "Detected, but not set up" hints with a one-click Enable button. The same
+// hint renders in the settings Hardware pane and in the wizard's Hardware
+// step (whichever ids exist on the page). Only shown when the appliance
+// reports the hardware attached and the matching service never provisioned,
+// so an already-installed service is never offered a reinstall.
+function _renderEnableHint(name, present, st) {
+  const show = !!(st && present && !st.installed && !st.active && !st.installing);
+  ['hwdetect-' + name + '-hint', 'wiz-hwdetect-' + name + '-hint'].forEach(function (id) {
+    const el = document.getElementById(id);
+    if (el) el.classList.toggle('d-none', !show);
+  });
 }
 
 // Prefill the deck size from the bridge's live detection (FoodAssistant-dcrh).

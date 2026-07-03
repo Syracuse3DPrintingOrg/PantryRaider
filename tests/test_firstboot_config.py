@@ -28,7 +28,13 @@ def run_firstboot(tmp_path: Path, config: str, extra_env: dict | None = None):
         "CONFIG_CANDIDATES": str(cfg),
         "COMPOSE_SRC": str(COMPOSE),
         "DONE_MARKER": str(tmp_path / "firstboot.done"),
+        # Hermetic display detection: point the DRM connector scan at an empty
+        # tree so has_display never sees the machine running the tests, and
+        # drop any inherited graphical-session variables.
+        "DRM_SYS_ROOT": str(tmp_path / "drm"),
     }
+    env.pop("DISPLAY", None)
+    env.pop("WAYLAND_DISPLAY", None)
     if extra_env:
         env.update(extra_env)
     proc = subprocess.run(
@@ -127,13 +133,69 @@ def test_kiosk_auto_with_display_installs(tmp_path):
     assert "Installing Chromium kiosk" in out
 
 
-def test_kiosk_enabled_without_display_warns(tmp_path):
-    # No display forced -> kiosk requested but skipped with a warning.
+def test_kiosk_enabled_without_display_warns_but_installs(tmp_path):
+    # An explicit ENABLE_KIOSK=true wins over the display gate: warn, but
+    # install anyway so the kiosk starts once a display is attached.
     rc, out = run_firstboot(
         tmp_path, "ENABLE_KIOSK=true\n", extra_env={"FORCE_DISPLAY": ""}
     )
     assert rc == 0, out
     assert "no display detected" in out
+    assert "Installing Chromium kiosk" in out
+
+
+def _fake_drm(tmp_path: Path, statuses: dict[str, str]) -> Path:
+    """Build a fake /sys/class/drm tree with the given connector statuses."""
+    root = tmp_path / "drm"
+    for name, status in statuses.items():
+        d = root / name
+        d.mkdir(parents=True)
+        (d / "status").write_text(status + "\n")
+    return root
+
+
+def test_kiosk_auto_connected_drm_connector_installs(tmp_path):
+    # "auto" with a connected DRM connector (a display actually plugged in)
+    # installs the kiosk with no flags at all.
+    root = _fake_drm(tmp_path, {"card1-HDMI-A-1": "connected"})
+    rc, out = run_firstboot(
+        tmp_path, "ENABLE_KIOSK=auto\n", extra_env={"DRM_SYS_ROOT": str(root)}
+    )
+    assert rc == 0, out
+    assert "Installing Chromium kiosk" in out
+
+
+def test_kiosk_auto_disconnected_drm_connector_skips(tmp_path):
+    # A KMS card whose connectors all read "disconnected" is a headless Pi:
+    # the card node alone must not count as a display.
+    root = _fake_drm(
+        tmp_path, {"card1-HDMI-A-1": "disconnected", "card1-HDMI-A-2": "disconnected"}
+    )
+    rc, out = run_firstboot(
+        tmp_path, "ENABLE_KIOSK=auto\n", extra_env={"DRM_SYS_ROOT": str(root)}
+    )
+    assert rc == 0, out
+    assert "Kiosk not enabled" in out
+
+
+def test_kiosk_auto_display_type_counts_as_display(tmp_path):
+    # A wizard-selected panel type (DSI/SPI) means a display even before its
+    # overlay is active, so "auto" installs the kiosk.
+    rc, out = run_firstboot(tmp_path, "ENABLE_KIOSK=auto\nDISPLAY_TYPE=dsi_7inch\n")
+    assert rc == 0, out
+    assert "Installing Chromium kiosk" in out
+
+
+def test_kiosk_force_display_zero_means_absent(tmp_path):
+    # FORCE_DISPLAY=0 forces "no display" even with a connected connector.
+    root = _fake_drm(tmp_path, {"card1-HDMI-A-1": "connected"})
+    rc, out = run_firstboot(
+        tmp_path,
+        "ENABLE_KIOSK=auto\n",
+        extra_env={"DRM_SYS_ROOT": str(root), "FORCE_DISPLAY": "0"},
+    )
+    assert rc == 0, out
+    assert "Kiosk not enabled" in out
 
 
 def test_kiosk_enabled_with_display(tmp_path):

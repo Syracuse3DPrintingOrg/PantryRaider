@@ -510,13 +510,29 @@ configure_display_rotation() {
 }
 
 # Step: kiosk (opt-in, display-gated)
-# Returns 0 if a display appears usable. We treat a present DRM/KMS card or an
-# existing X/Wayland session as "has display".
+# Returns 0 if a display appears attached. An existing X/Wayland session or a
+# connected DRM connector counts; a bare /dev/dri/card0 does NOT (vc4 KMS
+# creates the card even on a headless Pi, which used to make "auto" install
+# the kiosk everywhere). A wizard-selected display type also counts: DSI and
+# SPI panels only report a connector once their overlay is active, which may
+# be after the reboot this very run schedules.
+# Test hooks: FORCE_DISPLAY=1 forces present, FORCE_DISPLAY=0/false forces
+# absent, DRM_SYS_ROOT points the connector scan at a fake sysfs tree.
 has_display() {
-  [ -n "${FORCE_DISPLAY:-}" ] && return 0   # test hook
-  [ -e /dev/dri/card0 ] && return 0
+  case "${FORCE_DISPLAY:-}" in
+    0|false|FALSE|no) return 1 ;;   # test hook: force absent
+    ?*) return 0 ;;                 # test hook: force present
+  esac
   [ -n "${WAYLAND_DISPLAY:-}" ] && return 0
   [ -n "${DISPLAY:-}" ] && return 0
+  case "${DISPLAY_TYPE:-generic}" in
+    generic|"") : ;;
+    *) return 0 ;;                  # a chosen panel type means a display
+  esac
+  local st
+  for st in "${DRM_SYS_ROOT:-/sys/class/drm}"/*/status; do
+    [ -r "$st" ] && grep -qx connected "$st" 2>/dev/null && return 0
+  done
   return 1
 }
 
@@ -1172,8 +1188,10 @@ configure_kiosk() {
     return 0
   fi
   if ! has_display; then
-    warn "Kiosk enabled but no display detected; skipping kiosk"
-    return 0
+    # Only reachable with an explicit ENABLE_KIOSK=true (auto already skipped
+    # above). An explicit flag wins: install anyway, the service simply starts
+    # once a display is attached.
+    warn "Kiosk enabled but no display detected; installing anyway (ENABLE_KIOSK=$ENABLE_KIOSK), it starts when a display is attached"
   fi
   log "Installing Chromium kiosk via cage (Wayland) for $KIOSK_URL"
 

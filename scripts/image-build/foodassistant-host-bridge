@@ -762,8 +762,11 @@ def _service_active(unit):
         return False
 
 
-def _display_present():
-    return os.path.exists("/dev/dri/card0")
+def _unit_installed(unit, root="/etc/systemd/system"):
+    """True when the unit file exists, i.e. the service was provisioned on
+    this device (whether or not it is currently running). firstboot writes
+    all appliance units under /etc/systemd/system."""
+    return os.path.exists(os.path.join(root, unit))
 
 
 # Stream Deck / display detection from sysfs
@@ -1223,6 +1226,144 @@ def _streamdeck_keycount(usb_root="/sys/bus/usb/devices"):
 def _installing(step):
     p = _INSTALL_PROCS.get(step)
     return bool(p and p.poll() is None)
+
+
+def _start_provision(step):
+    """Launch the provisioner for one step (firstboot with STEPS=<step>) in
+    the background, streaming output to the step's install log. Returns
+    (ok, started, error). Re-entry while the same step is still running is a
+    no-op (ok=True, started=False), and firstboot's steps are themselves
+    idempotent, so re-running an already-provisioned step changes nothing.
+    """
+    if _installing(step):
+        return True, False, ""
+    script, repo_dir = _find_firstboot()
+    if not script:
+        return False, False, "Provisioner not found on this device."
+    try:
+        env = dict(os.environ, STEPS=step)
+        if repo_dir:
+            env["REPO_DIR"] = repo_dir
+        log = open(f"/var/log/foodassistant-{step}-install.log", "ab")
+        p = subprocess.Popen(
+            ["bash", script], env=env, stdout=log, stderr=subprocess.STDOUT
+        )
+        _INSTALL_PROCS[step] = p
+        return True, True, ""
+    except Exception as e:
+        return False, False, str(e)
+
+
+# Kiosk auto-enable (FoodAssistant-92e.3)
+# ---------------------------------------
+# A Pi provisioned without a display skips the kiosk (the display gate in
+# firstboot). When a display is connected later the appliance should just
+# light up: this watcher notices the connector coming up and provisions or
+# starts the kiosk on its own, no reflash or SSH needed. An explicit
+# ENABLE_KIOSK=false in the appliance config opts out.
+
+# Same config file search order firstboot uses (it sources the first hit).
+_CONFIG_ENV_CANDIDATES = [
+    "/boot/firmware/foodassistant.config.env",
+    "/boot/foodassistant.config.env",
+    "/etc/foodassistant/config.env",
+]
+
+_KIOSK_UNIT = "foodassistant-kiosk.service"
+
+
+def _config_env_value(key, paths=None):
+    """Return KEY's value from the first appliance config file that exists.
+
+    Mirrors how firstboot consumes the file (it sources the first candidate,
+    so a later assignment in the same file wins, and other candidates are
+    never read). Comment lines, blank lines, and an optional `export ` prefix
+    are handled; surrounding quotes are stripped. Returns "" when the key is
+    unset or no config file exists.
+    """
+    for path in (paths if paths is not None else _CONFIG_ENV_CANDIDATES):
+        try:
+            with open(path) as fh:
+                lines = fh.read().splitlines()
+        except OSError:
+            continue
+        value = ""
+        for line in lines:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if line.startswith("export "):
+                line = line[len("export "):].lstrip()
+            if "=" not in line:
+                continue
+            k, v = line.split("=", 1)
+            if k.strip() == key:
+                value = v.strip().strip('"').strip("'")
+        return value
+    return ""
+
+
+def _kiosk_autoenable_action(display_connected, installed, installing, active,
+                             enable_flag, attempted_install, attempted_start):
+    """Decide what the kiosk auto-enable watcher should do this tick.
+
+    Returns "install", "start", or None. Pure so it is unit-testable; the
+    loop supplies live state. Rules:
+      - No display connected, or an install already in flight: do nothing.
+      - ENABLE_KIOSK explicitly false: the owner opted out, never auto-act.
+      - Kiosk never provisioned: install, once per bridge run (a failing
+        install must not loop).
+      - Provisioned but not running: start it, once per display connection
+        (covers a kiosk installed while headless whose service exited).
+      - Installed and running: nothing to do.
+    """
+    if not display_connected or installing:
+        return None
+    if str(enable_flag).strip().lower() in ("false", "0", "no", "off"):
+        return None
+    if not installed:
+        return None if attempted_install else "install"
+    if not active:
+        return None if attempted_start else "start"
+    return None
+
+
+def _kiosk_autoenable_loop(interval=30):
+    """Background watcher that turns a newly attached display into a running
+    kiosk. Runs for the life of the bridge; every tick reads live state and
+    lets _kiosk_autoenable_action decide. Attempt latches keep a failure
+    from looping: one install per bridge run, one start per connection (a
+    replug resets the start latch)."""
+    attempted_install = False
+    attempted_start = False
+    while True:
+        try:
+            connected = bool(_drm_connected())
+            if not connected:
+                attempted_start = False
+            action = _kiosk_autoenable_action(
+                connected,
+                _unit_installed(_KIOSK_UNIT),
+                _installing("kiosk"),
+                _service_active(_KIOSK_UNIT),
+                _config_env_value("ENABLE_KIOSK"),
+                attempted_install,
+                attempted_start,
+            )
+            if action == "install":
+                attempted_install = True
+                ok, started, err = _start_provision("kiosk")
+                if started:
+                    print("kiosk auto-enable: display detected, provisioning the kiosk", flush=True)
+                elif not ok:
+                    print(f"kiosk auto-enable: install failed to start: {err}", flush=True)
+            elif action == "start":
+                attempted_start = True
+                print("kiosk auto-enable: display detected, starting the installed kiosk", flush=True)
+                subprocess.run(["systemctl", "start", _KIOSK_UNIT], timeout=30)
+        except Exception:
+            pass
+        time.sleep(interval)
 
 
 # Wi-Fi helpers
@@ -2086,13 +2227,19 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             "ok": True,
             "display": hw["display"],
             "kiosk": {
-                "present": _display_present(),
+                # "present" means a display is actually connected (DRM
+                # connector state), not merely that a KMS card exists: the
+                # card node is there even on a headless Pi, which used to
+                # make the UI offer a kiosk install with nothing attached.
+                "present": hw["display"]["present"],
+                "installed": _unit_installed("foodassistant-kiosk.service"),
                 "active": _service_active("foodassistant-kiosk.service"),
                 "installing": _installing("kiosk"),
             },
             "streamdeck": {
                 "present": _streamdeck_present() or sd_present,
                 "model": sd_model,
+                "installed": _unit_installed("foodassistant-streamdeck.service"),
                 "active": _service_active("foodassistant-streamdeck.service"),
                 "installing": _installing("streamdeck"),
                 "key_count": _streamdeck_keycount(),
@@ -2110,23 +2257,11 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         if _installing(step):
             self._send(200, {"ok": True, "started": False, "message": "Already installing."})
             return
-        script, repo_dir = _find_firstboot()
-        if not script:
-            self._send(500, {"ok": False, "error": "Provisioner not found on this device."})
-            return
-        try:
-            env = dict(os.environ, STEPS=step)
-            if repo_dir:
-                env["REPO_DIR"] = repo_dir
-            log_path = f"/var/log/foodassistant-{step}-install.log"
-            log = open(log_path, "ab")
-            p = subprocess.Popen(
-                ["bash", script], env=env, stdout=log, stderr=subprocess.STDOUT
-            )
-            _INSTALL_PROCS[step] = p
+        ok, _started, err = _start_provision(step)
+        if ok:
             self._send(200, {"ok": True, "started": True})
-        except Exception as e:
-            self._send(500, {"ok": False, "error": str(e)})
+        else:
+            self._send(500, {"ok": False, "error": err})
 
     def _ap_status(self):
         """Return whether the fallback AP is active.
@@ -2366,6 +2501,8 @@ if __name__ == "__main__":
     threading.Thread(target=_display_idle_loop, daemon=True).start()
     # Finish an interrupted Mealie install, if the stack's .env recorded one.
     threading.Thread(target=_resume_mealie_install, daemon=True).start()
+    # Light up the kiosk when a display is attached after provisioning.
+    threading.Thread(target=_kiosk_autoenable_loop, daemon=True).start()
     server = http.server.HTTPServer((LISTEN_HOST, LISTEN_PORT), _Handler)
     print(f"FoodAssistant host bridge listening on {LISTEN_HOST}:{LISTEN_PORT}", flush=True)
     try:

@@ -1157,3 +1157,102 @@ def test_read_stack_compose_reads_text(tmp_path):
     p = tmp_path / "docker-compose.yml"
     p.write_text(_APPLIANCE_COMPOSE)
     assert bridge._read_stack_compose(str(p)) == _APPLIANCE_COMPOSE
+# Kiosk auto-enable (FoodAssistant-92e.3)
+# ---------------------------------------
+
+def test_unit_installed_true_when_unit_file_exists(tmp_path):
+    (tmp_path / "foodassistant-kiosk.service").write_text("[Unit]\n")
+    assert bridge._unit_installed("foodassistant-kiosk.service", str(tmp_path)) is True
+
+
+def test_unit_installed_false_when_missing(tmp_path):
+    assert bridge._unit_installed("foodassistant-kiosk.service", str(tmp_path)) is False
+
+
+def test_config_env_value_reads_key(tmp_path):
+    cfg = tmp_path / "config.env"
+    cfg.write_text("# comment\nENABLE_KIOSK=false\n")
+    assert bridge._config_env_value("ENABLE_KIOSK", [str(cfg)]) == "false"
+
+
+def test_config_env_value_later_assignment_wins(tmp_path):
+    cfg = tmp_path / "config.env"
+    cfg.write_text("ENABLE_KIOSK=true\nENABLE_KIOSK=false\n")
+    assert bridge._config_env_value("ENABLE_KIOSK", [str(cfg)]) == "false"
+
+
+def test_config_env_value_handles_export_and_quotes(tmp_path):
+    cfg = tmp_path / "config.env"
+    cfg.write_text('export ENABLE_KIOSK="auto"\n')
+    assert bridge._config_env_value("ENABLE_KIOSK", [str(cfg)]) == "auto"
+
+
+def test_config_env_value_first_existing_file_wins(tmp_path):
+    # Mirrors firstboot: it sources only the first candidate that exists, so
+    # a later candidate must not be consulted even when the key is unset.
+    first = tmp_path / "first.env"
+    second = tmp_path / "second.env"
+    first.write_text("OTHER=1\n")
+    second.write_text("ENABLE_KIOSK=false\n")
+    missing = tmp_path / "missing.env"
+    assert bridge._config_env_value(
+        "ENABLE_KIOSK", [str(missing), str(first), str(second)]
+    ) == ""
+
+
+def test_config_env_value_no_files_returns_empty(tmp_path):
+    assert bridge._config_env_value("ENABLE_KIOSK", [str(tmp_path / "nope")]) == ""
+
+
+def test_config_env_value_ignores_commented_assignment(tmp_path):
+    cfg = tmp_path / "config.env"
+    cfg.write_text("# ENABLE_KIOSK=auto\n")
+    assert bridge._config_env_value("ENABLE_KIOSK", [str(cfg)]) == ""
+
+
+def _decide(**kw):
+    args = dict(
+        display_connected=True, installed=False, installing=False, active=False,
+        enable_flag="", attempted_install=False, attempted_start=False,
+    )
+    args.update(kw)
+    return bridge._kiosk_autoenable_action(**args)
+
+
+def test_autoenable_installs_when_display_and_never_provisioned():
+    assert _decide() == "install"
+
+
+def test_autoenable_nothing_without_display():
+    assert _decide(display_connected=False) is None
+
+
+def test_autoenable_respects_explicit_opt_out():
+    for flag in ("false", "FALSE", "0", "no", "off"):
+        assert _decide(enable_flag=flag) is None
+
+
+def test_autoenable_auto_and_true_flags_allow_install():
+    assert _decide(enable_flag="auto") == "install"
+    assert _decide(enable_flag="true") == "install"
+    assert _decide(enable_flag="") == "install"
+
+
+def test_autoenable_waits_while_installing():
+    assert _decide(installing=True) is None
+
+
+def test_autoenable_installs_once_per_run():
+    assert _decide(attempted_install=True) is None
+
+
+def test_autoenable_starts_installed_but_stopped_kiosk():
+    assert _decide(installed=True) == "start"
+
+
+def test_autoenable_starts_once_per_connection():
+    assert _decide(installed=True, attempted_start=True) is None
+
+
+def test_autoenable_noop_when_running():
+    assert _decide(installed=True, active=True) is None
