@@ -251,3 +251,88 @@ def test_weather_page_calls_the_correct_data_path(tmp_path, monkeypatch):
         assert "fetch('weather/data'" not in html
     finally:
         os.chdir(cwd)
+
+
+# --- forecast TTL cache (FoodAssistant-17tb) --------------------------------
+
+def test_cache_key_normalizes_location_and_units():
+    assert weather.cache_key("  Syracuse, NY ", "F") == ("syracuse, ny", "f")
+    assert weather.cache_key("Syracuse, NY", "c") == ("syracuse, ny", "c")
+    # Anything that is not celsius collapses to fahrenheit, matching the
+    # endpoint's own units handling.
+    assert weather.cache_key("", "kelvin") == ("", "f")
+    assert weather.cache_key(None, None) == ("", "f")
+
+
+def test_forecast_cache_hit_and_expiry():
+    c = weather.ForecastCache(ok_ttl=600.0, err_ttl=60.0)
+    key = weather.cache_key("Syracuse", "f")
+    fc = {"current": {"temp": "70"}, "days": []}
+    c.put(key, fc, "", now=1000.0)
+    # Warm inside the window, gone at/after the edge.
+    assert c.get(key, now=1599.9) == (fc, "")
+    assert c.get(key, now=1600.0) is None
+    # A repeated get after expiry stays a miss (the entry was dropped).
+    assert c.get(key, now=1000.0) is None
+
+
+def test_forecast_cache_failures_expire_sooner():
+    c = weather.ForecastCache(ok_ttl=600.0, err_ttl=60.0)
+    key = weather.cache_key("Nowhereville", "f")
+    c.put(key, None, "could not find that location", now=0.0)
+    assert c.get(key, now=59.9) == (None, "could not find that location")
+    assert c.get(key, now=60.0) is None
+
+
+def test_forecast_cache_put_prunes_expired_entries():
+    c = weather.ForecastCache(ok_ttl=100.0, err_ttl=10.0)
+    c.put(("a", "f"), {"days": []}, "", now=0.0)
+    c.put(("b", "f"), None, "boom", now=0.0)
+    # Writing a fresh entry after both expired drops the stale ones.
+    c.put(("c", "f"), {"days": []}, "", now=500.0)
+    assert set(c._entries) == {("c", "f")}
+
+
+def test_fetch_forecast_cached_shares_upstream_calls(monkeypatch):
+    import asyncio
+    calls = []
+
+    async def fake_fetch(location="", units="f"):
+        calls.append((location, units))
+        return {"current": {"temp": "70"}, "days": []}, ""
+
+    monkeypatch.setattr(weather, "fetch_forecast", fake_fetch)
+    cache = weather.ForecastCache()
+
+    async def scenario():
+        # Three tiles asking for the same place: one upstream call.
+        for _ in range(3):
+            fc, err = await weather.fetch_forecast_cached("Syracuse, NY", "f", cache=cache)
+            assert fc is not None and err == ""
+        # A different location is its own entry.
+        await weather.fetch_forecast_cached("Rome, NY", "f", cache=cache)
+
+    asyncio.run(scenario())
+    assert calls == [("Syracuse, NY", "f"), ("Rome, NY", "f")]
+
+
+def test_fetch_forecast_cached_caches_failures_with_error(monkeypatch):
+    import asyncio
+    calls = []
+
+    async def fake_fetch(location="", units="f"):
+        calls.append(location)
+        return None, "could not find that location"
+
+    monkeypatch.setattr(weather, "fetch_forecast", fake_fetch)
+    cache = weather.ForecastCache()
+
+    async def scenario():
+        fc1, err1 = await weather.fetch_forecast_cached("Xyzzy", "f", cache=cache)
+        fc2, err2 = await weather.fetch_forecast_cached("Xyzzy", "f", cache=cache)
+        # The cached failure keeps its error string for the caller to surface.
+        assert fc1 is None and fc2 is None
+        assert err1 == err2 == "could not find that location"
+
+    asyncio.run(scenario())
+    assert calls == ["Xyzzy"]

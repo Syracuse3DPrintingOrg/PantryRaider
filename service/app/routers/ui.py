@@ -569,13 +569,17 @@ async def weather_data(location: str | None = None, units: str | None = None):
     kiosk's own internet access. ``location`` and ``units`` override the saved
     ones (per-key deck overrides carry their own). Returns {ok, forecast} or
     {ok: false, error} with the reason it failed, so callers can show
-    something actionable."""
+    something actionable.
+
+    Results go through a shared in-process TTL cache keyed by (location,
+    units), so several deck tiles plus the weather page cost one upstream
+    fetch per location per window instead of one each (FoodAssistant-17tb)."""
     from ..services import weather as weather_svc
     loc = location if location is not None else (settings.streamdeck_weather_location or "")
     u = (units or "").strip().lower()
     if u not in ("f", "c"):
         u = settings.streamdeck_weather_units or "f"
-    forecast, error = await weather_svc.fetch_forecast(loc, u)
+    forecast, error = await weather_svc.fetch_forecast_cached(loc, u)
     if forecast is None:
         return {"ok": False, "error": error, "location": loc}
     return {"ok": True, "forecast": forecast, "location": loc}

@@ -1425,12 +1425,17 @@ class Controller:
         )
         if not has_weather_key and not self.override_weather:
             return
+        # Refresh every weather tile concurrently over one shared client: the
+        # override keys each carry their own (possibly different) location, and
+        # refreshing them one by one meant a single stalled request delayed all
+        # the rest (FoodAssistant-17tb). refresh() never raises, so gather is
+        # safe, and each request has its own tight timeout.
+        states: list[WeatherState] = []
         if has_weather_key:
-            await self.weather.refresh()
-        # Override weather keys each fetch their own (possibly different)
-        # location, so refresh them alongside the shared widget.
-        for w in self.override_weather.values():
-            await w.refresh()
+            states.append(self.weather)
+        states.extend(self.override_weather.values())
+        async with httpx.AsyncClient(timeout=httpx.Timeout(15.0, connect=5.0)) as client:
+            await asyncio.gather(*(w.refresh(client) for w in states))
         self._draw_page()
 
     async def _refresh_ha_entities(self) -> None:

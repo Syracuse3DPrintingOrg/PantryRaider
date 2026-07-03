@@ -13,6 +13,7 @@ show why it failed instead of a bare "unavailable".
 from __future__ import annotations
 
 import re
+import time
 from typing import Any
 
 # --- Open-Meteo (primary) -------------------------------------------------
@@ -409,6 +410,69 @@ async def _fetch_wttr(client, location: str, units: str) -> tuple[dict | None, s
     return parsed, ""
 
 
+# --- TTL cache (FoodAssistant-17tb) -----------------------------------------
+#
+# The Stream Deck can carry several weather tiles (the shared widget plus
+# per-key overrides), and the kiosk weather page fetches too. Without a cache
+# every tile re-hits Open-Meteo (or the rate-limited wttr.in fallback) on each
+# poll; with it, N tiles sharing a (location, units) pair cost one upstream
+# call per TTL window. Failures are cached briefly so a dead upstream is not
+# hammered, but recovery is quick.
+
+CACHE_OK_TTL_SECS: float = 600.0    # successful forecasts stay warm 10 minutes
+CACHE_ERR_TTL_SECS: float = 60.0    # failures retry after a minute
+
+
+def cache_key(location: str, units: str) -> tuple[str, str]:
+    """Normalize (location, units) so trivially-different spellings share an
+    entry: whitespace-trimmed, case-folded location; units collapsed to f/c."""
+    u = "c" if str(units or "").strip().lower() == "c" else "f"
+    return ((location or "").strip().lower(), u)
+
+
+class ForecastCache:
+    """In-process TTL cache for ``fetch_forecast`` results.
+
+    Pure: ``get``/``put`` take an explicit ``now`` so expiry is unit-testable
+    without sleeping. Entries are ``(expires_at, forecast, error)``; expired
+    entries are dropped lazily on ``get`` and pruned on ``put`` so the dict
+    never grows past the set of recently-asked locations.
+    """
+
+    def __init__(self, ok_ttl: float = CACHE_OK_TTL_SECS,
+                 err_ttl: float = CACHE_ERR_TTL_SECS) -> None:
+        self.ok_ttl = ok_ttl
+        self.err_ttl = err_ttl
+        self._entries: dict[tuple[str, str], tuple[float, dict | None, str]] = {}
+
+    def get(self, key: tuple[str, str], now: float) -> tuple[dict | None, str] | None:
+        """Return the cached ``(forecast, error)`` or None when absent/expired."""
+        entry = self._entries.get(key)
+        if entry is None:
+            return None
+        expires_at, forecast, error = entry
+        if now >= expires_at:
+            self._entries.pop(key, None)
+            return None
+        return forecast, error
+
+    def put(self, key: tuple[str, str], forecast: dict | None, error: str,
+            now: float) -> None:
+        ttl = self.ok_ttl if forecast is not None else self.err_ttl
+        self._entries[key] = (now + ttl, forecast, error)
+        # Prune anything else that has already expired, bounding memory.
+        stale = [k for k, (exp, _f, _e) in self._entries.items()
+                 if k != key and now >= exp]
+        for k in stale:
+            self._entries.pop(k, None)
+
+    def clear(self) -> None:
+        self._entries.clear()
+
+
+_forecast_cache = ForecastCache()
+
+
 # --- public ---------------------------------------------------------------
 
 async def fetch_forecast(location: str = "", units: str = "f") -> tuple[dict | None, str]:
@@ -421,7 +485,12 @@ async def fetch_forecast(location: str = "", units: str = "f") -> tuple[dict | N
     import httpx
     last_error = ""
     try:
-        async with httpx.AsyncClient(timeout=12.0, follow_redirects=True) as client:
+        # An explicit tight connect timeout: a device with a blackholed IPv6
+        # route otherwise waits the full read timeout per connection attempt
+        # before anything falls back, which stacked up across tiles is exactly
+        # the "everything is slow" satellite symptom (FoodAssistant-17tb).
+        timeout = httpx.Timeout(12.0, connect=5.0)
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
             if location.strip():
                 forecast, err = await _fetch_open_meteo(client, location, units)
                 if forecast is not None:
@@ -434,3 +503,23 @@ async def fetch_forecast(location: str = "", units: str = "f") -> tuple[dict | N
     except Exception as e:  # noqa: BLE001
         return None, f"weather lookup failed ({e.__class__.__name__})"
     return None, last_error or "forecast unavailable"
+
+
+async def fetch_forecast_cached(location: str = "", units: str = "f",
+                                cache: ForecastCache | None = None) -> tuple[dict | None, str]:
+    """``fetch_forecast`` behind the shared TTL cache.
+
+    All /ui/weather/data callers (the kiosk weather page and every Stream Deck
+    weather/forecast tile) go through here, so a deck with three tiles on the
+    same location makes one upstream call per TTL window instead of three per
+    poll. ``cache`` is injectable for tests; production uses the module cache.
+    """
+    c = cache if cache is not None else _forecast_cache
+    key = cache_key(location, units)
+    now = time.monotonic()
+    hit = c.get(key, now)
+    if hit is not None:
+        return hit
+    forecast, error = await fetch_forecast(location, units)
+    c.put(key, forecast, error, now)
+    return forecast, error

@@ -480,6 +480,26 @@ def should_auto_reset(now: float, last_interaction: float,
     return (now - last_interaction) >= window_secs
 
 
+def weather_error_face(error: str) -> str:
+    """Short tile face for a failed weather fetch, from the endpoint's error.
+
+    The old blanket "No signal" hid the actual problem: a per-key location the
+    geocoder cannot find looks identical to a dead network (FoodAssistant-17tb).
+    Pure keyword mapping so it is unit-testable; unknown errors keep the old
+    face so nothing regresses.
+    """
+    e = (error or "").lower()
+    if "find that location" in e:
+        return "Bad\nlocation"
+    if "could not reach" in e or "lookup failed" in e or "timed out" in e:
+        return "No\nnetwork"
+    if "http" in e:
+        return "Weather\nbusy"
+    if "parse" in e or "forecast data" in e:
+        return "No\ndata"
+    return "No signal"
+
+
 class WeatherState:
     """Fetches and caches current weather from the app's /ui/weather/data.
 
@@ -634,11 +654,15 @@ class WeatherState:
         self._day_idx = 0
         self.last_interaction = 0.0
 
-    def _set_no_signal(self) -> None:
-        self._label = "No signal"
+    def _set_no_signal(self, error: str = "") -> None:
+        """Show why the tile has no forecast: a short reason face derived from
+        the endpoint's error string, or the classic "No signal" when there is
+        no detail to give."""
+        face = weather_error_face(error)
+        self._label = face
         self._color = "#6b7280"
         self._error = True
-        self._fc_label = "No signal"
+        self._fc_label = face
 
     def apply_forecast(self, forecast: dict) -> None:
         """Populate the tile fields from the app's normalized forecast dict
@@ -679,26 +703,41 @@ class WeatherState:
             self._fc_label = f"H{days[0]['hi']} L{days[0]['lo']}"
             self._fc_color = "#0e7490"
 
-    async def refresh(self) -> None:
+    async def refresh(self, client=None) -> None:
+        """Fetch the forecast from the app and update the tile fields.
+
+        ``client`` lets the controller share one AsyncClient across every
+        weather tile in a refresh pass instead of building a connection pool
+        per tile. Each request carries a tight connect timeout so one stalled
+        tile cannot eat the whole poll budget (FoodAssistant-17tb).
+        """
         try:
             import httpx
             base = (self.base_url or "http://127.0.0.1:9284").rstrip("/")
             params: dict[str, str] = {"units": self.units}
             if self.location.strip():
                 params["location"] = self.location.strip()
-            async with httpx.AsyncClient(timeout=12.0) as client:
-                r = await client.get(f"{base}/ui/weather/data", params=params)
+            url = f"{base}/ui/weather/data"
+            timeout = httpx.Timeout(15.0, connect=5.0)
+            if client is not None:
+                r = await client.get(url, params=params, timeout=timeout)
+            else:
+                async with httpx.AsyncClient(timeout=timeout) as own:
+                    r = await own.get(url, params=params)
             if r.status_code != 200:
                 self._set_no_signal()
                 return
             data = r.json()
             forecast = data.get("forecast") if data.get("ok") else None
             if not isinstance(forecast, dict):
-                self._set_no_signal()
+                # The endpoint says why ({ok: false, error}); surface it as a
+                # short reason face instead of a blanket "No signal".
+                error = data.get("error") if isinstance(data, dict) else ""
+                self._set_no_signal(str(error or ""))
                 return
             self.apply_forecast(forecast)
-        except Exception:
-            self._set_no_signal()
+        except Exception as e:  # noqa: BLE001
+            self._set_no_signal(f"could not reach the app ({e.__class__.__name__})")
         finally:
             self._fetched_at = time.monotonic()
 

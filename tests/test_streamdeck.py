@@ -3595,3 +3595,33 @@ def test_weather_no_signal_face():
     assert w._label == "No signal"
     assert w._fc_label == "No signal"
     assert w._error is True
+
+
+# -- weather error faces (FoodAssistant-17tb) --------------------------------
+
+
+def test_weather_error_face_maps_reasons():
+    # A geocoder miss (a per-key location Open-Meteo cannot find) names the
+    # location as the problem instead of implying a dead network.
+    assert actions.weather_error_face("could not find that location") == "Bad\nlocation"
+    # Connectivity problems, whether upstream or between deck and app.
+    assert actions.weather_error_face(
+        "could not reach the weather service (ConnectError)") == "No\nnetwork"
+    assert actions.weather_error_face("weather lookup failed (TimeoutError)") == "No\nnetwork"
+    assert actions.weather_error_face("could not reach the app (ConnectError)") == "No\nnetwork"
+    # A rate-limited or erroring upstream (the wttr.in disease).
+    assert actions.weather_error_face("weather service returned HTTP 429") == "Weather\nbusy"
+    # Bad payloads.
+    assert actions.weather_error_face("could not parse the forecast") == "No\ndata"
+    assert actions.weather_error_face("weather service did not return forecast data") == "No\ndata"
+    # No detail keeps the classic face.
+    assert actions.weather_error_face("") == "No signal"
+    assert actions.weather_error_face("something else entirely") == "No signal"
+
+
+def test_weather_set_no_signal_uses_reason_face():
+    w = actions.WeatherState()
+    w._set_no_signal("could not find that location")
+    assert w._label == "Bad\nlocation"
+    assert w._fc_label == "Bad\nlocation"
+    assert w._error is True
