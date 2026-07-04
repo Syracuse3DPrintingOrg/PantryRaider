@@ -204,13 +204,18 @@ async def shopping_page(request: Request):
 @router.get("/expiring", response_class=HTMLResponse)
 async def expiring_page(request: Request, days: int = 7):
     grocy = GrocyClient()
+    grocy_error = None
     try:
         items = await grocy.get_expiring(days)
-    except Exception:
+    except Exception as e:
+        # Keep the page shell up during a Grocy outage, but say so honestly:
+        # an empty list would read as "all clear" (FoodAssistant-2cmm).
         items = []
+        grocy_error = str(e) or "Grocy is not reachable."
     return templates.TemplateResponse(request, "expiring.html", {
         "request": request,
         "items": items,
+        "grocy_error": grocy_error,
         "days": days,
         "active": "expiring",
         "mealie_configured": settings.mealie_configured(),

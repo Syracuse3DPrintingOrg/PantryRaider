@@ -6,7 +6,24 @@ from ..storage_categories import classify_location, location_for
 
 
 class GrocyError(Exception):
-    """Raised with Grocy's actual error message instead of a bare HTTP status."""
+    """Raised with Grocy's actual error message instead of a bare HTTP status.
+
+    Also raised, with an honest user-forward message, when Grocy (or the main
+    server, on a satellite) cannot be reached at all, so every route that
+    handles GrocyError degrades the same way during an outage instead of
+    letting a raw httpx connection error bubble up as a 500.
+    """
+
+
+def unreachable_message() -> str:
+    """The user-forward message for a dead upstream connection.
+
+    A satellite talks to Grocy through the main server's proxy, so a connect
+    failure there means the main server is gone, not Grocy itself.
+    """
+    if settings.is_satellite():
+        return "The main server is not reachable. Inventory will return when it is."
+    return "Grocy is not reachable. Inventory will return when it is."
 
 
 def stock_has_product(name: str, stock: list[dict]) -> bool:
@@ -60,9 +77,15 @@ class GrocyClient:
         self._cache: dict[str, list[dict]] = {}
 
     async def _request(self, method: str, path: str, body: dict | None = None) -> list | dict:
-        r = await _client.request(
-            method, f"{self.base}{path}", headers=self.headers, json=body
-        )
+        try:
+            r = await _client.request(
+                method, f"{self.base}{path}", headers=self.headers, json=body
+            )
+        except httpx.HTTPError as e:
+            # Connection refused, DNS failure, timeout: the service is down or
+            # unreachable. Surface it as a GrocyError with honest copy so every
+            # caller degrades consistently (FoodAssistant-2cmm).
+            raise GrocyError(unreachable_message()) from e
         if r.status_code >= 400:
             detail = r.text[:300].strip() or r.reason_phrase
             raise GrocyError(f"Grocy {r.status_code} on {path}: {detail}")

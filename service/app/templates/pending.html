@@ -86,6 +86,16 @@ function options(list, selected) {
 async function loadPending() {
   const r = await fetch('pending/');
   const data = await r.json();
+  if (!r.ok) {
+    // A satellite whose main server is unreachable gets an honest JSON
+    // detail; show that instead of pretending the queue is empty
+    // (FoodAssistant-2cmm).
+    document.getElementById('pending-empty').classList.add('d-none');
+    document.getElementById('pending-list').innerHTML =
+      `<div class="alert alert-warning"><i class="bi bi-plug me-2"></i>${esc(data.detail || 'The pending list did not load.')}</div>`;
+    document.getElementById('commitAllBtn').disabled = true;
+    return;
+  }
   const items = data.items || [];
   document.getElementById('pending-count').textContent = items.length;
   document.getElementById('pending-empty').classList.toggle('d-none', items.length > 0);

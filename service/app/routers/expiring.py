@@ -1,6 +1,6 @@
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import PlainTextResponse
-from ..services.grocy import GrocyClient
+from ..services.grocy import GrocyClient, GrocyError
 
 router = APIRouter(prefix="/expiring", tags=["expiring"])
 
@@ -9,7 +9,10 @@ router = APIRouter(prefix="/expiring", tags=["expiring"])
 async def get_expiring(days: int = Query(default=7, ge=0, le=365)):
     """Items expiring within N days, sorted soonest first."""
     grocy = GrocyClient()
-    return await grocy.get_expiring(days)
+    try:
+        return await grocy.get_expiring(days)
+    except GrocyError as e:
+        raise HTTPException(502, str(e))
 
 
 @router.get("/display", response_class=PlainTextResponse)
@@ -20,7 +23,11 @@ async def get_expiring_display(days: int = Query(default=3, ge=0, le=30)):
     Expired items show as '0d' or negative.
     """
     grocy = GrocyClient()
-    items = await grocy.get_expiring(days)
+    try:
+        items = await grocy.get_expiring(days)
+    except GrocyError:
+        # A TFT display can only render plain text, so keep it short.
+        return "Inventory unavailable"
     if not items:
         return "No items expiring soon"
     lines = []
@@ -37,7 +44,10 @@ async def get_expiring_display(days: int = Query(default=3, ge=0, le=30)):
 async def get_expiring_summary():
     """Counts by urgency bucket: for HA sensors."""
     grocy = GrocyClient()
-    all_items = await grocy.get_expiring(days=30)
+    try:
+        all_items = await grocy.get_expiring(days=30)
+    except GrocyError as e:
+        raise HTTPException(502, str(e))
     return {
         "expired": sum(1 for i in all_items if i["days_remaining"] < 0),
         "today": sum(1 for i in all_items if i["days_remaining"] == 0),

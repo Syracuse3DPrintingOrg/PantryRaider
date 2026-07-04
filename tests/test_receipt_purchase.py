@@ -7,10 +7,16 @@ import pytest
 
 # gemini.py imports google.generativeai at module load; that native dependency
 # is not installed in the pure-logic test environment. Stub it so the shared
-# receipt parsing helpers (which need no SDK) stay importable.
+# receipt parsing helpers (which need no SDK) stay importable. The stub also
+# carries no-op configure/GenerativeModel: sys.modules changes leak to every
+# later test module, and a later test that reaches GeminiProvider.__init__
+# (e.g. /health with leaked gemini settings) must not crash on a bare module
+# object with an AttributeError.
 if "google.generativeai" not in sys.modules:
     google_pkg = sys.modules.setdefault("google", types.ModuleType("google"))
     genai_stub = types.ModuleType("google.generativeai")
+    genai_stub.configure = lambda **kwargs: None
+    genai_stub.GenerativeModel = lambda *args, **kwargs: types.SimpleNamespace()
     google_pkg.generativeai = genai_stub
     sys.modules["google.generativeai"] = genai_stub
 

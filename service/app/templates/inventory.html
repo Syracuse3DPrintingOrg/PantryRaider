@@ -104,6 +104,13 @@
   </div>
 </div>
 
+<!-- Outage banner (FoodAssistant-2cmm): shown when the inventory data cannot
+     be fetched, with the honest reason from the API. The page stays up. -->
+<div class="alert alert-warning d-none align-items-center gap-2" id="inventory-status" role="alert">
+  <i class="bi bi-plug"></i>
+  <div id="inventory-status-text"></div>
+</div>
+
 <div class="row g-3" id="panels">
   {% for c in panels %}
   <div class="col-md-6" id="col-{{ c.key }}">
@@ -394,17 +401,29 @@ async function moveItem(productId, bucket, name) {
 async function loadDashboard() {
   const sort = document.getElementById('sortSelect').value;
   document.getElementById('loading-spinner').style.display = '';
+  const status = document.getElementById('inventory-status');
   try {
     const r = await fetch(`/inventory/dashboard?sort=${sort}`);
-    if (!r.ok) throw new Error(await r.text());
+    if (!r.ok) {
+      // Outages answer with a JSON detail written for people ("Grocy is not
+      // reachable..."), so surface that, never a raw error page.
+      const detail = (await r.json().catch(() => ({}))).detail;
+      throw new Error(detail || 'The inventory list did not load. It usually comes back on its own; Refresh retries now.');
+    }
     const data = await r.json();
+    status.classList.add('d-none');
+    status.classList.remove('d-flex');
     const allItems = PANEL_KEYS.flatMap(k => data[k] || []);
     storeItems(allItems);
     PANEL_KEYS.forEach(k => renderPanel(`panel-${k}`, `count-${k}`, data[k] || [], k));
   } catch(e) {
+    document.getElementById('inventory-status-text').textContent = e.message;
+    status.classList.remove('d-none');
+    status.classList.add('d-flex');
     PANEL_KEYS.forEach(b => {
       document.getElementById(`panel-${b}`).innerHTML =
-        `<div class="panel-empty text-danger">Failed to load: ${e.message}</div>`;
+        '<div class="panel-empty">Unavailable right now</div>';
+      document.getElementById(`count-${b}`).textContent = '—';
     });
   } finally {
     document.getElementById('loading-spinner').style.display = 'none';

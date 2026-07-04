@@ -15,7 +15,26 @@ from ..config import settings
 
 
 class MealieError(Exception):
-    """Raised with Mealie's actual error message instead of a bare HTTP status."""
+    """Raised with Mealie's actual error message instead of a bare HTTP status.
+
+    Also raised, with an honest user-forward message, when Mealie (or the main
+    server, on a satellite) cannot be reached at all, so every route that
+    handles MealieError degrades the same way during an outage instead of
+    letting a raw httpx connection error bubble up as a 500.
+    """
+
+
+def unreachable_message() -> str:
+    """The user-forward message for a dead upstream connection.
+
+    A satellite talks to Mealie through the main server's proxy, so a connect
+    failure there means the main server is gone, not Mealie itself.
+    """
+    if settings.is_satellite():
+        return ("The main server is not reachable. Recipes, meal plan, and "
+                "shopping will return when it is.")
+    return ("Mealie is not reachable. Recipes, meal plan, and shopping will "
+            "return when it is.")
 
 
 _client = httpx.AsyncClient(timeout=20.0)
@@ -70,10 +89,16 @@ class MealieClient:
         return bool(settings.mealie_base_url and settings.mealie_api_key)
 
     async def _request(self, method: str, path: str, body=None, params=None):
-        r = await _client.request(
-            method, f"{self.base}/api{path}",
-            headers=self.headers, json=body, params=params,
-        )
+        try:
+            r = await _client.request(
+                method, f"{self.base}/api{path}",
+                headers=self.headers, json=body, params=params,
+            )
+        except httpx.HTTPError as e:
+            # Connection refused, DNS failure, timeout: the service is down or
+            # unreachable. Surface it as a MealieError with honest copy so
+            # every caller degrades consistently (FoodAssistant-2cmm).
+            raise MealieError(unreachable_message()) from e
         if r.status_code >= 400:
             detail = r.text[:300].strip() or r.reason_phrase
             raise MealieError(f"Mealie {r.status_code} on {path}: {detail}")

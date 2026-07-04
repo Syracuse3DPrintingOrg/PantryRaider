@@ -932,8 +932,14 @@ async function loadSuggestions() {
     const tiers = data.tiers || {};
     meta.textContent = `${data.recipes_considered} recipes (${data.external_considered} from the web) matched against ${data.inventory_items} inventory items.`;
 
+    // Inventory outage (FoodAssistant-2cmm): the recipes still list, but with
+    // no stock to match against every tier reads "worth shopping for". Say so.
+    const grocyNote = data.grocy_error
+      ? `<div class="col-12"><div class="alert alert-warning mb-2"><i class="bi bi-plug me-2"></i>${data.grocy_error} Matching against your stock is paused, so recipes may look like they need more shopping than they do.</div></div>`
+      : '';
+
     // Local (Mealie) tiers
-    el.innerHTML = Object.entries(TIER_META).map(([key, m]) => {
+    el.innerHTML = grocyNote + Object.entries(TIER_META).map(([key, m]) => {
       const items = tiers[key] || [];
       return `
       <div class="col-12">

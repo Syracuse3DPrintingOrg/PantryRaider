@@ -57,9 +57,11 @@ async def _forward(request: Request, subpath: str) -> Response:
             params=dict(request.query_params),
             content=body or None,
         )
-    except Exception as exc:
+    except Exception:
         return JSONResponse(
-            {"detail": f"could not reach the main server: {exc}"}, status_code=502
+            {"detail": "The main server is not reachable. "
+                       "This will work again when it is."},
+            status_code=502,
         )
     media = up.headers.get("content-type", "application/json")
     return Response(content=up.content, status_code=up.status_code, media_type=media)
@@ -265,11 +267,19 @@ async def scan_barcode(body: ScanRequest, request: Request, db: Session = Depend
                             "mode": mode, "linked": item.name}
             except Exception:  # noqa: BLE001 - fall through to the report
                 pass
+            # An unreachable Grocy is an outage, not an unlinked barcode: say
+            # the honest reason instead of blaming the scan
+            # (FoodAssistant-2cmm).
+            from ..services.grocy import GrocyError
+            if isinstance(e, GrocyError) and "not reachable" in str(e):
+                error = str(e)
+            else:
+                error = ("No stocked product is linked to this barcode. "
+                         "Add the item once through Manage Pantry and the "
+                         "barcode links automatically. (" + str(e) + ")")
             return JSONResponse(
                 {"status": "consume_failed", "barcode": barcode, "mode": mode,
-                 "error": "No stocked product is linked to this barcode. "
-                          "Add the item once through Manage Pantry and the "
-                          "barcode links automatically. (" + str(e) + ")"},
+                 "error": error},
                 status_code=200,
             )
     if mode == "shopping":

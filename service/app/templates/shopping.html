@@ -55,14 +55,24 @@
 let currentListId = '';
 let itemsById = {};
 
+function esc(s) {
+  return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
 async function load(listId = '') {
   const el = document.getElementById('items');
   try {
     const r = await fetch('mealie/shopping' + (listId ? '?list_id=' + listId : ''));
     if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
     const data = await r.json();
+    if (data.error) {
+      // Mealie down or unconfigured: the API answers with an honest reason
+      // instead of an error status, so say that rather than "no lists yet".
+      el.innerHTML = `<div class="alert alert-warning"><i class="bi bi-plug me-2"></i>${esc(data.error)}</div>`;
+      return;
+    }
     if (!data.list) {
-      el.innerHTML = '<div class="alert alert-info">No shopping lists in Mealie yet — create one in the Mealie UI first.</div>';
+      el.innerHTML = '<div class="alert alert-info">No shopping lists in Mealie yet: create one in the Mealie UI first.</div>';
       return;
     }
     currentListId = data.list.id;

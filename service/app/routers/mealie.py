@@ -285,10 +285,16 @@ async def suggest(
             recipes = await m.get_recipes_with_ingredients()
         except MealieError as e:
             raise HTTPException(502, str(e))
+    grocy_error = None
     try:
         stock = await GrocyClient().get_full_stock()
-    except Exception:
+    except Exception as e:
+        # Suggestions still work without inventory, but silently matching
+        # against nothing would file every recipe under "worth shopping for".
+        # Carry the honest reason so the Cook page can say so
+        # (FoodAssistant-2cmm).
         stock = []
+        grocy_error = getattr(e, "detail", None) or str(e) or "Grocy is not reachable."
 
     ext_recipes: list[dict] = []
     if external and stock:
@@ -316,6 +322,7 @@ async def suggest(
         "recipes_considered": len(recipes) + len(ext_recipes),
         "external_considered": len(ext_recipes),
         "inventory_items": len(stock),
+        "grocy_error": grocy_error,
         "mealie_url": settings.mealie_link_url(),
     }
 
@@ -751,8 +758,11 @@ async def get_shopping(list_id: str = ""):
     except Exception as e:
         # Never 500 to the page (it parses JSON): return an empty list plus a
         # readable error so the Shopping tab degrades instead of breaking when
-        # Mealie is not configured or unreachable on a fresh install.
-        return {"lists": [], "list": None, "items": [], "error": str(e)}
+        # Mealie is not configured or unreachable on a fresh install. An
+        # HTTPException carries its message in .detail; show that, not
+        # "400: ...".
+        return {"lists": [], "list": None, "items": [],
+                "error": getattr(e, "detail", None) or str(e)}
 
     items = detail.get("listItems") or []
     items.sort(key=lambda i: (bool(i.get("checked")), (i.get("note") or "").lower()))

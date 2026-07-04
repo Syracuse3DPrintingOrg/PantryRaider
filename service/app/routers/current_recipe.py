@@ -27,7 +27,8 @@ timers_router = APIRouter(prefix="/timers", tags=["timers"])
 
 # Forwarding client for the satellite -> main server case (see _upstream).
 # The tight connect timeout matters on a kiosk LAN: a button press should fail
-# fast and report "could not reach the main server" rather than hang the tap.
+# fast and report that the main server is not reachable rather than hang the
+# tap.
 _fwd_client = httpx.AsyncClient(timeout=httpx.Timeout(15.0, connect=5.0))
 
 # Satellite-only micro-cache for GET /timers. Several surfaces poll it in the
@@ -80,9 +81,11 @@ async def _forward(request: Request, path: str) -> Response:
             params=dict(request.query_params),
             content=body or None,
         )
-    except Exception as exc:
+    except Exception:
         return JSONResponse(
-            {"detail": f"could not reach the main server: {exc}"}, status_code=502
+            {"detail": "The main server is not reachable. "
+                       "This will work again when it is."},
+            status_code=502,
         )
     media = up.headers.get("content-type", "application/json")
     return Response(content=up.content, status_code=up.status_code, media_type=media)
@@ -103,9 +106,11 @@ async def _create_timer_upstream(label: str, seconds: float) -> Response:
             headers={"X-API-Key": settings.upstream_api_key},
             json={"label": label, "seconds": seconds},
         )
-    except Exception as exc:
+    except Exception:
         return JSONResponse(
-            {"detail": f"could not reach the main server: {exc}"}, status_code=502
+            {"detail": "The main server is not reachable. "
+                       "This will work again when it is."},
+            status_code=502,
         )
     media = up.headers.get("content-type", "application/json")
     return Response(content=up.content, status_code=up.status_code, media_type=media)

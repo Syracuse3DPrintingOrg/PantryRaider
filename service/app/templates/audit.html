@@ -89,6 +89,13 @@
     try {
       var r = await fetch("../audit/locations", { headers: { "Accept": "application/json" } });
       var data = await r.json();
+      if (!r.ok) {
+        // Outages answer with an honest JSON detail ("Grocy is not
+        // reachable..."): show that instead of "no locations".
+        sel.innerHTML = '<option value="">' +
+          esc((data && data.detail) || 'Could not load locations') + '</option>';
+        return;
+      }
       var locs = (data && data.locations) || [];
       if (!locs.length) {
         sel.innerHTML = '<option value="">No stocked locations found</option>';

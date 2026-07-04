@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from ..models.food import ImportRequest, FoodItem, FoodItemOverride
 from ..services.defaults import apply_defaults
-from ..services.grocy import GrocyClient
+from ..services.grocy import GrocyClient, GrocyError
 from ..storage_categories import category_keys
 
 router = APIRouter(prefix="/inventory", tags=["inventory"])
@@ -48,7 +48,10 @@ async def consume_item(product_id: int, amount: float = 1.0):
 async def get_stock():
     """Return full stock list from Grocy."""
     grocy = GrocyClient()
-    return await grocy.get_stock()
+    try:
+        return await grocy.get_stock()
+    except GrocyError as e:
+        raise HTTPException(502, str(e))
 
 
 _SORT_KEYS = {
@@ -101,7 +104,12 @@ async def move_item(product_id: int, body: MoveRequest):
 async def get_dashboard(sort: str = "expiry_asc"):
     """Return stock grouped by storage bucket, sorted by the requested key."""
     grocy = GrocyClient()
-    items = await grocy.get_full_stock()
+    try:
+        items = await grocy.get_full_stock()
+    except GrocyError as e:
+        # 502 with honest copy, never a raw 500: the dashboard renders the
+        # detail as its outage banner (FoodAssistant-2cmm).
+        raise HTTPException(502, str(e))
 
     key_fn = _SORT_KEYS.get(sort, _SORT_KEYS["expiry_asc"])
     items.sort(key=key_fn, reverse=sort in _REVERSED_SORTS)

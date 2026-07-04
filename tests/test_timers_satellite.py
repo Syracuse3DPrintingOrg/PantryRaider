@@ -153,7 +153,7 @@ def test_satellite_reports_unreachable_server_as_502(sat_client):
     recorder.raise_exc = httpx.ConnectError("boom")
     r = client.get("/timers")
     assert r.status_code == 502
-    assert "could not reach the main server" in r.json()["detail"]
+    assert "main server is not reachable" in r.json()["detail"]
 
 
 # Recipe-suggestion start (POST /current-recipe/timers/start) -----------------
@@ -193,7 +193,7 @@ def test_suggestion_start_upstream_down_is_502(sat_client):
     current_recipe.set_active({"title": "x", "steps": ["Simmer 20 minutes"]})
     r = client.post("/current-recipe/timers/start", json={"step_index": 0})
     assert r.status_code == 502
-    assert "could not reach the main server" in r.json()["detail"]
+    assert "main server is not reachable" in r.json()["detail"]
 
 
 # Server-mode regression -------------------------------------------------------

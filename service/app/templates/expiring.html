@@ -31,6 +31,8 @@
   </div>
 </div>
 
+{% with upstream_down_message = grocy_error %}{% include "_upstream_down.html" %}{% endwith %}
+
 <!-- Summary badges -->
 <div class="row g-3 mb-4">
   {% set expired  = items | selectattr('days_remaining', 'lt', 0) | list %}
@@ -119,7 +121,7 @@
     </tbody>
   </table>
 </div>
-{% else %}
+{% elif not grocy_error %}
 <div class="text-center py-5 text-muted">
   <i class="bi bi-check-circle fs-1 d-block mb-2 text-success"></i>
   Nothing expiring within {{ days }} days.

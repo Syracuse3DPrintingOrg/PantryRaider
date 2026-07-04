@@ -46,8 +46,12 @@ async def _forward(request: Request, subpath: str) -> Response:
             request.method, f"{base}/action-items{subpath}",
             headers=headers, params=dict(request.query_params), content=body or None,
         )
-    except Exception as exc:
-        return JSONResponse({"detail": f"could not reach the main server: {exc}"}, status_code=502)
+    except Exception:
+        return JSONResponse(
+            {"detail": "The main server is not reachable. "
+                       "This will work again when it is."},
+            status_code=502,
+        )
     return Response(content=up.content, status_code=up.status_code,
                     media_type=up.headers.get("content-type", "application/json"))
 

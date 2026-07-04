@@ -609,6 +609,9 @@ async function addShoppingByName() {
     const lr = await fetch('mealie/shopping');
     if (!lr.ok) throw new Error('shopping list unavailable');
     const data = await lr.json();
+    // An outage arrives as an honest error field; show that rather than
+    // claiming there is no list (FoodAssistant-2cmm).
+    if (data.error) throw new Error(data.error);
     const listId = data.list && data.list.id;
     if (!listId) throw new Error('no shopping list in Mealie');
     const r = await fetch('mealie/shopping/items', {

@@ -24,7 +24,7 @@ from ..config import settings
 from ..database import SessionLocal
 from ..services import audit
 from ..services.barcode import lookup_barcode, BarcodeNotFound, BarcodeServiceError
-from ..services.grocy import GrocyClient
+from ..services.grocy import GrocyClient, GrocyError
 
 router = APIRouter(prefix="/audit", tags=["audit"])
 
@@ -53,9 +53,11 @@ async def _forward(request: Request, subpath: str) -> Response:
             params=dict(request.query_params),
             content=body or None,
         )
-    except Exception as exc:  # noqa: BLE001
+    except Exception:  # noqa: BLE001
         return JSONResponse(
-            {"detail": f"could not reach the main server: {exc}"}, status_code=502
+            {"detail": "The main server is not reachable. "
+                       "This will work again when it is."},
+            status_code=502,
         )
     media = up.headers.get("content-type", "application/json")
     return Response(content=up.content, status_code=up.status_code, media_type=media)
@@ -89,7 +91,10 @@ async def audit_locations(request: Request):
     """The storage locations that currently hold stock, for the start picker."""
     if _upstream():
         return await _forward(request, "/locations")
-    entries = await GrocyClient().get_full_stock()
+    try:
+        entries = await GrocyClient().get_full_stock()
+    except GrocyError as e:
+        raise HTTPException(502, str(e))
     seen: dict[str, int] = {}
     for e in entries:
         name = (e.get("location_name") or e.get("storage_bucket") or "").strip()
@@ -108,7 +113,10 @@ async def audit_start(body: StartRequest, request: Request):
     location = body.location.strip()
     if not location:
         raise HTTPException(400, "A storage location is required")
-    expected = await _stock_for_location(location)
+    try:
+        expected = await _stock_for_location(location)
+    except GrocyError as e:
+        raise HTTPException(502, str(e))
     return audit.start(location, expected)
 
 
