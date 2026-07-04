@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import inspect
 import time
+from pathlib import Path
 from dataclasses import dataclass, field, replace
 from typing import Any, Awaitable, Callable, Optional
 
@@ -2119,8 +2120,40 @@ async def scale_current_recipe(client: Any, base_url: str, factor: float) -> str
     return "Failed"
 
 
+# Where the host bridge drops its shared auth token (FoodAssistant-pxcm).
+# The bridge writes INSTALL_DIR/data/bridge-token at startup; the deck runs on
+# the same host, so it reads the same well-known path on both a pi_hosted and
+# a pi_remote install. Overridable per device via bridge_token_path in
+# config.toml.
+DEFAULT_BRIDGE_TOKEN_PATH = "/opt/foodassistant/data/bridge-token"
+
+# One cached token per path; a 401 from the bridge clears it so the next call
+# re-reads a rotated token from disk. A missing file is never cached (the
+# bridge may write it after the deck starts).
+_bridge_token_cache: dict[str, str] = {}
+
+
+def bridge_headers(token_path: str = "") -> dict:
+    """Auth header for a bridge call: the shared token when readable, else {}."""
+    path = token_path or DEFAULT_BRIDGE_TOKEN_PATH
+    token = _bridge_token_cache.get(path, "")
+    if not token:
+        try:
+            token = Path(path).read_text().strip()
+        except OSError:
+            return {}
+        if token:
+            _bridge_token_cache[path] = token
+    return {"X-Bridge-Token": token} if token else {}
+
+
+def invalidate_bridge_token(token_path: str = "") -> None:
+    """Drop the cached token so the next bridge call re-reads the file."""
+    _bridge_token_cache.pop(token_path or DEFAULT_BRIDGE_TOKEN_PATH, None)
+
+
 async def bridge_post(client: Any, host_bridge_url: str, path: str,
-                      timeout: float = 0.0) -> str:
+                      timeout: float = 0.0, token_path: str = "") -> str:
     """POST to a host-bridge path, best-effort. Returns a short face.
 
     ``host_bridge_url`` is the bridge base (empty off-Pi, so the call is a
@@ -2132,11 +2165,14 @@ async def bridge_post(client: Any, host_bridge_url: str, path: str,
     base = (host_bridge_url or "").rstrip("/")
     if not base:
         return "No bridge"
-    kwargs: dict[str, Any] = {"json": {}}
+    kwargs: dict[str, Any] = {"json": {}, "headers": bridge_headers(token_path)}
     if timeout:
         kwargs["timeout"] = timeout
     try:
         r = await client.post(f"{base}{path}", **kwargs)
+        if r.status_code == 401:
+            # Stale token: forget it so the next press reads the fresh one.
+            invalidate_bridge_token(token_path)
         return "OK" if r.status_code == 200 else "Failed"
     except Exception:  # noqa: BLE001
         # A timeout on a slow op (reboot/update) means the request reached the
@@ -2192,7 +2228,8 @@ class HealthState:
         try:
             import httpx
             async with httpx.AsyncClient(timeout=2.0) as client:
-                r = await client.get(f"{base}/system/health")
+                r = await client.get(f"{base}/system/health",
+                                     headers=bridge_headers())
             if r.status_code == 200:
                 warnings = (r.json() or {}).get("warnings") or []
                 self.apply(True, len(warnings))
@@ -2235,6 +2272,9 @@ class ActionContext:
     # Base URL of the host bridge (empty off-Pi). Bridge actions POST here via
     # ctx.client; display_power, health, and bridge_action keys all use it.
     host_bridge_url: str = ""
+    # Path of the bridge's shared auth token file ("" = the well-known
+    # default). Passed through to bridge_post so pressed keys authenticate.
+    bridge_token_path: str = ""
     ha_entity_refresh: Callable[[], Awaitable[None]] = field(
         default=lambda: __import__("asyncio").sleep(0)
     )
@@ -2377,7 +2417,8 @@ async def run_action(spec: ActionSpec, ctx: ActionContext, long_press: bool = Fa
     if spec.kind == "display_power":
         # Wake or blank the kiosk display via the host bridge.
         path = "/display/wake" if spec.power_on else "/display/blank"
-        face = await bridge_post(ctx.client, ctx.host_bridge_url, path)
+        face = await bridge_post(ctx.client, ctx.host_bridge_url, path,
+                                 token_path=ctx.bridge_token_path)
         if face in ("OK", "Sent"):
             return "On" if spec.power_on else "Off"
         return face
@@ -2419,7 +2460,8 @@ async def run_action(spec: ActionSpec, ctx: ActionContext, long_press: bool = Fa
         slow = spec.bridge_path in ("/update", "/reboot")
         timeout = 2.0 if slow else 0.0
         return await bridge_post(
-            ctx.client, ctx.host_bridge_url, spec.bridge_path, timeout=timeout
+            ctx.client, ctx.host_bridge_url, spec.bridge_path, timeout=timeout,
+            token_path=ctx.bridge_token_path,
         )
 
     if spec.kind == "camera":

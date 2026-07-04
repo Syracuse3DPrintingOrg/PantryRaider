@@ -12,7 +12,7 @@ from .hardware import is_raspberry_pi
 
 # Single source of truth for the app version (shown in the UI, used by the
 # update checker, and reported by FastAPI). Bump on each tagged release.
-APP_VERSION = "0.7.120"
+APP_VERSION = "0.7.121"
 
 # Single source of truth for the product's display name. The runtime identifiers
 # (systemd units, install paths, the foodassistant_streamdeck package, the
@@ -602,6 +602,9 @@ def _bridge_hostname() -> str:
         return ""
     try:
         import httpx
+        # No X-Bridge-Token here: GET /hostname is on the bridge's exempt
+        # read-only list, and services.bridge imports this module, so the
+        # token helper cannot be used from config without a circular import.
         r = httpx.get(f"{_HOST_BRIDGE_URL}/hostname", timeout=1.5)
         if r.status_code == 200:
             name = (r.json() or {}).get("hostname") or ""

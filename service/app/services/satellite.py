@@ -19,6 +19,7 @@ from urllib.parse import urlparse, urlunparse
 import httpx
 
 from ..config import settings, SATELLITE_PULL_FIELDS, APP_VERSION
+from .bridge import bridge_headers, invalidate_bridge_token
 
 logger = logging.getLogger("foodassistant.satellite")
 
@@ -181,7 +182,8 @@ def _push_streamdeck_settings(timeout: float = 4.0) -> bool:
         from ..hardware import is_raspberry_pi
         if not (is_raspberry_pi() and settings.has_streamdeck):
             return False
-        cur = httpx.get(f"{_HOST_BRIDGE}/streamdeck/config", timeout=timeout)
+        cur = httpx.get(f"{_HOST_BRIDGE}/streamdeck/config", timeout=timeout,
+                        headers=bridge_headers())
         config = (cur.json() or {}).get("config", {}) if cur.status_code == 200 else {}
         merged = _merge_streamdeck_settings(
             config,
@@ -199,8 +201,11 @@ def _push_streamdeck_settings(timeout: float = 4.0) -> bool:
             settings.streamdeck_screensaver_layout,
         )
         resp = httpx.post(
-            f"{_HOST_BRIDGE}/streamdeck/config", json={"config": merged}, timeout=timeout
+            f"{_HOST_BRIDGE}/streamdeck/config", json={"config": merged}, timeout=timeout,
+            headers=bridge_headers(),
         )
+        if resp.status_code == 401:
+            invalidate_bridge_token()
         return resp.status_code == 200
     except Exception as exc:  # bridge down, not a Pi, etc.: leave the deck as-is
         logger.warning("satellite sync: could not push Stream Deck settings: %s", exc)
@@ -217,7 +222,10 @@ def _push_timezone(tz: str, timeout: float = 4.0) -> bool:
         if not tz or not is_raspberry_pi():
             return False
         resp = httpx.post(f"{_HOST_BRIDGE}/system/timezone",
-                          json={"tz": tz}, timeout=timeout)
+                          json={"tz": tz}, timeout=timeout,
+                          headers=bridge_headers())
+        if resp.status_code == 401:
+            invalidate_bridge_token()
         return resp.status_code == 200
     except Exception as exc:  # bridge down / old: leave the host clock as-is
         logger.warning("satellite sync: could not push timezone: %s", exc)

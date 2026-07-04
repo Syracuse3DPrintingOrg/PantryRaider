@@ -1485,6 +1485,7 @@ class Controller:
             ha_base_url=self.config.ha_base_url,
             ha_token=self.config.ha_token,
             host_bridge_url=getattr(self.config, "host_bridge_url", ""),
+            bridge_token_path=getattr(self.config, "bridge_token_path", ""),
             ha_entity_refresh=self._refresh_ha_entities,
             keypad_enter=self._enter_keypad,
             keypad_press=self._keypad_press,
@@ -1557,9 +1558,13 @@ class Controller:
         url = getattr(self.config, "host_bridge_url", "")
         if not url:
             return
+        token_path = getattr(self.config, "bridge_token_path", "")
         try:
             async with httpx.AsyncClient(timeout=2.0) as c:
-                await c.post(f"{url}/activity", json={"source": "streamdeck"})
+                r = await c.post(f"{url}/activity", json={"source": "streamdeck"},
+                                 headers=actions.bridge_headers(token_path))
+            if r.status_code == 401:
+                actions.invalidate_bridge_token(token_path)
         except Exception:
             pass
 
@@ -1574,7 +1579,9 @@ class Controller:
             return
         try:
             async with httpx.AsyncClient(timeout=2.0) as c:
-                data = (await c.get(f"{url}/activity")).json()
+                headers = actions.bridge_headers(
+                    getattr(self.config, "bridge_token_path", ""))
+                data = (await c.get(f"{url}/activity", headers=headers)).json()
         except Exception:
             return
         if _external_activity_is_fresh(data.get("last_activity"), time.time()):

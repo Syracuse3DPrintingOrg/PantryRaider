@@ -8,6 +8,12 @@ uses network_mode: host.
 Exposes a minimal HTTP API for operations that need host-level access, such
 as Wi-Fi, hostname, display KMS rotation, and service restarts.
 
+Authentication: at startup the bridge writes a shared token to
+INSTALL_DIR/data/bridge-token and requires it back as the X-Bridge-Token
+header on every route except the read-only status GETs in TOKEN_EXEMPT_GET.
+Tokenless requests are logged and allowed while GRACE_MODE is on (one
+release, so mixed-version fleets keep a working update path).
+
 Endpoints
 ---------
 GET  /wifi/status          current Wi-Fi state + SSID (from nmcli)
@@ -49,11 +55,13 @@ POST /usb/backup           snapshot the data dirs into pantryraider-backups/ on 
 GET  /usb/photos           list image files in the drive's pictures/ or photos/ folder
 GET  /usb/photo?path=name  serve one image from that folder (read-only, size-capped)
 """
+import hmac
 import http.server
 import json
 import os
 from pathlib import Path
 import re
+import secrets
 import shutil
 import subprocess
 import sys
@@ -72,6 +80,103 @@ MEALIE_PORT = 9285
 # Flag file written by the AP watchdog service when the fallback hotspot is
 # active. Checked by GET /ap/status and removed by POST /ap/disable.
 _AP_FLAG = "/run/foodassistant-ap-active"
+
+# --- Shared-token handshake (FoodAssistant-pxcm) ---------------------------
+# The bridge runs as root and used to trust anything on localhost, which put
+# reboot, restore, and udev writes one curl away from any local process. At
+# startup it now writes a random token where the app can read it and requires
+# that token back (header X-Bridge-Token) on every state-changing route.
+#
+# Token location: INSTALL_DIR/data/bridge-token. That directory is the app
+# container's /app/data bind mount on a pi_hosted appliance, and the venv
+# app's DATA_DIR on a pi_remote, so one well-known path serves both shapes.
+# The Stream Deck controller reads the same path.
+TOKEN_PATH = os.path.join(INSTALL_DIR, "data", "bridge-token")
+
+# Grace mode: a request with NO token is logged and allowed, so a fleet where
+# the app or deck predates the handshake cannot lock itself out of its own
+# update path. A request with a WRONG token is always denied (the client
+# re-reads the token file and recovers on its next call).
+# TODO(FoodAssistant-pxcm): flip to False one release after every fleet
+# component (app, Stream Deck controller, satellite sync) ships the
+# X-Bridge-Token header, so a device that updates the bridge first keeps a
+# working OTA path in the meantime. Enforcing in the same release as the
+# clients would brick mixed-version fleets mid-update.
+GRACE_MODE = True
+
+# GET routes that stay open without a token. Deliberately a short list of
+# harmless read-only status probes: no secrets, no file contents, nothing a
+# local process could not already learn, and some are polled by callers that
+# may predate the token (the app's hostname probe, the deck's activity poll).
+# Everything else, including every POST, requires the token.
+TOKEN_EXEMPT_GET = frozenset({
+    "/hostname",
+    "/activity",
+    "/system/health",
+    "/hardware/status",
+    "/ap/status",
+    "/mealie/status",
+    "/stack/status",
+    "/display/rotation",
+})
+
+# Loaded (or created) once at startup by _load_or_create_token(). Empty only
+# if the token file could not be written, in which case every check falls
+# back to the grace path so the bridge keeps working.
+_EXPECTED_TOKEN = ""
+
+
+def _load_or_create_token(path=TOKEN_PATH):
+    """Return the shared token, creating the file when missing.
+
+    Reuses an existing token so app and deck caches stay valid across bridge
+    restarts. The data dir is created defensively: on first boot this service
+    can start before firstboot.sh (or docker) has made INSTALL_DIR/data.
+
+    The file is mode 644, not 600: the directory is the real boundary. The
+    bridge runs as root but its callers do not all run as root (the venv app
+    and the Stream Deck controller run as the primary user), and on a hosted
+    appliance the data dir stays root-owned, so a 600 root:root file would be
+    unreadable to them. Tradeoff: any local account can read the token, which
+    is acceptable on a single-user appliance and still a large step up from
+    trusting every localhost request outright.
+    """
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        try:
+            existing = Path(path).read_text().strip()
+        except OSError:
+            existing = ""
+        if existing:
+            os.chmod(path, 0o644)
+            return existing
+        token = secrets.token_hex(32)
+        Path(path).write_text(token + "\n")
+        os.chmod(path, 0o644)
+        return token
+    except OSError as e:
+        print(f"bridge token: could not write {path}: {e}", flush=True)
+        return ""
+
+
+def _token_gate(method, path, provided, expected, grace):
+    """Pure auth decision for one request: 'ok', 'grace', or 'deny'.
+
+    Exempt read-only GETs are always 'ok'. A matching token is 'ok'. A
+    missing token is 'grace' while GRACE_MODE holds, else 'deny'. A present
+    but wrong token is always 'deny' (the client re-reads the file and
+    recovers). When the bridge has no token of its own to compare against
+    the check degrades to 'grace' so it never locks everyone out.
+    """
+    clean = (path or "").split("?", 1)[0]
+    if method == "GET" and clean in TOKEN_EXEMPT_GET:
+        return "ok"
+    if not expected:
+        return "grace"
+    provided = (provided or "").strip()
+    if provided:
+        return "ok" if hmac.compare_digest(provided, expected) else "deny"
+    return "grace" if grace else "deny"
 
 # Interface name prefixes that never count as wired LAN connectivity: Wi-Fi
 # (handled separately), Docker bridges, veth pairs, tunnels, and libvirt.
@@ -2029,6 +2134,24 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         n = int(self.headers.get("Content-Length", 0))
         return json.loads(self.rfile.read(n)) if n else {}
 
+    def _authorized(self):
+        """Token gate for this request; sends the 401 itself when denied."""
+        verdict = _token_gate(
+            self.command, self.path,
+            self.headers.get("X-Bridge-Token", ""),
+            _EXPECTED_TOKEN, GRACE_MODE,
+        )
+        if verdict == "deny":
+            self._send(401, {"ok": False, "error": "missing or invalid X-Bridge-Token"})
+            return False
+        if verdict == "grace":
+            print(
+                f"bridge auth: allowing tokenless {self.command} {self.path} "
+                "(grace mode; this will be denied in a future release)",
+                flush=True,
+            )
+        return True
+
     # --- Display + activity coordination (FoodAssistant-otiy) -------------
 
     def _activity_get(self):
@@ -2104,6 +2227,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         self._send(200, resp)
 
     def do_GET(self):
+        if not self._authorized():
+            return
         if self.path == "/wifi/status":
             self._wifi_status()
         elif self.path == "/wifi/scan":
@@ -2140,6 +2265,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._send(404, {"error": "not found"})
 
     def do_POST(self):
+        if not self._authorized():
+            return
         if self.path == "/wifi/connect":
             self._wifi_connect()
         elif self.path == "/hostname":
@@ -3115,6 +3242,9 @@ class _Handler(http.server.BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
+    # Write (or reuse) the shared token before serving, so the app and deck
+    # can pick it up as soon as they start (FoodAssistant-pxcm).
+    _EXPECTED_TOKEN = _load_or_create_token()
     # Restore the persisted display idle timeout and start the blanking loop.
     _activity_state["idle_minutes"] = _read_persisted_idle_minutes()
     threading.Thread(target=_display_idle_loop, daemon=True).start()

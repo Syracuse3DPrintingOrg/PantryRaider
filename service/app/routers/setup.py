@@ -35,6 +35,7 @@ from ..dependencies import reset_providers
 from ..hardware import is_raspberry_pi, board_model, supports_local_stack
 from ..models.db_models import StreamDeckProfile
 from ..navigation import all_tabs, default_tabs, normalize_custom_tabs, NAV_TABS, CUSTOM_PREFIX
+from ..services.bridge import bridge_client
 from ..storage_categories import custom_categories, _normalize_custom, storable
 from ..templating import templates
 
@@ -438,7 +439,7 @@ async def switch_to_satellite(payload: SwitchToSatellitePayload, request: Reques
 
     # Park the local stack (bridge, root). On failure nothing has changed yet.
     try:
-        async with httpx.AsyncClient(timeout=310.0) as client:
+        async with bridge_client(timeout=310.0) as client:
             r = await client.post(f"{_HOST_BRIDGE}/stack/standdown")
         body = r.json()
         if r.status_code != 200 or not body.get("ok"):
@@ -485,7 +486,7 @@ async def switch_to_hosted(request: Request):
         return {"ok": False, "error": err}
 
     try:
-        async with httpx.AsyncClient(timeout=610.0) as client:
+        async with bridge_client(timeout=610.0) as client:
             r = await client.post(f"{_HOST_BRIDGE}/stack/standup")
         body = r.json()
         if r.status_code != 200 or not body.get("ok"):
@@ -1219,7 +1220,7 @@ async def save_setup(payload: SetupPayload):
     if settings.is_pi_appliance():
         if data.get("timezone"):
             try:
-                async with httpx.AsyncClient(timeout=15.0) as c:
+                async with bridge_client(timeout=15.0) as c:
                     await c.post(f"{_HOST_BRIDGE}/system/timezone",
                                  json={"tz": data["timezone"]})
             except Exception:
@@ -1234,7 +1235,7 @@ async def save_setup(payload: SetupPayload):
             freq = settings.scheduled_reboot_frequency or (
                 "nightly" if settings.scheduled_reboot_time else "off")
             try:
-                async with httpx.AsyncClient(timeout=15.0) as c:
+                async with bridge_client(timeout=15.0) as c:
                     await c.post(f"{_HOST_BRIDGE}/system/scheduled-reboot",
                                  json={"time": "" if freq == "off" else settings.scheduled_reboot_time,
                                        "frequency": freq,
@@ -1523,7 +1524,7 @@ async def _push_display_idle() -> bool:
     if not is_raspberry_pi():
         return False
     try:
-        async with httpx.AsyncClient(timeout=4.0) as c:
+        async with bridge_client(timeout=4.0) as c:
             r = await c.post(
                 f"{_HOST_BRIDGE}/display/idle",
                 json={
@@ -1543,7 +1544,7 @@ async def kiosk_activity():
     if not is_raspberry_pi():
         return {"ok": True, "woke": False}
     try:
-        async with httpx.AsyncClient(timeout=4.0) as c:
+        async with bridge_client(timeout=4.0) as c:
             r = await c.post(f"{_HOST_BRIDGE}/activity", json={"source": "kiosk"})
         return r.json()
     except Exception as e:
@@ -1556,7 +1557,7 @@ async def kiosk_activity_state():
     if not is_raspberry_pi():
         return {"ok": True, "last_activity": 0, "display_blanked": False}
     try:
-        async with httpx.AsyncClient(timeout=4.0) as c:
+        async with bridge_client(timeout=4.0) as c:
             r = await c.get(f"{_HOST_BRIDGE}/activity")
         return r.json()
     except Exception as e:
@@ -1569,7 +1570,7 @@ async def display_blank():
     if not is_raspberry_pi():
         return {"ok": False, "error": "Not available on this platform."}
     try:
-        async with httpx.AsyncClient(timeout=6.0) as c:
+        async with bridge_client(timeout=6.0) as c:
             r = await c.post(f"{_HOST_BRIDGE}/display/blank")
         return r.json()
     except Exception as e:
@@ -1582,7 +1583,7 @@ async def display_wake():
     if not is_raspberry_pi():
         return {"ok": False, "error": "Not available on this platform."}
     try:
-        async with httpx.AsyncClient(timeout=6.0) as c:
+        async with bridge_client(timeout=6.0) as c:
             r = await c.post(f"{_HOST_BRIDGE}/display/wake")
         return r.json()
     except Exception as e:
@@ -1595,7 +1596,7 @@ async def network_status():
     if not is_raspberry_pi():
         return {"ok": False, "error": "Not available on this platform."}
     try:
-        async with httpx.AsyncClient(timeout=4.0) as c:
+        async with bridge_client(timeout=4.0) as c:
             wifi = (await c.get(f"{_HOST_BRIDGE}/wifi/status")).json()
             hn = (await c.get(f"{_HOST_BRIDGE}/hostname")).json()
         return {
@@ -1616,7 +1617,7 @@ async def network_scan():
     if not is_raspberry_pi():
         return {"ok": False, "error": "Not available on this platform."}
     try:
-        async with httpx.AsyncClient(timeout=25.0) as c:
+        async with bridge_client(timeout=25.0) as c:
             r = (await c.get(f"{_HOST_BRIDGE}/wifi/scan")).json()
         return r
     except Exception as e:
@@ -1636,7 +1637,7 @@ async def network_wifi(payload: WifiPayload):
     if not payload.ssid.strip():
         return JSONResponse({"ok": False, "error": "SSID is required."})
     try:
-        async with httpx.AsyncClient(timeout=35.0) as c:
+        async with bridge_client(timeout=35.0) as c:
             r = await c.post(f"{_HOST_BRIDGE}/wifi/connect",
                              json={"ssid": payload.ssid.strip(), "password": payload.password})
         return r.json()
@@ -1657,7 +1658,7 @@ async def network_hostname(payload: HostnamePayload):
     if not name:
         return JSONResponse({"ok": False, "error": "Hostname is required."})
     try:
-        async with httpx.AsyncClient(timeout=10.0) as c:
+        async with bridge_client(timeout=10.0) as c:
             r = await c.post(f"{_HOST_BRIDGE}/hostname", json={"hostname": name})
         return r.json()
     except Exception as e:
@@ -1670,7 +1671,7 @@ async def display_rotation_status():
     if not is_raspberry_pi():
         return {"ok": False, "error": "Not available on this platform."}
     try:
-        async with httpx.AsyncClient(timeout=4.0) as c:
+        async with bridge_client(timeout=4.0) as c:
             r = (await c.get(f"{_HOST_BRIDGE}/display/rotation")).json()
         return r
     except Exception as e:
@@ -1690,7 +1691,7 @@ async def set_display_rotation(payload: KmsRotationPayload):
     if payload.degrees not in (0, 90, 180, 270):
         return JSONResponse({"ok": False, "error": "degrees must be 0, 90, 180, or 270."})
     try:
-        async with httpx.AsyncClient(timeout=20.0) as c:
+        async with bridge_client(timeout=20.0) as c:
             r = await c.post(f"{_HOST_BRIDGE}/display/rotation",
                              json={"degrees": payload.degrees, "reboot": payload.reboot})
         settings.save({"display_rotation": payload.degrees})
@@ -1721,7 +1722,7 @@ async def _provision_touch_for_display(display_type: str) -> dict | None:
     if driver != "ads7846":
         return None
     try:
-        async with httpx.AsyncClient(timeout=15.0) as c:
+        async with bridge_client(timeout=15.0) as c:
             r = await c.post(f"{_HOST_BRIDGE}/touch/provision",
                              json={"driver": driver, "reboot": False})
         return r.json()
@@ -1748,7 +1749,7 @@ async def touch_provision(request: Request):
     reboot = bool(body.get("reboot", False))
     driver = _DISPLAY_TOUCH_DRIVER.get(dtype, "generic")
     try:
-        async with httpx.AsyncClient(timeout=20.0) as c:
+        async with bridge_client(timeout=20.0) as c:
             r = await c.post(f"{_HOST_BRIDGE}/touch/provision",
                              json={"driver": driver, "reboot": reboot})
         # An old host bridge (updated app, stale bridge) has no such route and
@@ -1773,7 +1774,7 @@ async def maintenance_reboot():
     if not is_raspberry_pi():
         return JSONResponse({"ok": False, "error": "Not available on this platform."})
     try:
-        async with httpx.AsyncClient(timeout=15.0) as c:
+        async with bridge_client(timeout=15.0) as c:
             r = await c.post(f"{_HOST_BRIDGE}/reboot")
         if r.status_code != 200:
             # An out-of-date bridge answers 404 {"error": "not found"} for a
@@ -1807,7 +1808,7 @@ async def streamdeck_restart():
     if not is_raspberry_pi():
         return JSONResponse({"ok": False, "error": "Not available on this platform."})
     try:
-        async with httpx.AsyncClient(timeout=15.0) as c:
+        async with bridge_client(timeout=15.0) as c:
             r = await c.post(f"{_HOST_BRIDGE}/streamdeck/restart")
         return r.json()
     except Exception as e:
@@ -1820,7 +1821,7 @@ async def kiosk_restart():
     if not is_raspberry_pi():
         return JSONResponse({"ok": False, "error": "Not available on this platform."})
     try:
-        async with httpx.AsyncClient(timeout=35.0) as c:
+        async with bridge_client(timeout=35.0) as c:
             r = await c.post(f"{_HOST_BRIDGE}/kiosk/restart")
         return r.json()
     except Exception as e:
@@ -1837,7 +1838,7 @@ async def mealie_start():
     if not is_raspberry_pi():
         return JSONResponse({"ok": False, "error": "Not available on this platform."})
     try:
-        async with httpx.AsyncClient(timeout=10.0) as c:
+        async with bridge_client(timeout=10.0) as c:
             r = await c.post(f"{_HOST_BRIDGE}/mealie/start")
         return r.json()
     except Exception as e:
@@ -1850,7 +1851,7 @@ async def mealie_status():
     if not is_raspberry_pi():
         return {"ok": False, "error": "Not available on this platform."}
     try:
-        async with httpx.AsyncClient(timeout=12.0) as c:
+        async with bridge_client(timeout=12.0) as c:
             r = (await c.get(f"{_HOST_BRIDGE}/mealie/status")).json()
         return r
     except Exception as e:
@@ -1887,7 +1888,7 @@ async def install_logs(name: str):
     if name not in _LOG_NAMES:
         return {"ok": False, "error": "unknown log name"}
     try:
-        async with httpx.AsyncClient(timeout=6.0) as c:
+        async with bridge_client(timeout=6.0) as c:
             r = (await c.get(f"{_HOST_BRIDGE}/logs/{name}")).json()
         return r
     except Exception as e:
@@ -1909,7 +1910,7 @@ async def hardware_status():
             "streamdeck": {"present": False, "model": ""},
         }
     try:
-        async with httpx.AsyncClient(timeout=6.0) as c:
+        async with bridge_client(timeout=6.0) as c:
             r = (await c.get(f"{_HOST_BRIDGE}/hardware/status")).json()
         return r
     except Exception as e:
@@ -1927,7 +1928,7 @@ async def system_health():
     if not is_raspberry_pi():
         return {"ok": True, "warnings": []}
     try:
-        async with httpx.AsyncClient(timeout=6.0) as c:
+        async with bridge_client(timeout=6.0) as c:
             r = (await c.get(f"{_HOST_BRIDGE}/system/health")).json()
         return r
     except Exception as e:
@@ -1940,7 +1941,7 @@ async def kiosk_install():
     if not is_raspberry_pi():
         return JSONResponse({"ok": False, "error": "Not available on this platform."})
     try:
-        async with httpx.AsyncClient(timeout=15.0) as c:
+        async with bridge_client(timeout=15.0) as c:
             r = await c.post(f"{_HOST_BRIDGE}/kiosk/install")
         return r.json()
     except Exception as e:
@@ -1971,7 +1972,7 @@ async def run_host_bridge_update() -> dict:
     """POST the host bridge OTA and return its JSON result. Shared by the manual
     Update button and the automatic-update scheduler (FoodAssistant-k2kk)."""
     try:
-        async with httpx.AsyncClient(timeout=620.0) as c:
+        async with bridge_client(timeout=620.0) as c:
             r = await c.post(f"{_HOST_BRIDGE}/update")
         return r.json()
     except Exception as e:
@@ -2042,7 +2043,7 @@ async def restore_full_stack(req: _RestoreReq):
         return JSONResponse(
             {"ok": False, "error": "Full-stack restore is only available on this appliance."})
     try:
-        async with httpx.AsyncClient(timeout=920.0) as c:
+        async with bridge_client(timeout=920.0) as c:
             r = await c.post(f"{_HOST_BRIDGE}/restore", json={"source": req.source})
         return r.json()
     except Exception as e:
@@ -2060,7 +2061,7 @@ async def streamdeck_config_get():
     """
     if _HOST_BRIDGE:
         try:
-            async with httpx.AsyncClient(timeout=3.0) as c:
+            async with bridge_client(timeout=3.0) as c:
                 r = await c.get(f"{_HOST_BRIDGE}/streamdeck/config")
                 content = r.json()
                 if r.status_code == 200 and settings.is_satellite() and isinstance(content.get("config"), dict):
@@ -2112,7 +2113,7 @@ async def streamdeck_config_set(request: Request):
                 if settings.is_satellite():
                     payload["config"]["weather_location"] = settings.streamdeck_weather_location
                     payload["config"]["weather_units"] = settings.streamdeck_weather_units
-            async with httpx.AsyncClient(timeout=3.0) as c:
+            async with bridge_client(timeout=3.0) as c:
                 r = await c.post(f"{_HOST_BRIDGE}/streamdeck/config", json=payload)
                 return JSONResponse(status_code=r.status_code, content=r.json())
         except Exception as e:
@@ -2288,7 +2289,7 @@ async def streamdeck_actions():
     gets."""
     if is_raspberry_pi():
         try:
-            async with httpx.AsyncClient(timeout=12.0) as c:
+            async with bridge_client(timeout=12.0) as c:
                 r = (await c.get(f"{_HOST_BRIDGE}/streamdeck/actions")).json()
             if r.get("ok") and isinstance(r.get("actions"), list):
                 return r
@@ -2307,7 +2308,7 @@ async def streamdeck_install():
     if not is_raspberry_pi():
         return JSONResponse({"ok": False, "error": "Not available on this platform."})
     try:
-        async with httpx.AsyncClient(timeout=15.0) as c:
+        async with bridge_client(timeout=15.0) as c:
             r = await c.post(f"{_HOST_BRIDGE}/streamdeck/install")
         return r.json()
     except Exception as e:
@@ -2399,7 +2400,7 @@ async def ap_status():
     if not is_raspberry_pi():
         return {"ok": True, "active": False}
     try:
-        async with httpx.AsyncClient(timeout=4.0) as c:
+        async with bridge_client(timeout=4.0) as c:
             r = (await c.get(f"{_HOST_BRIDGE}/ap/status")).json()
         return r
     except Exception:
@@ -2412,7 +2413,7 @@ async def ap_disable():
     if not is_raspberry_pi():
         return JSONResponse({"ok": False, "error": "Not available on this platform."})
     try:
-        async with httpx.AsyncClient(timeout=15.0) as c:
+        async with bridge_client(timeout=15.0) as c:
             r = await c.post(f"{_HOST_BRIDGE}/ap/disable")
         return r.json()
     except Exception as e:
@@ -2675,7 +2676,7 @@ async def calibrate_touch_reset():
     if not is_raspberry_pi():
         return JSONResponse({"ok": False, "error": "Not available on this platform."})
     try:
-        async with httpx.AsyncClient(timeout=40.0) as c:
+        async with bridge_client(timeout=40.0) as c:
             r = await c.post(f"{_HOST_BRIDGE}/touch/calibrate/reset")
         # An old host bridge predates this route and answers 404
         # {"error": "not found"}; say something actionable instead.
@@ -2744,7 +2745,7 @@ async def calibrate_touch_page(request: Request):
         pass
     rotation = 0
     try:
-        async with httpx.AsyncClient(timeout=4.0) as c:
+        async with bridge_client(timeout=4.0) as c:
             data = (await c.get(f"{_HOST_BRIDGE}/display/rotation")).json()
         if data.get("ok"):
             rotation = int(data.get("rotation", 0) or 0)
@@ -2799,7 +2800,7 @@ async def calibrate_touch_apply(payload: TouchMatrixPayload):
         return JSONResponse({"ok": False, "error": "Non-numeric value in matrix."})
     matrix_str = " ".join(parts)
     try:
-        async with httpx.AsyncClient(timeout=20.0) as c:
+        async with bridge_client(timeout=20.0) as c:
             r = await c.post(f"{_HOST_BRIDGE}/touch/calibrate",
                              json={"matrix": matrix_str})
         data = r.json()

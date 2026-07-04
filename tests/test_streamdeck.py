@@ -2980,7 +2980,7 @@ def test_poll_shared_activity_wakes_blanked_deck(monkeypatch):
             return self
         async def __aexit__(self, *a):
             return False
-        async def get(self, url):
+        async def get(self, url, headers=None):
             return _Resp()
 
     monkeypatch.setattr(controller_mod.httpx, "AsyncClient", _FakeClient)

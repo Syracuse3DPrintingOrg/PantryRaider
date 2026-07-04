@@ -266,9 +266,9 @@ def _local_run_backup() -> dict:
 
 
 async def _bridge_get(path: str, timeout: float = 8.0) -> dict:
-    import httpx
+    from .bridge import bridge_client
     try:
-        async with httpx.AsyncClient(timeout=timeout) as c:
+        async with bridge_client(timeout=timeout) as c:
             r = await c.get(f"{_BRIDGE}{path}")
         return r.json()
     except Exception as e:
@@ -277,9 +277,9 @@ async def _bridge_get(path: str, timeout: float = 8.0) -> dict:
 
 
 async def _bridge_post(path: str, timeout: float = 8.0) -> dict:
-    import httpx
+    from .bridge import bridge_client
     try:
-        async with httpx.AsyncClient(timeout=timeout) as c:
+        async with bridge_client(timeout=timeout) as c:
             r = await c.post(f"{_BRIDGE}{path}", json={})
         return r.json()
     except Exception as e:

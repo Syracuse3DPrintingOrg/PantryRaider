@@ -118,9 +118,9 @@ async def fetch_deck_catalog() -> list[dict]:
     from ..hardware import is_raspberry_pi
     if is_raspberry_pi():
         try:
-            import httpx
             from ..routers.setup import _HOST_BRIDGE
-            async with httpx.AsyncClient(timeout=6.0) as c:
+            from .bridge import bridge_client
+            async with bridge_client(timeout=6.0) as c:
                 r = (await c.get(f"{_HOST_BRIDGE}/streamdeck/actions")).json()
             if r.get("ok") and isinstance(r.get("actions"), list):
                 return r["actions"]

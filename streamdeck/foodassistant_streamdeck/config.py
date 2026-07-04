@@ -96,6 +96,11 @@ class Config:
     # the kiosk display wakes too, and polls it so a screen touch wakes the deck
     # (shared activity, separate timeouts -- FoodAssistant-otiy). Empty disables.
     host_bridge_url: str = "http://127.0.0.1:9299"
+    # Path of the shared auth token the bridge writes at startup
+    # (FoodAssistant-pxcm). The deck runs on the same host as the bridge, so
+    # the well-known default works on both a pi_hosted and a pi_remote
+    # install; override here only for a non-standard INSTALL_DIR.
+    bridge_token_path: str = "/opt/foodassistant/data/bridge-token"
     # Advanced per-key overrides configured in the web setup page. Each entry is
     # a dict with "slot" (grid index), "type" (ha_action | timer | weather |
     # default) and type-specific fields. Overrides are applied on top of the
@@ -187,6 +192,7 @@ def load(path: str | os.PathLike | None = None) -> Config:
 def _apply(cfg: Config, data: dict) -> None:
     for name in ("base_url", "api_key", "kiosk_cdp_url", "weather_location", "weather_units",
                  "theme", "ha_base_url", "ha_token", "host_bridge_url",
+                 "bridge_token_path",
                  "key_style", "icon_color", "screensaver_layout"):
         if isinstance(data.get(name), str):
             setattr(cfg, name, data[name])

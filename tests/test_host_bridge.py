@@ -1577,3 +1577,93 @@ def test_usb_photo_safe_path_rejects_symlink_escaping_the_dir(tmp_path):
     secret.write_bytes(b"x")
     (photos / "link.jpg").symlink_to(secret)
     assert bridge._usb_photo_safe_path(str(photos), "link.jpg") is None
+
+
+# --- Shared-token handshake (FoodAssistant-pxcm) ---------------------------
+
+def test_token_gate_exempt_get_ok_without_token():
+    for path in sorted(bridge.TOKEN_EXEMPT_GET):
+        assert bridge._token_gate("GET", path, "", "secret", False) == "ok"
+
+
+def test_token_gate_exempt_is_get_only():
+    # POST /activity changes state (wakes the display) so it is not exempt.
+    assert bridge._token_gate("POST", "/activity", "", "secret", False) == "deny"
+
+
+def test_token_gate_query_string_does_not_dodge_the_check():
+    assert bridge._token_gate("GET", "/usb/photo?path=x.jpg", "", "secret", False) == "deny"
+
+
+def test_token_gate_correct_token_ok():
+    assert bridge._token_gate("POST", "/reboot", "secret", "secret", False) == "ok"
+
+
+def test_token_gate_missing_token_grace_allows():
+    assert bridge._token_gate("POST", "/reboot", "", "secret", True) == "grace"
+
+
+def test_token_gate_missing_token_denied_after_grace():
+    assert bridge._token_gate("POST", "/reboot", "", "secret", False) == "deny"
+
+
+def test_token_gate_wrong_token_denied_even_in_grace():
+    assert bridge._token_gate("POST", "/reboot", "nope", "secret", True) == "deny"
+
+
+def test_token_gate_no_expected_token_degrades_to_grace():
+    # The bridge could not write its token file: never lock everyone out.
+    assert bridge._token_gate("POST", "/reboot", "", "", False) == "grace"
+    assert bridge._token_gate("POST", "/reboot", "stale", "", False) == "grace"
+
+
+def test_load_or_create_token_creates_dir_and_file(tmp_path):
+    path = tmp_path / "data" / "bridge-token"
+    token = bridge._load_or_create_token(str(path))
+    assert len(token) == 64 and all(c in "0123456789abcdef" for c in token)
+    assert path.read_text().strip() == token
+    # 644: the venv app and the deck run as the primary user, not root.
+    assert (path.stat().st_mode & 0o777) == 0o644
+
+
+def test_load_or_create_token_reuses_existing(tmp_path):
+    path = tmp_path / "bridge-token"
+    path.write_text("existing-token\n")
+    assert bridge._load_or_create_token(str(path)) == "existing-token"
+
+
+def test_authorized_grace_allows_and_warns(monkeypatch, capsys):
+    monkeypatch.setattr(bridge, "_EXPECTED_TOKEN", "secret")
+    monkeypatch.setattr(bridge, "GRACE_MODE", True)
+
+    class Dummy:
+        command = "POST"
+        path = "/reboot"
+        headers = {}
+        sent = None
+
+        def _send(self, code, data):
+            self.sent = (code, data)
+
+    d = Dummy()
+    assert bridge._Handler._authorized(d) is True
+    assert d.sent is None
+    assert "grace mode" in capsys.readouterr().out
+
+
+def test_authorized_denies_wrong_token_with_401(monkeypatch):
+    monkeypatch.setattr(bridge, "_EXPECTED_TOKEN", "secret")
+    monkeypatch.setattr(bridge, "GRACE_MODE", True)
+
+    class Dummy:
+        command = "POST"
+        path = "/reboot"
+        headers = {"X-Bridge-Token": "wrong"}
+        sent = None
+
+        def _send(self, code, data):
+            self.sent = (code, data)
+
+    d = Dummy()
+    assert bridge._Handler._authorized(d) is False
+    assert d.sent[0] == 401
