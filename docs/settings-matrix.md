@@ -185,6 +185,8 @@ and are device-local. They do not apply to a server install.
 | `screensaver_minutes` | | Editable | Editable | Device-local |
 | `screensaver_speed` | | Editable | Editable | Device-local |
 | `screensaver_pill_scale` | | Editable | Editable | Device-local |
+| `screensaver_photo_seconds` | | Editable | Editable | Device-local |
+| `screensaver_ken_burns` | | Editable | Editable | Device-local |
 | `screensaver_mode` | | Editable | Editable | Device-local |
 | `screensaver_all_clients` | | Editable | Editable | Device-local |
 | `osk_enabled` | | Editable | Editable | Device-local |

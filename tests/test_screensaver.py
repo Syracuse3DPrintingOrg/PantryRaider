@@ -119,7 +119,8 @@ def test_screensaver_pills_animate_last_minute_and_done_stages():
     # cleared again if the timer is extended past a minute.
     assert "ss-timer-ending" in js
     assert "ss-timer-glow" in js
-    assert "PILL_SCALES" in js and "data-pill-scale" in js
+    assert "PILL_SCALES" in js
+    assert "KEN_BURNS" in js and "data-photo-seconds" in js and "data-pill-scale" in js
     assert "242,0,110" in js   # brand pink, not the retired hop
     assert "remaining <= 60" in js
     # Finished: a slow continuous spin layered with the red/amber pulse.

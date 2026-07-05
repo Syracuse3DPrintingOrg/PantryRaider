@@ -17,6 +17,8 @@ async function saveDisplaySettings() {
   const screensaver_speed = document.getElementById('screensaver_speed')?.value || 'normal';
   const screensaver_pill_scale = document.getElementById('screensaver_pill_scale')?.value || 'normal';
   const screensaver_mode = document.getElementById('screensaver_mode')?.value || 'bounce';
+  const screensaver_photo_seconds = parseInt(document.getElementById('screensaver_photo_seconds')?.value, 10) || 25;
+  const screensaver_ken_burns = document.getElementById('screensaver_ken_burns') ? document.getElementById('screensaver_ken_burns').checked : true;
   const screensaver_all_clients = document.getElementById('screensaver_all_clients')?.checked || false;
   const osk_enabled = document.getElementById('osk_enabled')?.checked ?? true;
   const wake_on_motion = document.getElementById('wake_on_motion')?.value || 'auto';
@@ -27,7 +29,7 @@ async function saveDisplaySettings() {
     });
     const saveResp = await (await fetch('setup/save', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({display_touch, display_type, display_idle_timeout, screensaver_minutes, screensaver_speed, screensaver_pill_scale, screensaver_mode, screensaver_all_clients, osk_enabled, wake_on_motion}),
+      body: JSON.stringify({display_touch, display_type, display_idle_timeout, screensaver_minutes, screensaver_speed, screensaver_pill_scale, screensaver_mode, screensaver_photo_seconds, screensaver_ken_burns, screensaver_all_clients, osk_enabled, wake_on_motion}),
     })).json();
     fetch('setup/kiosk/restart', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'}).catch(() => {});
     if (saveResp && saveResp.touch_needs_reboot) {
@@ -58,6 +60,8 @@ async function saveScreensaverSettings() {
     screensaver_speed: document.getElementById('screensaver_speed')?.value || 'normal',
     screensaver_pill_scale: document.getElementById('screensaver_pill_scale')?.value || 'normal',
     screensaver_mode: document.getElementById('screensaver_mode')?.value || 'bounce',
+    screensaver_photo_seconds: parseInt(document.getElementById('screensaver_photo_seconds')?.value, 10) || 25,
+    screensaver_ken_burns: document.getElementById('screensaver_ken_burns') ? document.getElementById('screensaver_ken_burns').checked : true,
     screensaver_all_clients: document.getElementById('screensaver_all_clients')?.checked || false,
     osk_enabled: document.getElementById('osk_enabled')?.checked ?? true,
   };
@@ -262,4 +266,12 @@ async function cancelTouchCalibration() {
   } catch (e) {
     if (el) { el.className = 'test-result mt-2 text-danger'; el.textContent = 'Cancel failed: ' + e; }
   }
+}
+
+
+// Show the photo slideshow options only when the screensaver style is photos.
+function screensaverModeChanged() {
+  const adv = document.getElementById('photo-advanced');
+  const mode = document.getElementById('screensaver_mode')?.value;
+  if (adv) adv.classList.toggle('d-none', mode !== 'photos');
 }

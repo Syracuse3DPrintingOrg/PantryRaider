@@ -265,6 +265,8 @@ class SetupPayload(BaseModel):
     screensaver_speed: str | None = None
     screensaver_pill_scale: str | None = None
     screensaver_mode: str | None = None
+    screensaver_photo_seconds: int | None = None
+    screensaver_ken_burns: bool | None = None
     screensaver_all_clients: bool = False
     streamdeck_logo_when_display_off: bool = True
     osk_enabled: bool = True
@@ -1535,6 +1537,12 @@ async def save_setup(payload: SetupPayload):
     if ("screensaver_pill_scale" in data
             and data["screensaver_pill_scale"] not in ("normal", "large", "xlarge")):
         data["screensaver_pill_scale"] = "normal"
+    # Seconds per slideshow photo: keep it in a sane range.
+    if "screensaver_photo_seconds" in data:
+        try:
+            data["screensaver_photo_seconds"] = max(2, min(120, int(data["screensaver_photo_seconds"])))
+        except (TypeError, ValueError):
+            data["screensaver_photo_seconds"] = 25
     # AI token budget: non-negative integer (0 = no budget).
     if "ai_token_budget" in data:
         try:

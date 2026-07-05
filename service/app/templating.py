@@ -99,6 +99,8 @@ def theme_context(request: Request) -> dict:
         "screensaver_minutes": settings.screensaver_minutes,
         "screensaver_speed": settings.screensaver_speed,
         "screensaver_pill_scale": settings.screensaver_pill_scale,
+        "screensaver_photo_seconds": settings.screensaver_photo_seconds,
+        "screensaver_ken_burns": settings.screensaver_ken_burns,
         "screensaver_mode": settings.screensaver_mode,
         # When on, the saver's idle behaviour runs in every browser viewing
         # this install, not just kiosk-mode ones (FoodAssistant-xlb3).

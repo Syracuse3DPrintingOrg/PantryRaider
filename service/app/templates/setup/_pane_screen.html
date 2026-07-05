@@ -103,11 +103,25 @@
             </div>
             <div class="mb-3">
               <label class="form-label" for="screensaver_mode">Screensaver style</label>
-              <select class="form-select form-select-sm" style="max-width:280px" id="screensaver_mode">
+              <select class="form-select form-select-sm" style="max-width:280px" id="screensaver_mode" onchange="screensaverModeChanged()">
                 <option value="bounce" {{ 'selected' if s.screensaver_mode == 'bounce' or not s.screensaver_mode else '' }}>Bouncing logo</option>
                 <option value="photos" {{ 'selected' if s.screensaver_mode == 'photos' else '' }}>Photo slideshow</option>
               </select>
               <div class="form-text">Photos plays images from a USB drive's photos folder and falls back to the logo when no drive is present. Put your pictures in a folder named photos or pictures at the top of the drive. This is a per-device choice.</div>
+            </div>
+            <div id="photo-advanced" class="ms-1 mb-3 {{ '' if s.screensaver_mode == 'photos' else 'd-none' }}">
+              <div class="mb-2">
+                <label class="form-label" for="screensaver_photo_seconds">Seconds per photo</label>
+                <input type="number" class="form-control form-control-sm" id="screensaver_photo_seconds"
+                       min="2" max="120" style="max-width:120px"
+                       value="{{ s.screensaver_photo_seconds or 25 }}">
+                <div class="form-text">How long each photo stays up before the next fades in (2 to 120 seconds).</div>
+              </div>
+              <div class="form-check form-switch">
+                <input class="form-check-input" type="checkbox" role="switch" id="screensaver_ken_burns"
+                       {{ 'checked' if s.screensaver_ken_burns or s.screensaver_ken_burns is none else '' }}>
+                <label class="form-check-label" for="screensaver_ken_burns">Ken Burns effect{{ info('A slow pan and zoom across each photo, the classic slideshow motion. Turn it off to hold each photo perfectly still.') }}</label>
+              </div>
             </div>
             <div class="form-check form-switch mb-3">
               <input class="form-check-input" type="checkbox" role="switch" id="screensaver_all_clients"
@@ -195,11 +209,25 @@
             </div>
             <div class="mb-3">
               <label class="form-label" for="screensaver_mode">Screensaver style</label>
-              <select class="form-select form-select-sm" style="max-width:280px" id="screensaver_mode">
+              <select class="form-select form-select-sm" style="max-width:280px" id="screensaver_mode" onchange="screensaverModeChanged()">
                 <option value="bounce" {{ 'selected' if s.screensaver_mode == 'bounce' or not s.screensaver_mode else '' }}>Bouncing logo</option>
                 <option value="photos" {{ 'selected' if s.screensaver_mode == 'photos' else '' }}>Photo slideshow</option>
               </select>
               <div class="form-text">Photos plays images from a USB drive's photos folder on the host and falls back to the logo when none are present.</div>
+            </div>
+            <div id="photo-advanced" class="ms-1 mb-3 {{ '' if s.screensaver_mode == 'photos' else 'd-none' }}">
+              <div class="mb-2">
+                <label class="form-label" for="screensaver_photo_seconds">Seconds per photo</label>
+                <input type="number" class="form-control form-control-sm" id="screensaver_photo_seconds"
+                       min="2" max="120" style="max-width:120px"
+                       value="{{ s.screensaver_photo_seconds or 25 }}">
+                <div class="form-text">How long each photo stays up before the next fades in (2 to 120 seconds).</div>
+              </div>
+              <div class="form-check form-switch">
+                <input class="form-check-input" type="checkbox" role="switch" id="screensaver_ken_burns"
+                       {{ 'checked' if s.screensaver_ken_burns or s.screensaver_ken_burns is none else '' }}>
+                <label class="form-check-label" for="screensaver_ken_burns">Ken Burns effect{{ info('A slow pan and zoom across each photo, the classic slideshow motion. Turn it off to hold each photo perfectly still.') }}</label>
+              </div>
             </div>
             <div class="form-check form-switch mb-3">
               <input class="form-check-input" type="checkbox" role="switch" id="screensaver_all_clients"

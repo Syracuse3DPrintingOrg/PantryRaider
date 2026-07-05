@@ -64,7 +64,11 @@
   var PILL_SCALES = { normal: 1, large: 1.35, xlarge: 1.7 };
   var PILL_K = PILL_SCALES[cfg.getAttribute('data-pill-scale') || 'normal'] || 1;
   function pv(n) { return (n * PILL_K).toFixed(2) + 'vmin'; }
-  var PHOTO_MS = 25000;   // how long each slideshow photo stays up
+  var _ps = parseInt(cfg.getAttribute('data-photo-seconds'), 10);
+  // How long each slideshow photo stays up, clamped to a sane range.
+  var PHOTO_MS = (isNaN(_ps) ? 25 : Math.max(2, Math.min(120, _ps))) * 1000;
+  // Ken Burns pan/zoom drift on each photo (on unless explicitly disabled).
+  var KEN_BURNS = cfg.getAttribute('data-ken-burns') !== 'false';
   var FADE_MS = 2000;     // crossfade length between photos
   var lastActivity = Date.now();
   var overlay = null;
@@ -563,6 +567,11 @@
     startTimerLoop();  // photos have no rAF of their own; the pills need one
 
     function kenBurns(img) {
+      if (!KEN_BURNS) {
+        // Held still: cover-fit with only the crossfade, no pan or zoom.
+        img.style.transition = 'opacity ' + FADE_MS + 'ms ease';
+        return;
+      }
       // Random start/end offsets small enough that the 1.12x scale always
       // keeps the frame covered; linear so the drift never visibly stops.
       function off() { return ((Math.random() * 6) - 3).toFixed(2) + '%'; }

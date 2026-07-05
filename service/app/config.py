@@ -12,7 +12,7 @@ from .hardware import is_raspberry_pi
 
 # Single source of truth for the app version (shown in the UI, used by the
 # update checker, and reported by FastAPI). Bump on each tagged release.
-APP_VERSION = "0.8.22"
+APP_VERSION = "0.8.23"
 
 # Single source of truth for the product's display name. The runtime identifiers
 # (systemd units, install paths, the foodassistant_streamdeck package, the
@@ -439,6 +439,7 @@ _SAVEABLE = [
     "start_page_enabled", "start_page_keys", "start_page_layout",
     "display_idle_timeout", "streamdeck_idle_timeout", "screensaver_minutes", "screensaver_speed", "screensaver_mode",
     "screensaver_all_clients", "screensaver_pill_scale",
+    "screensaver_photo_seconds", "screensaver_ken_burns",
     "streamdeck_logo_when_display_off",
     "osk_enabled",
     "wake_on_motion",
@@ -1109,6 +1110,11 @@ class Settings(BaseSettings):
     # large / xlarge. Small panels viewed from across the kitchen want large
     # (FoodAssistant, Dan's request: pills read small on certain displays).
     screensaver_pill_scale: str = "normal"
+    # Photo slideshow options. screensaver_photo_seconds: how long each photo
+    # stays up (2 to 120). screensaver_ken_burns: the slow pan/zoom drift on
+    # each photo (on by default; off holds each photo still).
+    screensaver_photo_seconds: int = 25
+    screensaver_ken_burns: bool = True
     # Show the Pantry Raider mark across the Stream Deck keys while the kiosk
     # display sleeps (FoodAssistant-zttc). The deck follows the display: the
     # raccoon appears when the display blanks and the page returns when it

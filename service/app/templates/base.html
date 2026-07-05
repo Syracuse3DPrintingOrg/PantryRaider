@@ -131,7 +131,7 @@
      floating clock; any touch dismisses it. Runs in kiosk mode (or in every
      browser when data-all-clients is on) and only when a timeout is set
      (FoodAssistant-y65x). #}
-  <div id="screensaver-config" data-minutes="{{ screensaver_minutes }}" data-speed="{{ screensaver_speed }}" data-pill-scale="{{ screensaver_pill_scale }}" data-mode="{{ screensaver_mode }}" data-all-clients="{{ 'true' if screensaver_all_clients else 'false' }}" hidden></div>
+  <div id="screensaver-config" data-minutes="{{ screensaver_minutes }}" data-speed="{{ screensaver_speed }}" data-pill-scale="{{ screensaver_pill_scale }}" data-photo-seconds="{{ screensaver_photo_seconds }}" data-ken-burns="{{ 'true' if screensaver_ken_burns else 'false' }}" data-mode="{{ screensaver_mode }}" data-all-clients="{{ 'true' if screensaver_all_clients else 'false' }}" hidden></div>
   <script src="static/js/screensaver.js?v={{ app_version }}"></script>
   {# On-screen keyboard for kiosk touchscreens (FoodAssistant-wo9j) #}
   {% include "_osk.html" %}
