@@ -155,215 +155,53 @@ def test_screensaver_js_maps_timer_labels_to_food_icons():
         assert token in js
 
 
-# -- shared canvas with the Stream Deck (FoodAssistant-3fdq) -----------------
+# -- Stream Deck config push (idle timeout + display-off logo) ----------------
 
 
-def test_streamdeck_screensaver_layout_is_device_local():
-    from app.config import STREAMDECK_SCREENSAVER_LAYOUTS
-
-    assert type(settings)().streamdeck_screensaver_layout == "off"
-    assert "streamdeck_screensaver_layout" in _SAVEABLE
-    # The deck's physical position next to THIS panel is a per-device fact,
-    # like streamdeck_key_style: never synced from the main server.
-    assert "streamdeck_screensaver_layout" not in SATELLITE_PULL_FIELDS
-    assert STREAMDECK_SCREENSAVER_LAYOUTS == ("off", "above", "below", "left", "right")
+def test_streamdeck_logo_when_display_off_is_device_local():
+    assert type(settings)().streamdeck_logo_when_display_off is True
+    assert "streamdeck_logo_when_display_off" in _SAVEABLE
+    # What this deck shows while its own display sleeps is a per-device
+    # choice, like streamdeck_key_style: never synced from the main server.
+    assert "streamdeck_logo_when_display_off" not in SATELLITE_PULL_FIELDS
 
 
-def test_setup_payload_accepts_deck_layout_and_validates_it():
+def test_setup_payload_accepts_display_off_logo_toggle():
     from app.routers.setup import SetupPayload
 
-    p = SetupPayload(streamdeck_screensaver_layout="below")
-    assert p.streamdeck_screensaver_layout == "below"
-    assert "streamdeck_screensaver_layout" not in SetupPayload().model_dump(exclude_unset=True)
+    p = SetupPayload(streamdeck_logo_when_display_off=False)
+    assert p.streamdeck_logo_when_display_off is False
+    assert "streamdeck_logo_when_display_off" not in SetupPayload().model_dump(exclude_unset=True)
 
 
-def test_streamdeck_grid_aspect_matches_the_key_grids():
-    from app.config import streamdeck_grid_aspect
-
-    assert streamdeck_grid_aspect(6) == 2 / 3
-    assert streamdeck_grid_aspect(15) == 3 / 5
-    assert streamdeck_grid_aspect(32) == 4 / 8
-    # Unknown size assumes the common 15-key deck.
-    assert streamdeck_grid_aspect(0) == 3 / 5
-
-
-def test_screensaver_state_freshness_is_pure():
-    from app.services.screensaver_state import is_fresh, STALE_AFTER_SECONDS
-
-    assert not is_fresh(0.0, 100.0)              # never posted
-    assert is_fresh(100.0, 100.0)                # just posted
-    assert is_fresh(100.0, 100.0 + STALE_AFTER_SECONDS)
-    assert not is_fresh(100.0, 111.0)            # kiosk went away
-    assert not is_fresh(200.0, 100.0 - 1)        # clock stepped backwards
+def test_stale_layout_key_in_settings_json_is_ignored():
+    # The retired streamdeck_screensaver_layout may linger in settings.json on
+    # updated devices; apply() only adopts _SAVEABLE keys, so it must be a
+    # silent no-op, never a crash or a stray attribute.
+    s = type(settings)()
+    s.apply({"streamdeck_screensaver_layout": "below",
+             "streamdeck_logo_when_display_off": False})
+    assert s.streamdeck_logo_when_display_off is False
+    assert "streamdeck_screensaver_layout" not in _SAVEABLE
 
 
-def test_screensaver_state_round_trip_and_staleness():
-    from app.services import screensaver_state as st
-
-    st.reset()
-    assert st.snapshot()["active"] is False
-    st.update(True, x=0.4, y=1.05, w=0.2, h=0.1, band=0.3, layout="below")
-    snap = st.snapshot()
-    assert snap["active"] is True
-    assert snap == {"active": True, "x": 0.4, "y": 1.05, "w": 0.2, "h": 0.1,
-                    "band": 0.3, "layout": "below", "pills": []}
-    # The same state read past the staleness window counts as inactive, so a
-    # dead kiosk never leaves the deck frozen mid-logo.
-    import time as _time
-    assert st.snapshot(now=_time.time() + 60)["active"] is False
-    st.update(False)
-    assert st.snapshot()["active"] is False
-    st.reset()
-
-
-def test_screensaver_dismiss_is_delivered_once():
-    from app.services import screensaver_state as st
-
-    st.reset()
-    st.update(True, band=0.3, layout="below")
-    st.dismiss()  # a deck key press
-    # The kiosk's next post picks the mark up exactly once.
-    assert st.update(True, band=0.3, layout="below")["dismiss"] is True
-    assert st.update(True, band=0.3, layout="below")["dismiss"] is False
-    st.reset()
-
-
-def test_screensaver_state_endpoints(client):
-    from app.services import screensaver_state as st
-
-    st.reset()
-    with patch.object(type(settings), "is_configured", lambda self: True):
-        _exercise_state_endpoints(client)
-    st.reset()
-
-
-def _exercise_state_endpoints(client):
-    r = client.post("/ui/screensaver/state", json={
-        "active": True, "x": 0.4, "y": 1.05, "w": 0.2, "h": 0.1,
-        "band": 0.3, "layout": "below"})
-    assert r.status_code == 200 and r.json()["dismiss"] is False
-    snap = client.get("/ui/screensaver/state").json()
-    assert snap["active"] is True and snap["y"] == 1.05
-    # A deck key press dismisses; the kiosk's next post is told to hide.
-    assert client.post("/ui/screensaver/dismiss").json()["ok"] is True
-    r = client.post("/ui/screensaver/state", json={"active": True})
-    assert r.json()["dismiss"] is True
-    # Garbage input is a safe no-op state, never a 500.
-    r = client.post("/ui/screensaver/state", json={"x": "NaN", "active": 1})
-    assert r.status_code == 200
-
-
-def test_streamdeck_config_push_carries_idle_timeout_and_layout():
-    """The deck's idle blank timeout and screensaver position only reach the
-    controller through config.toml. The timeout was saved in app settings but
-    never written there, so the deck never blanked (FoodAssistant-3fdq)."""
+def test_streamdeck_config_push_carries_idle_timeout_and_logo_choice():
+    """The deck's idle blank timeout and display-off logo choice only reach
+    the controller through config.toml, so the settings push must stamp them
+    (FoodAssistant-3fdq, FoodAssistant-zttc)."""
     from app.services import satellite as sat
 
     merged = sat._merge_streamdeck_settings(
         {"rotation": 90}, "Boston", "f", "dark",
-        idle_timeout_minutes=15, screensaver_layout="below",
+        idle_timeout_minutes=15, logo_when_display_off=False,
     )
     assert merged["idle_timeout_minutes"] == 15
-    assert merged["screensaver_layout"] == "below"
+    assert merged["logo_when_display_off"] is False
     assert merged["rotation"] == 90
-    # Defaults keep a bare merge safe: timeout off, deck out of the canvas.
+    # Defaults keep a bare merge safe: timeout off, the logo face on.
     merged = sat._merge_streamdeck_settings({}, "B", "f", "dark")
     assert merged["idle_timeout_minutes"] == 0
-    assert merged["screensaver_layout"] == "off"
-
-
-def test_screensaver_config_div_carries_deck_layout(client, monkeypatch):
-    with patch.object(type(settings), "is_configured", lambda self: True):
-        monkeypatch.setattr(settings, "has_streamdeck", True, raising=False)
-        monkeypatch.setattr(settings, "streamdeck_key_count", 15, raising=False)
-        monkeypatch.setattr(settings, "streamdeck_screensaver_layout", "below",
-                            raising=False)
-        r = client.get("/ui/timers")
-        assert r.status_code == 200
-        assert 'data-deck-layout="below"' in r.text
-        assert 'data-deck-aspect="0.6"' in r.text
-        # Without a deck the layout renders as off regardless of the setting.
-        monkeypatch.setattr(settings, "has_streamdeck", False, raising=False)
-        r = client.get("/ui/timers")
-        assert 'data-deck-layout="off"' in r.text
-
-
-# -- finished pills cross onto the deck (FoodAssistant-07ee) -------------------
-
-
-def test_sanitize_pills_is_pure_and_defensive():
-    from app.services.screensaver_state import sanitize_pills, MAX_PILLS
-
-    # Not a list, or junk entries: an empty/filtered result, never a raise.
-    assert sanitize_pills(None) == []
-    assert sanitize_pills("pills") == []
-    assert sanitize_pills([42, "x", None]) == []
-    # A well-formed pill keeps only the fields the deck needs, coerced.
-    out = sanitize_pills([{"id": "t1", "x": 0.4, "y": 1.05, "w": 0.2,
-                           "h": 0.08, "done": True, "icon": "\U0001F35D",
-                           "label": "should be dropped"}])
-    assert out == [{"id": "t1", "x": 0.4, "y": 1.05, "w": 0.2, "h": 0.08,
-                    "done": True, "icon": "\U0001F35D"}]
-    # Bad field types coerce to safe defaults; oversized strings truncate.
-    out = sanitize_pills([{"id": 7, "x": "NaN", "done": 1, "icon": "x" * 99}])
-    assert out[0]["x"] == 0.0 and out[0]["done"] is True
-    assert out[0]["id"] == "7" and len(out[0]["icon"]) <= 4
-    # The stored list is hard-capped.
-    assert len(sanitize_pills([{"id": str(i)} for i in range(20)])) == MAX_PILLS
-
-
-def test_state_channel_carries_pills():
-    from app.services import screensaver_state as st
-
-    st.reset()
-    st.update(True, band=0.3, layout="below",
-              pills=[{"id": "t1", "x": 0.4, "y": 1.05, "w": 0.2, "h": 0.08,
-                      "done": True, "icon": "\U0001F95A"}])
-    snap = st.snapshot()
-    assert snap["pills"] == [{"id": "t1", "x": 0.4, "y": 1.05, "w": 0.2,
-                              "h": 0.08, "done": True, "icon": "\U0001F95A"}]
-    # A post without pills clears the previous list (the timers were
-    # dismissed), so the deck never shows a stale Done pill.
-    st.update(True, band=0.3, layout="below")
-    assert st.snapshot()["pills"] == []
-    st.reset()
-
-
-def test_screensaver_state_endpoint_round_trips_pills(client):
-    from app.services import screensaver_state as st
-
-    st.reset()
-    with patch.object(type(settings), "is_configured", lambda self: True):
-        r = client.post("/ui/screensaver/state", json={
-            "active": True, "band": 0.3, "layout": "below",
-            "pills": [{"id": "t1", "x": 0.1, "y": 1.1, "w": 0.2, "h": 0.08,
-                       "done": True, "icon": "⏱"}]})
-        assert r.status_code == 200
-        snap = client.get("/ui/screensaver/state").json()
-        assert snap["pills"][0]["id"] == "t1"
-        assert snap["pills"][0]["done"] is True
-        # Garbage pills are a safe no-op, never a 500.
-        r = client.post("/ui/screensaver/state",
-                        json={"active": True, "pills": "junk"})
-        assert r.status_code == 200
-    st.reset()
-
-
-def test_screensaver_js_sends_done_pills_and_extends_their_walls():
-    js = (SERVICE / "app" / "static" / "js" / "screensaver.js").read_text()
-    # The kiosk's state post carries only the finished pills' boxes, in the
-    # same panel-normalized space as the mark, capped small.
-    assert "donePillBoxes" in js
-    assert "pills: donePillBoxes(w, h)" in js
-    assert "PILL_SHARE_CAP" in js
-    assert "if (!b.done) continue;" in js
-    # A done pill's walls extend into the deck band exactly like the logo's
-    # (the shared deckBandPx math), bounce mode only; running pills keep
-    # panel-only walls.
-    assert "deckBandPx" in js
-    assert "(b.done && bounceActive) ? deckBandPx(w, h) : 0" in js
-    # The pill body remembers its food icon so the deck can draw it.
-    assert "icon: parts.iconChar" in js
+    assert merged["logo_when_display_off"] is True
 
 
 # -- screensaver on any instance (FoodAssistant-xlb3) --------------------------
@@ -401,61 +239,3 @@ def test_screensaver_js_gates_idle_on_kiosk_or_all_clients():
     assert "data-all-clients" in js
     # Idle activation: kiosk OR the all-clients setting, still timeout-gated.
     assert "(kiosk || ALL_CLIENTS) && IDLE_MS > 0" in js
-
-
-# -- state-file sharing (FoodAssistant-0fho) ----------------------------------
-
-
-def _forget_saver_memory():
-    """Simulate a different worker process: module state back at its default,
-    only the runtime state file remains."""
-    from app.services import screensaver_state as st
-    st._state = dict(st._DEFAULT_STATE)
-    st._state["pills"] = []
-    st._mtime = None
-
-
-def test_saver_state_is_shared_across_workers(monkeypatch, tmp_path):
-    from app.services import screensaver_state as st
-
-    monkeypatch.setenv("SCREENSAVER_STATE_DIR", str(tmp_path))
-    st.reset()
-    st.update(True, x=0.4, y=0.2, w=0.2, h=0.1, band=0.3, layout="below")
-    assert (tmp_path / "foodassistant-screensaver.json").exists()
-    _forget_saver_memory()
-    # The deck's poll may land on a worker that never saw the kiosk's post.
-    snap = st.snapshot()
-    assert snap["active"] is True and snap["x"] == 0.4
-    # And the dismiss round-trips across workers too: deck key press on one
-    # worker, kiosk's next post handled by another.
-    st.dismiss()
-    _forget_saver_memory()
-    assert st.update(True, band=0.3, layout="below")["dismiss"] is True
-    st.reset()
-
-
-def test_corrupt_saver_file_never_breaks_a_poll(monkeypatch, tmp_path):
-    from app.services import screensaver_state as st
-
-    monkeypatch.setenv("SCREENSAVER_STATE_DIR", str(tmp_path))
-    st.reset()
-    st.update(True, band=0.3, layout="below")
-    (tmp_path / "foodassistant-screensaver.json").write_text("{not json")
-    # The in-memory view is kept; the corrupt file never raises.
-    assert st.snapshot()["active"] is True
-    _forget_saver_memory()
-    assert st.snapshot()["active"] is False
-    st.reset()
-
-
-def test_saver_state_file_lives_in_the_runtime_tmp_dir(monkeypatch, tmp_path):
-    # SD-wear call (FoodAssistant-0fho): the kiosk posts several times a
-    # second, so this state file must default to the system temp dir, never
-    # the SD-backed data_dir.
-    import tempfile
-    from app.services import screensaver_state as st
-
-    monkeypatch.delenv("SCREENSAVER_STATE_DIR", raising=False)
-    assert st._state_file().parent == Path(tempfile.gettempdir())
-    monkeypatch.setenv("SCREENSAVER_STATE_DIR", str(tmp_path))
-    assert st._state_file().parent == tmp_path

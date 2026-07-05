@@ -12,6 +12,11 @@ All notable changes to Pantry Raider are recorded here. The format is based on
 
 ### Added
 - **Link your kitchen to Forager.** Settings, AI & Scanning now has a Forager card: type in a pairing code from the cloud portal and this install links to your cloud account. Once linked, pick Forager as the AI provider and photo analysis, receipt parsing, and barcode enrichment run through your subscription, no API key of your own needed. The card shows the account's plan and how much of the monthly AI quota is used, right next to the local token counter, and an Unlink button forgets the link whenever you want. Every install pairs separately, satellites included, so each device shows up by name on your account. If the monthly quota runs out, AI features pause with a clear message until the new month, exactly like the local token budget; everything else keeps working.
+### Changed
+- **The Stream Deck now rests with the display.** When the kiosk display goes to sleep, an attached Stream Deck shows the Pantry Raider raccoon across its keys instead of the normal buttons, right way up whatever way the deck is turned, and brings the buttons back the moment the display wakes. This replaces the screensaver-spanning option from 0.8.0 (where the bouncing logo glided across the deck keys); the Screensaver position setting is gone, and a new Logo while display sleeps switch in the Stream Deck settings controls the resting face, on by default. The deck's own idle timeout is unchanged and still blanks the keys fully after its own quiet period.
+
+### Fixed
+- **Waking either surface now wakes both.** A Stream Deck press has always woken a sleeping display, but touching the screen could leave a blanked deck dark until its own next press. The deck now picks up screen activity reliably, even when its check runs late, so a tap on the panel relights the keys within moments. The two idle timeouts stay independent; only the wake is shared.
 
 ## [0.8.0] - 2026-07-04
 

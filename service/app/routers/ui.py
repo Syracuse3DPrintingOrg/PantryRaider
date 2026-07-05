@@ -637,55 +637,6 @@ async def screensaver_photo(name: str = ""):
                     headers={"Cache-Control": "private, max-age=3600"})
 
 
-@router.post("/screensaver/state")
-async def screensaver_state_post(request: Request):
-    """Record the kiosk screensaver's logo position (FoodAssistant-3fdq).
-
-    Posted by the kiosk browser a few times a second while the bouncing-logo
-    saver is up (and once with active=false when it hides), in
-    panel-normalized units. The reply carries {"dismiss": true} when a Stream
-    Deck key press asked for the saver to end since the previous post, so the
-    kiosk hides the overlay without any new polling loop of its own."""
-    from ..services import screensaver_state
-    try:
-        body = await request.json()
-    except Exception:
-        body = {}
-    if not isinstance(body, dict):
-        body = {}
-
-    def _num(key: str) -> float:
-        v = body.get(key, 0.0)
-        return float(v) if isinstance(v, (int, float)) else 0.0
-
-    result = screensaver_state.update(
-        active=bool(body.get("active")),
-        x=_num("x"), y=_num("y"), w=_num("w"), h=_num("h"),
-        band=_num("band"),
-        layout=str(body.get("layout") or "off"),
-        pills=body.get("pills"),
-    )
-    return {"ok": True, **result}
-
-
-@router.get("/screensaver/state")
-async def screensaver_state_get():
-    """Current saver state, polled by the Stream Deck controller. A state the
-    kiosk has not refreshed recently reads as inactive, so a dead kiosk never
-    leaves the deck frozen mid-logo."""
-    from ..services import screensaver_state
-    return {"ok": True, **screensaver_state.snapshot()}
-
-
-@router.post("/screensaver/dismiss")
-async def screensaver_dismiss():
-    """End the saver from another surface (a Stream Deck key press). The mark
-    is delivered to the kiosk on its next state post."""
-    from ..services import screensaver_state
-    screensaver_state.dismiss()
-    return {"ok": True}
-
-
 @router.get("/nutrition", response_class=HTMLResponse)
 async def nutrition_page(request: Request):
     """Food-intake / nutrition tracker (FoodAssistant-e6qt)."""

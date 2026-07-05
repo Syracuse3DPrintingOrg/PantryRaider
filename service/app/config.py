@@ -12,7 +12,7 @@ from .hardware import is_raspberry_pi
 
 # Single source of truth for the app version (shown in the UI, used by the
 # update checker, and reported by FastAPI). Bump on each tagged release.
-APP_VERSION = "0.8.1"
+APP_VERSION = "0.8.2"
 
 # Single source of truth for the product's display name. The runtime identifiers
 # (systemd units, install paths, the foodassistant_streamdeck package, the
@@ -373,7 +373,7 @@ _SAVEABLE = [
     "start_page_enabled", "start_page_keys", "start_page_layout",
     "display_idle_timeout", "streamdeck_idle_timeout", "screensaver_minutes", "screensaver_speed", "screensaver_mode",
     "screensaver_all_clients",
-    "streamdeck_screensaver_layout",
+    "streamdeck_logo_when_display_off",
     "osk_enabled",
     "wake_on_motion",
     "streamdeck_key_overrides",
@@ -545,24 +545,6 @@ def appliances_clause(keys) -> str:
 # bundled full-colour icon (best paired with the "clean" style).
 STREAMDECK_KEY_STYLES = ("rich", "minimal", "glass", "clean")
 STREAMDECK_ICON_COLORS = ("full", "mono", "color")
-
-# Where the Stream Deck physically sits relative to the kiosk panel, for the
-# screensaver that treats both as one canvas (FoodAssistant-3fdq). "off" keeps
-# the deck out of the screensaver; the other values extend the bouncing logo's
-# travel onto the deck keys on that side of the panel.
-STREAMDECK_SCREENSAVER_LAYOUTS = ("off", "above", "below", "left", "right")
-
-# Key grid (columns, rows) per deck size, mirroring streamdeck/layout.GRID.
-_STREAMDECK_GRIDS = {6: (3, 2), 15: (5, 3), 32: (8, 4)}
-
-
-def streamdeck_grid_aspect(key_count: int) -> float:
-    """Height-to-width ratio of the deck's key grid, for the screensaver's
-    virtual-canvas math (the kiosk turns it into the deck band's size in panel
-    pixels). Keys are close to square, so rows/cols is a good physical
-    approximation. An unknown key count assumes the common 15-key deck."""
-    cols, rows = _STREAMDECK_GRIDS.get(int(key_count or 0), _STREAMDECK_GRIDS[15])
-    return rows / cols
 
 # Settings that hold credentials. These are redacted from backups unless the
 # user explicitly opts in, and never rendered back into the setup page.
@@ -1052,13 +1034,12 @@ class Settings(BaseSettings):
     # phone included) dims to the screensaver after the same idle minutes. The
     # test button and dismissal work the same everywhere either way.
     screensaver_all_clients: bool = False
-    # Where the Stream Deck sits relative to the kiosk panel, so the bouncing
-    # screensaver logo can glide off the screen and across the deck keys as one
-    # canvas (FoodAssistant-3fdq). One of STREAMDECK_SCREENSAVER_LAYOUTS; "off"
-    # (the default) keeps the deck out of the screensaver. Device-local like
-    # streamdeck_key_style: it describes this device's physical arrangement, so
-    # it is deliberately not synced from the main server.
-    streamdeck_screensaver_layout: str = "off"
+    # Show the Pantry Raider mark across the Stream Deck keys while the kiosk
+    # display sleeps (FoodAssistant-zttc). The deck follows the display: the
+    # raccoon appears when the display blanks and the page returns when it
+    # wakes. Device-local like streamdeck_key_style: it describes what this
+    # device's deck does, so it is deliberately not synced from the server.
+    streamdeck_logo_when_display_off: bool = True
 
     # On-screen keyboard for kiosk touchscreens (FoodAssistant-wo9j). A wall
     # panel has no physical keyboard, so in kiosk mode a bottom-docked keyboard

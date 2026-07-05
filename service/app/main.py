@@ -272,11 +272,7 @@ async def require_pin(request: Request, call_next):
     path = request.url.path
     if not (path == "/" or path.startswith("/ui")):
         return await call_next(request)
-    # The screensaver state channel is kiosk plumbing, not user data: the
-    # locked kiosk still posts the saver's logo position and the deck still
-    # dismisses it (FoodAssistant-3fdq), like setup/kiosk/activity.
-    if path in ("/ui/pin", "/ui/pin/verify", "/ui/login",
-                "/ui/screensaver/state", "/ui/screensaver/dismiss") or _is_static(path):
+    if path in ("/ui/pin", "/ui/pin/verify", "/ui/login") or _is_static(path):
         return await call_next(request)
     if request.session.get("pin_ok"):
         return await call_next(request)

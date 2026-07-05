@@ -127,7 +127,6 @@ commit messages, and UI copy.
 | `satellite.py` | pi_remote pulls and persists backend config from the main server |
 | `devices.py` | Main-server registry of satellite remotes, with an up-to-date/behind version badge via `version_compare.py` |
 | `ha_events.py` | Ring of on-screen HA events (notification toasts, camera pop-ups), polled by the kiosk, shared across workers via a state file under data_dir |
-| `screensaver_state.py` | Kiosk/Stream Deck shared screensaver canvas state; lives in a runtime tmp file (ephemeral, spares the SD card), not data_dir |
 | `diagnostics.py` | Debug logging to a rotating file under `data_dir/logs`, with redacted download |
 | `auto_update.py` | Fleet-wide auto-update decision: a Pi appliance applies via the host-bridge OTA, a server via Watchtower, a satellite follows the server's flag |
 | `utensils.py` | Recipe-equipment match |
@@ -182,10 +181,8 @@ commit messages, and UI copy.
   HA events) is **shared through small atomic JSON state files under
   data_dir** (temp file + `os.replace` writes, mtime-cached reads, silent
   in-memory degradation when data_dir is unwritable), so multiple uvicorn
-  workers agree and the state survives a restart. Screensaver state is the
-  exception: it writes several times a second, so it lives in a runtime tmp
-  file (`tempfile.gettempdir()`, `SCREENSAVER_STATE_DIR` overrides) to spare
-  the SD card. `main.py` also heartbeats `data_dir/app-instance.json` and
+  workers agree and the state survives a restart.
+  `main.py` also heartbeats `data_dir/app-instance.json` and
   warns loudly at startup when another live process shares the data dir.
   Keep the normalization, scaling, and parse logic pure so it stays testable.
 - Templates get an `ai_configured` flag from `templating.theme_context`;

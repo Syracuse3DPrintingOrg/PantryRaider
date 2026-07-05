@@ -100,14 +100,11 @@
                            value="{{ s.streamdeck_idle_timeout }}">
                   </div>
                   <div class="col-auto">
-                    <label class="form-label" for="streamdeck_screensaver_layout">Screensaver position{{ info('Lets the bouncing screensaver logo glide off the screen and across the deck keys. Pick the side of the screen the deck sits on; Off keeps the screensaver on the display only.') }}</label>
-                    <select class="form-select form-select-sm" id="streamdeck_screensaver_layout" style="max-width:190px">
-                      <option value="off"   {{ 'selected' if s.streamdeck_screensaver_layout == 'off' or not s.streamdeck_screensaver_layout else '' }}>Off</option>
-                      <option value="above" {{ 'selected' if s.streamdeck_screensaver_layout == 'above' else '' }}>Deck above the screen</option>
-                      <option value="below" {{ 'selected' if s.streamdeck_screensaver_layout == 'below' else '' }}>Deck below the screen</option>
-                      <option value="left"  {{ 'selected' if s.streamdeck_screensaver_layout == 'left' else '' }}>Deck left of the screen</option>
-                      <option value="right" {{ 'selected' if s.streamdeck_screensaver_layout == 'right' else '' }}>Deck right of the screen</option>
-                    </select>
+                    <label class="form-label d-block" for="streamdeck_logo_when_display_off">Logo while display sleeps{{ info('While the display is asleep, the deck keys show the Pantry Raider logo instead of the buttons. Pressing any key or touching the screen brings both back. The deck\'s own idle timeout above still blanks the keys fully.') }}</label>
+                    <div class="form-check form-switch mt-1">
+                      <input class="form-check-input" type="checkbox" id="streamdeck_logo_when_display_off"
+                             {{ 'checked' if s.streamdeck_logo_when_display_off else '' }}>
+                    </div>
                   </div>
                   <div class="col-auto">
                     <label class="form-label" for="streamdeck_key_style">Key style{{ info('Rich and Glass have depth; Clean drops the coloured background so the icons stand out; Minimalist is flat.') }}</label>

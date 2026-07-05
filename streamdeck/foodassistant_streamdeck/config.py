@@ -24,11 +24,6 @@ BRIGHTNESS_STEPS: tuple[int, ...] = (20, 40, 60, 80, 100)
 # The only rotations we support, in degrees clockwise.
 ALLOWED_ROTATIONS: tuple[int, ...] = (0, 90, 180, 270)
 
-# Where the deck physically sits relative to the kiosk panel for the shared
-# screensaver canvas (FoodAssistant-3fdq). "off" keeps the deck out of the
-# screensaver; the rest name the side of the panel the deck is mounted on.
-ALLOWED_SCREENSAVER_LAYOUTS: tuple[str, ...] = ("off", "above", "below", "left", "right")
-
 # Key face rendering style. "rich" (the default) draws a subtle vertical
 # gradient with an inner border; "glass" draws a glassmorphism panel; "minimal"
 # keeps the old flat fill; "clean" draws no coloured background (a dark face with
@@ -115,12 +110,12 @@ class Config:
     # How often the full-deck camera overlay refreshes its frame, in seconds.
     # Clamped to at least 1 so a stray 0 cannot spin the refresh loop.
     camera_full_refresh_seconds: int = 5
-    # Screensaver canvas position (FoodAssistant-3fdq): where this deck sits
-    # relative to the kiosk panel. When not "off" and the kiosk screensaver's
-    # bouncing logo is up, the controller polls the app for the logo position
-    # and renders the slice crossing the deck instead of blanking. Stamped into
+    # Show the Pantry Raider mark across the keys while the kiosk display is
+    # asleep (FoodAssistant-zttc). The controller learns the display state from
+    # the host bridge's activity poll; with this off the keys just keep their
+    # normal page (until the deck's own idle timeout blanks them). Stamped into
     # config.toml by the app from the Stream Deck settings page.
-    screensaver_layout: str = "off"
+    logo_when_display_off: bool = True
 
     def validated(self) -> "Config":
         """Drop unknown action names and clamp numbers into sane ranges."""
@@ -139,8 +134,7 @@ class Config:
         if self.icon_color not in ALLOWED_ICON_COLORS:
             self.icon_color = DEFAULT_ICON_COLOR
         self.camera_full_refresh_seconds = max(1, int(self.camera_full_refresh_seconds))
-        if self.screensaver_layout not in ALLOWED_SCREENSAVER_LAYOUTS:
-            self.screensaver_layout = "off"
+        self.logo_when_display_off = bool(self.logo_when_display_off)
         return self
 
 
@@ -193,13 +187,17 @@ def _apply(cfg: Config, data: dict) -> None:
     for name in ("base_url", "api_key", "kiosk_cdp_url", "weather_location", "weather_units",
                  "theme", "ha_base_url", "ha_token", "host_bridge_url",
                  "bridge_token_path",
-                 "key_style", "icon_color", "screensaver_layout"):
+                 "key_style", "icon_color"):
         if isinstance(data.get(name), str):
+            setattr(cfg, name, data[name])
+    # Note: isinstance(True, int) holds, so booleans are matched first.
+    for name in ("logo_when_display_off",):
+        if isinstance(data.get(name), bool):
             setattr(cfg, name, data[name])
     for name in ("brightness", "poll_seconds", "soon_days", "rotation",
                  "weather_poll_minutes", "ha_poll_seconds", "idle_timeout_minutes",
                  "camera_full_refresh_seconds"):
-        if isinstance(data.get(name), int):
+        if isinstance(data.get(name), int) and not isinstance(data.get(name), bool):
             setattr(cfg, name, data[name])
 
     raw_cameras = data.get("cameras")

@@ -130,7 +130,7 @@
      floating clock; any touch dismisses it. Runs in kiosk mode (or in every
      browser when data-all-clients is on) and only when a timeout is set
      (FoodAssistant-y65x). #}
-  <div id="screensaver-config" data-minutes="{{ screensaver_minutes }}" data-speed="{{ screensaver_speed }}" data-mode="{{ screensaver_mode }}" data-all-clients="{{ 'true' if screensaver_all_clients else 'false' }}" data-deck-layout="{{ streamdeck_screensaver_layout }}" data-deck-aspect="{{ streamdeck_grid_aspect }}" hidden></div>
+  <div id="screensaver-config" data-minutes="{{ screensaver_minutes }}" data-speed="{{ screensaver_speed }}" data-mode="{{ screensaver_mode }}" data-all-clients="{{ 'true' if screensaver_all_clients else 'false' }}" hidden></div>
   <script src="static/js/screensaver.js?v={{ app_version }}"></script>
   {# On-screen keyboard for kiosk touchscreens (FoodAssistant-wo9j) #}
   {% include "_osk.html" %}

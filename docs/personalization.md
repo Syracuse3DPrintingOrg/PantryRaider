@@ -122,11 +122,10 @@ brings the page right back. It is configured per device in Screen & Sleep:
   browser viewing the install (a desktop or a phone included) dims after the
   same idle minutes. Because of this, the screensaver settings also appear on
   server installs.
-- **Spanning the Stream Deck**: a Screensaver position option in the Stream
-  Deck settings tells the saver which side of the screen the deck sits on.
-  The bouncing logo (and a finished timer's Done pill) then glides off the
-  panel and across the deck keys as if the two were one surface, and the deck
-  joins the screensaver instead of blanking. Pressing any key wakes both.
+- **The Stream Deck rests with the display**: while the display is asleep,
+  an attached Stream Deck shows the Pantry Raider logo across its keys
+  instead of the buttons (a switch in the Stream Deck settings, on by
+  default). Pressing any key or touching the screen wakes both surfaces.
 - **Test screensaver** starts the saver immediately with the options picked in
   the form, no waiting for the idle timeout. There is also a Screensaver
   button on the Timers page for the same jump.

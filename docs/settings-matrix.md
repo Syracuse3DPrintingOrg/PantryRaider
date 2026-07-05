@@ -178,7 +178,7 @@ and are device-local. They do not apply to a server install.
 | `screensaver_all_clients` | | Editable | Editable | Device-local |
 | `osk_enabled` | | Editable | Editable | Device-local |
 | `streamdeck_idle_timeout` | | Not applicable | Editable | Device-local |
-| `streamdeck_screensaver_layout` | | Not applicable | Editable | Device-local |
+| `streamdeck_logo_when_display_off` | | Not applicable | Editable | Device-local |
 
 The kiosk display cards (Settings, Personalization, Screen & Sleep) and the
 Stream Deck editor (Settings, Personalization, Start Page & Stream Deck) are
@@ -209,11 +209,11 @@ keyboard. On by default; turn it off on a kiosk with a keyboard attached.
 Like the screensaver, it is offered on server installs too, because any
 browser can be put in kiosk (touch) mode.
 
-`streamdeck_screensaver_layout` tells the screensaver where the Stream Deck
-sits relative to the screen (above, below, left, or right). With a position
-set, the bouncing logo glides off the panel and across the deck keys as if
-the two were one surface, and the deck joins the screensaver instead of
-blanking; `off` (the default) keeps the screensaver on the display only.
+`streamdeck_logo_when_display_off` puts the Pantry Raider logo across the
+Stream Deck keys while the display is asleep, so the deck reads as resting
+rather than showing stale buttons. Pressing any key or touching the screen
+brings both surfaces back. On by default; the deck's own
+`streamdeck_idle_timeout` still blanks the keys fully after its idle period.
 
 ## Stream Deck
 

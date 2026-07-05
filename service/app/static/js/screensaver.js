@@ -27,15 +27,6 @@
 // (FoodAssistant-ysf6): the camera page or an ha-events camera pop-up means
 // someone is watching a feed, which is intentionally idle.
 //
-// Shared canvas with the Stream Deck (FoodAssistant-3fdq): when the deck's
-// screensaver position setting says the deck sits above/below/left/right of
-// the panel, the bounce walls extend past that edge by a band sized from the
-// deck's key grid, and the logo's position is posted to ui/screensaver/state
-// a few times a second so the deck controller can render the slice crossing
-// its keys. The kiosk stays the animation driver; the deck is a slower echo.
-// The state replies also carry a dismiss flag, so a deck key press wakes the
-// panel's saver too.
-//
 // Floating kitchen timers (FoodAssistant-8c6m): while the saver is up, every
 // active timer from the shared /timers registry rides the screen as a small
 // bouncing pill (label + live countdown) in BOTH styles. Pills reflect off
@@ -51,13 +42,6 @@
 // so the physics body underneath never changes course. At most
 // six pills are simulated (Pi 3 budget); the rest collapse into a static
 // "+N more" pill.
-//
-// A FINISHED pill crosses onto the Stream Deck (FoodAssistant-07ee): with the
-// deck in the canvas, a done pill's walls extend into the deck band exactly
-// like the logo's, so it physically drifts across the seam, and the state
-// posts carry the done pills' boxes (same panel-normalized space as the mark)
-// so the deck renders its slice of them. Running pills keep panel-only walls;
-// only finished timers earn the extra surface.
 (function () {
   var kiosk = false;
   try {
@@ -75,12 +59,6 @@
   var SPEEDS = { slow: 18, normal: 32, fast: 60 };
   var SPEED = SPEEDS[cfg.getAttribute('data-speed') || 'normal'] || SPEEDS.normal;
   var MODE = cfg.getAttribute('data-mode') === 'photos' ? 'photos' : 'bounce';
-  // Stream Deck canvas position (off disables the shared canvas) and the
-  // deck's key-grid height/width ratio, used to size the off-screen band.
-  var DECK_LAYOUT = cfg.getAttribute('data-deck-layout') || 'off';
-  if (['above', 'below', 'left', 'right'].indexOf(DECK_LAYOUT) === -1) DECK_LAYOUT = 'off';
-  var DECK_ASPECT = parseFloat(cfg.getAttribute('data-deck-aspect') || '0.6') || 0.6;
-  var STATE_POST_MS = 300;  // how often the logo position is shared while up
   var PHOTO_MS = 25000;   // how long each slideshow photo stays up
   var FADE_MS = 2000;     // crossfade length between photos
   var lastActivity = Date.now();
@@ -102,23 +80,6 @@
     });
   }
 
-  // Post the shared saver state (the logo mark's box, panel-normalized) so
-  // the Stream Deck can render its slice of the canvas. A reply carrying
-  // dismiss=true means a deck key press ended the saver: hide it here too.
-  function postSaverState(body) {
-    fetch('ui/screensaver/state', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-      keepalive: true,
-      cache: 'no-store',
-    }).then(function (r) { return r.json(); })
-      .then(function (data) {
-        if (data && data.dismiss && overlay) hide();
-      })
-      .catch(function () { });
-  }
-
   // The layout-pixel viewport, the space translate() coordinates render in:
   // the visual viewport divided by the kiosk interface scale's zoom
   // (kiosk-display.js sets html.style.zoom; 1 everywhere else). Read per
@@ -134,16 +95,6 @@
     return { w: window.innerWidth / z, h: window.innerHeight / z };
   }
 
-  // Off-screen band for the deck's side of the canvas, in layout px. For
-  // above/below the deck's width spans the panel width, so the band is that
-  // width times the deck grid's height/width ratio; left/right is the same
-  // idea against the panel height. 0 when no deck is in the canvas.
-  function deckBandPx(w, h) {
-    if (DECK_LAYOUT === 'above' || DECK_LAYOUT === 'below') return w * DECK_ASPECT;
-    if (DECK_LAYOUT === 'left' || DECK_LAYOUT === 'right') return h / DECK_ASPECT;
-    return 0;
-  }
-
   // Old-school DVD bounce: the block travels in a dead-straight line at
   // constant speed until it HITS an edge, then reflects (angle in = angle
   // out) and carries on; nothing else ever changes its course. Frame-time
@@ -153,24 +104,16 @@
   //
   // Every measurement here lives in LAYOUT pixels: layoutSize() for the
   // walls (the vf4f zoom fix) and offsetWidth/Height for the block.
-  //
-  // With a Stream Deck in the canvas (DECK_LAYOUT not 'off'), the wall on the
-  // deck's side moves out by a band sized from the deck's key grid, so the
-  // logo glides off the panel, across the deck, and back.
-  function startBounce(block, mark) {
+  function startBounce(block) {
     var x = null, y = null, dx = 0, dy = 0, last = null;
-    var lastPost = 0;
     bounceActive = true;  // this loop drives the timer pills too
     function step(ts) {
       if (!overlay) return;
       var vp = layoutSize();
       var w = vp.w, h = vp.h;
       var bw = block.offsetWidth, bh = block.offsetHeight;
-      var bandPx = deckBandPx(w, h);
-      var vw = w + ((DECK_LAYOUT === 'left' || DECK_LAYOUT === 'right') ? bandPx : 0);
-      var vh = h + ((DECK_LAYOUT === 'above' || DECK_LAYOUT === 'below') ? bandPx : 0);
-      var maxX = Math.max(0, vw - bw);
-      var maxY = Math.max(0, vh - bh);
+      var maxX = Math.max(0, w - bw);
+      var maxY = Math.max(0, h - bh);
       if (x === null) {
         x = Math.random() * Math.max(0, w - bw);
         y = Math.random() * Math.max(0, h - bh);
@@ -192,38 +135,13 @@
         else if (y >= maxY) { y = maxY; dy = -Math.abs(dy); }
       }
       last = ts;
-      // Virtual coords put the deck band past the panel edge; for a deck
-      // above or to the left, on-screen coordinates shift back so the panel
-      // still occupies its own 0..w / 0..h.
-      var sx = x - (DECK_LAYOUT === 'left' ? bandPx : 0);
-      var sy = y - (DECK_LAYOUT === 'above' ? bandPx : 0);
-      block.style.transform = 'translate(' + sx + 'px,' + sy + 'px)';
+      block.style.transform = 'translate(' + x + 'px,' + y + 'px)';
       // The timer pills ride this same frame step (one rAF loop total). They
       // carom off the logo block, approximated as a circle in on-screen
       // coordinates; the logo itself never changes course.
       stepTimerBodies(ts, w, h, {
-        cx: sx + bw / 2, cy: sy + bh / 2, r: (bw + bh) / 4,
+        cx: x + bw / 2, cy: y + bh / 2, r: (bw + bh) / 4,
       });
-      if (DECK_LAYOUT !== 'off' && bandPx > 0 && ts - lastPost >= STATE_POST_MS) {
-        lastPost = ts;
-        // Share just the raccoon mark's box (not the clock under it), in
-        // panel-normalized units: the panel is 0..1 on each axis and the
-        // deck band extends past that range on its side. Finished timer
-        // pills ride along in the same units (FoodAssistant-07ee): only the
-        // done ones, so an expired timer grabs attention on the deck too
-        // while the payload stays a handful of numbers.
-        postSaverState({
-          active: true,
-          x: (sx + (mark ? mark.offsetLeft : 0)) / w,
-          y: (sy + (mark ? mark.offsetTop : 0)) / h,
-          w: (mark ? mark.offsetWidth : bw) / w,
-          h: (mark ? mark.offsetHeight : bh) / h,
-          band: (DECK_LAYOUT === 'above' || DECK_LAYOUT === 'below')
-            ? bandPx / h : bandPx / w,
-          layout: DECK_LAYOUT,
-          pills: donePillBoxes(w, h),
-        });
-      }
       rafId = requestAnimationFrame(step);
     }
     rafId = requestAnimationFrame(step);
@@ -522,19 +440,12 @@
     for (i = 0; i < timerBodies.length; i++) {
       b = timerBodies[i];
       // Walls last, so a collision separation can never leave a pill drawn
-      // past the edge: reflect exactly at the wall, like the logo does. A
-      // DONE pill's walls extend into the deck band the same way the logo's
-      // do (bounce mode only, the mode that drives the shared canvas), so a
-      // finished timer physically drifts across the seam onto the deck keys;
-      // running pills keep panel-only walls (FoodAssistant-07ee).
-      var band = (b.done && bounceActive) ? deckBandPx(w, h) : 0;
-      var minX = DECK_LAYOUT === 'left' ? -band : 0;
-      var minY = DECK_LAYOUT === 'above' ? -band : 0;
-      var maxX = Math.max(minX, w - b.w + (DECK_LAYOUT === 'right' ? band : 0));
-      var maxY = Math.max(minY, h - b.h + (DECK_LAYOUT === 'below' ? band : 0));
-      if (b.x <= minX) { b.x = minX; b.vx = Math.abs(b.vx); }
+      // past the edge: reflect exactly at the wall, like the logo does.
+      var maxX = Math.max(0, w - b.w);
+      var maxY = Math.max(0, h - b.h);
+      if (b.x <= 0) { b.x = 0; b.vx = Math.abs(b.vx); }
       else if (b.x >= maxX) { b.x = maxX; b.vx = -Math.abs(b.vx); }
-      if (b.y <= minY) { b.y = minY; b.vy = Math.abs(b.vy); }
+      if (b.y <= 0) { b.y = 0; b.vy = Math.abs(b.vy); }
       else if (b.y >= maxY) { b.y = maxY; b.vy = -Math.abs(b.vy); }
       b.el.style.transform = 'translate(' + b.x + 'px,' + b.y + 'px)';
       if (b.done) continue;
@@ -561,23 +472,6 @@
       timerRafId = requestAnimationFrame(tstep);
     }
     timerRafId = requestAnimationFrame(tstep);
-  }
-
-  // The done pills' boxes for the shared state post, panel-normalized: the
-  // panel is 0..1 on each axis and a pill inside the deck band sits past that
-  // range, exactly like the mark's box. Only FINISHED pills are shared (the
-  // point is attention for an expired timer), capped so the 300ms post stays
-  // a handful of numbers.
-  var PILL_SHARE_CAP = 4;
-  function donePillBoxes(w, h) {
-    var out = [];
-    for (var i = 0; i < timerBodies.length && out.length < PILL_SHARE_CAP; i++) {
-      var b = timerBodies[i];
-      if (!b.done) continue;
-      out.push({ id: b.id, x: b.x / w, y: b.y / h, w: b.w / w, h: b.h / h,
-                 done: true, icon: b.icon });
-    }
-    return out;
   }
 
   // Test-only view of the simulated pills (layout px, px/s), sampled by the
@@ -613,7 +507,7 @@
     block.appendChild(date);
     overlay.appendChild(block);
     updateClock();
-    startBounce(block, mark);
+    startBounce(block);
   }
 
   // Photo slideshow. Each image is cover-fit and drifts with a slow Ken Burns
@@ -770,8 +664,6 @@
     if (!overlay) return;
     var el = overlay;
     overlay = null;
-    // Tell the deck the saver ended so it returns to its keys promptly.
-    if (DECK_LAYOUT !== 'off') postSaverState({ active: false });
     clearInterval(clockTimer);
     if (rafId) cancelAnimationFrame(rafId);
     rafId = null;

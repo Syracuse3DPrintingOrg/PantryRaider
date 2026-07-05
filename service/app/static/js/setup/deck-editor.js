@@ -1301,7 +1301,8 @@ async function saveStreamDeckSettings() {
   const has_streamdeck = document.getElementById('has_streamdeck')?.checked || false;
   const streamdeck_key_count = parseInt(document.getElementById('streamdeck_key_count')?.value || '15', 10);
   const streamdeck_idle_timeout = parseInt(document.getElementById('streamdeck_idle_timeout')?.value || '0', 10);
-  const streamdeck_screensaver_layout = document.getElementById('streamdeck_screensaver_layout')?.value || 'off';
+  const logoOffEl = document.getElementById('streamdeck_logo_when_display_off');
+  const streamdeck_logo_when_display_off = logoOffEl ? logoOffEl.checked : true;
   const rotation = parseInt(document.getElementById('streamdeck_rotation')?.value || '0', 10);
   const brightness = parseInt(document.getElementById('streamdeck_brightness')?.value || '60', 10);
   const keys = _sdCollectKeys();
@@ -1319,7 +1320,7 @@ async function saveStreamDeckSettings() {
     await fetch('setup/save', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({has_streamdeck, streamdeck_key_count, streamdeck_idle_timeout,
-                            streamdeck_screensaver_layout,
+                            streamdeck_logo_when_display_off,
                             streamdeck_key_overrides: key_overrides,
                             streamdeck_weather_location: weather_location,
                             streamdeck_weather_units: weather_units,

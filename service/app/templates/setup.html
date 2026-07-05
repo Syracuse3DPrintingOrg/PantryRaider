@@ -427,7 +427,7 @@ const WIZ_HAS_MEALIE_KEY = {{ 'true' if has.mealie_api_key else 'false' }};
 <script src="static/js/setup/dirty-guard.js?v={{ version }}"></script>
 {# The screensaver script backs the Display pane's Test button
    (window.__screensaverTest) and, on a kiosk, the normal idle behaviour. #}
-<div id="screensaver-config" data-minutes="{{ s.screensaver_minutes }}" data-speed="{{ s.screensaver_speed }}" data-mode="{{ s.screensaver_mode }}" data-all-clients="{{ 'true' if s.screensaver_all_clients else 'false' }}" data-deck-layout="{{ streamdeck_screensaver_layout }}" data-deck-aspect="{{ streamdeck_grid_aspect }}" hidden></div>
+<div id="screensaver-config" data-minutes="{{ s.screensaver_minutes }}" data-speed="{{ s.screensaver_speed }}" data-mode="{{ s.screensaver_mode }}" data-all-clients="{{ 'true' if s.screensaver_all_clients else 'false' }}" hidden></div>
 <script src="static/js/screensaver.js?v={{ version }}"></script>
 {# On-screen keyboard for kiosk touchscreens (FoodAssistant-wo9j): a kiosk in
    the setup wizard or the settings page needs to type API keys and names. #}

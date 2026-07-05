@@ -49,9 +49,11 @@ The key layout, custom keys (Home Assistant actions, quick-add shopping items,
 timers, weather, cameras, media, macros), the key style, and the icon colours
 are all edited in the app under Settings, Personalization, Start Page & Stream
 Deck; the deck picks changes up on its next sync. While the service starts,
-the keys show the Pantry Raider raccoon instead of the factory logo, and with
-a screensaver position set in those settings the deck joins the kiosk
-screensaver instead of blanking.
+the keys show the Pantry Raider raccoon instead of the factory logo, and the
+same raccoon covers the keys while the kiosk display is asleep (a switch in
+those settings, on by default). Pressing any key or touching the screen wakes
+the display and the deck together; the deck's own idle timeout still blanks
+the keys fully after its own quiet period.
 
 ## Install
 
