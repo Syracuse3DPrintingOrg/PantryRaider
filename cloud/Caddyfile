@@ -26,11 +26,11 @@
 	# for a known kitchen subdomain with a live tunnel, so this gates cert
 	# issuance to real kitchens and nothing else.
 	on_demand_tls {
+		# The ask endpoint is the gate: Caddy issues a certificate for an
+		# unknown host only when the app answers 200, and the app says yes
+		# solely for a live kitchen subdomain, so a flood of bogus hostnames
+		# never reaches ACME.
 		ask http://127.0.0.1:8000/v1/tunnel/tls-check
-		# A safety rail on issuance rate, so a flood of bogus hostnames
-		# cannot drive Caddy to hammer the ACME endpoint.
-		interval 2m
-		burst 5
 	}
 }
 
