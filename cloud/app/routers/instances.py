@@ -56,7 +56,9 @@ def provision_instance(payload: ProvisionRequest, request: Request,
     client = client_ip(request)
     if not ratelimit.allow(f"login:{client}", settings.login_rate_per_minute):
         raise HTTPException(429, detail="Too many login attempts, try again in a minute")
-    account = authenticate(db, payload.email, payload.password)
+    account, locked = authenticate(db, payload.email, payload.password)
+    if locked:
+        raise HTTPException(429, detail=locked)
     if not account:
         raise HTTPException(401, detail="Invalid email or password")
     if account.disabled:

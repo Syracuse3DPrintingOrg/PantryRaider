@@ -1,14 +1,20 @@
 {% extends "base.html" %}
 {% block title %}My account: Forager{% endblock %}
 {% block content %}
-<h1>My account</h1>
+<div class="dash-head">
+  <h1 style="margin-bottom:0.25rem;">My account</h1>
+  <span class="pill">{{ plan_label }}</span>
+</div>
 <p class="muted">{{ email }}</p>
 
 {% if notice %}<div class="alert alert-notice">{{ notice }}</div>{% endif %}
 {% if error %}<div class="alert alert-error">{{ error }}</div>{% endif %}
 
 <div class="card">
-  <h2>Your plan: {{ plan_label }}</h2>
+  <h2>Your plan</h2>
+  {% if plan == "trial" and trial_days_left is not none %}
+  <p class="muted small">{{ trial_days_left }} days left on your free trial.</p>
+  {% endif %}
   <div class="meter" role="progressbar" aria-valuenow="{{ percent }}"
        aria-valuemin="0" aria-valuemax="100"
        aria-label="Monthly scanning allowance used">
@@ -33,8 +39,8 @@
       {% endfor %}
     </div>
     <p class="muted small">A subscription keeps your kitchen reachable from
-    anywhere and refills your scanning allowance. Cancel anytime. Pantry
-    Raider itself is always free with your own AI key.</p>
+    anywhere and refills your scanning allowance. Cancel anytime. Pantry Raider
+    itself is always free with your own AI key.</p>
   {% else %}
     <p class="muted small">Billing is not live yet. Everyone is on the free
     trial for now, on us.</p>
@@ -65,9 +71,9 @@
   <p class="muted small">Removing a kitchen signs that device out of your
   account. You can always sign it back in from the app.</p>
   {% else %}
-  <p class="muted">No kitchens linked yet. Open the Pantry Raider app in
-  your kitchen, go to Settings, and sign in with this email and password.
-  It will show up here.</p>
+  <p class="muted">No kitchens linked yet. Open the Pantry Raider app in your
+  kitchen, go to Settings, and sign in with this email and password. It will
+  show up here.</p>
   {% endif %}
 </div>
 
@@ -76,8 +82,8 @@
   <h2>Change password</h2>
   {% else %}
   <h2>Set a password</h2>
-  <p class="muted small">You signed up with Google. Add a password if you
-  also want to log in with your email address.</p>
+  <p class="muted small">You signed up with Google. Add a password if you also
+  want to log in with your email address.</p>
   {% endif %}
   <form method="post" action="/account/password">
     {% if has_password %}
@@ -87,10 +93,10 @@
     {% endif %}
     <label for="new_password">New password</label>
     <input type="password" id="new_password" name="new_password"
-           autocomplete="new-password" minlength="8" required>
+           autocomplete="new-password" minlength="10" required>
     <label for="confirm_password">Confirm new password</label>
     <input type="password" id="confirm_password" name="confirm_password"
-           autocomplete="new-password" minlength="8" required>
+           autocomplete="new-password" minlength="10" required>
     <button class="btn btn-outline" type="submit">
       {% if has_password %}Update password{% else %}Set password{% endif %}
     </button>

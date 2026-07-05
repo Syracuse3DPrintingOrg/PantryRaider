@@ -1,62 +1,86 @@
 {% extends "base.html" %}
 {% block title %}Forager: photo scanning for Pantry Raider{% endblock %}
 {% block content %}
-<h1>Point your camera at the groceries. Forager does the rest.</h1>
-<p class="muted">
-  Forager is the companion service for Pantry Raider. Snap a photo of your
-  groceries or a receipt and Forager reads it for you: no accounts with AI
-  companies, no keys to paste in, nothing to configure.
-</p>
+{% macro check() %}<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8.5l3.5 3.5L13 4"/></svg>{% endmacro %}
+
+<section class="hero">
+  <h1>Point your camera at the groceries. Forager does the rest.</h1>
+  <p class="lead">
+    Snap a photo of your groceries or a receipt and Forager reads it for you.
+    No accounts with AI companies, no keys to paste in, nothing to configure.
+  </p>
+  <div class="hero-cta">
+    {% if signed_in %}
+    <a class="btn btn-lg" href="/account">Go to my account</a>
+    {% else %}
+    <a class="btn btn-lg" href="/signup">Start a free trial</a>
+    <a class="btn btn-outline btn-lg" href="/login">Log in</a>
+    {% endif %}
+  </div>
+</section>
 
 <div class="card">
   <h2>How it works</h2>
   <p>Create a Forager account here, then open the Pantry Raider app in your
   kitchen and sign in with the same email and password. That is the whole
   setup: scanning starts working right away.</p>
-  <p class="muted small">Every account starts on a free trial. Your
-  inventory, recipes, and shopping lists stay in your own kitchen; photos
-  pass through Forager only long enough to be read, and are never stored.</p>
-  {% if signed_in %}
-  <a class="btn" href="/account">Go to my account</a>
-  {% else %}
-  <a class="btn" href="/signup">Start a free trial</a>
-  <a class="btn btn-outline" href="/login">Log in</a>
-  {% endif %}
+  <p class="muted small">Every account starts on a free trial. Your inventory,
+  recipes, and shopping lists stay in your own kitchen; photos pass through
+  Forager only long enough to be read, and are never stored.</p>
 </div>
 
 <div class="card">
   <h2>Pantry Raider is free. Forager is the easy button.</h2>
-  <p>Pantry Raider itself is free and open source. Run it at home with your
-  own AI key and your own network setup and it works forever, no account
-  needed. Forager is for people who would rather not: it gives your kitchen
-  a web address you can reach from anywhere and AI scanning credits, with no
-  keys to paste and nothing to configure.</p>
+  <p>Pantry Raider itself is free and open source. Run it at home with your own
+  AI key and your own network setup and it works forever, no account needed.
+  Forager is for people who would rather not: it gives your kitchen a web
+  address you can reach from anywhere and AI scanning credits, with no keys to
+  paste and nothing to configure.</p>
 </div>
 
+<h2 style="text-align:center; margin: 2rem 0 1rem;">Simple pricing</h2>
 <div class="pricing">
   <div class="card plan">
     <h3>Free trial</h3>
     <p class="price">30 days</p>
-    <p class="muted small">The full Premium experience while you try it:
-    remote access and generous scanning credits. No card to start.</p>
+    <p class="price-note">The full Premium experience, no card to start.</p>
+    <ul class="features">
+      <li>{{ check() }} Remote access to your kitchen</li>
+      <li>{{ check() }} Generous scanning credits</li>
+      <li>{{ check() }} Starts the moment you sign up</li>
+    </ul>
+    <a class="btn btn-outline" href="/signup">Start free</a>
   </div>
+
+  <div class="card plan featured">
+    <span class="tag-popular">Most popular</span>
+    <h3>Premium</h3>
+    <p class="price">$3<span class="per"> / month</span></p>
+    <p class="price-note">or $30 / year</p>
+    <ul class="features">
+      <li>{{ check() }} Remote access from anywhere</li>
+      <li>{{ check() }} The full pool of scanning credits</li>
+      <li>{{ check() }} Photos, receipts, and barcodes handled for you</li>
+    </ul>
+    <a class="btn" href="/signup">Choose Premium</a>
+  </div>
+
   <div class="card plan">
     <h3>Cloud Basic</h3>
-    <p class="price">$10<span class="muted small"> / year</span></p>
-    <p class="muted small">Remote access plus a small pool of scanning
-    credits. Best if you bring your own AI key or scan only now and then.</p>
-  </div>
-  <div class="card plan">
-    <h3>Premium</h3>
-    <p class="price">$3<span class="muted small"> / month, or $30 / year</span></p>
-    <p class="muted small">Remote access plus the full pool of scanning
-    credits, so photos, receipts, and barcodes are always handled for you.</p>
+    <p class="price">$10<span class="per"> / year</span></p>
+    <p class="price-note">Best if you bring your own AI key.</p>
+    <ul class="features">
+      <li>{{ check() }} Remote access to your kitchen</li>
+      <li>{{ check() }} A small pool of scanning credits</li>
+      <li>{{ check() }} Great for light, occasional scanning</li>
+    </ul>
+    <a class="btn btn-outline" href="/signup">Choose Basic</a>
   </div>
 </div>
 
-<p class="muted small">
-  New to Pantry Raider? It is a free app you run at home that tracks what is
-  in your pantry and when it expires. Learn more and get it at
+<p class="muted small" style="text-align:center; max-width: 60ch; margin: 1.5rem auto 0;">
+  New to Pantry Raider? It is a free app you run at home that tracks what is in
+  your pantry and when it expires. Learn more and get it at
   <a href="https://pantryraider.app">pantryraider.app</a>.
 </p>
 {% endblock %}

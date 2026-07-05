@@ -4,103 +4,191 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#212529">
+  <link rel="icon" href="/static/mark.svg" type="image/svg+xml">
   <title>{% block title %}Forager{% endblock %}</title>
-  {# A small hand-written stylesheet that echoes the Pantry Raider app's
-     Bootstrap dark look (same background, surface, and pink accent) without
-     importing anything from service/. Kept inline: one page-weight, no
-     static mount, no CDN. #}
+  {# A hand-written stylesheet that echoes the Pantry Raider app's Bootstrap
+     dark look (same background, surface, and pink accent) without importing
+     anything from service/. Kept inline: one page-weight, no CDN. The raccoon
+     mark in the header is the only external asset, served from /static. #}
   <style>
     :root {
-      --bg: #212529; --surface: #2b3035; --border: #495057;
+      --bg: #212529; --surface: #2b3035; --surface-2: #32383e;
+      --border: #495057; --border-soft: #3a4046;
       --text: #dee2e6; --muted: #adb5bd;
-      --primary: #F2006E; --primary-hover: #d1005f;
+      --primary: #F2006E; --primary-hover: #d1005f; --primary-soft: rgba(242,0,110,0.12);
       --danger: #dc3545; --success: #75b798;
+      --radius: 0.6rem; --radius-lg: 0.9rem;
+      --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 8px 24px rgba(0,0,0,0.22);
     }
     * { box-sizing: border-box; }
+    html { -webkit-text-size-adjust: 100%; }
     body {
       margin: 0; background: var(--bg); color: var(--text);
       font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-      line-height: 1.5;
+      line-height: 1.55; min-height: 100vh;
+      display: flex; flex-direction: column;
     }
-    a { color: var(--primary); }
+    a { color: var(--primary); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    :focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; border-radius: 4px; }
+
     header.nav {
       display: flex; align-items: center; justify-content: space-between;
-      padding: 0.75rem 1.25rem; border-bottom: 1px solid var(--border);
-      background: var(--surface);
+      flex-wrap: wrap; gap: 0.75rem;
+      padding: 0.85rem 1.25rem; border-bottom: 1px solid var(--border-soft);
+      background: var(--surface); position: sticky; top: 0; z-index: 10;
     }
-    .brand { font-weight: 700; font-size: 1.15rem; color: var(--text); text-decoration: none; }
-    .brand .dot { color: var(--primary); }
-    .nav-links { display: flex; gap: 0.5rem; align-items: center; }
-    main { max-width: 640px; margin: 0 auto; padding: 1.5rem 1rem 3rem; }
+    .brand {
+      display: inline-flex; align-items: center; gap: 0.6rem;
+      color: var(--text); font-weight: 700; font-size: 1.2rem; line-height: 1;
+    }
+    .brand:hover { text-decoration: none; }
+    .brand img { width: 30px; height: 30px; display: block; }
+    .brand .wordmark { display: flex; flex-direction: column; }
+    .brand .wordmark .name .dot { color: var(--primary); }
+    .brand .wordmark .tag { font-size: 0.68rem; font-weight: 500; color: var(--muted); letter-spacing: 0.02em; }
+    .nav-links { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+
+    main { width: 100%; max-width: 960px; margin: 0 auto; padding: 2rem 1.15rem 3.5rem; flex: 1; }
+    main.narrow { max-width: 460px; }
+
     .card {
-      background: var(--surface); border: 1px solid var(--border);
-      border-radius: 0.5rem; padding: 1.25rem; margin-bottom: 1.25rem;
+      background: var(--surface); border: 1px solid var(--border-soft);
+      border-radius: var(--radius-lg); padding: 1.5rem; margin-bottom: 1.25rem;
     }
-    .pricing {
-      display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-      gap: 0.75rem; margin-bottom: 1.25rem;
-    }
-    .pricing .plan { margin-bottom: 0; }
-    .pricing .plan h3 { font-size: 1.05rem; margin: 0 0 0.4rem; }
-    .pricing .price { font-size: 1.4rem; font-weight: 600; margin: 0 0 0.5rem; }
-    .plan-buttons { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.5rem; }
-    h1 { font-size: 1.6rem; margin: 0.5rem 0 1rem; }
-    h2 { font-size: 1.15rem; margin: 0 0 0.75rem; }
+    .card h2:first-child, .card h3:first-child { margin-top: 0; }
+
+    h1 { font-size: 1.75rem; line-height: 1.2; margin: 0.25rem 0 1rem; letter-spacing: -0.01em; }
+    h2 { font-size: 1.2rem; margin: 0 0 0.75rem; }
+    h3 { font-size: 1.05rem; margin: 0 0 0.5rem; }
+    p { margin: 0 0 0.85rem; }
+    p:last-child { margin-bottom: 0; }
     p.muted, .muted { color: var(--muted); }
     .small { font-size: 0.875rem; }
-    label { display: block; margin-bottom: 0.25rem; font-size: 0.9rem; color: var(--muted); }
+    .lead { font-size: 1.1rem; color: var(--muted); }
+
+    label { display: block; margin-bottom: 0.3rem; font-size: 0.9rem; color: var(--muted); }
     input[type=email], input[type=password], input[type=text] {
-      width: 100%; padding: 0.5rem 0.75rem; margin-bottom: 0.9rem;
+      width: 100%; padding: 0.6rem 0.8rem; margin-bottom: 1rem;
       background: var(--bg); color: var(--text);
-      border: 1px solid var(--border); border-radius: 0.375rem; font-size: 1rem;
+      border: 1px solid var(--border); border-radius: 0.45rem; font-size: 1rem;
     }
-    input:focus { outline: 2px solid var(--primary); border-color: var(--primary); }
+    input:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-soft); }
+
     .btn {
-      display: inline-block; padding: 0.45rem 1rem; border-radius: 0.375rem;
-      border: 1px solid transparent; font-size: 0.95rem; cursor: pointer;
-      text-decoration: none; text-align: center;
-      background: var(--primary); color: #fff;
+      display: inline-flex; align-items: center; justify-content: center; gap: 0.4rem;
+      padding: 0.55rem 1.1rem; border-radius: 0.45rem;
+      border: 1px solid transparent; font-size: 0.95rem; font-weight: 600;
+      cursor: pointer; text-decoration: none; text-align: center;
+      background: var(--primary); color: #fff; transition: background 0.12s ease, transform 0.05s ease;
     }
-    .btn:hover { background: var(--primary-hover); }
+    .btn:hover { background: var(--primary-hover); text-decoration: none; }
+    .btn:active { transform: translateY(1px); }
+    .btn-lg { padding: 0.7rem 1.5rem; font-size: 1.02rem; }
     .btn-outline { background: transparent; border-color: var(--primary); color: var(--primary); }
     .btn-outline:hover { background: var(--primary); color: #fff; }
-    .btn-quiet { background: transparent; border-color: var(--border); color: var(--muted); }
+    .btn-quiet { background: transparent; border-color: var(--border); color: var(--muted); font-weight: 500; }
     .btn-quiet:hover { border-color: var(--danger); color: var(--danger); background: transparent; }
-    .btn-block { display: block; width: 100%; }
+    .btn-block { display: flex; width: 100%; }
+
     .alert {
-      padding: 0.6rem 0.9rem; border-radius: 0.375rem; margin-bottom: 1rem;
+      padding: 0.65rem 0.95rem; border-radius: 0.45rem; margin-bottom: 1.1rem;
       border: 1px solid transparent; font-size: 0.95rem;
     }
     .alert-error { background: #2c0b0e; border-color: #842029; color: #ea868f; }
     .alert-notice { background: #051b11; border-color: #0f5132; color: var(--success); }
+
     .meter {
       height: 0.75rem; border-radius: 0.5rem; background: var(--bg);
-      border: 1px solid var(--border); overflow: hidden; margin: 0.5rem 0;
+      border: 1px solid var(--border); overflow: hidden; margin: 0.6rem 0;
     }
-    .meter > span { display: block; height: 100%; background: var(--primary); }
+    .meter > span { display: block; height: 100%; background: var(--primary); transition: width 0.3s ease; }
     .meter > span.full { background: var(--danger); }
+
     ul.plain { list-style: none; margin: 0; padding: 0; }
     ul.plain li {
       display: flex; align-items: center; justify-content: space-between;
-      gap: 1rem; padding: 0.75rem 0; border-top: 1px solid var(--border);
+      gap: 1rem; padding: 0.85rem 0; border-top: 1px solid var(--border-soft);
     }
     ul.plain li:first-child { border-top: none; }
+
     .or-divider {
-      display: flex; align-items: center; gap: 0.75rem; margin: 1rem 0;
+      display: flex; align-items: center; gap: 0.75rem; margin: 1.15rem 0;
       color: var(--muted); font-size: 0.85rem;
     }
     .or-divider::before, .or-divider::after {
-      content: ""; flex: 1; border-top: 1px solid var(--border);
+      content: ""; flex: 1; border-top: 1px solid var(--border-soft);
     }
+
+    /* Kept off-screen and out of the tab order; not shown to people. */
+    .hp-field { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
+
+    /* Landing hero */
+    .hero { text-align: center; padding: 1.5rem 0 2.25rem; }
+    .hero h1 { font-size: 2.3rem; max-width: 18ch; margin: 0.5rem auto 1rem; }
+    .hero .lead { max-width: 52ch; margin: 0 auto 1.75rem; }
+    .hero-cta { display: flex; gap: 0.75rem; justify-content: center; flex-wrap: wrap; }
+
+    /* Pricing */
+    .pricing {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+      gap: 1rem; margin: 0.5rem 0 1rem; align-items: stretch;
+    }
+    .pricing .plan {
+      margin-bottom: 0; display: flex; flex-direction: column; position: relative;
+    }
+    .pricing .plan.featured { border-color: var(--primary); box-shadow: 0 0 0 1px var(--primary), var(--shadow); }
+    .plan .tag-popular {
+      position: absolute; top: -0.7rem; right: 1.1rem;
+      background: var(--primary); color: #fff; font-size: 0.72rem; font-weight: 700;
+      letter-spacing: 0.03em; text-transform: uppercase;
+      padding: 0.2rem 0.6rem; border-radius: 1rem;
+    }
+    .plan h3 { font-size: 1.1rem; margin: 0 0 0.5rem; }
+    .plan .price { font-size: 1.9rem; font-weight: 700; margin: 0 0 0.15rem; line-height: 1; }
+    .plan .price .per { font-size: 0.9rem; font-weight: 500; color: var(--muted); }
+    .plan .price-note { font-size: 0.85rem; color: var(--muted); margin: 0 0 1rem; min-height: 1.1rem; }
+    .plan ul.features { list-style: none; margin: 0 0 1.25rem; padding: 0; flex: 1; }
+    .plan ul.features li {
+      display: flex; align-items: flex-start; gap: 0.55rem;
+      padding: 0.35rem 0; font-size: 0.92rem;
+    }
+    .plan ul.features li svg { flex: 0 0 auto; margin-top: 0.18rem; color: var(--primary); }
+    .plan .btn { width: 100%; }
+    .plan-buttons { display: flex; flex-wrap: wrap; gap: 0.6rem; margin-bottom: 0.6rem; }
+
+    .dash-head { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 0.5rem; }
+    .pill {
+      display: inline-block; font-size: 0.78rem; font-weight: 600;
+      padding: 0.15rem 0.6rem; border-radius: 1rem;
+      background: var(--primary-soft); color: var(--primary);
+    }
+
     footer {
-      text-align: center; color: var(--muted); font-size: 0.85rem;
-      padding: 1rem; border-top: 1px solid var(--border);
+      border-top: 1px solid var(--border-soft); background: var(--surface);
+      color: var(--muted); font-size: 0.85rem; padding: 1.5rem 1.25rem;
+    }
+    footer .foot-inner { max-width: 960px; margin: 0 auto; display: flex;
+      align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.75rem; }
+    footer .foot-links { display: flex; gap: 1.1rem; flex-wrap: wrap; }
+
+    @media (max-width: 560px) {
+      h1 { font-size: 1.5rem; }
+      .hero h1 { font-size: 1.85rem; }
+      main { padding: 1.5rem 1rem 2.5rem; }
+      .card { padding: 1.2rem; }
     }
   </style>
 </head>
 <body>
   <header class="nav">
-    <a class="brand" href="/">Forager<span class="dot">.</span></a>
+    <a class="brand" href="/">
+      <img src="/static/mark.svg" alt="" width="30" height="30">
+      <span class="wordmark">
+        <span class="name">Forager<span class="dot">.</span></span>
+        <span class="tag">by Pantry Raider</span>
+      </span>
+    </a>
     <nav class="nav-links">
       {% if signed_in %}
         {% if is_admin %}<a class="btn btn-outline" href="/admin">Admin</a>{% endif %}
@@ -114,13 +202,18 @@
       {% endif %}
     </nav>
   </header>
-  <main>
+  <main class="{% block main_class %}{% endblock %}">
     {% block content %}{% endblock %}
   </main>
   <footer>
-    Forager is the companion service for
-    <a href="https://pantryraider.app">Pantry Raider</a>, the free
-    self-hosted kitchen app.
+    <div class="foot-inner">
+      <span>Forager is the companion service for Pantry Raider, which is free and open source.</span>
+      <span class="foot-links">
+        <a href="https://pantryraider.app">pantryraider.app</a>
+        <a href="/login">Log in</a>
+        <a href="/signup">Sign up</a>
+      </span>
+    </div>
   </footer>
 </body>
 </html>

@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Log in: Forager{% endblock %}
+{% block main_class %}narrow{% endblock %}
 {% block content %}
 <h1>Welcome back</h1>
 <div class="card">
@@ -11,6 +12,12 @@
     <label for="password">Password</label>
     <input type="password" id="password" name="password"
            autocomplete="current-password" required>
+    {# Honeypot: hidden from people; only a bot fills it, and the server
+       refuses any non-empty value. #}
+    <div class="hp-field" aria-hidden="true">
+      <label for="website">Website</label>
+      <input type="text" id="website" name="website" tabindex="-1" autocomplete="off">
+    </div>
     <button class="btn btn-block" type="submit">Log in</button>
   </form>
   {% if google %}

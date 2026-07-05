@@ -28,6 +28,12 @@ class Account(Base):
     # Admin kill switch. A disabled account cannot log in, provision, or use
     # the AI proxy; every seam answers with a clear message.
     disabled: Mapped[int] = mapped_column(Integer, default=0)
+    # Per-account failed-login lockout, enforced in accounts.authenticate.
+    # failed_logins counts consecutive wrong passwords; once it crosses the
+    # configured threshold, locked_until holds an ISO timestamp until which
+    # even the right password is refused. A successful login resets both.
+    failed_logins: Mapped[int] = mapped_column(Integer, default=0)
+    locked_until: Mapped[str] = mapped_column(String(40), default="")
     created_at: Mapped[str] = mapped_column(String(40))
 
 

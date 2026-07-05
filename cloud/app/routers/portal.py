@@ -24,9 +24,10 @@ from ..config import settings
 from ..deps import (ACCOUNT_DISABLED_MESSAGE, SESSION_COOKIE, client_ip,
                     cookie_account, get_db, is_admin, utc_now_iso)
 from ..models import Account, AuthSession, Instance, UsageLedger
-from ..security import (hash_password, password_problem,
+from ..security import (email_is_disposable, hash_password, password_problem,
                         token_hash, verify_password)
-from .accounts import _issue_session, _valid_email, authenticate
+from .accounts import (DISPOSABLE_EMAIL_MESSAGE, _issue_session, _valid_email,
+                       authenticate)
 from .oauth_google import enabled as google_enabled
 
 router = APIRouter(include_in_schema=False)
@@ -107,6 +108,7 @@ def signup_submit(request: Request,
                   email: str = Form(""),
                   password: str = Form(""),
                   confirm_password: str = Form(""),
+                  website: str = Form(""),
                   db: Session = Depends(get_db)):
     def retry(error: str, status: int = 400):
         return templates.TemplateResponse(
@@ -114,12 +116,19 @@ def signup_submit(request: Request,
             {"error": error, "email": email, "google": google_enabled()},
             status_code=status)
 
+    # Honeypot: a hidden field no person can see, so only a form-stuffing bot
+    # fills it. Refuse with a generic error and create nothing, without
+    # hinting that the trap was tripped.
+    if website.strip():
+        return retry("Something went wrong. Please try again.")
     if not ratelimit.allow(f"signup:{_client(request)}",
                            settings.signup_rate_per_minute):
         return retry("Too many attempts. Wait a minute and try again.", 429)
     email = email.strip().lower()
     if not _valid_email(email):
         return retry("Enter a valid email address.")
+    if email_is_disposable(email):
+        return retry(DISPOSABLE_EMAIL_MESSAGE)
     problem = password_problem(password, email)
     if problem:
         return retry(problem)
@@ -147,6 +156,7 @@ def login_page(request: Request):
 def login_submit(request: Request,
                  email: str = Form(""),
                  password: str = Form(""),
+                 website: str = Form(""),
                  db: Session = Depends(get_db)):
     def retry(error: str, status: int = 401):
         return templates.TemplateResponse(
@@ -154,10 +164,16 @@ def login_submit(request: Request,
             {"error": error, "email": email, "google": google_enabled()},
             status_code=status)
 
+    # Honeypot: only a bot fills the hidden field. Refuse with the same
+    # generic failure a wrong password shows, authenticating no one.
+    if website.strip():
+        return retry("That email and password did not match.")
     if not ratelimit.allow(f"login:{_client(request)}",
                            settings.login_rate_per_minute):
         return retry("Too many attempts. Wait a minute and try again.", 429)
-    account = authenticate(db, email, password)
+    account, locked = authenticate(db, email, password)
+    if locked:
+        return retry(locked, 429)
     if not account:
         # One message for both cases, so login does not confirm which
         # emails have accounts.

@@ -70,6 +70,34 @@ def password_problem(password: str, email: str = "") -> str | None:
     return None
 
 
+# A best-effort, in-code set of throwaway-email domains. It is deliberately
+# small and hand-curated (no external dependency, no live blocklist feed), so
+# it will miss new services and the occasional alias; the goal is only to turn
+# away the obvious burner addresses that never receive a real person's mail.
+# Matched case-insensitively against the domain after the "@".
+_DISPOSABLE_EMAIL_DOMAINS = frozenset({
+    "mailinator.com", "guerrillamail.com", "guerrillamail.info",
+    "guerrillamail.net", "guerrillamail.org", "sharklasers.com",
+    "grr.la", "10minutemail.com", "10minutemail.net", "20minutemail.com",
+    "tempmail.com", "temp-mail.org", "tempmail.net", "tempr.email",
+    "throwawaymail.com", "trashmail.com", "trashmail.net", "trashmail.me",
+    "getnada.com", "nada.email", "yopmail.com", "yopmail.net",
+    "dispostable.com", "maildrop.cc", "mailnesia.com", "mohmal.com",
+    "fakeinbox.com", "spam4.me", "mytemp.email", "emailondeck.com",
+    "getairmail.com", "mailcatch.com", "moakt.com", "tempinbox.com",
+    "burnermail.io", "discard.email", "einrot.com",
+})
+
+
+def email_is_disposable(email: str) -> bool:
+    """Whether the address uses a known throwaway / temporary-mail domain.
+
+    Best-effort only (see the curated set above). Compares the domain after
+    the "@" case-insensitively; returns False for anything without a domain."""
+    _, _, domain = email.strip().lower().partition("@")
+    return bool(domain) and domain in _DISPOSABLE_EMAIL_DOMAINS
+
+
 def new_token(prefix: str) -> str:
     """A fresh bearer token: 'prs_' for portal sessions, 'prc_' for instances.
 

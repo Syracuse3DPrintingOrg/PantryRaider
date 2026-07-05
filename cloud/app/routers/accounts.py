@@ -12,10 +12,16 @@ from ..config import settings
 from ..deps import (ACCOUNT_DISABLED_MESSAGE, client_ip, current_account,
                     get_db, utc_now_iso)
 from ..models import Account, AuthSession, Instance
-from ..security import (hash_password, new_token, password_problem,
-                        token_hash, verify_password)
+from ..security import (email_is_disposable, hash_password, new_token,
+                        password_problem, token_hash, verify_password)
 
 router = APIRouter(prefix="/v1/accounts", tags=["accounts"])
+
+# What every seam tells an account that has locked itself with too many wrong
+# passwords. Deliberately vague about how long, so it gives an attacker no
+# timer to script against.
+ACCOUNT_LOCKED_MESSAGE = "Too many failed attempts. Try again in a few minutes."
+DISPOSABLE_EMAIL_MESSAGE = "Please use a non-temporary email address."
 
 
 class Credentials(BaseModel):
@@ -30,13 +36,54 @@ def _valid_email(email: str) -> bool:
     return bool(local) and "." in domain and " " not in email
 
 
-def authenticate(db: Session, email: str, password: str) -> Account | None:
-    """The account matching these credentials, or None. Shared by login,
-    the portal forms, and one-step provisioning."""
+def authenticate(db: Session, email: str, password: str,
+                 now: str | None = None) -> tuple[Account | None, str | None]:
+    """Resolve credentials, returning (account, error).
+
+    Shared by portal login, JSON login, and one-step provisioning so all
+    three honour the same per-account lockout. On correct credentials returns
+    (account, None) and clears the failure counter. On wrong credentials
+    returns (None, None); for an existing account it records the failure and,
+    once the configured threshold is reached, sets locked_until. While locked,
+    returns (None, ACCOUNT_LOCKED_MESSAGE) even for the right password.
+
+    A disabled account is handed back to the caller (whose disabled branch
+    runs) before any lockout applies, and lockout never touches it. ``now`` is
+    an injectable ISO timestamp so the time-based unlock is unit-testable.
+    """
+    now = now or utc_now_iso()
     account = db.query(Account).filter_by(email=email.strip().lower()).first()
-    if not account or not verify_password(password, account.password_hash):
-        return None
-    return account
+    if not account:
+        # Unknown email: never tracked, so a probe cannot lock out or
+        # enumerate accounts that do not exist.
+        return None, None
+
+    # Disabled short-circuits: the caller's disabled branch owns the message,
+    # and a dead account has nothing to lock.
+    if account.disabled:
+        if verify_password(password, account.password_hash):
+            return account, None
+        return None, None
+
+    if account.locked_until and account.locked_until > now:
+        return None, ACCOUNT_LOCKED_MESSAGE
+
+    if verify_password(password, account.password_hash):
+        if account.failed_logins or account.locked_until:
+            account.failed_logins = 0
+            account.locked_until = ""
+            db.commit()
+        return account, None
+
+    # A wrong password for a real account: count it, and lock once the run of
+    # failures crosses the threshold.
+    account.failed_logins = (account.failed_logins or 0) + 1
+    if account.failed_logins >= settings.account_lockout_threshold:
+        until = (datetime.fromisoformat(now)
+                 + timedelta(minutes=settings.account_lockout_minutes))
+        account.locked_until = until.isoformat(timespec="seconds")
+    db.commit()
+    return None, None
 
 
 def _issue_session(db: Session, account_id: int) -> str:
@@ -60,6 +107,8 @@ def signup(payload: Credentials, request: Request, db: Session = Depends(get_db)
         raise HTTPException(400, detail=problem)
     if not _valid_email(email):
         raise HTTPException(400, detail="Enter a valid email address")
+    if email_is_disposable(email):
+        raise HTTPException(400, detail=DISPOSABLE_EMAIL_MESSAGE)
     if db.query(Account).filter_by(email=email).first():
         raise HTTPException(409, detail="An account with that email already exists")
     account = Account(email=email, password_hash=hash_password(payload.password),
@@ -77,7 +126,9 @@ def login(payload: Credentials, request: Request, db: Session = Depends(get_db))
     client = client_ip(request)
     if not ratelimit.allow(f"login:{client}", settings.login_rate_per_minute):
         raise HTTPException(429, detail="Too many login attempts, try again in a minute")
-    account = authenticate(db, payload.email, payload.password)
+    account, locked = authenticate(db, payload.email, payload.password)
+    if locked:
+        raise HTTPException(429, detail=locked)
     if not account:
         # One message for both cases, so login does not confirm which emails exist.
         raise HTTPException(401, detail="Invalid email or password")

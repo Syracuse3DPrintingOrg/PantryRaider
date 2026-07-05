@@ -1,9 +1,10 @@
 {% extends "base.html" %}
 {% block title %}Sign up: Forager{% endblock %}
+{% block main_class %}narrow{% endblock %}
 {% block content %}
 <h1>Create your account</h1>
-<p class="muted">Free to start. You will use this email and password to sign
-in from the Pantry Raider app too.</p>
+<p class="muted">Free to start. You will use this email and password to sign in
+from the Pantry Raider app too.</p>
 <div class="card">
   {% if error %}<div class="alert alert-error">{{ error }}</div>{% endif %}
   <form method="post" action="/signup">
@@ -12,10 +13,16 @@ in from the Pantry Raider app too.</p>
            autocomplete="email" required autofocus>
     <label for="password">Password</label>
     <input type="password" id="password" name="password"
-           autocomplete="new-password" minlength="8" required>
+           autocomplete="new-password" minlength="10" required>
     <label for="confirm_password">Confirm password</label>
     <input type="password" id="confirm_password" name="confirm_password"
-           autocomplete="new-password" minlength="8" required>
+           autocomplete="new-password" minlength="10" required>
+    {# Honeypot: hidden from people, tempting to a form-stuffing bot. A real
+       submission leaves it empty; the server rejects any non-empty value. #}
+    <div class="hp-field" aria-hidden="true">
+      <label for="website">Website</label>
+      <input type="text" id="website" name="website" tabindex="-1" autocomplete="off">
+    </div>
     <button class="btn btn-block" type="submit">Sign up</button>
   </form>
   {% if google %}

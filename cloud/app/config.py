@@ -118,6 +118,14 @@ class CloudSettings(BaseSettings):
     login_rate_per_minute: int = 10
     proxy_rate_per_minute: int = 30
 
+    # Per-account failed-login lockout. The per-IP rate limit above does not
+    # stop an attacker who rotates IPs against one email, so an account locks
+    # itself for a short while after too many consecutive wrong passwords.
+    # Purely time-based (locked_until compared to now), no cron. A correct
+    # login clears the counter.
+    account_lockout_threshold: int = 8
+    account_lockout_minutes: int = 15
+
     model_config = {"env_prefix": "CLOUD_"}
 
 

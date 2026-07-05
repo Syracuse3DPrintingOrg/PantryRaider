@@ -6,8 +6,10 @@ two share nothing at import time. Design: docs/design/cloud-platform.md.
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 
 from .config import CLOUD_VERSION
 from .database import init_db
@@ -24,6 +26,12 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Forager", version=CLOUD_VERSION, lifespan=lifespan)
+
+# The one static asset the portal serves: the Pantry Raider raccoon mark in
+# the header. Kept as a file (not inlined) so the 9 KB base64 does not weigh
+# down every page; still fully self-contained, no CDN.
+app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "static")),
+          name="static")
 
 app.include_router(accounts.router)
 app.include_router(instances.router)
