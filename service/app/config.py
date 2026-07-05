@@ -12,7 +12,7 @@ from .hardware import is_raspberry_pi
 
 # Single source of truth for the app version (shown in the UI, used by the
 # update checker, and reported by FastAPI). Bump on each tagged release.
-APP_VERSION = "0.8.5"
+APP_VERSION = "0.8.6"
 
 # Single source of truth for the product's display name. The runtime identifiers
 # (systemd units, install paths, the foodassistant_streamdeck package, the
@@ -456,7 +456,7 @@ _SAVEABLE = [
     "deployment_mode", "remote_server_url", "remote_server_ip", "remote_server_host", "upstream_api_key", "kiosk_pin", "kiosk_readonly_when_locked",
     "satellite_sync_minutes", "satellite_last_sync", "device_id",
     "hosted_stack_parked", "hosted_config_snapshot",
-    "secret_key", "auth_password", "totp_secret", "api_key", "extra_api_keys", "auth_required",
+    "secret_key", "auth_password", "viewer_password", "totp_secret", "api_key", "extra_api_keys", "auth_required",
     "rclone_remote", "rclone_schedule_hours",
     "usb_backup_interval_hours", "usb_backup_last",
     "tunnel_mode", "tunnel_token", "tunnel_url",
@@ -623,7 +623,7 @@ SECRET_SETTING_KEYS = [
     "gemini_api_key", "openai_api_key", "anthropic_api_key", "ai_extra_keys",
     "grocy_api_key", "mealie_api_key",
     "themealdb_api_key", "spoonacular_api_key",
-    "auth_password", "totp_secret", "api_key", "extra_api_keys", "secret_key", "kiosk_pin",
+    "auth_password", "viewer_password", "totp_secret", "api_key", "extra_api_keys", "secret_key", "kiosk_pin",
     "streamdeck_ha_token",
     "cloud_instance_token",
     # The parked-stack snapshot holds pre-switch copies of several keys above
@@ -1346,6 +1346,11 @@ class Settings(BaseSettings):
     # zero-trust proxy like Pangolin: to avoid a redundant second login.
     auth_required: bool = True
     auth_password: str = ""
+    # Optional second password that opens a viewer session: full use of the
+    # kitchen pages (inventory, timers, scanning, cooking) but no access to
+    # Settings, backups, or updates. Hashed at rest like auth_password. Empty
+    # means the feature is off and only the main password logs in.
+    viewer_password: str = ""
     totp_secret: str = ""   # base32 secret; empty = TOTP disabled
     api_key: str = ""
     extra_api_keys: list[str] = []   # additional keys; each satellite can use its own
@@ -1548,7 +1553,7 @@ class Settings(BaseSettings):
         # leaked settings.json or backup never exposes the secret. A value that
         # is already hashed (a re-save) is left alone to avoid double hashing.
         from .passwords import hash_secret, looks_hashed
-        for _sk in ("auth_password", "kiosk_pin"):
+        for _sk in ("auth_password", "viewer_password", "kiosk_pin"):
             if data.get(_sk) and not looks_hashed(data[_sk]):
                 data[_sk] = hash_secret(data[_sk])
         existing.update({k: v for k, v in data.items() if k in _SAVEABLE and v is not None})

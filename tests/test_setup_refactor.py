@@ -52,7 +52,11 @@ PINNED = {
             'appliance_sm_sausage_stuffer', 'appliance_sm_spiralizer', 'appliance_smoker', 'appliance_sous_vide',
             'appliance_spiralizer', 'appliance_stand_mixer', 'appliance_stove', 'appliance_toaster',
             'appliance_toaster_oven', 'appliance_torch', 'appliance_waffle_iron', 'appliance_wok',
-            'auth_password', 'auth_required', 'auto_update', 'update_channel', 'background_file',
+            'auth_password',
+            # Added after the pin: the optional viewer password (kitchen-only
+            # login, security review Jul 2026).
+            'viewer_password',
+            'auth_required', 'auto_update', 'update_channel', 'background_file',
             'background_image_url', 'background_opacity', 'backup_include_secrets', 'barcode_autocheck_shopping',
             'barcode_enrichment', 'barcode_global_capture', 'barcode_llm_fallback', 'cam-ip-host',
             'cam-ip-name', 'cam-ip-pass', 'cam-ip-path', 'cam-ip-port',
@@ -108,7 +112,11 @@ PINNED = {
             'appliance_sm_sausage_stuffer', 'appliance_sm_spiralizer', 'appliance_smoker', 'appliance_sous_vide',
             'appliance_spiralizer', 'appliance_stand_mixer', 'appliance_stove', 'appliance_toaster',
             'appliance_toaster_oven', 'appliance_torch', 'appliance_waffle_iron', 'appliance_wok',
-            'auth_password', 'auth_required', 'auto_update', 'update_channel', 'background_file',
+            'auth_password',
+            # Added after the pin: the optional viewer password (kitchen-only
+            # login, security review Jul 2026).
+            'viewer_password',
+            'auth_required', 'auto_update', 'update_channel', 'background_file',
             'background_image_url', 'background_opacity', 'backup_include_secrets', 'barcode_autocheck_shopping',
             'barcode_enrichment', 'barcode_global_capture', 'barcode_llm_fallback', 'cam-ip-host',
             'cam-ip-name', 'cam-ip-pass', 'cam-ip-path', 'cam-ip-port',
@@ -170,6 +178,9 @@ PINNED = {
             'appliance_sm_spiralizer', 'appliance_smoker', 'appliance_sous_vide', 'appliance_spiralizer',
             'appliance_stand_mixer', 'appliance_stove', 'appliance_toaster', 'appliance_toaster_oven',
             'appliance_torch', 'appliance_waffle_iron', 'appliance_wok', 'auth_password',
+            # Added after the pin: the optional viewer password (kitchen-only
+            # login, security review Jul 2026).
+            'viewer_password',
             'auth_required', 'auto_update', 'update_channel', 'background_file', 'background_image_url',
             'background_opacity', 'backup_include_secrets', 'barcode_autocheck_shopping', 'barcode_enrichment',
             'barcode_global_capture', 'barcode_llm_fallback',

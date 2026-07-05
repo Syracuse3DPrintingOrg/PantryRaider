@@ -48,7 +48,7 @@ _SECRET_FIELDS = [
     "gemini_api_key", "openai_api_key", "anthropic_api_key",
     "grocy_api_key", "mealie_api_key",
     "themealdb_api_key", "spoonacular_api_key",
-    "auth_password", "api_key", "upstream_api_key", "kiosk_pin",
+    "auth_password", "viewer_password", "api_key", "upstream_api_key", "kiosk_pin",
     "streamdeck_ha_token",
 ]
 _CLEAR = "__CLEAR__"
@@ -295,6 +295,7 @@ class SetupPayload(BaseModel):
     display_touch: bool = False
     auth_required: bool = True
     auth_password: str = ""
+    viewer_password: str = ""
     api_key: str = ""
     # Each row is {"key": <secret or __KEEP__:i>, "name": <label>}; a bare
     # string is still accepted (see _merge_satellite_keys).
@@ -1305,6 +1306,17 @@ async def save_setup(payload: SetupPayload):
         data.pop("update_channel", None)
     if data.get("remote_server_url"):
         data["remote_server_url"] = data["remote_server_url"].rstrip("/")
+    # The backup remote later becomes a positional rclone argument, so only a
+    # safe remote:path (or absolute path) shape is ever stored; anything else,
+    # in particular a value starting with "-", is dropped so it can never
+    # smuggle a flag into the rclone command (see services/backup_remote.py).
+    if "rclone_remote" in data:
+        from ..services.backup_remote import valid_remote
+        v = (data["rclone_remote"] or "").strip()
+        if v and not valid_remote(v):
+            data.pop("rclone_remote", None)
+        else:
+            data["rclone_remote"] = v   # "" clears the remote
     settings.save(data)
     reset_providers()   # apply new provider/model/key without a restart
     from ..services.mealie import reset_cache as reset_mealie_cache, reset_staple_cache

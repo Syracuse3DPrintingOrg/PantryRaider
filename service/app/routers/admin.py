@@ -419,14 +419,23 @@ async def push_to_remote(include_secrets: bool = False):
     if not shutil.which("rclone"):
         raise HTTPException(500, "rclone is not installed in this container. Rebuild the image after adding it to the Dockerfile.")
 
+    # Defense in depth (the save path already validates): never let a stored
+    # remote reach the command line unless it has the safe remote:path shape,
+    # and terminate flag parsing with "--" (rclone uses spf13/pflag, which
+    # honours it) so a positional argument can never be read as a flag.
+    from ..services.backup_remote import valid_remote
+    if not valid_remote(settings.rclone_remote):
+        raise HTTPException(400, "The backup remote must look like remote:path "
+                                 "(or an absolute path). Fix it in Settings > Backup.")
+
     zip_bytes, filename = _build_zip(include_secrets=include_secrets)
     tmp = Path("/tmp") / filename
     tmp.write_bytes(zip_bytes)
     try:
-        dest = settings.rclone_remote.rstrip("/") + "/" + filename
+        dest = settings.rclone_remote.strip().rstrip("/") + "/" + filename
         env = {"RCLONE_CONFIG": str(Path(settings.data_dir) / "rclone.conf")}
         proc = await asyncio.create_subprocess_exec(
-            "rclone", "copyto", str(tmp), dest,
+            "rclone", "copyto", "--", str(tmp), dest,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
             env={**__import__('os').environ, **env},
         )
@@ -474,10 +483,16 @@ async def test_remote():
     import shutil
     if not shutil.which("rclone"):
         return {"ok": False, "error": "rclone not found in container. Rebuild image with rclone installed."}
+    # Same boundary as push_to_remote: only a safe remote:path shape reaches
+    # the command line, and "--" stops rclone from reading it as a flag.
+    from ..services.backup_remote import valid_remote
+    if not valid_remote(settings.rclone_remote):
+        return {"ok": False, "error": "The backup remote must look like remote:path "
+                                      "(or an absolute path)."}
     env = {"RCLONE_CONFIG": str(Path(settings.data_dir) / "rclone.conf")}
     try:
         proc = await asyncio.create_subprocess_exec(
-            "rclone", "lsd", settings.rclone_remote,
+            "rclone", "lsd", "--", settings.rclone_remote.strip(),
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
             env={**__import__('os').environ, **env},
         )

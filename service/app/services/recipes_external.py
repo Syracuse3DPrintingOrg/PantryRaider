@@ -77,7 +77,9 @@ def _core_ingredient(name: str) -> str:
     ]
     return " ".join(core)
 
-# (source, query/id) keyed caches, expired together
+# (source, query/id) keyed caches, expired together. Per-process scope is
+# fine here: the cached data is read-only third-party recipe listings, so the
+# worst a second worker could see is an independently fetched copy.
 _search_cache: dict[tuple, list[str]] = {}
 _recipe_cache: dict[tuple, dict] = {}
 _cache_at: float = 0.0

@@ -65,6 +65,8 @@ ACTION_HREF: dict[str, str] = {
 # editors show the same palette everywhere; on a Pi the live catalog still
 # comes from the host bridge.
 _BUNDLED_CATALOG_PATH = Path(__file__).resolve().parent.parent / "data" / "deck_catalog.json"
+# Per-process cache of an immutable bundled file (it only changes with a code
+# deploy, which restarts the process), so no TTL or cross-worker sharing needed.
 _bundled_catalog_cache: list[dict] | None = None
 
 

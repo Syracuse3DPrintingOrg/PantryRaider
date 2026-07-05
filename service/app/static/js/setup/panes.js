@@ -407,6 +407,7 @@ function savePaneSecurity(btn) {
   return savePane({
     auth_required: auth_required,
     auth_password: auth_password,
+    viewer_password: document.getElementById('viewer_password') ? secretVal('viewer_password') : undefined,
     api_key:       document.getElementById('api_key') ? secretVal('api_key') : undefined,
     kiosk_pin:     document.getElementById('kiosk_pin') ? secretVal('kiosk_pin') : undefined,
     kiosk_readonly_when_locked: chk('kiosk_readonly_when_locked'),

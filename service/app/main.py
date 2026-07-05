@@ -2,7 +2,6 @@ import asyncio
 import secrets
 
 from fastapi import FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse
 from starlette.middleware.sessions import SessionMiddleware
 from contextlib import asynccontextmanager
@@ -159,12 +158,17 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# No CORS middleware on purpose (security review, Jul 2026). Every browser
+# client is same-origin: the web UI and kiosk pages fetch relative URLs, the
+# phone QR flow opens the app's own address, and the setup wizard posts to its
+# own origin. The headless clients (Home Assistant REST sensors, the satellite
+# sync, the Stream Deck controller, the host bridge) are server-side HTTP with
+# no CORS preflight at all. The old allow_origins=["*"] therefore served no
+# client and only widened the browser attack surface (any web page could probe
+# the LAN address and read whatever answers without a login). Same-origin is
+# the browser default and strictly safer. If a cross-origin browser client
+# ever appears, add CORSMiddleware back gated on an env-only allowlist
+# setting, never "*".
 
 # Paths that bypass both setup-redirect and auth checks
 _SETUP_BYPASS = {
@@ -197,6 +201,22 @@ _ALWAYS_PUBLIC = {
     "/api/config/satellite", "/health", "/docs", "/openapi.json", "/redoc",
     "/ui/login", "/",
 }
+
+
+# Admin-only surface for the optional viewer role (RBAC-lite, security review
+# Jul 2026). A session opened with the viewer password can use every kitchen
+# page (inventory, timers, scanning, cooking) but is kept out of anything that
+# changes how the install works: the whole settings surface (/setup covers the
+# wizard, saves, deployment-mode switches, network, and maintenance actions)
+# and the admin surface (/admin covers backup downloads, restore, updates, and
+# diagnostics). Kept in one place next to the auth middleware so the protected
+# list is easy to audit and extend. The kiosk PIN gate and the loopback trust
+# below are separate mechanisms and unchanged.
+_ADMIN_ONLY_PREFIXES = ("/setup", "/admin")
+
+
+def _is_admin_only(path: str) -> bool:
+    return any(path == p or path.startswith(p + "/") for p in _ADMIN_ONLY_PREFIXES)
 
 
 def _is_static(path: str) -> bool:
@@ -249,7 +269,20 @@ async def require_auth(request: Request, call_next):
     key_ok = bool(sent) and bool(valid) and any(
         secrets.compare_digest(sent, k) for k in valid
     )
-    if session_ok or key_ok:
+    if key_ok:
+        # API keys stay full-access: they drive Home Assistant automations and
+        # satellite syncs, which need endpoints a viewer session does not get.
+        return await call_next(request)
+    if session_ok:
+        # A missing role means an admin session (every session predating the
+        # viewer feature, and every admin login). Viewers are blocked from the
+        # settings and admin surfaces: a browser page request is bounced back
+        # to the app, anything else gets an explicit 403.
+        if request.session.get("role") == "viewer" and _is_admin_only(request.url.path):
+            if request.method == "GET" and request.url.path == "/setup":
+                return ingress_redirect(request, "/ui/")
+            return JSONResponse({"detail": "This needs the admin password."},
+                                status_code=403)
         return await call_next(request)
 
     if request.url.path.startswith("/ui"):

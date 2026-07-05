@@ -36,31 +36,48 @@ def login(request: Request, password: str = Form(None), totp_code: str = Form(No
         if totp_code and totp.verify(totp_code.strip(), valid_window=1):
             request.session.pop("totp_pending", None)
             request.session["authed"] = True
+            request.session["role"] = "admin"
             return ingress_redirect(request, "/ui/")
         return templates.TemplateResponse(request, "login.html",
             {"request": request, "error": "Invalid code: try again.", "step": "totp"},
             status_code=401)
 
-    # Step 1: password check (hashed at rest, FoodAssistant-ufwz)
-    if not (settings.auth_password and password and
-            verify_secret(password, settings.auth_password)):
-        return templates.TemplateResponse(request, "login.html",
-            {"request": request, "error": "Incorrect password.", "step": "password"},
-            status_code=401)
-    # Upgrade a legacy plaintext password to a hash on the next good login.
-    if not looks_hashed(settings.auth_password):
-        try:
-            settings.save({"auth_password": password})
-        except Exception:
-            pass
+    # Step 1: password check (hashed at rest, FoodAssistant-ufwz). The admin
+    # password is tried first; when a viewer password is set it opens a
+    # kitchen-only session instead (no Settings, backups, or updates). If the
+    # two passwords happen to match, the admin match wins.
+    if settings.auth_password and password and verify_secret(password, settings.auth_password):
+        # Upgrade a legacy plaintext password to a hash on the next good login.
+        if not looks_hashed(settings.auth_password):
+            try:
+                settings.save({"auth_password": password})
+            except Exception:
+                pass
 
-    if settings.totp_secret:
-        request.session["totp_pending"] = True
-        return templates.TemplateResponse(request, "login.html",
-            {"request": request, "error": None, "step": "totp"})
+        if settings.totp_secret:
+            request.session["totp_pending"] = True
+            return templates.TemplateResponse(request, "login.html",
+                {"request": request, "error": None, "step": "totp"})
 
-    request.session["authed"] = True
-    return ingress_redirect(request, "/ui/")
+        request.session["authed"] = True
+        request.session["role"] = "admin"
+        return ingress_redirect(request, "/ui/")
+
+    if settings.viewer_password and password and verify_secret(password, settings.viewer_password):
+        if not looks_hashed(settings.viewer_password):
+            try:
+                settings.save({"viewer_password": password})
+            except Exception:
+                pass
+        # TOTP stays an admin-only step: a viewer session cannot change
+        # anything about the install, so it remains a single-factor login.
+        request.session["authed"] = True
+        request.session["role"] = "viewer"
+        return ingress_redirect(request, "/ui/")
+
+    return templates.TemplateResponse(request, "login.html",
+        {"request": request, "error": "Incorrect password.", "step": "password"},
+        status_code=401)
 
 
 @router.get("/logout")

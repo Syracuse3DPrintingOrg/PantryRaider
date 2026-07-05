@@ -325,6 +325,7 @@ password, TOTP secret, and API keys are never synced.
 | --- | --- | --- | --- | --- |
 | `auth_required` | | Editable | Editable | Device-local |
 | `auth_password` | Secret | Editable | Editable | Device-local |
+| `viewer_password` | Secret | Editable | Editable | Device-local |
 | `totp_secret` | Secret | Editable | Editable | Device-local |
 | `api_key` | Secret | Editable | Editable | Device-local |
 | `extra_api_keys` | Secret | Editable | Editable | Device-local |
@@ -333,6 +334,12 @@ password, TOTP secret, and API keys are never synced.
 `secret_key` is auto-generated on first run on every mode and persisted so
 sessions survive a restart.
 
+`viewer_password` is an optional second password for the household: it logs in
+to a session that can use every kitchen page (inventory, timers, scanning,
+recipes) but not Settings, backups, or updates, which stay behind the main
+password. Leaving it blank turns the feature off. Like the main password it is
+stored hashed and never synced between devices.
+
 ## Backups (rclone and USB drive)
 
 `usb_backup_interval_hours` schedules backups to an attached USB flash drive
@@ -340,6 +347,10 @@ sessions survive a restart.
 full stack snapshot, a Pi Remote saves its device config, and a server saves
 the app-data zip. `usb_backup_last` records the last successful run and is
 maintained by the app, not edited directly.
+
+`rclone_remote` must be a plain rclone destination, either `remote:path` (for
+example `s3:mybucket/pantry`) or an absolute path; anything else is rejected
+on save.
 
 | Setting | Secret | Server | Pi Hosted | Pi Remote |
 | --- | --- | --- | --- | --- |

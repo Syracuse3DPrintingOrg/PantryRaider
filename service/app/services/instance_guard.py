@@ -98,9 +98,11 @@ def check_on_startup() -> int | None:
             "%s (this is pid %s). This usually means uvicorn was started with "
             "several workers. Timers, scanner mode, the current recipe, the "
             "audit session, and on-screen events are shared through state "
-            "files and stay consistent, but any process-local cache and the "
-            "SQLite database can disagree between workers. Run a single "
-            "worker unless you know you need more.",
+            "files and stay consistent, but process-local caches (the Mealie "
+            "recipe cache, external recipe search, the weather forecast, "
+            "cached provider instances) and the SQLite database can disagree "
+            "between workers. Run a single worker unless you know you need "
+            "more.",
             other, _guard_path().parent, os.getpid(),
         )
     write_heartbeat()

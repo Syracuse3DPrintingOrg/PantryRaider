@@ -72,11 +72,7 @@ async function load(listId = '') {
       return;
     }
     if (!data.list) {
-<<<<<<< ours
       el.innerHTML = '<div class="alert alert-info">No shopping lists in Mealie yet: create one in the Mealie UI first.</div>';
-=======
-      el.innerHTML = '<div class="alert alert-info">No shopping lists in Mealie yet. Create one in the Mealie UI first.</div>';
->>>>>>> theirs
       return;
     }
     currentListId = data.list.id;

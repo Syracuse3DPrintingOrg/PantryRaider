@@ -39,10 +39,18 @@ def unreachable_message() -> str:
 
 _client = httpx.AsyncClient(timeout=20.0)
 
-# "households" (v2+) or "groups" (v1.x); probed on first scoped request
+# "households" (v2+) or "groups" (v1.x); probed on first scoped request.
+# Per-process on purpose: the API generation of a given Mealie server never
+# changes at runtime, and reset_cache() clears it on a settings save.
 _scope: str | None = None
 
-# Recipe-with-ingredients cache shared across requests: slug -> detail dict
+# Recipe-with-ingredients cache shared across requests: slug -> detail dict.
+# Per-process scope, acknowledged (security review, Jul 2026): the write paths
+# below invalidate only this process's copy, so under several uvicorn workers
+# another worker could serve up to TTL-stale recipes. The deployment runs a
+# single worker and instance_guard warns loudly if it ever does not, so the
+# short TTL is the proportionate fix; worst case is staleness, never wrong
+# writes (mutations always go straight to Mealie).
 _recipe_cache: dict[str, dict] = {}
 _recipe_cache_at: float = 0.0
 _RECIPE_CACHE_TTL = 600  # seconds
@@ -359,6 +367,8 @@ def _load_staples_file() -> list[frozenset[str]] | None:
 
 
 # Cached list of phrase token-sets built from staples.txt (invalidated on save).
+# Per-process scope is acceptable: the file changes only through a settings
+# save, which calls reset_staple_cache() in the same process that serves it.
 _staple_phrases_cache: list[frozenset[str]] | None = None
 _staple_phrases_loaded: bool = False
 
