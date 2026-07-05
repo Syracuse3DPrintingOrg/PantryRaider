@@ -36,8 +36,13 @@ import subprocess
 import sys
 from pathlib import Path
 
-LISTEN_HOST = "127.0.0.1"
-LISTEN_PORT = 9300
+# Bind host: 127.0.0.1 by default (agent and app on the same host netns).
+# When the cloud app runs in Docker and the agent on the host, set this to the
+# compose network's gateway IP (an internal-only address, e.g. 172.28.0.1) via
+# FORAGER_TUNNEL_AGENT_HOST so containers can reach it while the public
+# internet cannot. Never bind 0.0.0.0: that would expose a root helper.
+LISTEN_HOST = os.environ.get("FORAGER_TUNNEL_AGENT_HOST", "127.0.0.1")
+LISTEN_PORT = int(os.environ.get("FORAGER_TUNNEL_AGENT_PORT", "9300"))
 
 WG_INTERFACE = "wg0"
 # The Caddy include the app writes and Caddy imports. One site block per

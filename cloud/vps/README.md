@@ -80,28 +80,26 @@ If the cloud app runs in Docker Compose and the agent runs on the host, set
 bridge IP) so the container can reach it. When both run on the host,
 `http://127.0.0.1:9300` is right.
 
-## 4. Caddy
+## 4. Caddy (on the host, not in Docker)
 
-Create the (initially empty) per-kitchen include the agent regenerates, so
-Caddy's `import` resolves on a fresh host:
-
-```bash
-sudo touch /etc/caddy/forager-kitchens.caddy
-```
-
-The shipped `cloud/Caddyfile` already adds the on-demand TLS block (with the
-`ask http://app:8000/v1/tunnel/tls-check` gate and an issuance rate guard)
-and the `import /etc/caddy/forager-kitchens.caddy` line. Make sure Caddy can
-reach the app at that address; in the compose stack the app service is named
-`app` on the shared network. Reload Caddy after any Caddyfile change:
+Caddy runs on the host, because only a host-network Caddy can reach both the
+app (published on `127.0.0.1:8000` by the compose stack) and the kitchen
+tunnel peers (`10.99.0.0/16` on `wg0`, in the host netns). The compose stack
+is app + Postgres only.
 
 ```bash
-sudo systemctl reload caddy
+sudo apt-get install -y caddy
+sudo install -m 0644 /opt/pantryraider/cloud/Caddyfile /etc/caddy/Caddyfile
+sudo touch /etc/caddy/forager-kitchens.caddy   # so the import resolves
+sudo CLOUD_DOMAIN=forager.pantryraider.app systemctl reload caddy
 ```
 
-The agent reloads Caddy itself whenever a kitchen route changes, so it needs
-permission to run `systemctl reload caddy` (it runs as root, so this is
-covered).
+The shipped `cloud/Caddyfile` proxies the apex to `127.0.0.1:8000`, adds the
+on-demand TLS block (`ask http://127.0.0.1:8000/v1/tunnel/tls-check` plus an
+issuance rate guard), and imports `/etc/caddy/forager-kitchens.caddy`. Set
+`CLOUD_DOMAIN` for the caddy service (an `Environment=CLOUD_DOMAIN=...` drop-in
+on `caddy.service`, or the systemd default). The agent reloads Caddy itself
+with `systemctl reload caddy` whenever a kitchen route changes.
 
 ## 5. DNS
 
@@ -122,10 +120,24 @@ certificate, and the app says yes only for a subdomain with a live tunnel.
 ```
 CLOUD_TUNNEL_ENDPOINT=forager.pantryraider.app:51820
 CLOUD_TUNNEL_SERVER_PUBLIC_KEY=<server_public.key from step 1>
-CLOUD_TUNNEL_AGENT_URL=http://127.0.0.1:9300
+CLOUD_TUNNEL_AGENT_URL=http://172.28.0.1:9300
 CLOUD_TUNNEL_AGENT_TOKEN=<the shared token from step 2>
 CLOUD_TUNNEL_CIDR=10.99.0.0/16
 ```
+
+The app container (on the pinned `172.28.0.0/16` compose network) reaches the
+host-run agent at the network gateway `172.28.0.1`. Start the agent bound to
+that internal-only address so containers can reach it but the public internet
+cannot:
+
+```bash
+sudo FORAGER_TUNNEL_AGENT_HOST=172.28.0.1 systemctl restart forager-tunnel-agent
+```
+
+(Set `Environment=FORAGER_TUNNEL_AGENT_HOST=172.28.0.1` in the systemd unit so
+it persists. The gateway interface exists once `docker compose up` has created
+the network, so start the compose stack before the agent, or let the agent's
+restart pick it up.)
 
 That completes the VPS side. From then on a kitchen enabling remote access in
 the app calls `/v1/tunnel/enable`, the app allocates an IP and subdomain and
