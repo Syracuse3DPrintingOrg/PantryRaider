@@ -125,6 +125,14 @@
   </div>
   <p class="text-secondary small mt-3 mb-0">These are all volunteer-run, community-supported projects. Even a small donation
   or a GitHub star goes a long way.</p>
+  {% if buymeacoffee_url %}
+  <hr class="my-3">
+  <p class="text-secondary small mb-2">Pantry Raider itself is free for home use. If it has earned a spot on your counter,
+  you can buy the developer a coffee.</p>
+  <a href="{{ buymeacoffee_url }}" target="_blank" rel="noopener" class="btn btn-sm btn-outline-warning">
+    <i class="bi bi-cup-hot-fill me-1"></i>Support the project
+  </a>
+  {% endif %}
 </div>
 
 <div class="mt-4">

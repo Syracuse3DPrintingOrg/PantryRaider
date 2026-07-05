@@ -57,6 +57,10 @@ def theme_context(request: Request) -> dict:
         "background_opacity": max(0, min(100, settings.background_opacity)) / 100.0,
         "ui_scale": settings.ui_scale,
         "ui_scale_factor": ui_scale_factor(settings.ui_scale),
+        # 12/24-hour clock reading, stamped on <html data-clock-format> so any
+        # browser-side clock (the screensaver, browser-rendered timestamps)
+        # follows the same setting as the server-rendered ones.
+        "clock_format": settings.clock_format,
         "display_rotation": settings.display_rotation,
         "is_pi": is_raspberry_pi(),
         "features": settings.features(),

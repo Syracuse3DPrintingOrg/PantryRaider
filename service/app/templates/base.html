@@ -4,7 +4,8 @@
       data-display-rotation="{{ display_rotation | default(0) }}"
       data-rotation-mode="{{ 'compositor' if is_pi else 'css' }}"
       data-is-pi="{{ '1' if is_pi else '0' }}"
-      data-quiet-mode="{{ 'true' if quiet_mode else 'false' }}">
+      data-quiet-mode="{{ 'true' if quiet_mode else 'false' }}"
+      data-clock-format="{{ clock_format | default('auto') }}">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">

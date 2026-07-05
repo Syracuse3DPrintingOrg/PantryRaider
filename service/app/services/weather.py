@@ -91,6 +91,54 @@ def _clock(value) -> str | None:
     return m.group(1) if m else None
 
 
+def format_hour_label(hhmm: str, clock_format: str) -> str:
+    """Re-read an 'HH:MM' label per the clock_format setting. Pure.
+
+    "12" turns 15:00 into 3 PM (an on-the-hour label drops :00 to keep the
+    hourly strip compact) and 05:31 into 5:31 AM; "auto" and "24" keep the
+    24-hour label unchanged, as does anything that is not HH:MM."""
+    if clock_format != "12":
+        return hhmm
+    m = re.fullmatch(r"(\d{1,2}):(\d{2})", str(hhmm or ""))
+    if not m:
+        return hhmm
+    h, minute = int(m.group(1)), int(m.group(2))
+    if h > 23 or minute > 59:
+        return hhmm
+    suffix = "AM" if h < 12 else "PM"
+    h12 = h % 12 or 12
+    return (f"{h12} {suffix}" if minute == 0 else f"{h12}:{minute:02d} {suffix}")
+
+
+def apply_clock_format(forecast: dict, clock_format: str) -> dict:
+    """A copy of a parsed forecast with every time-of-day label (the hourly
+    strip, sunrise, sunset) re-read per clock_format. Pure and non-mutating:
+    the input may live in the shared forecast cache, so nothing is edited in
+    place. "auto" and "24" return the input untouched."""
+    if clock_format != "12" or not isinstance(forecast, dict):
+        return forecast
+    out = dict(forecast)
+    days = []
+    for day in forecast.get("days") or []:
+        if not isinstance(day, dict):
+            days.append(day)
+            continue
+        d = dict(day)
+        for key in ("sunrise", "sunset"):
+            if d.get(key):
+                d[key] = format_hour_label(d[key], clock_format)
+        hours = []
+        for h in d.get("hourly") or []:
+            if isinstance(h, dict) and h.get("time"):
+                h = dict(h)
+                h["time"] = format_hour_label(h["time"], clock_format)
+            hours.append(h)
+        d["hourly"] = hours
+        days.append(d)
+    out["days"] = days
+    return out
+
+
 def _parse_om_hours(hourly: dict, date: str) -> list[dict]:
     """Build a day's hourly strip from an Open-Meteo ``hourly`` block, keeping
     only the rows whose timestamp falls on ``date``. Pure."""

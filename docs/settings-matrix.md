@@ -260,11 +260,13 @@ is).
 | `nav_visibility` | | Editable | Editable | Device-local |
 | `timer_chips` | | Editable | Editable | Device-local |
 
-## Timezone, scheduled reboot, and update bookkeeping
+## Timezone, clock format, scheduled reboot, and update bookkeeping
 
 `timezone` sets how timestamps read across the fleet: set it once on the main
 server (or a standalone install) and a Pi Remote inherits it and applies it to
-its own clock on each sync. The scheduled reboot (Settings, Personalization,
+its own clock on each sync. `clock_format` rides with it: Auto, 12-hour, or
+24-hour reading for the screensaver clock, the weather page, and timestamps,
+also set once on the main server and inherited by every Pi Remote. The scheduled reboot (Settings, Personalization,
 Screen & Sleep) applies only to a Pi appliance; the frequency can be Off,
 Nightly, or Weekly with a day-of-week picker. The `update_last_*` fields record
 the most recent update check and are maintained by the app.
@@ -272,6 +274,7 @@ the most recent update check and are maintained by the app.
 | Setting | Secret | Server | Pi Hosted | Pi Remote |
 | --- | --- | --- | --- | --- |
 | `timezone` | | Editable | Editable | Inherited (read-only) |
+| `clock_format` | | Editable | Editable | Inherited (read-only) |
 | `scheduled_reboot_time` | | Not applicable | Editable | Device-local |
 | `scheduled_reboot_frequency` | | Not applicable | Editable | Device-local |
 | `scheduled_reboot_day` | | Not applicable | Editable | Device-local |

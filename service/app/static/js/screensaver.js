@@ -69,12 +69,31 @@
 
   function pad(n) { return (n < 10 ? '0' : '') + n; }
 
+  // 12/24-hour clock reading, from the fleet-synced setting stamped on <html>
+  // by base.html. '12' shows 3:42 with a small AM/PM; '24' and 'auto' (the
+  // long-standing default look) show 15:42.
+  var CLOCK_FORMAT =
+    document.documentElement.getAttribute('data-clock-format') || 'auto';
+
   function updateClock() {
     if (!overlay) return;
     var now = new Date();
     var t = overlay.querySelector('.ss-time');
     var d = overlay.querySelector('.ss-date');
-    if (t) t.textContent = pad(now.getHours()) + ':' + pad(now.getMinutes());
+    if (t) {
+      if (CLOCK_FORMAT === '12') {
+        var h = now.getHours();
+        t.textContent = (h % 12 || 12) + ':' + pad(now.getMinutes());
+        var ampm = document.createElement('span');
+        ampm.className = 'ss-ampm';
+        ampm.style.cssText =
+          'font-size:0.42em;font-weight:600;margin-left:0.35em;opacity:0.8;';
+        ampm.textContent = h < 12 ? 'AM' : 'PM';
+        t.appendChild(ampm);
+      } else {
+        t.textContent = pad(now.getHours()) + ':' + pad(now.getMinutes());
+      }
+    }
     if (d) d.textContent = now.toLocaleDateString(undefined, {
       weekday: 'long', month: 'long', day: 'numeric',
     });

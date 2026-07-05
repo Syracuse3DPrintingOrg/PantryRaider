@@ -443,8 +443,15 @@ async function loadUsbStatus() {
     }
     const free = (d.free_bytes / 1073741824).toFixed(1);
     let msg = 'USB drive at ' + d.mountpoint + ' (' + free + ' GB free)';
-    if (d.last_backup) msg += '. Last backup: ' + new Date(d.last_backup_time * 1000).toLocaleString() + '.';
-    else msg += '. No backups on it yet.';
+    if (d.last_backup) {
+      // Honor the 12/24-hour setting; 'auto' keeps the browser locale reading.
+      const bd = new Date(d.last_backup_time * 1000);
+      const cf = document.documentElement.getAttribute('data-clock-format');
+      const stamp = (cf === '12' || cf === '24')
+        ? bd.toLocaleString(undefined, { hour12: cf === '12' })
+        : bd.toLocaleString();
+      msg += '. Last backup: ' + stamp + '.';
+    } else msg += '. No backups on it yet.';
     el.innerHTML = '<span class="text-success"><i class="bi bi-check-circle-fill me-1"></i>' + msg + '</span>';
   } catch (e) {
     el.innerHTML = '<span class="text-secondary">Drive status is unavailable right now.</span>';

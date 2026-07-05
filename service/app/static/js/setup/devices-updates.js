@@ -9,6 +9,12 @@ function fmtSyncTime(iso) {
   if (!iso) return '';
   const d = new Date(iso);
   if (isNaN(d.getTime())) return iso;
+  // Honor the 12/24-hour setting stamped on <html>; 'auto' keeps the browser
+  // locale's own reading.
+  const cf = document.documentElement.getAttribute('data-clock-format');
+  if (cf === '12' || cf === '24') {
+    return d.toLocaleString(undefined, { hour12: cf === '12' });
+  }
   return d.toLocaleString();
 }
 
@@ -313,10 +319,15 @@ async function saveTimezone(btn) {
   const tz = document.getElementById('timezone')?.value ?? '';
   if (el) el.innerHTML = '<span class="text-secondary">Saving…</span>';
   if (btn) btn.disabled = true;
+  // The clock format select sits in the same Date & time card and saves with
+  // the same button; absent (older markup) it is simply left out of the POST.
+  const body = { timezone: tz };
+  const cf = document.getElementById('clock_format');
+  if (cf) body.clock_format = cf.value;
   try {
-    const r = await fetch('setup/save', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ timezone: tz }) });
+    const r = await fetch('setup/save', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     const d = await r.json();
-    if (d.ok) { if (el) el.innerHTML = '<span class="text-success"><i class="bi bi-check-circle me-1"></i>Timezone saved.</span>'; setTimeout(() => location.reload(), 600); }
+    if (d.ok) { if (el) el.innerHTML = '<span class="text-success"><i class="bi bi-check-circle me-1"></i>Saved.</span>'; setTimeout(() => location.reload(), 600); }
     else if (el) el.innerHTML = '<span class="text-danger">' + (d.error || 'Failed') + '</span>';
   } catch (e) { if (el) el.innerHTML = '<span class="text-danger">' + e + '</span>'; }
   finally { if (btn) btn.disabled = false; }

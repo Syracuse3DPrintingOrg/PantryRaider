@@ -23,6 +23,7 @@ from ..config import (
     NAV_VISIBILITY,
     TIMER_CHIPS,
     COMMON_TIMEZONES, format_local,
+    CLOCK_FORMATS, _DEFAULT_CLOCK_FORMAT,
     STREAMDECK_KEY_STYLES, STREAMDECK_ICON_COLORS,
     DEPLOYMENT_MODES, _DEFAULT_DEPLOYMENT_MODE,
     AI_MODELS, SATELLITE_PULL_FIELDS,
@@ -287,6 +288,7 @@ class SetupPayload(BaseModel):
     nav_visibility: str = ""
     timer_chips: str = ""
     timezone: str = ""
+    clock_format: str = ""
     scheduled_reboot_time: str = ""
     scheduled_reboot_frequency: str = ""
     scheduled_reboot_day: int = 0
@@ -740,12 +742,14 @@ async def setup_page(request: Request):
         # Update-check bookkeeping + timezone (FoodAssistant-lq01/-amp0): the last
         # check shown pre-formatted in the configured zone, plus the tz options.
         "update_last_checked_display": format_local(
-            settings.update_last_checked, settings.timezone),
+            settings.update_last_checked, settings.timezone,
+            clock_format=settings.clock_format),
         "update_last_latest": settings.update_last_latest,
         "update_last_available": settings.update_last_available,
         "timezone": settings.timezone,
         "common_timezones": COMMON_TIMEZONES,
         "system_timezone": _system_timezone(),
+        "clock_format": settings.clock_format,
         "scheduled_reboot_time": settings.scheduled_reboot_time,
         "scheduled_reboot_frequency": settings.scheduled_reboot_frequency,
         "scheduled_reboot_day": settings.scheduled_reboot_day,
@@ -1147,6 +1151,9 @@ async def save_setup(payload: SetupPayload):
         data["extra_api_keys"], data["extra_api_key_names"] = merged_sat
     if data.get("display_rotation") not in DISPLAY_ROTATIONS:
         data["display_rotation"] = _DEFAULT_DISPLAY_ROTATION
+    # 12/24-hour clock reading: only the known values persist.
+    if "clock_format" in data and data["clock_format"] not in CLOCK_FORMATS:
+        data["clock_format"] = _DEFAULT_CLOCK_FORMAT
     # AI token budget: non-negative integer (0 = no budget).
     if "ai_token_budget" in data:
         try:

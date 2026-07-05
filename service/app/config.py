@@ -12,7 +12,7 @@ from .hardware import is_raspberry_pi
 
 # Single source of truth for the app version (shown in the UI, used by the
 # update checker, and reported by FastAPI). Bump on each tagged release.
-APP_VERSION = "0.8.4"
+APP_VERSION = "0.8.5"
 
 # Single source of truth for the product's display name. The runtime identifiers
 # (systemd units, install paths, the foodassistant_streamdeck package, the
@@ -35,6 +35,12 @@ AMAZON_ASSOCIATES_TAG = _os.environ.get("AMAZON_ASSOCIATES_TAG", "improvisedeng-
 # per-user setting. Empty by default; set AMAZON_STOREFRONT_URL to surface the
 # storefront link on the Shop page. No URL is invented here.
 AMAZON_STOREFRONT_URL = _os.environ.get("AMAZON_STOREFRONT_URL", "https://www.amazon.com/shop/improvisedeng").strip()
+
+# Buy Me a Coffee page for supporting Pantry Raider itself. Like the Amazon
+# links above, this is the project owner's static link (the point is support
+# for the project), NOT a per-user setting. Surfaced quietly on the About page
+# only; a BUYMEACOFFEE_URL env var overrides it, and empty hides the link.
+BUYMEACOFFEE_URL = _os.environ.get("BUYMEACOFFEE_URL", "https://www.buymeacoffee.com/syracuse3dprinting").strip()
 
 # UI themes. Each entry carries the Bootstrap 5.3 colour mode (data-bs-theme)
 # and an optional vendored Bootswatch stylesheet served from /static. When
@@ -164,6 +170,32 @@ COMMON_TIMEZONES = (
 )
 
 
+# How times of day read across the app (the screensaver clock, the weather
+# page's hourly strip and sunrise/sunset, "last checked" style timestamps):
+#   auto - the existing rendering for each surface (24-hour on the clock and
+#          weather strip, the browser locale for browser-rendered stamps)
+#   12   - 12-hour with AM/PM (the screensaver shows 3:42 with a small PM)
+#   24   - 24-hour (the screensaver shows 15:42)
+# Fleet-synced with the timezone (see SATELLITE_PULL_FIELDS): both are "how
+# does a time read" choices, and every surface in one kitchen should agree.
+CLOCK_FORMATS = ("auto", "12", "24")
+_DEFAULT_CLOCK_FORMAT = "auto"
+
+
+def format_time_of_day(hour: int, minute: int, clock_format: str) -> str:
+    """A wall-clock time as text per the clock_format setting. Pure.
+
+    "12" reads 3:42 PM; "24" (and "auto", the keep-current-behaviour value)
+    reads 15:42. Out-of-range values are taken modulo a day so a bad input
+    still renders something sane rather than raising."""
+    h = int(hour) % 24
+    m = int(minute) % 60
+    if clock_format == "12":
+        suffix = "AM" if h < 12 else "PM"
+        return f"{h % 12 or 12}:{m:02d} {suffix}"
+    return f"{h:02d}:{m:02d}"
+
+
 def resolve_timezone(name: str):
     """A ZoneInfo for the configured tz name, the system local zone when unset,
     or None if the name is invalid (caller then falls back to local/UTC).
@@ -185,12 +217,15 @@ def resolve_timezone(name: str):
     return datetime.now().astimezone().tzinfo
 
 
-def format_local(epoch: float, name: str = "", fmt: str = "%Y-%m-%d %H:%M %Z") -> str:
+def format_local(epoch: float, name: str = "", fmt: str = "%Y-%m-%d %H:%M %Z",
+                 clock_format: str = "auto") -> str:
     """Format a UTC epoch as a local wall-clock string in the given tz name.
 
     Returns "" for a falsy/invalid epoch so the UI can show "never". Timestamps
     are stored as UTC epochs (unambiguous) and only rendered through here, so the
-    displayed zone always follows the timezone setting."""
+    displayed zone always follows the timezone setting. When clock_format is
+    "12", the %H:%M part of fmt renders as 3:42 PM instead of 15:42; "auto" and
+    "24" keep the 24-hour reading."""
     if not epoch:
         return ""
     from datetime import datetime, timezone as _tz
@@ -201,6 +236,10 @@ def format_local(epoch: float, name: str = "", fmt: str = "%Y-%m-%d %H:%M %Z") -
     zone = resolve_timezone(name)
     if zone is not None:
         dt = dt.astimezone(zone)
+    if clock_format == "12" and "%H:%M" in fmt:
+        # The 12-hour reading contains no % directives, so it is safe to splice
+        # into the format string before strftime.
+        fmt = fmt.replace("%H:%M", format_time_of_day(dt.hour, dt.minute, "12"))
     return dt.strftime(fmt)
 
 
@@ -411,7 +450,7 @@ _SAVEABLE = [
     "ha_events_enabled", "ha_camera_popup_seconds", "convert_custom_rows",
     "quiet_mode",
     "floating_nav_position", "floating_nav_orientation", "floating_nav_autohide_streamdeck",
-    "nav_visibility", "timer_chips", "timezone", "scheduled_reboot_time",
+    "nav_visibility", "timer_chips", "timezone", "clock_format", "scheduled_reboot_time",
     "scheduled_reboot_frequency", "scheduled_reboot_day",
     "update_last_checked", "update_last_latest", "update_last_available",
     "deployment_mode", "remote_server_url", "remote_server_ip", "remote_server_host", "upstream_api_key", "kiosk_pin", "kiosk_readonly_when_locked",
@@ -472,6 +511,11 @@ SATELLITE_PULL_FIELDS = [
     # main server. A satellite inherits it (and applies it to its own host clock
     # on sync), so it is not offered as a per-device option on a Pi Remote.
     "timezone",
+    # Clock format rides with the timezone for the same reason: 12/24-hour is a
+    # "how does a time read" choice, and the kitchen's surfaces (server pages,
+    # satellite kiosks, screensaver clocks) should all agree. Set it once on the
+    # main server next to the timezone.
+    "clock_format",
 ]
 
 # Kitchen appliances the user owns, used to steer the AI cook suggestions so it
@@ -1100,6 +1144,11 @@ class Settings(BaseSettings):
     # overrides it. Timestamps are stored as UTC epochs and rendered through
     # format_local(), so this only changes how they read.
     timezone: str = ""
+
+    # 12/24-hour reading for times of day (see CLOCK_FORMATS). "auto" keeps
+    # each surface's existing rendering; "12" and "24" force one reading on the
+    # screensaver clock, the weather page, and server-rendered timestamps.
+    clock_format: str = _DEFAULT_CLOCK_FORMAT
 
     # Update-check bookkeeping (FoodAssistant-lq01): when the app last checked
     # for a new version (UTC epoch), and what it found, so the UI can show a

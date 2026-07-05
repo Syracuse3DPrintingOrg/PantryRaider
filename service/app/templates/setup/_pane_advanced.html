@@ -40,7 +40,7 @@
             {% if features.satellite %}
             {# A Pi Remote inherits the fleet timezone from the main server (it is
                a SATELLITE_PULL_FIELD), so there is no per-device option here. #}
-            <div class="form-text"><i class="bi bi-hdd-network me-1"></i>Timezone is managed on the main server and applied here automatically on each sync{% if timezone %} (currently <strong>{{ timezone }}</strong>){% endif %}.</div>
+            <div class="form-text"><i class="bi bi-hdd-network me-1"></i>Timezone and clock format are managed on the main server and applied here automatically on each sync{% if timezone %} (currently <strong>{{ timezone }}</strong>){% endif %}.</div>
             {% else %}
             <div class="mb-2">
               <label class="form-label" for="timezone">Timezone{{ info('Timezone for timestamps shown in the app (like the last update check). The clock stays NTP-synced; this only sets how times read. Auto follows the system clock. Pi Remotes inherit this from the server.') }}</label>
@@ -54,8 +54,16 @@
               <div class="form-text">Current: {{ timezone }} (custom, kept)</div>
               {% endif %}
             </div>
+            <div class="mb-2">
+              <label class="form-label" for="clock_format">Clock format{{ info('How times of day read everywhere: the screensaver clock, the weather page, and timestamps like the last update check. Auto keeps the usual reading for each surface. Pi Remotes inherit this from the server, so the whole kitchen agrees.') }}</label>
+              <select class="form-select form-select-sm" id="clock_format" style="max-width:340px">
+                <option value="auto" {{ 'selected' if clock_format in ('', 'auto') else '' }}>Auto</option>
+                <option value="12" {{ 'selected' if clock_format == '12' else '' }}>12-hour (3:42 PM)</option>
+                <option value="24" {{ 'selected' if clock_format == '24' else '' }}>24-hour (15:42)</option>
+              </select>
+            </div>
             <button type="button" class="btn btn-outline-info btn-sm" onclick="saveTimezone(this)">
-              <i class="bi bi-check-lg me-1"></i>Save timezone
+              <i class="bi bi-check-lg me-1"></i>Save date &amp; time
             </button>
             <span class="test-result ms-2" id="timezone-result"></span>
             {% endif %}

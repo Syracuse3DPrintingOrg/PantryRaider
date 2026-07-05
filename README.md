@@ -287,6 +287,11 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow, local smoke
 test, and how to run the tests. Participation is covered by our
 [Code of Conduct](CODE_OF_CONDUCT.md).
 
+## Support the project
+
+Pantry Raider is free for home use. If it has earned a spot on your counter,
+you can [buy the developer a coffee](https://www.buymeacoffee.com/syracuse3dprinting) ☕.
+
 ## Security
 
 Please report security vulnerabilities privately. See [SECURITY.md](SECURITY.md)

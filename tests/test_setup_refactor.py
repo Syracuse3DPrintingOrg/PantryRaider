@@ -78,6 +78,9 @@ PINNED = {
             'spoonacular_api_key', 'staple_items', 'start_icon_color', 'start_key_style',
             'start_page_enabled', 'start_page_keys', 'streamdeck_ha_base_url', 'streamdeck_ha_token',
             'streamdeck_weather_location', 'streamdeck_weather_units', 'suggest_per_tier', 'themealdb_api_key', 'timer_chips',
+            # Added after the pin: the 12/24-hour clock format select in the
+            # Date & time card (FoodAssistant-v3ui).
+            'clock_format',
             'timezone', 'totp-code', 'tunnel_mode_cloudflare', 'tunnel_mode_off',
             'tunnel_mode_subscription', 'tunnel_token', 'ui_theme', 'usb_backup_interval_hours',
             'vision_provider',
@@ -136,6 +139,9 @@ PINNED = {
             'streamdeck_ha_token', 'streamdeck_icon_color', 'streamdeck_idle_timeout', 'streamdeck_key_count',
             'streamdeck_key_style', 'streamdeck_logo_when_display_off', 'streamdeck_rotation', 'streamdeck_weather_location',
             'streamdeck_weather_units', 'suggest_per_tier', 'switch_server_url', 'switch_upstream_api_key',
+            # Added after the pin: the 12/24-hour clock format select in the
+            # Date & time card (FoodAssistant-v3ui).
+            'clock_format',
             'themealdb_api_key', 'timer_chips', 'timezone', 'totp-code', 'tunnel_mode_cloudflare',
             'tunnel_mode_off', 'tunnel_mode_subscription', 'tunnel_token', 'ui_scale',
             'ui_theme', 'usb_backup_interval_hours', 'vision_provider', 'wake_on_motion',

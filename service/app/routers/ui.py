@@ -4,7 +4,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from sqlalchemy.orm import Session
 from typing import Optional
 
-from ..config import settings
+from ..config import settings, BUYMEACOFFEE_URL
 from ..passwords import verify_secret, looks_hashed
 from ..database import get_db
 from ..ingress import ingress_redirect
@@ -587,6 +587,10 @@ async def weather_data(location: str | None = None, units: str | None = None):
     forecast, error = await weather_svc.fetch_forecast_cached(loc, u)
     if forecast is None:
         return {"ok": False, "error": error, "location": loc}
+    # 12/24-hour setting: re-read the hourly strip and sunrise/sunset labels
+    # without touching the cached copy, so the page and the deck tiles agree
+    # with every other clock in the kitchen.
+    forecast = weather_svc.apply_clock_format(forecast, settings.clock_format)
     return {"ok": True, "forecast": forecast, "location": loc}
 
 
@@ -652,6 +656,7 @@ async def about_page(request: Request):
     return templates.TemplateResponse(request, "about.html", {
         "request": request,
         "active": "about",
+        "buymeacoffee_url": BUYMEACOFFEE_URL,
     })
 
 
