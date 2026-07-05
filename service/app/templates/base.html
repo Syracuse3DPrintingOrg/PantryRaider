@@ -118,8 +118,8 @@
   <script src="static/js/kiosk-idle.js?v={{ app_version }}"></script>
   <!-- On-screen floating navigation menu: corner placement + drag to reposition -->
   <script src="static/js/floating-nav.js?v={{ app_version }}"></script>
-  <!-- Floating timer window: shows running server-side timers; defers to a deck -->
-  <script src="static/js/timer-window.js?v={{ app_version }}"></script>
+  <!-- Floating timer chips: one chip per running server-side timer, every page -->
+  <script src="static/js/timer-chips.js?v={{ app_version }}"></script>
   {# On-screen Home Assistant event channel: notification toasts + camera
      pop-ups. Rendered on every device so each can opt in or out for itself (a
      per-device localStorage override of the server default); the poller exits
@@ -310,65 +310,52 @@
     }
     .float-nav-link:hover { background: var(--bs-secondary-bg, rgba(255, 255, 255, 0.1)); }
     .float-nav-link.active { background: var(--bs-primary, #0d6efd); color: #fff; }
-    /* Floating timer window (FoodAssistant-8uqy). A compact card docked to the
-       bottom-right that lists running server-side timers; timer-window.js shows
-       it only when a timer is running and hides it otherwise. Style matches the
-       .float-nav conventions above. */
-    .timer-window {
+    /* Floating timer chips (FoodAssistant-kfda). One compact pill per running
+       server-side timer, stacked bottom-right on every page; timer-chips.js
+       shows them only while a timer is running. Style matches the .float-nav
+       conventions above. */
+    .timer-chips {
       position: fixed;
       z-index: 1030;
       /* Offset clear of a docked nav bar (floating-nav.js publishes its size as
-         these CSS vars) so the timer window never sits on top of it. */
+         these CSS vars) so the chips never sit on top of it. */
       bottom: calc(0.75rem + var(--float-nav-bottom, 0px));
       right: calc(0.75rem + var(--float-nav-right, 0px));
-      min-width: 9rem;
-      max-width: 16rem;
-      padding: 0.35rem 0.5rem;
-      border-radius: 0.6rem;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 0.35rem;
+      max-width: 14rem;
+      user-select: none;
+    }
+    .timer-chip {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      max-width: 100%;
+      padding: 0.25rem 0.65rem;
+      border-radius: 1rem;
       background: var(--bs-tertiary-bg, rgba(33, 37, 41, 0.92));
       border: 1px solid var(--bs-border-color, rgba(255, 255, 255, 0.15));
       box-shadow: 0 0.4rem 1rem rgba(0, 0, 0, 0.35);
       opacity: 0.95;
-      user-select: none;
-    }
-    .timer-window-head {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      color: var(--bs-secondary-color, #adb5bd);
-      font-size: 0.75rem;
-      margin-bottom: 0.2rem;
-    }
-    .timer-window-close {
-      background: none;
-      border: none;
-      color: var(--bs-secondary-color, #adb5bd);
-      line-height: 1;
-      padding: 0 0.15rem;
-      cursor: pointer;
-    }
-    .timer-window-close:hover { color: var(--bs-body-color, #dee2e6); }
-    .timer-window-row {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 0.5rem;
-      padding: 0.15rem 0.1rem;
       color: var(--bs-body-color, #dee2e6);
+      text-decoration: none;
     }
-    .timer-window-label {
+    .timer-chip:hover { border-color: var(--bs-primary, #0d6efd); color: var(--bs-body-color, #dee2e6); }
+    .timer-chip-label {
       overflow: hidden;
       white-space: nowrap;
       text-overflow: ellipsis;
       font-size: 0.85rem;
     }
-    .timer-window-clock {
+    .timer-chip-clock {
       font-variant-numeric: tabular-nums;
       font-weight: 600;
+      font-size: 0.85rem;
       white-space: nowrap;
     }
-    .timer-window-expired { color: #ff6b6b; }
-    .timer-window-expired .timer-window-clock { color: #ff6b6b; }
+    .timer-chip-expired, .timer-chip-expired .timer-chip-clock { color: #ff6b6b; }
 
     /* Contrast hardening (FoodAssistant-tjlm). These load after any theme
        overlay, so they correct low-contrast spots the bundled themes leave on
@@ -560,19 +547,13 @@
     <a class="float-nav-link" href="setup" title="Settings"><i class="bi bi-gear"></i></a>
   </div>
 
-  <!-- Floating timer window (FoodAssistant-8uqy). Hidden until timer-window.js
-       sees at least one running timer (GET /timers). It defers to the Stream
-       Deck: when one is present it stays hidden unless the user explicitly turned
-       it on for this device. data-has-streamdeck mirrors the floatNav gate. -->
-  <div id="timerWindow" class="timer-window d-none"
-       data-has-streamdeck="{{ '1' if has_streamdeck else '0' }}">
-    <div class="timer-window-head">
-      <span><i class="bi bi-stopwatch me-1"></i>Timers</span>
-      <button type="button" class="timer-window-close" title="Hide timer window"
-              aria-label="Hide timer window">&times;</button>
-    </div>
-    <div class="timer-window-list"></div>
-  </div>
+  <!-- Floating timer chips (FoodAssistant-kfda). Hidden until timer-chips.js
+       sees at least one running timer (GET /timers); a tap opens the Timers
+       page. data-chips-hidden is the server-resolved timer_chips setting
+       (auto keeps them off at large/xlarge scale), and when it is set the
+       script exits without polling anything. -->
+  <div id="timerChips" class="timer-chips d-none"
+       data-chips-hidden="{{ '1' if hide_timer_chips else '0' }}"></div>
 
   <!-- QR deep-link modal: at body level so backdrop and focus work on all browsers -->
   <div class="modal fade" id="qrModal" tabindex="-1" aria-labelledby="qrModalLabel" aria-hidden="true">

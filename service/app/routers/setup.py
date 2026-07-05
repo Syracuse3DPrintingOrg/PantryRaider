@@ -21,6 +21,7 @@ from ..config import (
     FLOATING_NAV_POSITIONS,
     FLOATING_NAV_ORIENTATIONS,
     NAV_VISIBILITY,
+    TIMER_CHIPS,
     COMMON_TIMEZONES, format_local,
     STREAMDECK_KEY_STYLES, STREAMDECK_ICON_COLORS,
     DEPLOYMENT_MODES, _DEFAULT_DEPLOYMENT_MODE,
@@ -284,6 +285,7 @@ class SetupPayload(BaseModel):
     floating_nav_orientation: str = ""
     floating_nav_autohide_streamdeck: bool = False
     nav_visibility: str = ""
+    timer_chips: str = ""
     timezone: str = ""
     scheduled_reboot_time: str = ""
     scheduled_reboot_frequency: str = ""
@@ -1215,6 +1217,9 @@ async def save_setup(payload: SetupPayload):
     # Drop an unknown nav-visibility value (empty/invalid keeps the stored one).
     if "nav_visibility" in data and data["nav_visibility"] not in NAV_VISIBILITY:
         data.pop("nav_visibility", None)
+    # Drop an unknown timer-chips value (empty/invalid keeps the stored one).
+    if "timer_chips" in data and data["timer_chips"] not in TIMER_CHIPS:
+        data.pop("timer_chips", None)
     # Drop an unknown QR address mode (empty/invalid keeps the stored one).
     if "qr_url_mode" in data and data["qr_url_mode"] not in ("auto", "public"):
         data.pop("qr_url_mode", None)
@@ -2046,22 +2051,67 @@ async def hardware_status():
         return {"ok": False, "error": str(e)}
 
 
+# Sync the system-warning action items at most this often. The navbar polls
+# this route from every open page (5-minute interval plus one hit per page
+# load), so the throttle keeps the inbox sync to once a minute, matching the
+# bridge's own monitoring loop.
+_WARN_SYNC_THROTTLE_SECS = 60.0
+_warn_last_sync = 0.0
+
+
+def _sync_warning_items(warnings: list) -> None:
+    """Raise/retire system-warning action items from the bridge feed, throttled.
+
+    Best-effort by design: the health poll must keep answering even when the
+    database is momentarily busy, so any failure here is swallowed.
+    """
+    global _warn_last_sync
+    # A satellite's inbox lives on the main server (the action-items routes
+    # forward upstream), so locally raised items would never be seen there;
+    # the navbar icon and the settings banner still show its warnings.
+    if settings.is_satellite():
+        return
+    import time as _time
+    now = _time.monotonic()
+    if now - _warn_last_sync < _WARN_SYNC_THROTTLE_SECS:
+        return
+    _warn_last_sync = now
+    from ..services import action_items
+    db = SessionLocal()
+    try:
+        action_items.sync_system_warnings(db, warnings)
+    except Exception:
+        pass
+    finally:
+        db.close()
+
+
 @router.get("/system/health")
 async def system_health():
     """Pi power/thermal/disk warnings, via the host bridge.
 
-    Off a Pi there is no bridge to probe, so return a clean "no warnings" shape
-    (rather than an error) so the navbar indicator simply shows nothing instead
-    of a failure on a server or phone.
+    Served from the bridge's continuously monitored /system/warnings snapshot
+    (60-second loop), falling back to the on-demand /system/health probe on an
+    older bridge. Off a Pi there is no bridge to probe, so return a clean "no
+    warnings" shape (rather than an error) so the navbar indicator simply shows
+    nothing instead of a failure on a server or phone. As a side effect the
+    active warnings are mirrored into the action-items inbox (throttled), so a
+    condition like undervoltage shows up there once and archives itself when
+    it clears.
     """
     if not is_raspberry_pi():
         return {"ok": True, "warnings": []}
     try:
         async with bridge_client(timeout=6.0) as c:
-            r = (await c.get(f"{_HOST_BRIDGE}/system/health")).json()
-        return r
+            resp = await c.get(f"{_HOST_BRIDGE}/system/warnings")
+            if resp.status_code == 404:  # older bridge: on-demand probe only
+                resp = await c.get(f"{_HOST_BRIDGE}/system/health")
+            r = resp.json()
     except Exception as e:
         return {"ok": False, "error": str(e), "warnings": []}
+    if isinstance(r, dict):
+        _sync_warning_items(r.get("warnings") or [])
+    return r
 
 
 @router.post("/kiosk/install")

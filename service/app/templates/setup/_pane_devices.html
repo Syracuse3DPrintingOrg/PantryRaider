@@ -49,6 +49,18 @@
           </div>
 
           {% if is_pi %}
+          {# Pi system warnings (FoodAssistant-y06w): filled by
+             loadSystemWarnings() in setup/hardware.js from the host bridge's
+             continuous monitor (undervoltage, throttling, heat, storage).
+             Dismissing hides it until the page is next opened; the same
+             warnings also land in the action-items inbox and clear themselves
+             when the condition does. #}
+          <div id="system-warnings-banner" class="alert alert-warning alert-dismissible d-none" role="alert">
+            <div class="fw-semibold mb-1"><i class="bi bi-exclamation-triangle-fill me-1"></i>This device needs attention</div>
+            <ul class="mb-1 ps-4" id="system-warnings-list"></ul>
+            <div class="small" id="system-warnings-help"></div>
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Dismiss"></button>
+          </div>
           <div class="section-card">
             <div class="section-title"><i class="bi bi-hdd-stack text-info"></i> Attached hardware</div>
             <div class="form-text mb-2">Live detection from the appliance host. Plug hardware in, then use Refresh.</div>

@@ -243,10 +243,14 @@ each deck can pick its own look and keep it across syncs.
 | `ha_events_enabled` | | Editable | Editable | Inherited (read-only) |
 | `ha_camera_popup_seconds` | | Editable | Editable | Inherited (read-only) |
 
-## Floating navigation bar
+## Floating navigation bar and timer chips
 
 The on-screen navigation bar position and orientation are device-local server
 defaults; a drag on the device overrides them per-device via localStorage.
+`timer_chips` controls the floating per-timer countdown chips shown on every
+page while timers run: on, off, or auto (auto hides them at large and
+extra-large interface scale, resolved per device the same way `nav_visibility`
+is).
 
 | Setting | Secret | Server | Pi Hosted | Pi Remote |
 | --- | --- | --- | --- | --- |
@@ -254,6 +258,7 @@ defaults; a drag on the device overrides them per-device via localStorage.
 | `floating_nav_orientation` | | Editable | Editable | Device-local |
 | `floating_nav_autohide_streamdeck` | | Editable | Editable | Device-local |
 | `nav_visibility` | | Editable | Editable | Device-local |
+| `timer_chips` | | Editable | Editable | Device-local |
 
 ## Timezone, scheduled reboot, and update bookkeeping
 

@@ -248,6 +248,18 @@ function actionItemCard(it) {
   sub.textContent = it.body || '';
   text.appendChild(title);
   if (it.body) text.appendChild(sub);
+  // A system warning can carry a guide link in its payload (the power and
+  // cabling doc for undervoltage); render it as a small trailing link.
+  const url = it.payload && typeof it.payload.url === 'string' ? it.payload.url : '';
+  if (url && (url.startsWith('https://') || url.startsWith('http://'))) {
+    const a = document.createElement('a');
+    a.className = 'meta-text';
+    a.href = url;
+    a.target = '_blank';
+    a.rel = 'noopener';
+    a.textContent = 'Open the guide';
+    text.appendChild(a);
+  }
   const btns = document.createElement('div');
   btns.className = 'd-flex gap-1';
   // A leftover prompt offers a primary "Save to leftovers"; every item can be

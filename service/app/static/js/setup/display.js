@@ -90,11 +90,12 @@ async function saveFloatingNav() {
   const floating_nav_position = document.getElementById('floating_nav_position')?.value || 'off';
   const floating_nav_autohide_streamdeck = document.getElementById('floating_nav_autohide_streamdeck')?.checked || false;
   const nav_visibility = document.getElementById('nav_visibility')?.value || 'auto';
+  const timer_chips = document.getElementById('timer_chips')?.value || 'auto';
   const quiet_mode = document.getElementById('quiet_mode')?.checked || false;
   try {
     await fetch('setup/save', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({floating_nav_position, floating_nav_autohide_streamdeck, nav_visibility, quiet_mode}),
+      body: JSON.stringify({floating_nav_position, floating_nav_autohide_streamdeck, nav_visibility, timer_chips, quiet_mode}),
     });
     // Clear any per-device override so the new default dock takes effect here.
     try { localStorage.removeItem('floatNavPosition'); } catch (e) {}

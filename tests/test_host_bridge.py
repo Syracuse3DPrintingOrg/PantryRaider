@@ -547,6 +547,60 @@ def test_read_throttled_word_none_on_exception(monkeypatch):
     assert bridge._read_throttled_word() is None
 
 
+# Continuous monitoring for GET /system/warnings (FoodAssistant-y06w)
+# --------------------------------------------------------------------
+
+def test_collapse_throttle_flags_prefers_live_over_sticky():
+    # 0x50005: undervoltage and throttled both live AND sticky; the collapsed
+    # list carries each condition once, with the live wording winning.
+    flags = bridge._parse_throttled(0x50005)
+    out = bridge._collapse_throttle_flags(flags)
+    assert [(w["key"], w["live"]) for w in out] == [
+        ("undervoltage", True), ("throttled", True)]
+
+
+def test_collapse_throttle_flags_keeps_sticky_only():
+    # 0x50000: only the since-boot bits; the collapsed list keeps them, marked
+    # not-live, so a past brownout still surfaces (OctoPrint-style).
+    out = bridge._collapse_throttle_flags(bridge._parse_throttled(0x50000))
+    assert [(w["key"], w["live"]) for w in out] == [
+        ("undervoltage", False), ("throttled", False)]
+
+
+def test_warnings_snapshot_all_clear():
+    snap = bridge._warnings_snapshot(0, 45.0, 40, 10.0, checked_epoch=123.0)
+    assert snap["ok"] is True
+    assert snap["warnings"] == []
+    assert snap["checked_epoch"] == 123.0
+
+
+def test_warnings_snapshot_combines_power_heat_and_disk():
+    snap = bridge._warnings_snapshot(0x1, 85.0, 95, 1.2, checked_epoch=1.0)
+    keys = [w["key"] for w in snap["warnings"]]
+    assert keys == ["undervoltage", "temperature", "disk"]
+    assert all(w["live"] for w in snap["warnings"])
+    # Thresholds mirror _system_health: 80C and 90%.
+    assert "85C" in snap["warnings"][1]["message"]
+    assert "95%" in snap["warnings"][2]["message"]
+
+
+def test_warnings_snapshot_unknown_probes_stay_quiet():
+    # No vcgencmd, no thermal zone, no disk info: an unknown state must not
+    # fabricate warnings (a non-Pi host would otherwise cry wolf forever).
+    snap = bridge._warnings_snapshot(None, None, None, None, checked_epoch=1.0)
+    assert snap["warnings"] == []
+    assert snap["throttled"] is None
+
+
+def test_warnings_snapshot_below_thresholds():
+    snap = bridge._warnings_snapshot(0, 79.9, 89, 3.0, checked_epoch=1.0)
+    assert snap["warnings"] == []
+
+
+def test_system_warnings_exempt_get():
+    assert "/system/warnings" in bridge.TOKEN_EXEMPT_GET
+
+
 def test_read_cpu_temp(tmp_path):
     f = tmp_path / "temp"
     f.write_text("48312\n")

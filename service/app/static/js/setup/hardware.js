@@ -502,3 +502,46 @@ function _applyDeckAutodetect(sd) {
     el.classList.remove('d-none');
   });
 }
+
+// Pi system warnings banner (FoodAssistant-y06w). Fills the dismissable alert
+// on the Devices pane from the host bridge's continuous monitor (undervoltage,
+// throttling, heat, storage). One fetch per settings visit is enough: these
+// conditions change slowly, and the navbar indicator plus the action-items
+// inbox carry the ongoing state. The banner only exists on a Pi (the template
+// gates it), so this exits immediately everywhere else.
+async function loadSystemWarnings() {
+  const banner = document.getElementById('system-warnings-banner');
+  const list = document.getElementById('system-warnings-list');
+  if (!banner || !list) return;
+  try {
+    const d = await fetch('setup/system/health', { cache: 'no-store' }).then(x => x.json());
+    const warnings = (d && d.warnings) || [];
+    if (!warnings.length) { banner.classList.add('d-none'); return; }
+    list.innerHTML = '';
+    let showPowerHelp = false;
+    warnings.forEach(function (w) {
+      const li = document.createElement('li');
+      li.textContent = w.message || w.key || 'Device warning';
+      list.appendChild(li);
+      if (w.key === 'undervoltage' || w.key === 'freq_capped' || w.key === 'throttled') {
+        showPowerHelp = true;
+      }
+    });
+    const help = document.getElementById('system-warnings-help');
+    if (help) {
+      help.innerHTML = '';
+      if (showPowerHelp) {
+        help.append('Power trouble is almost always the supply or a charge-only USB cable. ');
+        const a = document.createElement('a');
+        a.href = 'https://github.com/Syracuse3DPrintingOrg/PantryRaider/blob/main/docs/hardware.md#power-and-cabling';
+        a.target = '_blank';
+        a.rel = 'noopener';
+        a.textContent = 'Power and cabling guide';
+        help.appendChild(a);
+      }
+    }
+    banner.classList.remove('d-none');
+  } catch (e) { /* transient: leave the banner as it is */ }
+}
+
+document.addEventListener('DOMContentLoaded', loadSystemWarnings);

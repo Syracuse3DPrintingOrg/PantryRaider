@@ -2,7 +2,7 @@
 from fastapi import Request
 from fastapi.templating import Jinja2Templates
 
-from .config import settings, theme_info, ui_scale_factor, resolve_custom_colors, nav_chrome_hidden, APP_NAME, APP_VERSION
+from .config import settings, theme_info, ui_scale_factor, resolve_custom_colors, nav_chrome_hidden, timer_chips_hidden, APP_NAME, APP_VERSION
 from .hardware import is_raspberry_pi
 from .ingress import template_globals
 from .navigation import visible_tabs, auto_hidden_groups, build_nav_tree
@@ -79,6 +79,12 @@ def theme_context(request: Request) -> dict:
         "hide_nav_chrome": nav_chrome_hidden(
             settings.nav_visibility, settings.has_streamdeck, settings.ui_scale),
         "has_streamdeck": settings.has_streamdeck,
+        # Floating timer chips (FoodAssistant-kfda): per-timer overlay chips on
+        # every page. "auto" resolves against the interface scale the same way
+        # nav_visibility does; base.html passes the resolved flag to the chips
+        # script so a hidden device never even starts the poller.
+        "timer_chips": settings.timer_chips,
+        "hide_timer_chips": timer_chips_hidden(settings.timer_chips, settings.ui_scale),
         # Cameras for the kiosk camera page (FoodAssistant-oewn).
         "cameras": settings.streamdeck_cameras,
         # On-screen Home Assistant event channel (notifications + camera pop-ups).

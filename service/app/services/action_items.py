@@ -26,6 +26,7 @@ from ..models.db_models import ActionItem
 # kind without a migration; the UI falls back to a generic look for unknown ones.
 KIND_FOOD_EXPIRED = "food_expired"
 KIND_LEFTOVER_PROMPT = "leftover_prompt"
+KIND_SYSTEM_WARNING = "system_warning"
 KIND_GENERIC = "generic"
 
 _VALID_LEVELS = ("info", "success", "warning", "error")
@@ -242,6 +243,132 @@ def sync_food_expired(db: Session, expiring_items: list[dict]) -> int:
     stale = (
         db.query(ActionItem)
         .filter(ActionItem.kind == KIND_FOOD_EXPIRED,
+                ActionItem.dedupe_key.isnot(None))
+        .all()
+    )
+    changed = False
+    for row in stale:
+        if row.dedupe_key in seen:
+            continue
+        if row.status in ("open", "snoozed"):
+            row.status = "archived"
+        row.dedupe_key = None
+        row.updated_at = _iso(_now())
+        changed = True
+    if changed:
+        db.commit()
+    return len(seen)
+
+
+def system_warning_dedupe_key(warning_key: str) -> str:
+    """Stable dedupe key for a Pi system warning, keyed by the condition."""
+    return f"{KIND_SYSTEM_WARNING}:{warning_key}"
+
+
+# Where the power troubleshooting guidance lives; the under-voltage items link
+# here because nearly every under-voltage report traces back to the supply or
+# a charge-only USB cable (docs/hardware.md, Power and cabling).
+POWER_GUIDE_URL = ("https://github.com/Syracuse3DPrintingOrg/PantryRaider"
+                   "/blob/main/docs/hardware.md#power-and-cabling")
+
+# User-forward copy per warning condition the host bridge can report
+# (FoodAssistant-y06w). Each entry is (title, live body, since-boot body,
+# level, guide url or None). The bodies name the likely fix, OctoPrint-style,
+# instead of just restating the symptom.
+_SYSTEM_WARNING_COPY: dict[str, tuple[str, str, str, str, str | None]] = {
+    "undervoltage": (
+        "Undervoltage detected",
+        "The Pi is not getting enough power right now. This is almost always "
+        "the power supply or a charge-only USB cable: use the official supply "
+        "(5V/3A for a Pi 4, 5V/5A for a Pi 5) and a proper data-capable cable. "
+        "The Power and cabling guide walks through it.",
+        "The Pi ran short of power at some point since it started. If this "
+        "keeps appearing, the power supply or cable is marginal: the official "
+        "supply (5V/3A for a Pi 4, 5V/5A for a Pi 5) fixes it. See the Power "
+        "and cabling guide.",
+        "error", POWER_GUIDE_URL),
+    "freq_capped": (
+        "Pi is running below full speed",
+        "The Pi has capped its CPU speed, usually to protect itself from a "
+        "weak power supply or heat. Check the supply and cable first, then "
+        "airflow around the board.",
+        "The Pi capped its CPU speed at some point since it started, usually "
+        "because of power or heat. Check the supply and cable, and the "
+        "airflow around the board.",
+        "warning", POWER_GUIDE_URL),
+    "throttled": (
+        "Pi performance is throttled",
+        "The Pi is throttling itself right now, which means it is too hot or "
+        "underpowered. Improve airflow (a small heatsink or fan helps) and "
+        "make sure the power supply is up to the job.",
+        "The Pi throttled itself at some point since it started. If it "
+        "recurs, look at cooling and the power supply.",
+        "warning", POWER_GUIDE_URL),
+    "temp_limit": (
+        "Pi reached its temperature limit",
+        "The Pi has hit its soft temperature limit and is slowing down to "
+        "cool off. Better airflow, a heatsink, or a small fan will keep it "
+        "at full speed.",
+        "The Pi hit its soft temperature limit at some point since it "
+        "started. Better airflow, a heatsink, or a small fan prevents it.",
+        "warning", None),
+    "temperature": (
+        "Pi is running hot",
+        "The CPU is above 80C. It will start throttling around this point, "
+        "so improve the airflow or add a heatsink or fan, especially inside "
+        "an enclosure.",
+        "The CPU went above 80C. Improve the airflow or add a heatsink or "
+        "fan, especially inside an enclosure.",
+        "warning", None),
+    "disk": (
+        "Storage is almost full",
+        "The data storage is over 90% full. When it fills up completely, "
+        "inventory updates and photos stop saving. Free some space, or move "
+        "to a larger SD card (take a backup first from Settings, Backups).",
+        "The data storage is over 90% full. Free some space, or move to a "
+        "larger SD card (take a backup first from Settings, Backups).",
+        "warning", None),
+}
+
+
+def sync_system_warnings(db: Session, warnings: list[dict]) -> int:
+    """Raise/refresh one action item per active Pi system warning, and
+    auto-archive items whose condition has cleared (FoodAssistant-y06w).
+
+    ``warnings`` is the host bridge's warnings list ({key, message, live}
+    dicts, one per condition). The caller does the fetch so this stays pure of
+    network and testable, mirroring sync_food_expired. Each condition dedupes
+    on its key, so "Undervoltage detected" shows once no matter how often the
+    monitor reports it; when a condition disappears from the feed, its item is
+    archived and the dedupe key retired so the next occurrence raises a fresh
+    open item. Returns the number of active warnings.
+    """
+    seen: set[str] = set()
+    for w in warnings or []:
+        wkey = w.get("key") or ""
+        copy = _SYSTEM_WARNING_COPY.get(wkey)
+        if copy is None:
+            # An unknown condition from a newer bridge still surfaces, with
+            # the bridge's own message as the body.
+            title = "Device warning"
+            body = w.get("message") or "The device reported a warning."
+            level, url = "warning", None
+        else:
+            title, body_live, body_boot, level, url = copy
+            body = body_live if w.get("live", True) else body_boot
+        key = system_warning_dedupe_key(wkey or "unknown")
+        seen.add(key)
+        payload = {"warning_key": wkey, "live": bool(w.get("live", True))}
+        if url:
+            payload["url"] = url
+        create(db, KIND_SYSTEM_WARNING, title, body=body, dedupe_key=key,
+               level=level, payload=payload)
+    # Cleared conditions: drop their items from the inbox and retire the
+    # dedupe key on every row (whatever its status), exactly like
+    # sync_food_expired, so a genuinely new occurrence later starts fresh.
+    stale = (
+        db.query(ActionItem)
+        .filter(ActionItem.kind == KIND_SYSTEM_WARNING,
                 ActionItem.dedupe_key.isnot(None))
         .all()
     )

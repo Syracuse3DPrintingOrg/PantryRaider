@@ -35,6 +35,7 @@ POST /mealie/start         start Mealie in the background (docker compose --prof
 GET  /logs/<name>          tail of an install/start log (name in mealie/kiosk/streamdeck/grocy)
 GET  /hardware/status      display/Stream Deck presence + service/install state
 GET  /system/health        power/thermal/disk warnings (vcgencmd get_throttled, temp, df)
+GET  /system/warnings      cached warnings from the 60s monitor loop (power, heat, disk)
 GET  /support-bundle       host facts for the app's support zip (units, journal, probes)
 POST /kiosk/install        provision the kiosk service (display attached later)
 POST /streamdeck/install   provision the Stream Deck service (attached later)
@@ -115,6 +116,7 @@ TOKEN_EXEMPT_GET = frozenset({
     "/hostname",
     "/activity",
     "/system/health",
+    "/system/warnings",
     "/hardware/status",
     "/ap/status",
     "/mealie/status",
@@ -1602,6 +1604,102 @@ def _system_health():
     }
 
 
+# --- Continuous system monitoring (FoodAssistant-y06w) ----------------------
+# A 60-second loop keeps a cached snapshot of the same power/thermal/disk
+# probes _system_health runs on demand, so GET /system/warnings answers
+# instantly (no vcgencmd round-trip per request) and the app can poll it
+# cheaply, raise action items while a condition holds, and retire them when it
+# clears. The disk probe watches the app data mount (where Grocy/Mealie and the
+# photos live), not just /, so a filling SD card is caught where it hurts.
+
+_DATA_MOUNT = os.path.join(INSTALL_DIR, "data")
+
+
+def _collapse_throttle_flags(flags):
+    """One warning per throttle key, preferring the live bit over the sticky.
+
+    _parse_throttled reports the live (low) and since-boot (high) bits as
+    separate entries with the same key. For the warnings feed we want each
+    condition once: "happening now" when the live bit is set, else the sticky
+    "has occurred since boot" wording. Order is preserved by key first-seen.
+    """
+    by_key = {}
+    order = []
+    for f in flags or []:
+        k = f.get("key")
+        if k not in by_key:
+            by_key[k] = f
+            order.append(k)
+        elif f.get("live") and not by_key[k].get("live"):
+            by_key[k] = f
+    return [by_key[k] for k in order]
+
+
+def _warnings_snapshot(word, temp_c, disk_pct, disk_free_gb, checked_epoch=None):
+    """Build the /system/warnings payload from raw probe values. Pure.
+
+    Mirrors _system_health's thresholds (temp >= 80C, disk >= 90%) but
+    collapses the live/sticky throttle pairs to one warning per condition,
+    which is what the app dedupes action items on.
+    """
+    flags = _collapse_throttle_flags(_parse_throttled(word) if word is not None else [])
+    warnings = list(flags)
+    if temp_c is not None and temp_c >= _TEMP_WARN_C:
+        warnings.append({
+            "key": "temperature",
+            "message": f"CPU temperature high ({temp_c:.0f}C)",
+            "live": True,
+        })
+    if disk_pct is not None and disk_pct >= _DISK_WARN_PCT:
+        warnings.append({
+            "key": "disk",
+            "message": f"Storage almost full ({disk_pct}% used)",
+            "live": True,
+        })
+    return {
+        "ok": True,
+        "throttled": word,
+        "temp_c": temp_c,
+        "disk_percent": disk_pct,
+        "disk_free_gb": disk_free_gb,
+        "warnings": warnings,
+        "checked_epoch": checked_epoch if checked_epoch is not None else time.time(),
+    }
+
+
+_warnings_lock = threading.Lock()
+_warnings_cache = None  # last snapshot from the loop; None until the first run
+
+
+def _refresh_system_warnings():
+    """Run the probes once and store the snapshot for GET /system/warnings."""
+    global _warnings_cache
+    disk_path = _DATA_MOUNT if os.path.isdir(_DATA_MOUNT) else "/"
+    disk_pct, disk_free_gb = _disk_usage(disk_path)
+    snap = _warnings_snapshot(
+        _read_throttled_word(), _read_cpu_temp(), disk_pct, disk_free_gb)
+    with _warnings_lock:
+        _warnings_cache = snap
+    return snap
+
+
+def _system_warnings():
+    """Cached snapshot for GET /system/warnings (probing now if none yet)."""
+    with _warnings_lock:
+        snap = _warnings_cache
+    return snap if snap is not None else _refresh_system_warnings()
+
+
+def _system_warnings_loop(interval=60):
+    """Refresh the warnings snapshot every minute, forever. Never raises."""
+    while True:
+        try:
+            _refresh_system_warnings()
+        except Exception as e:
+            print(f"system warnings probe failed: {e}", flush=True)
+        time.sleep(interval)
+
+
 # --- Support bundle (FoodAssistant-w7mb) -----------------------------------
 # GET /support-bundle returns a JSON report of host-level facts the app folds
 # into its downloadable support zip: systemd unit states, drop-in contents,
@@ -2421,6 +2519,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._hardware_status()
         elif self.path == "/system/health":
             self._system_health()
+        elif self.path == "/system/warnings":
+            self._system_warnings()
         elif self.path == "/support-bundle":
             self._support_bundle_get()
         elif self.path == "/streamdeck/config":
@@ -3072,6 +3172,13 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         except Exception as e:
             self._send(500, {"ok": False, "error": str(e)})
 
+    def _system_warnings(self):
+        """Cached power/thermal/disk warnings from the 60s monitor loop."""
+        try:
+            self._send(200, _system_warnings())
+        except Exception as e:
+            self._send(500, {"ok": False, "error": str(e), "warnings": []})
+
     def _support_bundle_get(self):
         """Host facts for the app's downloadable support zip (FoodAssistant-w7mb)."""
         try:
@@ -3464,6 +3571,8 @@ if __name__ == "__main__":
     threading.Thread(target=_resume_mealie_install, daemon=True).start()
     # Light up the kiosk when a display is attached after provisioning.
     threading.Thread(target=_kiosk_autoenable_loop, daemon=True).start()
+    # Continuous power/thermal/disk monitoring for GET /system/warnings.
+    threading.Thread(target=_system_warnings_loop, daemon=True).start()
     server = http.server.HTTPServer((LISTEN_HOST, LISTEN_PORT), _Handler)
     print(f"FoodAssistant host bridge listening on {LISTEN_HOST}:{LISTEN_PORT}", flush=True)
     try:

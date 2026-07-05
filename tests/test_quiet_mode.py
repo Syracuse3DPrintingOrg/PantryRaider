@@ -39,7 +39,7 @@ def test_quiet_flag_on_base_pages_and_toggle_on_settings(client, monkeypatch):
     with patch.object(type(settings), "is_configured", lambda self: True):
         # The Settings page carries the toggle control.
         assert 'id="quiet_mode"' in client.get("/setup").text
-        # A base-extending page (where timer-window.js runs) carries the flag on
+        # A base-extending page (where timer-chips.js runs) carries the flag on
         # the <html> element so the chime can read it.
         page = client.get("/ui/weather").text
         assert 'data-quiet-mode="false"' in page

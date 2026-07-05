@@ -12,7 +12,7 @@ from .hardware import is_raspberry_pi
 
 # Single source of truth for the app version (shown in the UI, used by the
 # update checker, and reported by FastAPI). Bump on each tagged release.
-APP_VERSION = "0.8.2"
+APP_VERSION = "0.8.3"
 
 # Single source of truth for the product's display name. The runtime identifiers
 # (systemd units, install paths, the foodassistant_streamdeck package, the
@@ -138,6 +138,18 @@ NAV_VISIBILITY = ("auto", "shown", "hidden")
 _DEFAULT_NAV_VISIBILITY = "auto"
 
 
+# Floating timer chips (FoodAssistant-kfda): one small overlay chip per running
+# timer, shown on every page so a countdown started anywhere stays visible while
+# browsing. "auto" keeps them off at large / extra-large interface scale, where
+# a small kiosk panel has no room to spare and the Stream Deck usually shows the
+# timers anyway.
+#   auto - show, except when the UI scale is large or xlarge
+#   on   - always show while a timer is running
+#   off  - never show
+TIMER_CHIPS = ("auto", "on", "off")
+_DEFAULT_TIMER_CHIPS = "auto"
+
+
 # A curated shortlist of IANA timezones for the settings dropdown, so a user
 # rarely has to type one. "" (the default) means "follow the system clock",
 # which on a Pi is NTP-synced. Any valid IANA name also works if typed/sent.
@@ -207,6 +219,21 @@ def nav_chrome_hidden(nav_visibility: str, has_streamdeck: bool, ui_scale: str) 
     if nav_visibility == "shown":
         return False
     return bool(has_streamdeck) and ui_scale in ("large", "xlarge")
+
+
+def timer_chips_hidden(timer_chips: str, ui_scale: str) -> bool:
+    """Resolve whether the floating timer chips are suppressed for this device.
+
+    Pure, like nav_chrome_hidden above, so it can be unit-tested and reused by
+    the template context. "auto" (the default) hides the chips at large or
+    extra-large interface scale, where a small kiosk panel has no spare room
+    and oversize chips would cover content; at every other scale they show
+    whenever a timer is running."""
+    if timer_chips == "off":
+        return True
+    if timer_chips == "on":
+        return False
+    return ui_scale in ("large", "xlarge")
 
 # Deployment modes chosen on the first wizard step. They steer the rest of
 # setup and (on a Pi) what the first-boot provisioner installs:
@@ -384,7 +411,7 @@ _SAVEABLE = [
     "ha_events_enabled", "ha_camera_popup_seconds", "convert_custom_rows",
     "quiet_mode",
     "floating_nav_position", "floating_nav_orientation", "floating_nav_autohide_streamdeck",
-    "nav_visibility", "timezone", "scheduled_reboot_time",
+    "nav_visibility", "timer_chips", "timezone", "scheduled_reboot_time",
     "scheduled_reboot_frequency", "scheduled_reboot_day",
     "update_last_checked", "update_last_latest", "update_last_available",
     "deployment_mode", "remote_server_url", "remote_server_ip", "remote_server_host", "upstream_api_key", "kiosk_pin", "kiosk_readonly_when_locked",
@@ -1063,6 +1090,10 @@ class Settings(BaseSettings):
     # Whether the on-screen navigation chrome shows at all (see NAV_VISIBILITY /
     # nav_hidden). "auto" hides it on a Stream-Deck-driven large/xlarge kiosk.
     nav_visibility: str = _DEFAULT_NAV_VISIBILITY
+
+    # Floating timer chips (see TIMER_CHIPS / timer_chips_hidden). "auto" shows
+    # them except at large/xlarge interface scale.
+    timer_chips: str = _DEFAULT_TIMER_CHIPS
 
     # Display timezone for timestamps shown in the UI. "" follows the system
     # clock (NTP-synced on a Pi); an IANA name (e.g. "America/New_York")

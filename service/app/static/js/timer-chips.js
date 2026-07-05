@@ -1,54 +1,40 @@
-// On-screen floating timer window (FoodAssistant-8uqy, Current Recipe epic).
+// Floating timer chips (FoodAssistant-kfda, successor to the timer window of
+// FoodAssistant-8uqy).
 //
-// Shows the server-side running timers (GET /timers) in a small floating window
-// so any browser surface can watch the same countdowns the Stream Deck and
-// satellites see. The window only appears when at least one timer is running and
-// hides itself when none remain.
+// One small overlay chip per running server-side timer (GET /timers), shown on
+// every page so a countdown started anywhere in the house stays visible while
+// browsing. Tapping a chip opens the full Timers page. The chips only appear
+// while at least one timer is running and disappear when none remain.
+//
+// Visibility is resolved server-side (the timer_chips setting: on / off / auto,
+// where auto hides the chips at large or extra-large interface scale) and
+// arrives as data-chips-hidden on the container. A hidden device exits here
+// before starting any polling, so it costs nothing.
 //
 // Two clocks, like the server: we POLL /timers every few seconds to learn which
 // timers exist and to pick up new/cancelled ones, but between polls we TICK each
-// visible countdown locally once a second from deadline_epoch minus the browser's
-// own time.time() (Date.now()). That keeps the mm:ss display smooth without
+// visible countdown locally once a second from deadline_epoch minus the
+// browser's own clock (Date.now()). That keeps the mm:ss display smooth without
 // hammering the server, and matches the server's shareable-countdown contract:
 // remaining = deadline_epoch - now, clamped at zero, expired once it hits zero.
-//
-// Per-device toggle: a small close control hides the window and persists the
-// choice in localStorage ('timerWindow' = 'on'|'off', default 'on'), since a
-// wall kiosk and a phone may each want it on or off independently.
-//
-// Defers to the Stream Deck: when a deck is present (data-has-streamdeck="1"),
-// the deck already displays timers, so the on-screen window stays hidden unless
-// the user has explicitly turned it 'on' on this device.
+// A hidden tab skips the network trip (visibilitychange resyncs on return).
 (function () {
-  var STORE_KEY = 'timerWindow';
-  var POLL_MS = 5000;   // how often we re-ask the server which timers exist
-  var TICK_MS = 1000;   // how often we redraw the local countdown
+  var POLL_MS = 3000;   // how often we re-ask the server which timers exist
+  var TICK_MS = 1000;   // how often we redraw the local countdowns
 
   function start() {
-    var win = document.getElementById('timerWindow');
-    if (!win) return;
+    var wrap = document.getElementById('timerChips');
+    if (!wrap) return;
+    if (wrap.getAttribute('data-chips-hidden') === '1') return;
 
-    var hasDeck = win.getAttribute('data-has-streamdeck') === '1';
-
-    var stored = '';
-    try { stored = localStorage.getItem(STORE_KEY) || ''; } catch (e) { }
-
-    // 'off' always wins. With a deck present we default to hidden (the deck
-    // shows timers); only an explicit 'on' brings the window back. Without a
-    // deck the default is 'on'.
-    if (stored === 'off') return;
-    if (hasDeck && stored !== 'on') return;
-
-    var list = win.querySelector('.timer-window-list');
-    var closeBtn = win.querySelector('.timer-window-close');
     var timers = [];
 
-    // Audible timer chime (FoodAssistant-soj1). Quiet mode silences it so a
-    // finished timer is signalled only by the highlighted row. We chime once per
-    // timer, the first render it is seen expired, tracked by id in `chimed`.
-    // Synthesised with the Web Audio API so there is no asset to ship; some
-    // browsers gate audio until the page has had a user gesture, which a kiosk
-    // gets from its normal taps.
+    // Audible timer chime (FoodAssistant-soj1, carried over from the timer
+    // window). Quiet mode silences it so a finished timer is signalled only by
+    // the highlighted chip. We chime once per timer, the first render it is
+    // seen expired, tracked by id in `chimed`. Synthesised with the Web Audio
+    // API so there is no asset to ship; some browsers gate audio until the page
+    // has had a user gesture, which a kiosk gets from its normal taps.
     var quiet = document.documentElement.getAttribute('data-quiet-mode') === 'true';
     var chimed = {};
     function chime() {
@@ -72,13 +58,6 @@
       } catch (e) { /* audio unavailable: stay visual only */ }
     }
 
-    if (closeBtn) {
-      closeBtn.addEventListener('click', function () {
-        try { localStorage.setItem(STORE_KEY, 'off'); } catch (e) { }
-        win.classList.add('d-none');
-      });
-    }
-
     function fmt(remaining) {
       var total = Math.max(0, Math.floor(remaining));
       var m = Math.floor(total / 60);
@@ -99,13 +78,12 @@
 
     function render() {
       if (!timers.length) {
-        win.classList.add('d-none');
-        if (list) list.innerHTML = '';
+        wrap.classList.add('d-none');
+        wrap.innerHTML = '';
         return;
       }
-      win.classList.remove('d-none');
-      if (!list) return;
-      list.innerHTML = '';
+      wrap.classList.remove('d-none');
+      wrap.innerHTML = '';
       for (var i = 0; i < timers.length; i++) {
         var t = timers[i];
         var remaining = remainingOf(t);
@@ -116,20 +94,23 @@
           if (!chimed[key]) { chimed[key] = true; chime(); }
         }
 
-        var row = document.createElement('div');
-        row.className = 'timer-window-row' + (expired ? ' timer-window-expired' : '');
+        // <base href> makes 'ui/timers' resolve on every page, ingress included.
+        var chip = document.createElement('a');
+        chip.className = 'timer-chip' + (expired ? ' timer-chip-expired' : '');
+        chip.href = 'ui/timers';
+        chip.title = 'Open timers';
 
         var label = document.createElement('span');
-        label.className = 'timer-window-label';
+        label.className = 'timer-chip-label';
         label.textContent = t.label || ('Timer ' + (t.id != null ? t.id : (i + 1)));
 
         var clock = document.createElement('span');
-        clock.className = 'timer-window-clock';
+        clock.className = 'timer-chip-clock';
         clock.textContent = expired ? 'done' : fmt(remaining);
 
-        row.appendChild(label);
-        row.appendChild(clock);
-        list.appendChild(row);
+        chip.appendChild(label);
+        chip.appendChild(clock);
+        wrap.appendChild(chip);
       }
     }
 

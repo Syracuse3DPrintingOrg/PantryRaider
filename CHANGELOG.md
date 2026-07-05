@@ -17,6 +17,8 @@ All notable changes to Pantry Raider are recorded here. The format is based on
 
 ### Fixed
 - **Waking either surface now wakes both.** A Stream Deck press has always woken a sleeping display, but touching the screen could leave a blanked deck dark until its own next press. The deck now picks up screen activity reliably, even when its check runs late, so a tap on the panel relights the keys within moments. The two idle timeouts stay independent; only the wake is shared.
+- **Floating timer chips on every page.** While kitchen timers are running, each one now shows as a small countdown chip in the bottom corner of whatever page you are on, so a timer started from the Stream Deck or the Timers page stays in sight while you browse the pantry or a recipe. Tap a chip to jump to the Timers page. A new Floating timer chips choice sits with the other display settings: Auto (the default) shows them everywhere except at large and extra-large interface scale, where a small kiosk screen has no room to spare, and Always show or Always hide override that per install.
+- **The appliance warns you about hardware trouble.** A Pi appliance now checks itself every minute for the classic Raspberry Pi problems: not enough power (a weak supply or a charge-only USB cable), running hot, CPU throttling, and storage filling up. An active problem shows up in three places: the warning icon in the top bar, a banner on the Settings device page, and a notification in the inbox that explains the likely fix in plain terms, with the power ones linking straight to the Power and cabling guide. Each warning appears once, stays while the condition holds, and clears itself from the inbox when the condition goes away.
 
 ## [0.8.0] - 2026-07-04
 

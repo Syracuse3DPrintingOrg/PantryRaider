@@ -153,7 +153,7 @@ commit messages, and UI copy.
   `POST /events/camera-popup`, `GET /events/poll`), rendered on screen by
   `static/js/ha-events.js` when `ha_events_enabled`.
 - Browser-facing static JS lives in `static/js/`: `floating-nav.js`,
-  `timer-window.js`, `kiosk-idle.js`, `kiosk-auto.js`, `ha-events.js`.
+  `timer-chips.js`, `kiosk-idle.js`, `kiosk-auto.js`, `ha-events.js`.
 
 ### Pi provisioning (`scripts/image-build/`)
 
