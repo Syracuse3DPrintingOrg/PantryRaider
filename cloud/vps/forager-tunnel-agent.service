@@ -16,7 +16,7 @@ RestartSec=3
 # The two paths it must write: the WireGuard config (wg-quick save persists
 # peers) and the Caddy per-kitchen include it regenerates.
 ProtectSystem=full
-ReadWritePaths=/etc/wireguard /etc/caddy
+ReadWritePaths=/etc/wireguard /etc/caddy /etc/forager
 NoNewPrivileges=false
 
 [Install]
