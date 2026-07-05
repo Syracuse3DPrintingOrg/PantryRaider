@@ -217,6 +217,8 @@ setTimeout(_revealMenu, 1500);
   if (typeof _haInitDeviceEvents === 'function') _haInitDeviceEvents();
   // Show current AI token usage against any budget.
   if (typeof _loadAiUsage === 'function') _loadAiUsage();
+  // Forager link state and quota, when this install is linked.
+  if (typeof _loadCloudStatus === 'function') _loadCloudStatus();
 
   // Settings form only: update auth hint on load
   if (IS_CONFIGURED) toggleAuthRequired();

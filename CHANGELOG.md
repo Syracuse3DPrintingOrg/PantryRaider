@@ -10,6 +10,9 @@ All notable changes to Pantry Raider are recorded here. The format is based on
 
 ## [Unreleased]
 
+### Added
+- **Link your kitchen to Forager.** Settings, AI & Scanning now has a Forager card: type in a pairing code from the cloud portal and this install links to your cloud account. Once linked, pick Forager as the AI provider and photo analysis, receipt parsing, and barcode enrichment run through your subscription, no API key of your own needed. The card shows the account's plan and how much of the monthly AI quota is used, right next to the local token counter, and an Unlink button forgets the link whenever you want. Every install pairs separately, satellites included, so each device shows up by name on your account. If the monthly quota runs out, AI features pause with a clear message until the new month, exactly like the local token budget; everything else keeps working.
+
 ## [0.8.0] - 2026-07-04
 
 ### Added
@@ -262,7 +265,7 @@ for the public release. See the note at the bottom of this file.
 ## [0.4.0]
 
 ### Added
-- **Remote Access**: expose your Pantry Raider to the internet without port-forwarding. In **Settings → Remote Access**, choose Cloudflare Tunnel (free, bring your own token) or Pantry Raider Cloud (managed subscription, coming soon). The tunnel runs as a sidecar container; your public URL appears in the UI once the connection is established.
+- **Remote Access**: expose your Pantry Raider to the internet without port-forwarding. In **Settings → Remote Access**, choose Cloudflare Tunnel (free, bring your own token) or Forager (managed subscription, coming soon). The tunnel runs as a sidecar container; your public URL appears in the UI once the connection is established.
 - **Phone QR code**: a QR icon in the navbar opens a modal with a scannable code that jumps your phone's browser directly to the add-item page. Use your phone's camera for food photos without typing the server address.
 - **Kiosk / touch mode**: a tablet icon in the navbar toggles touch-optimised sizing (48 px minimum tap targets on buttons, inputs, and list items). Useful on a countertop touchscreen; the preference is remembered in the browser.
 - **SD-card image tooling**: `scripts/image-build/` and `image/config.env` for building a flashable Raspberry Pi appliance image. First boot auto-installs Docker, starts the full stack, configures mDNS (`foodassistant.local`), and optionally launches a Chromium kiosk. Supports Pi 4, Pi 5, and generic ARM64/x86-64 Linux. See `docs/hardware/sd-image.md`.

@@ -49,9 +49,17 @@ enrichment, and cook suggestions. All are pulled by a satellite from the server.
 | `anthropic_model` | | Editable | Editable | Inherited (read-only) |
 | `ai_extra_keys` | Secret | Editable | Editable | Device-local |
 | `ai_token_budget` | | Editable | Editable | Device-local |
+| `cloud_base_url` | | Device-local | Device-local | Device-local |
+| `cloud_instance_token` | Secret | Editable | Editable | Editable |
 
 Note: `ai_extra_keys` is device-local. It is in `_SAVEABLE` and is a secret, but
 it is not in `SATELLITE_PULL_FIELDS`, so each device keeps its own spare keys.
+
+Note: the Forager link is per-device on purpose, satellites
+included: each install redeems its own pairing code in Settings, AI and holds
+its own instance token, so it shows up as its own instance on the cloud
+account. `cloud_base_url` is the cloud service address; it has no settings
+control and is only changed with the `CLOUD_BASE_URL` environment variable.
 
 ## Barcode scanning and enrichment
 

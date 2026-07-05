@@ -125,6 +125,83 @@ async function resetAiUsage(btn) {
   } catch (e) { if (el) el.innerHTML = '<span class="text-danger">' + e + '</span>'; }
 }
 
+// Forager pairing (docs/design/cloud-platform.md). Link redeems a
+// pairing code for an instance token stored server-side; the page reloads so
+// the card re-renders in its linked state. All failures land in the result
+// line; an unreachable cloud never breaks the pane.
+async function cloudLink(btn) {
+  const el = document.getElementById('cloud-link-result');
+  const code = (document.getElementById('cloud_pairing_code')?.value || '').trim();
+  if (!code) { if (el) el.innerHTML = '<span class="text-danger">Enter the pairing code from the cloud portal.</span>'; return; }
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Linking…';
+  try {
+    const r = await fetch('setup/cloud/link', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code }),
+    });
+    const d = await r.json();
+    if (!d.ok) throw new Error(d.error || 'The pairing code was not accepted.');
+    if (el) el.innerHTML = '<span class="text-success"><i class="bi bi-check-circle me-1"></i>Linked. Reloading…</span>';
+    setTimeout(() => location.reload(), 600);
+  } catch (e) {
+    if (el) el.innerHTML = `<span class="text-danger"><i class="bi bi-x-circle-fill me-1"></i>${e.message}</span>`;
+    btn.disabled = false;
+    btn.innerHTML = orig;
+  }
+}
+
+async function cloudUnlink(btn) {
+  if (!confirm('Unlink this install from Forager? AI calls through the subscription will stop until it is linked again.')) return;
+  const el = document.getElementById('cloud-link-result');
+  btn.disabled = true;
+  try {
+    await fetch('setup/cloud/unlink', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    if (el) el.innerHTML = '<span class="text-success"><i class="bi bi-check-circle me-1"></i>Unlinked. Reloading…</span>';
+    setTimeout(() => location.reload(), 600);
+  } catch (e) {
+    if (el) el.innerHTML = `<span class="text-danger">${e.message}</span>`;
+    btn.disabled = false;
+  }
+}
+
+// Fill the cloud status card and the cloud quota line in the usage card.
+async function _loadCloudStatus() {
+  const statusEl = document.getElementById('cloud-status');
+  const usageEl = document.getElementById('cloud-usage-display');
+  if (!statusEl && !usageEl) return;
+  const fail = msg => {
+    if (statusEl) statusEl.innerHTML = '<span class="text-warning"><i class="bi bi-cloud-slash me-1"></i>' + msg + '</span>';
+    if (usageEl) usageEl.textContent = 'Cloud quota unavailable right now.';
+  };
+  try {
+    const d = await fetch('setup/cloud/status').then(r => r.json());
+    if (!d.linked) { if (statusEl) statusEl.textContent = 'Not linked.'; if (usageEl) usageEl.textContent = ''; return; }
+    if (!d.reachable || !d.valid) { fail(d.error || 'The cloud link could not be checked.'); return; }
+    const ent = d.entitlement || {};
+    const fmt = n => (n || 0).toLocaleString();
+    let html = '<i class="bi bi-cloud-check me-1"></i>Linked as <strong>' +
+      String(d.name || 'this install').replace(/[<>&"]/g, '') + '</strong>';
+    html += ent.active
+      ? ' · ' + (ent.plan ? String(ent.plan).replace(/[<>&"]/g, '') + ' plan, ' : '') + 'subscription active'
+      : ' · <span class="text-warning">no active subscription</span>';
+    statusEl && (statusEl.innerHTML = html);
+    if (usageEl) {
+      if (ent.quota) {
+        const pct = Math.min(100, Math.round((ent.used || 0) / ent.quota * 100));
+        const bar = (ent.used || 0) >= ent.quota ? 'bg-danger' : (pct >= 80 ? 'bg-warning' : 'bg-info');
+        usageEl.innerHTML = '<div><i class="bi bi-cloud me-1"></i>Forager (' + (ent.month || '') + '): <strong>' +
+          fmt(ent.used) + '</strong> of ' + fmt(ent.quota) + ' tokens' +
+          '</div><div class="progress mt-1" style="max-width:420px;height:8px"><div class="progress-bar ' + bar + '" style="width:' + pct + '%"></div></div>';
+      } else {
+        usageEl.innerHTML = '<i class="bi bi-cloud me-1"></i>Forager: ' +
+          (ent.active ? 'no monthly quota set for this plan.' : 'no active subscription.');
+      }
+    }
+  } catch (e) { fail('Forager could not be reached.'); }
+}
+
 // Collect the checked kitchen appliances. Absent container (e.g. on a satellite
 // where Preferences may differ) returns undefined so the field is not posted and
 // the stored selection is left alone; otherwise an explicit (possibly empty) list.

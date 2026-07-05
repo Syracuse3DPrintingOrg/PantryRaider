@@ -34,6 +34,15 @@ def reset_providers() -> None:
 
 
 def _build_provider(name: str, model: str | None = None) -> VisionProvider:
+    if name == "cloud":
+        # Pantry Raider Cloud: the managed AI proxy. No model choice here;
+        # the cloud picks the upstream model. Requires a paired instance
+        # token (Settings, AI, Pantry Raider Cloud).
+        from .providers.cloud import CloudProvider
+        if not settings.cloud_instance_token:
+            raise RuntimeError("This install is not linked to Pantry Raider Cloud")
+        return CloudProvider(settings.cloud_base_url, settings.cloud_instance_token)
+
     if name == "ollama":
         from .providers.ollama import OllamaProvider
         return OllamaProvider(settings.ollama_base_url, model or settings.ollama_model)

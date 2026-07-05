@@ -56,7 +56,11 @@ PINNED = {
             'background_image_url', 'background_opacity', 'backup_include_secrets', 'barcode_autocheck_shopping',
             'barcode_enrichment', 'barcode_global_capture', 'barcode_llm_fallback', 'cam-ip-host',
             'cam-ip-name', 'cam-ip-pass', 'cam-ip-path', 'cam-ip-port',
-            'cam-ip-preset', 'cam-ip-user', 'cam-scan-cidr', 'cook_ai_context',
+            'cam-ip-preset', 'cam-ip-user', 'cam-scan-cidr',
+            # Added after the pin: the Pantry Raider Cloud pairing input
+            # (FoodAssistant-2nd1).
+            'cloud_pairing_code',
+            'cook_ai_context',
             'custom-heading-icon', 'custom-heading-label', 'custom-tab-icon', 'custom-tab-label',
             'custom-tab-url', 'custom_theme_accent', 'custom_theme_base', 'custom_theme_bg',
             'custom_theme_name', 'custom_theme_primary', 'custom_theme_surface', 'custom_theme_text',
@@ -105,7 +109,11 @@ PINNED = {
             'background_image_url', 'background_opacity', 'backup_include_secrets', 'barcode_autocheck_shopping',
             'barcode_enrichment', 'barcode_global_capture', 'barcode_llm_fallback', 'cam-ip-host',
             'cam-ip-name', 'cam-ip-pass', 'cam-ip-path', 'cam-ip-port',
-            'cam-ip-preset', 'cam-ip-user', 'cam-scan-cidr', 'cook_ai_context',
+            'cam-ip-preset', 'cam-ip-user', 'cam-scan-cidr',
+            # Added after the pin: the Pantry Raider Cloud pairing input
+            # (FoodAssistant-2nd1).
+            'cloud_pairing_code',
+            'cook_ai_context',
             'custom-heading-icon', 'custom-heading-label', 'custom-tab-icon', 'custom-tab-label',
             'custom-tab-url', 'custom_theme_accent', 'custom_theme_base', 'custom_theme_bg',
             'custom_theme_name', 'custom_theme_primary', 'custom_theme_surface', 'custom_theme_text',
@@ -158,7 +166,12 @@ PINNED = {
             'appliance_torch', 'appliance_waffle_iron', 'appliance_wok', 'auth_password',
             'auth_required', 'auto_update', 'update_channel', 'background_file', 'background_image_url',
             'background_opacity', 'backup_include_secrets', 'barcode_autocheck_shopping', 'barcode_enrichment',
-            'barcode_global_capture', 'barcode_llm_fallback', 'cook_ai_context', 'custom-heading-icon',
+            'barcode_global_capture', 'barcode_llm_fallback',
+            # Added after the pin: the Pantry Raider Cloud pairing input. Shown
+            # on a satellite too, since every install pairs itself
+            # (FoodAssistant-2nd1).
+            'cloud_pairing_code',
+            'cook_ai_context', 'custom-heading-icon',
             'custom-heading-label', 'custom-tab-icon', 'custom-tab-label', 'custom-tab-url',
             'custom_theme_accent', 'custom_theme_base', 'custom_theme_bg', 'custom_theme_name',
             'custom_theme_primary', 'custom_theme_surface', 'custom_theme_text', 'debug_logging',

@@ -1008,6 +1008,104 @@ async def ai_usage_reset():
     return {"ok": True}
 
 
+# ---- Forager pairing (docs/design/cloud-platform.md) ----------
+# The install always dials out: a pairing code minted on the cloud portal is
+# typed here, redeemed for a long-lived instance token, and stored. All three
+# routes degrade honestly when the cloud is unreachable; none of them can
+# break the settings page.
+
+_CLOUD_TIMEOUT = httpx.Timeout(8.0, connect=5.0)
+
+
+def _cloud_headers() -> dict:
+    return {
+        "Authorization": f"Bearer {settings.cloud_instance_token}",
+        "X-Device-Version": APP_VERSION,
+        "X-Device-Mode": settings.deployment_mode or "server",
+    }
+
+
+class CloudLinkPayload(BaseModel):
+    code: str = ""
+
+
+@router.post("/cloud/link")
+async def cloud_link(payload: CloudLinkPayload):
+    """Redeem a pairing code against the cloud and store the instance token."""
+    code = payload.code.strip()
+    if not code:
+        return {"ok": False, "error": "Enter the pairing code from the cloud portal."}
+    base = settings.cloud_base_url.rstrip("/")
+    name = device_hostname() or "Pantry Raider"
+    try:
+        async with httpx.AsyncClient(timeout=_CLOUD_TIMEOUT) as client:
+            r = await client.post(f"{base}/v1/pairing/redeem",
+                                  json={"code": code, "name": name})
+    except httpx.HTTPError as e:
+        return {"ok": False, "error": _safe_error(
+            f"Forager could not be reached ({e.__class__.__name__}). "
+            "Check the internet connection and try again.")}
+    if r.status_code != 200:
+        try:
+            detail = r.json().get("detail", "")
+        except ValueError:
+            detail = ""
+        return {"ok": False, "error": detail or "The pairing code was not accepted."}
+    token = (r.json() or {}).get("instance_token", "")
+    if not token:
+        return {"ok": False, "error": "The cloud reply had no instance token."}
+    settings.save({"cloud_instance_token": token})
+    reset_providers()
+    return {"ok": True}
+
+
+@router.post("/cloud/unlink")
+async def cloud_unlink():
+    """Forget the stored instance token.
+
+    Local-only on purpose: the cloud has no instance-side revoke endpoint
+    (removing the instance from the account is done on the cloud portal), so
+    unlinking here simply stops this install from using the link.
+    """
+    settings.save({"cloud_instance_token": ""})
+    reset_providers()
+    return {"ok": True}
+
+
+@router.get("/cloud/status")
+async def cloud_status():
+    """Linked state plus the account's plan and quota, for the AI pane.
+
+    Proxies GET /v1/instance/me with the stored token so the browser never
+    sees the token itself. Unreachable or rejected replies come back as data,
+    never as an error status: the settings page must render regardless.
+    """
+    if not settings.cloud_linked():
+        return {"ok": True, "linked": False}
+    base = settings.cloud_base_url.rstrip("/")
+    try:
+        async with httpx.AsyncClient(timeout=_CLOUD_TIMEOUT) as client:
+            r = await client.get(f"{base}/v1/instance/me",
+                                 headers=_cloud_headers())
+    except httpx.HTTPError as e:
+        return {"ok": True, "linked": True, "reachable": False,
+                "error": _safe_error(
+                    f"Forager could not be reached ({e.__class__.__name__}).",
+                    settings.cloud_instance_token)}
+    if r.status_code == 401:
+        return {"ok": True, "linked": True, "reachable": True, "valid": False,
+                "error": ("The cloud no longer accepts this install's link. "
+                          "Unlink and pair again with a new code.")}
+    if r.status_code != 200:
+        return {"ok": True, "linked": True, "reachable": True, "valid": False,
+                "error": f"Forager answered with status {r.status_code}."}
+    body = r.json() or {}
+    return {"ok": True, "linked": True, "reachable": True, "valid": True,
+            "instance_id": body.get("instance_id"),
+            "name": body.get("name", ""),
+            "entitlement": body.get("entitlement", {})}
+
+
 class ScalePayload(BaseModel):
     ui_scale: str = _DEFAULT_UI_SCALE
     display_rotation: int = _DEFAULT_DISPLAY_ROTATION
@@ -1418,6 +1516,32 @@ async def test_provider(payload: TestProviderPayload):
             return {"ok": False, "error": f"HTTP {r.status_code}: {_safe_error(r.text[:200], key)}"}
         except Exception as e:
             return {"ok": False, "error": _safe_error(e, key)}
+
+    if p == "cloud":
+        # Forager: "connected" means the stored instance token is
+        # accepted by GET /v1/instance/me. No key or model to test.
+        if not settings.cloud_linked():
+            return {"ok": False, "error": ("Not linked to Forager "
+                                           "yet. Enter a pairing code in the "
+                                           "Forager card first.")}
+        base = settings.cloud_base_url.rstrip("/")
+        try:
+            async with httpx.AsyncClient(timeout=_CLOUD_TIMEOUT) as client:
+                r = await client.get(f"{base}/v1/instance/me",
+                                     headers=_cloud_headers())
+            if r.status_code == 200:
+                ent = (r.json() or {}).get("entitlement", {})
+                if ent.get("active"):
+                    return {"ok": True, "message": "Connected: subscription active."}
+                return {"ok": True, "message": ("Connected, but the account has "
+                                                "no active subscription.")}
+            if r.status_code == 401:
+                return {"ok": False, "error": ("The cloud no longer accepts this "
+                                               "install's link. Unlink and pair "
+                                               "again with a new code.")}
+            return {"ok": False, "error": f"HTTP {r.status_code}"}
+        except Exception as e:
+            return {"ok": False, "error": _safe_error(e, settings.cloud_instance_token)}
 
     if p == "anthropic":
         if not key:

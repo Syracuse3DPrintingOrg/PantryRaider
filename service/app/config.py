@@ -12,7 +12,7 @@ from .hardware import is_raspberry_pi
 
 # Single source of truth for the app version (shown in the UI, used by the
 # update checker, and reported by FastAPI). Bump on each tagged release.
-APP_VERSION = "0.8.0"
+APP_VERSION = "0.8.1"
 
 # Single source of truth for the product's display name. The runtime identifiers
 # (systemd units, install paths, the foodassistant_streamdeck package, the
@@ -347,6 +347,11 @@ _SAVEABLE = [
     "openai_api_key", "openai_model",
     "anthropic_api_key", "anthropic_model",
     "ai_extra_keys", "ai_token_budget",
+    # Forager link (setting keys stay cloud_* so the branding can evolve
+    # without a settings migration). Deliberately NOT in SATELLITE_PULL_FIELDS:
+    # every install (satellites included) pairs itself and holds its own
+    # instance token, matching the cloud's one-account-many-instances model.
+    "cloud_base_url", "cloud_instance_token",
     "scanner_type", "barcode_global_capture", "extra_api_key_names",
     "barcode_enrichment", "barcode_llm_fallback", "barcode_autocheck_shopping", "enrich_provider", "enrich_model",
     "grocy_base_url", "grocy_api_key", "grocy_public_url",
@@ -567,6 +572,7 @@ SECRET_SETTING_KEYS = [
     "themealdb_api_key", "spoonacular_api_key",
     "auth_password", "totp_secret", "api_key", "extra_api_keys", "secret_key", "kiosk_pin",
     "streamdeck_ha_token",
+    "cloud_instance_token",
     # The parked-stack snapshot holds pre-switch copies of several keys above
     # (Grocy/Mealie/AI), so it is a secret as a whole (FoodAssistant-dzx9).
     "hosted_config_snapshot",
@@ -771,6 +777,22 @@ class Settings(BaseSettings):
     # until the next month or the budget is raised. Foundation for cloud per-user
     # quotas.
     ai_token_budget: int = 0
+
+    # Forager (docs/design/cloud-platform.md). The optional paid
+    # AI proxy: link this install to a cloud account and photo analysis,
+    # receipt parsing, and barcode enrichment run through the cloud with no
+    # API key of your own. cloud_base_url is the cloud service address (env
+    # CLOUD_BASE_URL overrides it, mainly for testing against a local or
+    # staging cloud). cloud_instance_token is the long-lived bearer token
+    # issued when a pairing code is redeemed; non-empty means linked. Both are
+    # deliberately per-device (not satellite-synced): each install pairs
+    # itself and appears as its own instance on the account.
+    cloud_base_url: str = "https://forager.pantryraider.app"
+    cloud_instance_token: str = ""
+
+    def cloud_linked(self) -> bool:
+        """True when this install holds a Forager instance token."""
+        return bool(self.cloud_instance_token)
 
     # How barcodes are scanned: "usb" = USB/BT HID keyboard-wedge, "camera" =
     # Pi camera / scan engine, "" = not set (user picks on Manage Pantry page).
@@ -1317,6 +1339,10 @@ class Settings(BaseSettings):
             "gemini": self.gemini_api_key,
             "openai": self.openai_api_key,
             "anthropic": self.anthropic_api_key,
+            # The cloud "key" is the paired instance token, so ai_configured()
+            # and the enrichment gate light up exactly when the install is
+            # linked to Forager.
+            "cloud": self.cloud_instance_token,
         }.get(provider, "ollama-no-key-needed" if provider == "ollama" else "")
 
     def provider_keys(self, provider: str) -> list[str]:

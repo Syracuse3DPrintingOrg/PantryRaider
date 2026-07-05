@@ -54,6 +54,7 @@
                 <option value="openai" {{ 'selected' if s.vision_provider == 'openai' else '' }}>OpenAI (cloud)</option>
                 <option value="anthropic" {{ 'selected' if s.vision_provider == 'anthropic' else '' }}>Anthropic Claude (cloud)</option>
                 <option value="ollama" {{ 'selected' if s.vision_provider == 'ollama' else '' }}>Ollama (local)</option>
+                <option value="cloud" {{ 'selected' if s.vision_provider == 'cloud' else '' }}>Forager (cloud subscription)</option>
                 <option value="none" {{ 'selected' if s.vision_provider == 'none' else '' }}>None (skip AI)</option>
               </select>
               <div class="form-text">With None, photo import, receipt scanning, barcode enrichment, and
@@ -94,6 +95,11 @@
               </div>
               {{ extra_keys('anthropic') }}
             </div>
+            <div class="provider-fields" id="fields-cloud">
+              <p class="text-secondary small mb-2">Photos, receipts, and barcode enrichment run through your
+                Forager subscription: no API key needed, and the model choice is handled for you.
+                {% if not s.cloud_instance_token %}Link this install in the Forager card below first.{% endif %}</p>
+            </div>
             <div class="provider-fields" id="fields-ollama">
               <div class="mb-3">
                 <label class="form-label">Ollama URL</label>
@@ -111,6 +117,42 @@
               <i class="bi bi-plug me-1"></i>Test Connection
             </button>
             <div class="test-result" id="vision-result"></div>
+          </div>
+
+          {# Forager pairing (docs/design/cloud-platform.md). Shown on
+             every mode, satellites included: the link is per-install, each device
+             pairs itself with its own code and appears as its own instance on the
+             account, so it is never synced from the main server. #}
+          <div class="section-card">
+            <div class="section-title"><i class="bi bi-cloud-check text-info"></i> Forager</div>
+            {% if s.cloud_instance_token %}
+            <p class="text-secondary small">This install is linked to a Forager account. AI photo
+              analysis, receipt parsing, and barcode enrichment can run through your subscription: pick
+              Forager as the provider above.</p>
+            <div id="cloud-status" class="mb-3 small text-secondary">Checking the cloud link…</div>
+            <button type="button" class="btn btn-outline-danger btn-sm" onclick="cloudUnlink(this)">
+              <i class="bi bi-cloud-slash me-1"></i>Unlink
+            </button>
+            <div class="form-text">Unlinking makes this install forget its cloud credentials. To remove the
+              install from the account entirely, delete it from the instance list on the cloud portal.</div>
+            {% else %}
+            <p class="text-secondary small">An optional subscription that runs the AI for you: photo analysis,
+              receipt parsing, and barcode enrichment with no API key of your own. Sign in on the cloud
+              portal, generate a pairing code there, and enter it here.</p>
+            <div class="row g-2 align-items-end mb-2" style="max-width:420px">
+              <div class="col">
+                <label class="form-label small mb-1" for="cloud_pairing_code">Pairing code</label>
+                <input type="text" class="form-control form-control-sm font-monospace" id="cloud_pairing_code"
+                       placeholder="from the cloud portal" autocomplete="off" spellcheck="false">
+              </div>
+              <div class="col-auto">
+                <button type="button" class="btn btn-outline-info btn-sm" onclick="cloudLink(this)">
+                  <i class="bi bi-link-45deg me-1"></i>Link
+                </button>
+              </div>
+            </div>
+            {% endif %}
+            <div class="test-result mt-2" id="cloud-link-result"></div>
           </div>
 
           <div class="section-card">
@@ -153,6 +195,7 @@
                 <option value="openai" {{ 'selected' if s.enrich_provider == 'openai' else '' }}>OpenAI</option>
                 <option value="anthropic" {{ 'selected' if s.enrich_provider == 'anthropic' else '' }}>Anthropic Claude</option>
                 <option value="ollama" {{ 'selected' if s.enrich_provider == 'ollama' else '' }}>Ollama (local)</option>
+                <option value="cloud" {{ 'selected' if s.enrich_provider == 'cloud' else '' }}>Forager</option>
               </select>
               <div class="form-text">Uses the key/URL from the Vision section. Pick Ollama to keep scans fully local.</div>
             </div>
@@ -189,6 +232,10 @@
             <div class="section-title"><i class="bi bi-speedometer2 text-warning"></i> AI token usage &amp; budget</div>
             <p class="text-secondary small">Tokens your AI provider has used through this app. For your own API key you can set a monthly token budget; when it is reached, AI photo import and barcode enrichment are declined until the next month or you raise it. 0 = no budget.</p>
             <div id="ai-usage-display" class="mb-3 small text-secondary">Loading usage…</div>
+            {% if s.cloud_instance_token %}
+            {# Cloud quota alongside the local numbers, filled by _loadCloudStatus(). #}
+            <div id="cloud-usage-display" class="mb-3 small text-secondary">Loading Forager quota…</div>
+            {% endif %}
             {% if not features.satellite %}
             <div class="row g-2 align-items-end mb-2" style="max-width:420px">
               <div class="col">
