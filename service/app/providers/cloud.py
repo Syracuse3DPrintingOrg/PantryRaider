@@ -73,9 +73,8 @@ def raise_for_cloud_error(resp: httpx.Response) -> None:
         raise HTTPException(429, detail=_quota_message(detail))
     if resp.status_code == 401:
         raise HTTPException(502, detail=(
-            "Forager no longer accepts this install's link "
-            "(it may have been removed from the account). Re-link with a "
-            "new pairing code in Settings, AI."))
+            "Forager no longer recognizes this device (it may have been "
+            "removed from the account). Sign in again under Settings, AI."))
     text = detail if isinstance(detail, str) else resp.text[:200]
     raise HTTPException(502, detail=f"Forager error: {text}")
 

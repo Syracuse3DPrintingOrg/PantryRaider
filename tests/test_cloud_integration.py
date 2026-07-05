@@ -239,6 +239,12 @@ class _FakeAsyncClient:
             raise self._error
         return self._response
 
+    async def delete(self, url, **kwargs):
+        self.delete_url, self.delete_kwargs = url, kwargs
+        if self._error:
+            raise self._error
+        return self._response
+
 
 def _resp(status, body):
     return httpx.Response(status, json=body,
@@ -282,9 +288,26 @@ def test_link_unreachable_cloud_is_honest(client, monkeypatch):
     assert "could not be reached" in d["error"]
 
 
-def test_unlink_clears_token_locally(client, monkeypatch):
+def test_unlink_clears_token_and_revokes_on_cloud(client, monkeypatch):
     monkeypatch.setattr(settings, "cloud_instance_token", "prc_old")
-    r = client.post("/setup/cloud/unlink")
+    fake = _FakeAsyncClient(_resp(200, {"ok": True}))
+    from app.routers import setup as setup_router
+    with patch.object(setup_router.httpx, "AsyncClient", fake):
+        r = client.post("/setup/cloud/unlink")
+    assert r.json() == {"ok": True}
+    assert settings.cloud_instance_token == ""
+    # The cloud-side revoke was attempted with the old credential.
+    assert fake.delete_url == "https://cloud.test/v1/instance"
+    assert fake.delete_kwargs["headers"]["Authorization"] == "Bearer prc_old"
+
+
+def test_unlink_survives_unreachable_cloud(client, monkeypatch):
+    # The revoke is best effort: unreachable must never block local unlink.
+    monkeypatch.setattr(settings, "cloud_instance_token", "prc_old")
+    fake = _FakeAsyncClient(error=httpx.ConnectError("down"))
+    from app.routers import setup as setup_router
+    with patch.object(setup_router.httpx, "AsyncClient", fake):
+        r = client.post("/setup/cloud/unlink")
     assert r.json() == {"ok": True}
     assert settings.cloud_instance_token == ""
 
@@ -336,28 +359,264 @@ def test_status_revoked_token(client, monkeypatch):
         r = client.get("/setup/cloud/status")
     d = r.json()
     assert d["linked"] and d["reachable"] and d["valid"] is False
-    assert "pair again" in d["error"].lower()
+    assert "sign in again" in d["error"].lower()
 
 
 # --- rendering ----------------------------------------------------------------
 
-def test_ai_pane_shows_pairing_when_unlinked(client, monkeypatch):
+def test_ai_pane_shows_signin_when_unlinked(client, monkeypatch):
     monkeypatch.setattr(settings, "cloud_instance_token", "")
     monkeypatch.setattr(settings, "deployment_mode", "server")
     with patch.object(type(settings), "is_configured", lambda self: True):
         html = client.get("/setup").text
+    # Primary state: the account sign-in form.
+    assert 'id="cloud_email"' in html
+    assert 'id="cloud_password"' in html
+    assert 'id="cloud_kitchen_name"' in html
+    # The pairing-code path survives under the Advanced toggle.
     assert 'id="cloud_pairing_code"' in html
+    assert 'id="cloud-advanced-collapse"' in html
+    # The Google button renders hidden; setup/cloud/meta reveals it.
+    assert 'id="cloud-google-btn"' in html
     assert "Forager" in html
     assert 'id="cloud-status"' not in html
+
+
+def test_wizard_offers_forager_first(client, monkeypatch):
+    # Unconfigured install renders the wizard; its AI step leads with the
+    # Forager sign-in and keeps the manual key providers below.
+    monkeypatch.setattr(settings, "cloud_instance_token", "")
+    monkeypatch.setattr(settings, "gemini_api_key", "")
+    monkeypatch.setattr(settings, "deployment_mode", "server")
+    with patch.object(type(settings), "is_configured", lambda self: False):
+        html = client.get("/setup").text
+    assert 'id="wiz_cloud_email"' in html
+    assert 'id="wiz_cloud_password"' in html
+    assert 'id="wiz_cloud_kitchen_name"' in html
+    assert 'id="wiz_cloud-google-btn"' in html
+    # Forager is the first choice in the provider list, and with no AI
+    # configured it is the default.
+    forager = html.index('value="cloud"')
+    assert forager < html.index('value="gemini"')
+    assert 'value="cloud" selected' in html
+    # The manual providers are still offered.
+    assert 'id="gemini_api_key"' in html
+
+
+# --- account sign-in (FoodAssistant-t6ab) --------------------------------------
+
+def _fresh_ai(monkeypatch):
+    """No usable AI provider configured, no Forager link, no public URL."""
+    monkeypatch.setattr(settings, "cloud_instance_token", "")
+    monkeypatch.setattr(settings, "vision_provider", "gemini")
+    monkeypatch.setattr(settings, "gemini_api_key", "")
+    monkeypatch.setattr(settings, "enrich_provider", "")
+    monkeypatch.setattr(settings, "qr_public_url", "")
+
+
+def _signin(client, fake, payload=None):
+    from app.routers import setup as setup_router
+    with patch.object(setup_router.httpx, "AsyncClient", fake):
+        return client.post("/setup/cloud/signin", json=payload or {
+            "email": "cook@example.com", "password": "hunter2",
+            "device_name": "Kitchen Pi"})
+
+
+def test_signin_provisions_and_autocompletes_a_fresh_install(client, monkeypatch):
+    _fresh_ai(monkeypatch)
+    fake = _FakeAsyncClient(_resp(200, {
+        "instance_token": "prc_new", "account_email": "cook@example.com",
+        "plan": "starter", "quota": 2000000, "month_used": 0,
+        "suggested_public_url": None}))
+    r = _signin(client, fake)
+    d = r.json()
+    assert d["ok"] is True
+    assert d["account_email"] == "cook@example.com"
+    assert d["plan"] == "starter"
+    assert d["providers_set"] is True
+    assert fake.post_url == "https://cloud.test/v1/instances/provision"
+    assert fake.post_kwargs["json"] == {
+        "email": "cook@example.com", "password": "hunter2",
+        "device_name": "Kitchen Pi"}
+    # Auto-complete: token stored, Forager becomes the provider end to end.
+    assert settings.cloud_instance_token == "prc_new"
+    assert settings.vision_provider == "cloud"
+    assert settings.enrich_provider == "cloud"
+    # suggested_public_url is null today, so the QR address is untouched.
+    assert settings.qr_public_url == ""
+    saved = json.loads((Path(settings.data_dir) / "settings.json").read_text())
+    assert saved["cloud_instance_token"] == "prc_new"
+    assert saved["vision_provider"] == "cloud"
+    # The password never lands in the saved settings.
+    assert "hunter2" not in json.dumps(saved)
+
+
+def test_signin_preserves_a_working_provider(client, monkeypatch):
+    _fresh_ai(monkeypatch)
+    monkeypatch.setattr(settings, "gemini_api_key", "g-key")  # gemini works
+    fake = _FakeAsyncClient(_resp(200, {
+        "instance_token": "prc_new", "account_email": "cook@example.com",
+        "plan": "starter", "suggested_public_url": None}))
+    d = _signin(client, fake).json()
+    assert d["ok"] is True and d["providers_set"] is False
+    assert settings.cloud_instance_token == "prc_new"
+    # The user's own provider stays in charge; the card offers the switch.
+    assert settings.vision_provider == "gemini"
+    assert settings.enrich_provider == ""
+
+
+def test_signin_applies_the_platform_web_address(client, monkeypatch):
+    # Address alignment: a non-null suggested_public_url becomes the QR /
+    # outward-link address so local and outside addresses match the platform.
+    _fresh_ai(monkeypatch)
+    fake = _FakeAsyncClient(_resp(200, {
+        "instance_token": "prc_new", "account_email": "cook@example.com",
+        "plan": "starter",
+        "suggested_public_url": "https://my-kitchen.forager.pantryraider.app/"}))
+    d = _signin(client, fake).json()
+    assert d["ok"] is True
+    assert d["public_url"] == "https://my-kitchen.forager.pantryraider.app"
+    assert settings.qr_public_url == "https://my-kitchen.forager.pantryraider.app"
+
+
+def test_signin_leaves_an_existing_web_address_alone(client, monkeypatch):
+    _fresh_ai(monkeypatch)
+    monkeypatch.setattr(settings, "qr_public_url", "https://pantry.example.com")
+    fake = _FakeAsyncClient(_resp(200, {
+        "instance_token": "prc_new", "suggested_public_url": None}))
+    assert _signin(client, fake).json()["ok"] is True
+    assert settings.qr_public_url == "https://pantry.example.com"
+
+
+def test_signin_wrong_password_is_friendly(client, monkeypatch):
+    _fresh_ai(monkeypatch)
+    fake = _FakeAsyncClient(_resp(401, {"detail": "invalid credentials"}))
+    d = _signin(client, fake).json()
+    assert d["ok"] is False
+    assert "did not match" in d["error"]
+    assert settings.cloud_instance_token == ""
+    assert settings.vision_provider == "gemini"
+
+
+def test_signin_rate_limited_is_honest(client, monkeypatch):
+    _fresh_ai(monkeypatch)
+    fake = _FakeAsyncClient(_resp(429, {"detail": "slow down"}))
+    d = _signin(client, fake).json()
+    assert d["ok"] is False
+    assert "Too many sign-in attempts" in d["error"]
+
+
+def test_signin_unreachable_cloud_is_honest(client, monkeypatch):
+    _fresh_ai(monkeypatch)
+    fake = _FakeAsyncClient(error=httpx.ConnectError("refused"))
+    d = _signin(client, fake).json()
+    assert d["ok"] is False
+    assert "could not be reached" in d["error"]
+    assert settings.cloud_instance_token == ""
+
+
+def test_signin_requires_email_and_password(client, monkeypatch):
+    _fresh_ai(monkeypatch)
+    d = client.post("/setup/cloud/signin",
+                    json={"email": "", "password": ""}).json()
+    assert d["ok"] is False and "email and password" in d["error"]
+
+
+def test_signin_error_never_echoes_the_password(client, monkeypatch):
+    # A weird cloud error whose detail contains the password must come back
+    # scrubbed (same guarantee _safe_error gives API keys elsewhere).
+    _fresh_ai(monkeypatch)
+    fake = _FakeAsyncClient(_resp(500, {"detail": "boom hunter2 boom"}))
+    d = _signin(client, fake).json()
+    assert d["ok"] is False
+    assert "hunter2" not in json.dumps(d)
+
+
+# --- Google sign-in (meta gate + return leg) ------------------------------------
+
+def test_cloud_meta_reports_google_when_cloud_offers_it(client, monkeypatch):
+    fake = _FakeAsyncClient(_resp(200, {"oauth_google": True}))
+    from app.routers import setup as setup_router
+    with patch.object(setup_router.httpx, "AsyncClient", fake):
+        d = client.get("/setup/cloud/meta").json()
+    assert d["oauth_google"] is True
+    assert d["google_start_url"] == "https://cloud.test/auth/google/start"
+
+
+def test_cloud_meta_degrades_to_no_button(client, monkeypatch):
+    # Unreachable cloud, or a cloud without Google sign-in: no button, no error.
+    from app.routers import setup as setup_router
+    fake = _FakeAsyncClient(error=httpx.ConnectError("down"))
+    with patch.object(setup_router.httpx, "AsyncClient", fake):
+        d = client.get("/setup/cloud/meta").json()
+    assert d["ok"] is True and d["oauth_google"] is False
+    fake = _FakeAsyncClient(_resp(200, {"oauth_google": False}))
+    with patch.object(setup_router.httpx, "AsyncClient", fake):
+        d = client.get("/setup/cloud/meta").json()
+    assert d["oauth_google"] is False
+
+
+def test_oauth_return_redeems_and_autocompletes(client, monkeypatch):
+    _fresh_ai(monkeypatch)
+    fake = _FakeAsyncClient(_resp(200, {
+        "instance_token": "prc_oauth", "account_email": "cook@example.com",
+        "suggested_public_url": None}))
+    from app.routers import setup as setup_router
+    with patch.object(setup_router.httpx, "AsyncClient", fake):
+        r = client.get("/setup/cloud/oauth-return",
+                       params={"code": "OTC-123", "flow": "settings"},
+                       follow_redirects=False)
+    assert r.status_code in (302, 303)
+    assert r.headers["location"].endswith("/setup#pane-scanning")
+    # The one-time code was redeemed against the existing pairing endpoint.
+    assert fake.post_url == "https://cloud.test/v1/pairing/redeem"
+    assert fake.post_kwargs["json"]["code"] == "OTC-123"
+    # Same auto-complete path as the password sign-in.
+    assert settings.cloud_instance_token == "prc_oauth"
+    assert settings.vision_provider == "cloud"
+
+
+def test_oauth_return_wizard_flow_returns_to_the_wizard(client, monkeypatch):
+    _fresh_ai(monkeypatch)
+    fake = _FakeAsyncClient(_resp(200, {"instance_token": "prc_oauth"}))
+    from app.routers import setup as setup_router
+    with patch.object(setup_router.httpx, "AsyncClient", fake):
+        r = client.get("/setup/cloud/oauth-return",
+                       params={"code": "OTC-123", "flow": "wizard"},
+                       follow_redirects=False)
+    assert r.status_code in (302, 303)
+    assert r.headers["location"].endswith("/setup?cloud=done")
+
+
+def test_oauth_return_bad_code_is_a_friendly_retry(client, monkeypatch):
+    _fresh_ai(monkeypatch)
+    fake = _FakeAsyncClient(_resp(400, {"detail": "Invalid or expired pairing code"}))
+    from app.routers import setup as setup_router
+    with patch.object(setup_router.httpx, "AsyncClient", fake):
+        r = client.get("/setup/cloud/oauth-return",
+                       params={"code": "NOPE", "flow": "settings"},
+                       follow_redirects=False)
+    assert r.status_code in (302, 303)
+    loc = r.headers["location"]
+    assert "cloud_error=" in loc and "expired" in loc
+    assert settings.cloud_instance_token == ""
 
 
 def test_ai_pane_shows_linked_state(client, monkeypatch):
     monkeypatch.setattr(settings, "cloud_instance_token", "prc_tok")
     monkeypatch.setattr(settings, "deployment_mode", "server")
+    monkeypatch.setattr(settings, "vision_provider", "gemini")
+    monkeypatch.setattr(settings, "qr_public_url",
+                        "https://my-kitchen.forager.pantryraider.app")
     with patch.object(type(settings), "is_configured", lambda self: True):
         html = client.get("/setup").text
     assert 'id="cloud-status"' in html
     assert 'id="cloud-usage-display"' in html
     assert 'id="cloud_pairing_code"' not in html
+    # Signed in but scanning stays on the user's provider: offer the switch.
+    assert "cloudUseForager" in html
+    # The kitchen's web address shows on the connected card.
+    assert "kitchen's web address" in html
+    assert "https://my-kitchen.forager.pantryraider.app" in html
     # The stored token itself never renders into the page.
     assert "prc_tok" not in html

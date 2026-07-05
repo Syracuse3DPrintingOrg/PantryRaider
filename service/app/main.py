@@ -180,6 +180,13 @@ _SETUP_BYPASS = {
     "/setup/test/provider", "/setup/test/mealie", "/setup/test/recipes",
     "/setup/totp/generate", "/setup/totp/verify", "/setup/totp/disable",
     "/setup/satellite/sync", "/setup/ha/cameras",
+    # The wizard's AI step signs in to Forager before setup is finished, so
+    # these must answer rather than serve the setup-redirect page: signin and
+    # the Google sign-in landing do the actual link, meta gates the Google
+    # button. Like the /setup/test/* probes they only dial out (to the
+    # configured cloud), and once setup completes they are auth-protected
+    # like the rest of /setup.
+    "/setup/cloud/signin", "/setup/cloud/meta", "/setup/cloud/oauth-return",
     # The last wizard step can start Mealie and poll its status before setup is
     # finished, so these must return JSON, not the setup-redirect HTML page.
     "/setup/mealie/start", "/setup/mealie/status",

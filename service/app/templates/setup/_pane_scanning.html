@@ -98,7 +98,7 @@
             <div class="provider-fields" id="fields-cloud">
               <p class="text-secondary small mb-2">Photos, receipts, and barcode enrichment run through your
                 Forager subscription: no API key needed, and the model choice is handled for you.
-                {% if not s.cloud_instance_token %}Link this install in the Forager card below first.{% endif %}</p>
+                {% if not s.cloud_instance_token %}Sign in with your Forager account in the card below first.{% endif %}</p>
             </div>
             <div class="provider-fields" id="fields-ollama">
               <div class="mb-3">
@@ -119,39 +119,94 @@
             <div class="test-result" id="vision-result"></div>
           </div>
 
-          {# Forager pairing (docs/design/cloud-platform.md). Shown on
-             every mode, satellites included: the link is per-install, each device
-             pairs itself with its own code and appears as its own instance on the
-             account, so it is never synced from the main server. #}
+          {# Forager sign-in (docs/design/cloud-platform.md, FoodAssistant-t6ab).
+             Shown on every mode, satellites included: the link is per-install,
+             each device signs in on its own and appears as its own kitchen on
+             the account, so it is never synced from the main server. The
+             pairing-code path stays under Advanced for portal-first setups. #}
           <div class="section-card">
             <div class="section-title"><i class="bi bi-cloud-check text-info"></i> Forager</div>
             {% if s.cloud_instance_token %}
-            <p class="text-secondary small">This install is linked to a Forager account. AI photo
-              analysis, receipt parsing, and barcode enrichment can run through your subscription: pick
-              Forager as the provider above.</p>
-            <div id="cloud-status" class="mb-3 small text-secondary">Checking the cloud link…</div>
+            <p class="text-secondary small">This device is connected to a Forager account. Photo
+              analysis, receipt reading, and barcode enrichment can run through your subscription.</p>
+            <div id="cloud-status" class="mb-3 small text-secondary">Checking the Forager connection…</div>
+            {% if s.qr_public_url %}
+            <div class="mb-3 small text-secondary"><i class="bi bi-globe2 me-1"></i>Your kitchen's web address:
+              <a href="{{ s.qr_public_url }}" target="_blank" rel="noopener">{{ s.qr_public_url }}</a>.
+              Phone links and QR codes use this address, so it works at home and away.</div>
+            {% endif %}
+            {% if s.vision_provider != 'cloud' %}
+            <div class="alert alert-secondary py-2 small mb-3" style="max-width:520px">
+              <i class="bi bi-info-circle me-1"></i>Scanning still uses the provider you set up yourself;
+              connecting Forager changed nothing there.
+              <button type="button" class="btn btn-outline-info btn-sm ms-2" onclick="cloudUseForager(this)">
+                Use Forager for scanning
+              </button>
+            </div>
+            {% endif %}
             <button type="button" class="btn btn-outline-danger btn-sm" onclick="cloudUnlink(this)">
-              <i class="bi bi-cloud-slash me-1"></i>Unlink
+              <i class="bi bi-cloud-slash me-1"></i>Disconnect
             </button>
-            <div class="form-text">Unlinking makes this install forget its cloud credentials. To remove the
-              install from the account entirely, delete it from the instance list on the cloud portal.</div>
+            <div class="form-text">Disconnecting signs this device out of the Forager account. You can also
+              remove it from your account page on the Forager website.</div>
             {% else %}
-            <p class="text-secondary small">An optional subscription that runs the AI for you: photo analysis,
-              receipt parsing, and barcode enrichment with no API key of your own. Sign in on the cloud
-              portal, generate a pairing code there, and enter it here.</p>
-            <div class="row g-2 align-items-end mb-2" style="max-width:420px">
-              <div class="col">
-                <label class="form-label small mb-1" for="cloud_pairing_code">Pairing code</label>
-                <input type="text" class="form-control form-control-sm font-monospace" id="cloud_pairing_code"
-                       placeholder="from the cloud portal" autocomplete="off" spellcheck="false">
+            <p class="text-secondary small">Sign in with your Forager account and scanning just works:
+              photo analysis, receipt reading, and barcode enrichment are handled for you, with nothing
+              else to set up.</p>
+            <div style="max-width:420px">
+              <div class="mb-2">
+                <label class="form-label small mb-1" for="cloud_email">Email</label>
+                <input type="email" class="form-control form-control-sm" id="cloud_email"
+                       placeholder="you@example.com" autocomplete="email" spellcheck="false">
               </div>
-              <div class="col-auto">
-                <button type="button" class="btn btn-outline-info btn-sm" onclick="cloudLink(this)">
-                  <i class="bi bi-link-45deg me-1"></i>Link
-                </button>
+              <div class="mb-2">
+                <label class="form-label small mb-1" for="cloud_password">Password</label>
+                <input type="password" class="form-control form-control-sm" id="cloud_password"
+                       placeholder="Your Forager password" autocomplete="current-password">
+              </div>
+              <div class="mb-2">
+                <label class="form-label small mb-1" for="cloud_kitchen_name">Kitchen name <span class="text-secondary">(optional)</span></label>
+                <input type="text" class="form-control form-control-sm" id="cloud_kitchen_name"
+                       value="{{ suggested_kitchen_name }}" placeholder="e.g. Home kitchen"
+                       autocomplete="off" spellcheck="false">
+                <div class="form-text">How this device appears on your Forager account.</div>
+              </div>
+              <button type="button" class="btn btn-info btn-sm" onclick="cloudSignin(this)">
+                <i class="bi bi-box-arrow-in-right me-1"></i>Sign in and connect
+              </button>
+              {# Revealed by _initCloudMeta() only when Forager is reachable and
+                 offers Google sign-in; otherwise it stays hidden, no error. #}
+              <button type="button" class="btn btn-outline-light btn-sm ms-1 d-none" id="cloud-google-btn"
+                      onclick="cloudGoogleStart('')">
+                <i class="bi bi-google me-1"></i>Continue with Google
+              </button>
+              <div class="form-text">Your password goes to Forager only, to sign you in. It is never
+                saved on this device.</div>
+            </div>
+            <div class="mt-3">
+              <button class="btn btn-link btn-sm p-0 text-secondary text-decoration-none" type="button"
+                      data-bs-toggle="collapse" data-bs-target="#cloud-advanced-collapse" aria-expanded="false">
+                <i class="bi bi-chevron-down me-1"></i>Advanced: connect with a pairing code
+              </button>
+              <div class="collapse mt-2" id="cloud-advanced-collapse">
+                <p class="text-secondary small mb-2">Already signed in on the Forager website? Generate a
+                  pairing code there and enter it here instead.</p>
+                <div class="row g-2 align-items-end mb-2" style="max-width:420px">
+                  <div class="col">
+                    <label class="form-label small mb-1" for="cloud_pairing_code">Pairing code</label>
+                    <input type="text" class="form-control form-control-sm font-monospace" id="cloud_pairing_code"
+                           placeholder="from the Forager website" autocomplete="off" spellcheck="false">
+                  </div>
+                  <div class="col-auto">
+                    <button type="button" class="btn btn-outline-info btn-sm" onclick="cloudLink(this)">
+                      <i class="bi bi-link-45deg me-1"></i>Link
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
             {% endif %}
+            <div class="test-result mt-2" id="cloud-signin-result"></div>
             <div class="test-result mt-2" id="cloud-link-result"></div>
           </div>
 

@@ -125,6 +125,103 @@ async function resetAiUsage(btn) {
   } catch (e) { if (el) el.innerHTML = '<span class="text-danger">' + e + '</span>'; }
 }
 
+// Forager sign-in (FoodAssistant-t6ab). One call does everything: the email
+// and password go to the cloud (only there, never stored here), the install
+// gets its own credential back, and a fresh install is switched to Forager
+// for scanning automatically. The settings card reloads into its linked
+// state; the wizard stays on its step and marks AI as done.
+async function cloudSignin(btn, prefix) {
+  prefix = prefix || '';
+  const el = document.getElementById(prefix + 'cloud-signin-result');
+  const esc = s => String(s || '').replace(/[<>&"]/g, '');
+  const say = (ok, msg) => {
+    if (el) el.innerHTML = '<span class="' + (ok ? 'text-success' : 'text-danger') + '">' +
+      '<i class="bi ' + (ok ? 'bi-check-circle' : 'bi-x-circle-fill') + ' me-1"></i>' + msg + '</span>';
+  };
+  const email = (document.getElementById(prefix + 'cloud_email')?.value || '').trim();
+  const password = document.getElementById(prefix + 'cloud_password')?.value || '';
+  const name = (document.getElementById(prefix + 'cloud_kitchen_name')?.value || '').trim();
+  if (!email || !password) { say(false, 'Enter your Forager email and password.'); return; }
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Signing in…';
+  try {
+    const r = await fetch('setup/cloud/signin', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password, device_name: name }),
+    });
+    const d = await r.json();
+    if (!d.ok) throw new Error(d.error || 'Sign-in failed. Try again.');
+    const pw = document.getElementById(prefix + 'cloud_password');
+    if (pw) pw.value = '';
+    if (prefix) {
+      // Wizard: stay on the step so nothing typed elsewhere is lost.
+      window._cloudSignedIn = true;
+      say(true, 'Signed in as ' + esc(d.account_email) + '. Scanning is ready.');
+      btn.innerHTML = '<i class="bi bi-check-lg me-1"></i>Signed in';
+    } else {
+      say(true, 'Signed in. Reloading…');
+      setTimeout(() => location.reload(), 600);
+    }
+  } catch (e) {
+    say(false, esc(e.message));
+    btn.disabled = false;
+    btn.innerHTML = orig;
+  }
+}
+
+// One-click switch offered when a sign-in preserved an already-working
+// provider: point scanning and enrichment at Forager and re-render.
+async function cloudUseForager(btn) {
+  btn.disabled = true;
+  await savePane({ vision_provider: 'cloud', enrich_provider: 'cloud' }, btn, 'cloud-signin-result');
+  setTimeout(() => location.reload(), 600);
+}
+
+// "Continue with Google" is shown only when the cloud is reachable and says
+// Google sign-in is on; anything else means no button and no error.
+async function _initCloudMeta() {
+  const btns = ['cloud-google-btn', 'wiz_cloud-google-btn']
+    .map(id => document.getElementById(id)).filter(Boolean);
+  if (!btns.length) return;
+  try {
+    const d = await fetch('setup/cloud/meta').then(r => r.json());
+    if (d && d.oauth_google && d.google_start_url) {
+      window._cloudGoogleStartUrl = d.google_start_url;
+      btns.forEach(b => b.classList.remove('d-none'));
+    }
+  } catch (e) { /* no button, no error */ }
+}
+
+// Send the browser to Forager's Google sign-in. The return address is built
+// from this page's own origin, so it works on the LAN address today and a
+// public address later; the flow hint brings the user back to the right
+// place (settings card or wizard step).
+function cloudGoogleStart(prefix) {
+  if (!window._cloudGoogleStartUrl) return;
+  prefix = prefix || '';
+  const name = (document.getElementById(prefix + 'cloud_kitchen_name')?.value || '').trim();
+  const ret = new URL('setup/cloud/oauth-return', document.baseURI);
+  ret.searchParams.set('flow', prefix ? 'wizard' : 'settings');
+  const u = new URL(window._cloudGoogleStartUrl);
+  u.searchParams.set('flow', 'app');
+  if (name) u.searchParams.set('device_name', name);
+  u.searchParams.set('return_url', ret.toString());
+  window.location.href = u.toString();
+}
+
+// After a Google sign-in bounce, a failure comes back as ?cloud_error=…;
+// show it in whichever sign-in card is on the page.
+function _showCloudReturnNotice() {
+  let err = '';
+  try { err = new URLSearchParams(window.location.search).get('cloud_error') || ''; } catch (e) { return; }
+  if (!err) return;
+  const el = document.getElementById('cloud-signin-result')
+    || document.getElementById('wiz_cloud-signin-result');
+  if (el) el.innerHTML = '<span class="text-danger"><i class="bi bi-x-circle-fill me-1"></i>' +
+    err.replace(/[<>&"]/g, '') + '</span>';
+}
+
 // Forager pairing (docs/design/cloud-platform.md). Link redeems a
 // pairing code for an instance token stored server-side; the page reloads so
 // the card re-renders in its linked state. All failures land in the result
@@ -153,7 +250,7 @@ async function cloudLink(btn) {
 }
 
 async function cloudUnlink(btn) {
-  if (!confirm('Unlink this install from Forager? AI calls through the subscription will stop until it is linked again.')) return;
+  if (!confirm('Disconnect this device from Forager? Scanning through your subscription will stop until you sign in again.')) return;
   const el = document.getElementById('cloud-link-result');
   btn.disabled = true;
   try {
@@ -181,8 +278,10 @@ async function _loadCloudStatus() {
     if (!d.reachable || !d.valid) { fail(d.error || 'The cloud link could not be checked.'); return; }
     const ent = d.entitlement || {};
     const fmt = n => (n || 0).toLocaleString();
-    let html = '<i class="bi bi-cloud-check me-1"></i>Linked as <strong>' +
-      String(d.name || 'this install').replace(/[<>&"]/g, '') + '</strong>';
+    const esc = s => String(s || '').replace(/[<>&"]/g, '');
+    let html = '<i class="bi bi-cloud-check me-1"></i>' + (d.account_email
+      ? 'Signed in as <strong>' + esc(d.account_email) + '</strong> (this device: ' + esc(d.name || 'unnamed') + ')'
+      : 'Connected as <strong>' + esc(d.name || 'this device') + '</strong>');
     html += ent.active
       ? ' · ' + (ent.plan ? String(ent.plan).replace(/[<>&"]/g, '') + ' plan, ' : '') + 'subscription active'
       : ' · <span class="text-warning">no active subscription</span>';

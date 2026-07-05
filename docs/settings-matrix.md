@@ -56,9 +56,16 @@ Note: `ai_extra_keys` is device-local. It is in `_SAVEABLE` and is a secret, but
 it is not in `SATELLITE_PULL_FIELDS`, so each device keeps its own spare keys.
 
 Note: the Forager link is per-device on purpose, satellites
-included: each install redeems its own pairing code in Settings, AI and holds
-its own instance token, so it shows up as its own instance on the cloud
-account. `cloud_base_url` is the cloud service address; it has no settings
+included: each install signs in with the account email and password (or a
+pairing code under the card's Advanced toggle, or Continue with Google when
+Forager offers it) in Settings, AI and holds its own instance token, so it
+shows up as its own instance on the cloud account. The password is forwarded
+to the cloud during sign-in and never stored. A sign-in on a fresh install
+also sets `vision_provider` and `enrich_provider` to `cloud` (an install with
+a working provider keeps it), and `qr_public_url` follows the kitchen's
+public web address whenever the platform supplies one (absent that, the
+stored value is untouched). `cloud_base_url` is the cloud service address;
+it has no settings
 control and is only changed with the `CLOUD_BASE_URL` environment variable.
 
 ## Barcode scanning and enrichment

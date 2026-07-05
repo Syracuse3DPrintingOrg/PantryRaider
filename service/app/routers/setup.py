@@ -33,6 +33,7 @@ from ..config import (
 )
 from ..database import SessionLocal
 from ..dependencies import reset_providers
+from ..ingress import ingress_redirect
 from ..hardware import is_raspberry_pi, board_model, supports_local_stack
 from ..models.db_models import StreamDeckProfile
 from ..navigation import all_tabs, default_tabs, normalize_custom_tabs, NAV_TABS, CUSTOM_PREFIX
@@ -771,6 +772,9 @@ async def setup_page(request: Request):
         # the kiosk's localhost, so a phone on the same network can open it.
         "kiosk": request.query_params.get("kiosk") == "1",
         "setup_phone_url": _setup_phone_url(request),
+        # Default kitchen name for the Forager sign-in (the device's hostname,
+        # so a signed-in account sees "kitchen-pi" rather than a blank).
+        "suggested_kitchen_name": device_hostname(),
         # Kitchen-appliance checklist, grouped for the Preferences section, with
         # each item's current checked state from the saved selection.
         "appliance_groups": _appliance_groups(),
@@ -1036,6 +1040,160 @@ class CloudLinkPayload(BaseModel):
     code: str = ""
 
 
+class CloudSigninPayload(BaseModel):
+    email: str = ""
+    password: str = ""
+    device_name: str = ""
+
+
+def _apply_cloud_link(body: dict) -> dict:
+    """Finish a fresh Forager link the same way for every sign-in path
+    (password, Google, pairing code from the website).
+
+    Stores the credential, and if no other AI provider is set up yet makes
+    Forager the scanning and enrichment provider so scanning just works; an
+    install with a working provider keeps it (the settings card offers a
+    one-click switch instead). When the platform already knows this kitchen's
+    public web address it is applied to qr_public_url so the local and
+    outside addresses match; null or absent (no tunnel yet) leaves the
+    stored value untouched.
+    """
+    to_save: dict = {"cloud_instance_token": body.get("instance_token", "")}
+    providers_set = False
+    if not settings.ai_configured():
+        to_save["vision_provider"] = "cloud"
+        to_save["enrich_provider"] = "cloud"
+        providers_set = True
+    public_url = (body.get("suggested_public_url") or "").strip().rstrip("/")
+    if public_url:
+        to_save["qr_public_url"] = public_url
+    settings.save(to_save)
+    reset_providers()
+    return {"providers_set": providers_set, "public_url": public_url}
+
+
+@router.post("/cloud/signin")
+async def cloud_signin(payload: CloudSigninPayload):
+    """Sign in with a Forager account and provision this install.
+
+    One POST to the cloud's provision endpoint trades the account email and
+    password for this install's own long-lived credential. The password is
+    forwarded to the cloud and nowhere else: it is never saved, never logged
+    (nothing in this app logs request bodies), and the error paths below
+    scrub it so it cannot leak into a message.
+
+    On success _apply_cloud_link finishes the link: providers when unset,
+    the kitchen's public web address when the platform provides one.
+    """
+    email = payload.email.strip()
+    password = payload.password
+    if not email or not password:
+        return {"ok": False, "error": "Enter your Forager email and password."}
+    name = payload.device_name.strip() or device_hostname() or "Pantry Raider"
+    base = settings.cloud_base_url.rstrip("/")
+    try:
+        async with httpx.AsyncClient(timeout=_CLOUD_TIMEOUT) as client:
+            r = await client.post(f"{base}/v1/instances/provision",
+                                  json={"email": email, "password": password,
+                                        "device_name": name})
+    except httpx.HTTPError as e:
+        return {"ok": False, "error": (
+            f"Forager could not be reached ({e.__class__.__name__}). "
+            "Check the internet connection and try again.")}
+    if r.status_code == 401:
+        return {"ok": False, "error": ("That email and password did not match "
+                                       "a Forager account. Check them and try "
+                                       "again.")}
+    if r.status_code == 429:
+        return {"ok": False, "error": ("Too many sign-in attempts right now. "
+                                       "Wait a minute and try again.")}
+    if r.status_code != 200:
+        try:
+            detail = r.json().get("detail", "")
+        except ValueError:
+            detail = ""
+        detail = detail if isinstance(detail, str) else ""
+        return {"ok": False, "error": _safe_error(detail, password)
+                or f"Forager answered with status {r.status_code}."}
+    body = r.json() or {}
+    if not body.get("instance_token"):
+        return {"ok": False, "error": ("The sign-in worked but the reply was "
+                                       "incomplete. Try again.")}
+    applied = _apply_cloud_link(body)
+    return {"ok": True,
+            "account_email": body.get("account_email", email),
+            "plan": body.get("plan", ""),
+            **applied}
+
+
+@router.get("/cloud/meta")
+async def cloud_meta():
+    """Forager feature discovery for the sign-in card, proxied so the browser
+    never talks to the cloud directly.
+
+    Drives the "Continue with Google" button: it renders only when the cloud
+    is reachable and says Google sign-in is on. Unreachable or malformed
+    replies degrade to every feature off, no button and no error, so the
+    page never breaks over this.
+    """
+    base = settings.cloud_base_url.rstrip("/")
+    try:
+        async with httpx.AsyncClient(timeout=_CLOUD_TIMEOUT) as client:
+            r = await client.get(f"{base}/v1/meta")
+        body = r.json() if r.status_code == 200 else {}
+    except (httpx.HTTPError, ValueError):
+        body = {}
+    body = body if isinstance(body, dict) else {}
+    return {"ok": True, "oauth_google": bool(body.get("oauth_google")),
+            "google_start_url": f"{base}/auth/google/start"}
+
+
+@router.get("/cloud/oauth-return")
+async def cloud_oauth_return(request: Request, code: str = "", flow: str = ""):
+    """Land the browser after "Continue with Google" on the Forager site.
+
+    Forager redirects here with a one-time code; redeeming it against the
+    pairing endpoint yields this install's credential, and the link then
+    finishes exactly like a password sign-in (_apply_cloud_link). The user
+    always ends up back where they started, the settings AI pane or the
+    setup wizard's AI step, with any failure carried as a friendly message
+    in the cloud_error query parameter.
+    """
+    # flow=wizard came from the setup wizard (the hint rides through the
+    # return_url the button built); everything else returns to settings.
+    if flow == "wizard":
+        dest, err_dest = "/setup?cloud=done", "/setup?cloud_error={msg}"
+    else:
+        dest = "/setup#pane-scanning"
+        err_dest = "/setup?cloud_error={msg}#pane-scanning"
+
+    def fail(msg: str):
+        from urllib.parse import quote
+        return ingress_redirect(request, err_dest.format(msg=quote(msg)))
+
+    code = code.strip()
+    if not code:
+        return fail("Google sign-in did not finish. Try again.")
+    base = settings.cloud_base_url.rstrip("/")
+    name = device_hostname() or "Pantry Raider"
+    try:
+        async with httpx.AsyncClient(timeout=_CLOUD_TIMEOUT) as client:
+            r = await client.post(f"{base}/v1/pairing/redeem",
+                                  json={"code": code, "name": name})
+    except httpx.HTTPError:
+        return fail("Forager could not be reached. Check the internet "
+                    "connection and try signing in again.")
+    if r.status_code != 200:
+        return fail("The Google sign-in expired or was already used. "
+                    "Try signing in again.")
+    body = r.json() or {}
+    if not body.get("instance_token"):
+        return fail("The sign-in worked but the reply was incomplete. "
+                    "Try again.")
+    _apply_cloud_link(body)
+    return ingress_redirect(request, dest)
+
+
 @router.post("/cloud/link")
 async def cloud_link(payload: CloudLinkPayload):
     """Redeem a pairing code against the cloud and store the instance token."""
@@ -1068,12 +1226,20 @@ async def cloud_link(payload: CloudLinkPayload):
 
 @router.post("/cloud/unlink")
 async def cloud_unlink():
-    """Forget the stored instance token.
+    """Forget the stored instance token and ask the cloud to revoke it.
 
-    Local-only on purpose: the cloud has no instance-side revoke endpoint
-    (removing the instance from the account is done on the cloud portal), so
-    unlinking here simply stops this install from using the link.
+    The revoke (DELETE /v1/instance) is best effort: an unreachable or
+    already-revoked cloud must never stop the user from unlinking locally,
+    and the account page can remove the install too.
     """
+    if settings.cloud_instance_token:
+        base = settings.cloud_base_url.rstrip("/")
+        try:
+            async with httpx.AsyncClient(timeout=_CLOUD_TIMEOUT) as client:
+                await client.delete(f"{base}/v1/instance",
+                                    headers=_cloud_headers())
+        except httpx.HTTPError:
+            pass
     settings.save({"cloud_instance_token": ""})
     reset_providers()
     return {"ok": True}
@@ -1101,8 +1267,8 @@ async def cloud_status():
                     settings.cloud_instance_token)}
     if r.status_code == 401:
         return {"ok": True, "linked": True, "reachable": True, "valid": False,
-                "error": ("The cloud no longer accepts this install's link. "
-                          "Unlink and pair again with a new code.")}
+                "error": ("Forager no longer recognizes this device. "
+                          "Disconnect, then sign in again.")}
     if r.status_code != 200:
         return {"ok": True, "linked": True, "reachable": True, "valid": False,
                 "error": f"Forager answered with status {r.status_code}."}
@@ -1110,6 +1276,7 @@ async def cloud_status():
     return {"ok": True, "linked": True, "reachable": True, "valid": True,
             "instance_id": body.get("instance_id"),
             "name": body.get("name", ""),
+            "account_email": body.get("account_email", ""),
             "entitlement": body.get("entitlement", {})}
 
 

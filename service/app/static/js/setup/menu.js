@@ -219,6 +219,10 @@ setTimeout(_revealMenu, 1500);
   if (typeof _loadAiUsage === 'function') _loadAiUsage();
   // Forager link state and quota, when this install is linked.
   if (typeof _loadCloudStatus === 'function') _loadCloudStatus();
+  // Forager sign-in extras: reveal "Continue with Google" when the cloud
+  // offers it, and surface a ?cloud_error= message from a sign-in bounce.
+  if (typeof _initCloudMeta === 'function') _initCloudMeta();
+  if (typeof _showCloudReturnNotice === 'function') _showCloudReturnNotice();
 
   // Settings form only: update auth hint on load
   if (IS_CONFIGURED) toggleAuthRequired();

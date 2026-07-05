@@ -334,7 +334,10 @@
       <div class="mb-3">
         <label class="form-label">Provider</label>
         <select class="form-select" id="vision_provider" onchange="showProvider(); wizUpdateAiKeyVisibility()">
-          <option value="gemini" {{ 'selected' if s.vision_provider == 'gemini' else '' }}>Google Gemini (cloud, recommended)</option>
+          {# Forager first, and the default until an AI provider works: sign in
+             with the account and scanning just works, no keys to manage. #}
+          <option value="cloud" {{ 'selected' if s.vision_provider == 'cloud' or not ai_configured else '' }}>Forager (sign in, easiest)</option>
+          <option value="gemini" {{ 'selected' if s.vision_provider == 'gemini' and ai_configured else '' }}>Google Gemini (cloud, free key)</option>
           <option value="openai" {{ 'selected' if s.vision_provider == 'openai' else '' }}>OpenAI (cloud)</option>
           <option value="anthropic" {{ 'selected' if s.vision_provider == 'anthropic' else '' }}>Anthropic Claude (cloud)</option>
           <option value="ollama" {{ 'selected' if s.vision_provider == 'ollama' else '' }}>Ollama (local, no API key needed)</option>
@@ -345,6 +348,50 @@
       <div id="wiz-ai-none-note" class="alert alert-secondary py-2 small d-none">
         <i class="bi bi-info-circle me-1"></i>AI features (photo import, barcode enrichment, recipe suggestions) will be unavailable.
         You can add a provider later from Settings.
+      </div>
+
+      <!-- Forager fields: sign in with the account made on the Forager website
+           and scanning just works, no API keys to manage. -->
+      <div class="provider-fields d-none" id="fields-cloud">
+        <p class="text-secondary small">Sign in with your Forager account and scanning just works:
+          photos, receipts, and barcodes are read for you, with nothing else to set up.</p>
+        {% if s.cloud_instance_token %}
+        <div class="alert alert-success py-2 small mb-0">
+          <i class="bi bi-check-circle me-1"></i>Signed in. Scanning is ready.
+        </div>
+        {% else %}
+        <div style="max-width:420px">
+          <div class="mb-2">
+            <label class="form-label small mb-1" for="wiz_cloud_email">Email</label>
+            <input type="email" class="form-control form-control-sm" id="wiz_cloud_email"
+                   placeholder="you@example.com" autocomplete="email" spellcheck="false">
+          </div>
+          <div class="mb-2">
+            <label class="form-label small mb-1" for="wiz_cloud_password">Password</label>
+            <input type="password" class="form-control form-control-sm" id="wiz_cloud_password"
+                   placeholder="Your Forager password" autocomplete="current-password">
+          </div>
+          <div class="mb-2">
+            <label class="form-label small mb-1" for="wiz_cloud_kitchen_name">Kitchen name <span class="text-secondary">(optional)</span></label>
+            <input type="text" class="form-control form-control-sm" id="wiz_cloud_kitchen_name"
+                   value="{{ suggested_kitchen_name }}" placeholder="e.g. Home kitchen"
+                   autocomplete="off" spellcheck="false">
+            <div class="form-text">How this device appears on your Forager account.</div>
+          </div>
+          <button type="button" class="btn btn-info btn-sm" onclick="cloudSignin(this, 'wiz_')">
+            <i class="bi bi-box-arrow-in-right me-1"></i>Sign in and connect
+          </button>
+          {# Revealed by _initCloudMeta() only when Forager is reachable and
+             offers Google sign-in; otherwise it stays hidden, no error. #}
+          <button type="button" class="btn btn-outline-light btn-sm ms-1 d-none" id="wiz_cloud-google-btn"
+                  onclick="cloudGoogleStart('wiz_')">
+            <i class="bi bi-google me-1"></i>Continue with Google
+          </button>
+          <div class="form-text">Your password goes to Forager only, to sign you in. It is never
+            saved on this device.</div>
+          <div class="test-result mt-2" id="wiz_cloud-signin-result"></div>
+        </div>
+        {% endif %}
       </div>
 
       <!-- Gemini fields -->

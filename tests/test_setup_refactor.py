@@ -64,6 +64,11 @@ PINNED = {
             # Added after the pin: the Pantry Raider Cloud pairing input
             # (FoodAssistant-2nd1).
             'cloud_pairing_code',
+            # Added after the pin: the Forager account sign-in fields
+            # (FoodAssistant-t6ab).
+            'cloud_email',
+            'cloud_kitchen_name',
+            'cloud_password',
             'cook_ai_context',
             'custom-heading-icon', 'custom-heading-label', 'custom-tab-icon', 'custom-tab-label',
             'custom-tab-url', 'custom_theme_accent', 'custom_theme_base', 'custom_theme_bg',
@@ -96,6 +101,9 @@ PINNED = {
             '#pane-connections', '#pane-devices', '#pane-inventory',
             '#pane-personalization-recipes', '#pane-scanning', '#pane-screen',
             '#pane-security', '#pane-start-page',
+            # Added after the pin: the Forager card's Advanced (pairing code)
+            # toggle (FoodAssistant-t6ab).
+            '#cloud-advanced-collapse',
         ],
     },
     "pi_hosted": {
@@ -126,6 +134,11 @@ PINNED = {
             # Added after the pin: the Pantry Raider Cloud pairing input
             # (FoodAssistant-2nd1).
             'cloud_pairing_code',
+            # Added after the pin: the Forager account sign-in fields
+            # (FoodAssistant-t6ab).
+            'cloud_email',
+            'cloud_kitchen_name',
+            'cloud_password',
             'cook_ai_context',
             'custom-heading-icon', 'custom-heading-label', 'custom-tab-icon', 'custom-tab-label',
             'custom-tab-url', 'custom_theme_accent', 'custom_theme_base', 'custom_theme_bg',
@@ -164,6 +177,9 @@ PINNED = {
             '#pane-connections', '#pane-devices', '#pane-inventory',
             '#pane-personalization-recipes', '#pane-scanning', '#pane-screen',
             '#pane-security', '#pane-start-page',
+            # Added after the pin: the Forager card's Advanced (pairing code)
+            # toggle (FoodAssistant-t6ab).
+            '#cloud-advanced-collapse',
         ],
     },
     "pi_remote": {
@@ -192,6 +208,12 @@ PINNED = {
             # on a satellite too, since every install pairs itself
             # (FoodAssistant-2nd1).
             'cloud_pairing_code',
+            # Added after the pin: the Forager account sign-in fields, on a
+            # satellite too since every device signs in on its own
+            # (FoodAssistant-t6ab).
+            'cloud_email',
+            'cloud_kitchen_name',
+            'cloud_password',
             'cook_ai_context', 'custom-heading-icon',
             'custom-heading-label', 'custom-tab-icon', 'custom-tab-label', 'custom-tab-url',
             'custom_theme_accent', 'custom_theme_base', 'custom_theme_bg', 'custom_theme_name',
@@ -228,6 +250,9 @@ PINNED = {
             '#pane-connections', '#pane-devices', '#pane-personalization-recipes',
             '#pane-scanning', '#pane-screen', '#pane-security',
             '#pane-start-page',
+            # Added after the pin: the Forager card's Advanced (pairing code)
+            # toggle (FoodAssistant-t6ab).
+            '#cloud-advanced-collapse',
         ],
     },
     "wizard": {
@@ -241,6 +266,11 @@ PINNED = {
             'openai_model', 'openai_model_sel', 'recipe_source_wiz', 'remote_server_url',
             'spoonacular_api_key_wiz', 'streamdeck_key_count', 'ui_scale_wiz', 'upstream_api_key',
             'vision_provider', 'wiz-scanner-test-input', 'wiz-scanner_type', 'wiz_has_display',
+            # Added after the pin: the wizard's Forager sign-in fields
+            # (FoodAssistant-t6ab).
+            'wiz_cloud_email',
+            'wiz_cloud_kitchen_name',
+            'wiz_cloud_password',
         ],
         "targets": [
             '#mealie-collapse', '#recipes-collapse', '#scanner-collapse',

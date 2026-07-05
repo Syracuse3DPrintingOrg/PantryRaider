@@ -408,6 +408,9 @@ const SETUP_CURRENT_MODE = {{ current_mode | tojson }};
 const WIZ_HAS_GROCY_KEY = {{ 'true' if has.grocy_api_key else 'false' }};
 const WIZ_HAS_AI_KEY = {{ 'true' if (has.gemini_api_key or has.openai_api_key or has.anthropic_api_key) else 'false' }};
 const WIZ_HAS_MEALIE_KEY = {{ 'true' if has.mealie_api_key else 'false' }};
+// Whether this install is already connected to a Forager account, so the
+// wizard's summary counts a Forager sign-in as AI configured.
+const WIZ_CLOUD_LINKED = {{ 'true' if s.cloud_instance_token else 'false' }};
 </script>
 {# The setup script lives in static/js/setup/, split by concern. Load order
    matters only for the top-level statements: menu.js runs the page init, so

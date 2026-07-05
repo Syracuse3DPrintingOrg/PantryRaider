@@ -205,7 +205,16 @@ function wizUpdateAiKeyVisibility() {
   const noneNote = document.getElementById('wiz-ai-none-note');
   const testRow = document.getElementById('wiz-ai-test-row');
   if (noneNote) noneNote.classList.toggle('d-none', p !== 'none');
-  if (testRow) testRow.classList.toggle('d-none', p === 'none');
+  // Forager has its own sign-in button, so the key-oriented Test Connection
+  // row applies to the manual providers only.
+  if (testRow) testRow.classList.toggle('d-none', p === 'none' || p === 'cloud');
+}
+
+// Whether the Forager sign-in is done: linked before the page loaded, or
+// signed in on this very step (cloudSignin sets the flag without a reload).
+function _wizCloudLinked() {
+  return (typeof WIZ_CLOUD_LINKED !== 'undefined' && WIZ_CLOUD_LINKED)
+    || Boolean(window._cloudSignedIn);
 }
 
 // Step 4: respond to install mode choice made in Step 1
@@ -274,8 +283,9 @@ function _wizBuildSummary() {
   const grocyUrl = val('grocy_base_url');
   const hasGrocyKey = WIZ_HAS_GROCY_KEY || !!secretVal('grocy_api_key');
   const provider = document.getElementById('vision_provider')?.value || 'none';
-  const hasAiKey = provider === 'none' || provider === 'ollama'
-    ? (provider === 'ollama')
+  const hasAiKey = provider === 'none' ? false
+    : provider === 'ollama' ? true
+    : provider === 'cloud' ? _wizCloudLinked()
     : (WIZ_HAS_AI_KEY || !!secretVal(provider + '_api_key'));
   const mealieUrl = val('mealie_base_url');
   const hasMealieKey = WIZ_HAS_MEALIE_KEY || !!secretVal('mealie_api_key');
@@ -331,8 +341,10 @@ function _wizBuildSummary() {
   if (provider === 'none') {
     items.push({icon:'bi-magic text-secondary', label:'AI: not configured', ok:true, detail:'Photo import and enrichment will be unavailable.'});
   } else if (hasAiKey) {
-    const providerLabel = {'gemini':'Gemini','openai':'OpenAI','anthropic':'Anthropic','ollama':'Ollama'}[provider] || provider;
+    const providerLabel = {'cloud':'Forager','gemini':'Gemini','openai':'OpenAI','anthropic':'Anthropic','ollama':'Ollama'}[provider] || provider;
     items.push({icon:'bi-magic text-success', label:'AI: ' + providerLabel, ok:true, detail:''});
+  } else if (provider === 'cloud') {
+    items.push({icon:'bi-magic text-warning', label:'AI: Forager (not signed in)', ok:false, step:5, detail:'Sign in with your Forager account, or pick another provider or None.'});
   } else {
     const providerLabel = {'gemini':'Gemini','openai':'OpenAI','anthropic':'Anthropic'}[provider] || provider;
     items.push({icon:'bi-magic text-warning', label:'AI: ' + providerLabel + ' (no API key)', ok:false, step:5, detail:'Enter an API key or choose None.'});
@@ -452,4 +464,13 @@ async function wizSaveAll() {
 // Pi Remote panel, and the progress bar reflect it before any click.
 (function initWizardMode() {
   if (_installMode) selectInstallMode(_installMode);
+  // Returning from a Google sign-in bounce (?cloud=done or ?cloud_error=…):
+  // land back on the AI step instead of making the user re-walk the wizard.
+  try {
+    const q = new URLSearchParams(window.location.search);
+    if ((q.has('cloud') || q.has('cloud_error'))
+        && document.getElementById('wiz-step-5') && _wizStepSeq().includes(5)) {
+      _wizShowStep(5);
+    }
+  } catch (e) { /* never block wizard init on this nicety */ }
 })();
