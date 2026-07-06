@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}Sign up: Forager{% if turnstile_site_key %}<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>{% endif %}
+{% endblock %}
+{% block main_class %}narrow{% endblock %}
+{% block content %}
+<h1>Create your account</h1>
+<p class="muted">Free to start. You will use this email and password to sign in
+from the Pantry Raider app too.</p>
+<div class="card">
+  {% if error %}<div class="alert alert-error">{{ error }}</div>{% endif %}
+  <form method="post" action="/signup">
+    {# Opaque per-install id from the app's signup link, so a free trial is
+       limited to one per install. Absent for a plain browser signup. #}
+    {% if install_key %}<input type="hidden" name="install_key" value="{{ install_key }}">{% endif %}
+    <label for="email">Email</label>
+    <input type="email" id="email" name="email" value="{{ email or '' }}"
+           autocomplete="email" required autofocus>
+    <label for="password">Password</label>
+    <input type="password" id="password" name="password"
+           autocomplete="new-password" minlength="10" required>
+    <label for="confirm_password">Confirm password</label>
+    <input type="password" id="confirm_password" name="confirm_password"
+           autocomplete="new-password" minlength="10" required>
+    {# Honeypot: hidden from people, tempting to a form-stuffing bot. A real
+       submission leaves it empty; the server rejects any non-empty value. #}
+    <div class="hp-field" aria-hidden="true">
+      <label for="website">Website</label>
+      <input type="text" id="website" name="website" tabindex="-1" autocomplete="off">
+    </div>
+    {% if turnstile_site_key %}
+    <div class="cf-turnstile" data-sitekey="{{ turnstile_site_key }}" style="margin-bottom:0.9rem;"></div>
+    {% endif %}
+    <button class="btn btn-block" type="submit">Sign up</button>
+  </form>
+  {% if google %}
+  <div class="or-divider"><span>or</span></div>
+  <a class="btn btn-outline btn-block" href="/auth/google/start?intent=signup">Continue with Google</a>
+  {% endif %}
+</div>
+<p class="muted small">Already have an account? <a href="/login">Log in</a>.</p>
+{% endblock %}
