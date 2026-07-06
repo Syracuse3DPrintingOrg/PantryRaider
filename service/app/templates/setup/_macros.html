@@ -1,0 +1,375 @@
+{# Shared macro: password/secret input with show-toggle and clear button #}
+{# A secret is read-only on a satellite ONLY when the main server manages it
+   (it is pulled each sync, see SATELLITE_PULL_FIELDS). The satellite's own
+   device-local secrets (its upstream API key, web password, X-API-Key, kiosk
+   PIN) must stay editable so the device can be paired or re-keyed locally. #}
+{% macro secret_input(id, placeholder) -%}
+{% set managed = features.satellite and id in satellite_managed %}
+<div class="input-group">
+  <input type="password" class="form-control font-monospace" id="{{ id }}" autocomplete="new-password"
+         placeholder="{{ '•••• saved, leave blank to keep' if has[id] else placeholder }}" {% if managed %}readonly{% endif %}>
+  <button class="btn btn-outline-secondary" type="button" onclick="toggleVis('{{ id }}')" title="Show/hide">
+    <i class="bi bi-eye"></i>
+  </button>
+  {% if has[id] and not managed %}
+  <button class="btn btn-outline-danger" type="button" onclick="clearSecret('{{ id }}')" title="Forget the saved value on next save">
+    <i class="bi bi-trash3"></i>
+  </button>
+  {% endif %}
+</div>
+{%- endmacro %}
+
+
+{# Small info icon whose help text lives in a hover/tap tooltip, so long
+   explanations do not stretch a settings pane vertically. Tooltips are
+   initialised once on load (see initTooltips). #}
+{% macro info(text) -%}
+<i class="bi bi-info-circle text-secondary ms-1" role="button" tabindex="0"
+   data-bs-toggle="tooltip" data-bs-title="{{ text }}" style="cursor:help;font-size:0.85em;"></i>
+{%- endmacro %}
+
+
+{# Multi-entry list of additional API keys for one provider. The primary key
+   is entered above via secret_input; these are spares the app falls back to.
+   Stored keys are shown as locked "saved" rows (value __KEEP__:<index>) so the
+   real secret is never sent to the page; the user removes or adds rows. #}
+{% macro extra_keys(provider) -%}
+{% set count = extra_key_counts.get(provider, 0) %}
+<div class="mb-3">
+  <label class="form-label">Additional {{ provider|capitalize }} API keys
+    <span class="text-secondary small">(optional fallback)</span></label>
+  <div class="extra-keys" data-provider="{{ provider }}">
+    {% for i in range(count) %}
+    <div class="input-group mb-2 extra-key-row">
+      <input type="text" class="form-control font-monospace extra-key-input"
+             value="__KEEP__:{{ i }}" data-keep="1" readonly
+             placeholder="•••• saved spare key">
+      <button class="btn btn-outline-danger" type="button"
+              onclick="this.closest('.extra-key-row').remove()" title="Remove key">
+        <i class="bi bi-trash3"></i>
+      </button>
+    </div>
+    {% endfor %}
+  </div>
+  {% if not features.satellite %}
+  <button class="btn btn-outline-secondary btn-sm" type="button"
+          onclick="addExtraKey('{{ provider }}')">
+    <i class="bi bi-plus-lg me-1"></i>Add another key
+  </button>
+  {% endif %}
+  <div class="form-text">Extra keys are tried in order when the primary key is
+    rate-limited or rejected.</div>
+</div>
+{%- endmacro %}
+
+{# Provider-dependent model picker: a dropdown of curated vision-capable models
+   with capability notes, plus a free-text override (Custom) for anything not
+   listed. The text input keeps id="<provider>_model" so buildPayload reads the
+   effective value whether a listed model or a custom one is chosen. #}
+{% macro ai_model_field(provider, current) -%}
+<select class="form-select ai-model-select" id="{{ provider }}_model_sel"
+        data-provider="{{ provider }}" onchange="aiModelSelChanged('{{ provider }}')" {% if features.satellite %}disabled{% endif %}>
+  {% for m in ai_models.get(provider, []) %}
+  <option value="{{ m.id }}">{{ m.id }}: {{ m.note }}</option>
+  {% endfor %}
+  <option value="__custom__">Custom model…</option>
+</select>
+<input type="text" class="form-control font-monospace mt-2 d-none" id="{{ provider }}_model"
+       value="{{ current }}" placeholder="exact model id (e.g. {{ (ai_models.get(provider, [{'id':''}])[0]).id }})" {% if features.satellite %}readonly{% endif %}>
+<div class="form-text ai-model-note" id="{{ provider }}_model_note"></div>
+{%- endmacro %}
+
+
+{% macro satellite_keys() -%}
+<div class="mb-3" id="satellite-extra-keys-section">
+  <label class="form-label">Additional satellite keys
+    <span class="text-secondary small">(one per connected satellite or client)</span></label>
+  <div class="satellite-extra-keys">
+    {% for i in range(extra_api_key_count) %}
+    <div class="input-group mb-2 satellite-key-row">
+      <input type="text" class="form-control satellite-key-name" style="max-width:11rem"
+             value="{{ extra_api_key_names[i] if i < extra_api_key_names|length else '' }}"
+             placeholder="name (optional)">
+      <input type="text" class="form-control font-monospace satellite-key-input"
+             value="__KEEP__:{{ i }}" data-keep="1" readonly
+             placeholder="•••• saved satellite key">
+      <button class="btn btn-outline-danger" type="button"
+              onclick="this.closest('.satellite-key-row').remove()" title="Remove this key">
+        <i class="bi bi-trash3"></i>
+      </button>
+    </div>
+    {% endfor %}
+  </div>
+  <button class="btn btn-outline-secondary btn-sm" type="button"
+          onclick="addSatelliteKey()">
+    <i class="bi bi-plus-lg me-1"></i>Add satellite key
+  </button>
+  <div class="form-text">Each satellite or headless client can have its own key. Removing a key disconnects only that client.</div>
+</div>
+{%- endmacro %}
+
+
+{# Main Server, Sync Status, and About cards render inside the Devices
+           pane on a satellite (docs/design/settings-reorg.md); the Kiosk PIN
+           card lives in Security & Access and Return to full stack in
+           Advanced. This macro keeps the satellite server cards together. #}
+        {% macro upstream_cards() %}
+          {% call panel('Main Pantry Raider server',
+                        'This device signs in with the server\'s API key, pulls the shared config, then talks to Grocy, Mealie, and AI directly.') %}
+            {% call srow('Server address', 'No trailing slash. A numeric IP is most reliable.',
+                         'If you use a .local name and your network does not resolve mDNS, this device caches the server\'s IP after the first successful sync and falls back to it automatically.') %}
+              <div class="input-group" style="max-width:420px">
+                <input type="url" class="form-control" id="remote_server_url"
+                       placeholder="http://192.168.1.10:9284"
+                       value="{{ s.remote_server_url or '' }}">
+                <button class="btn btn-outline-secondary" type="button"
+                        onclick="scanLanForServer('remote_server_url', 'settings-scan-result')">
+                  <i class="bi bi-search me-1"></i>Scan LAN
+                </button>
+              </div>
+              <div id="settings-scan-result" class="small mt-1"></div>
+            {% endcall %}
+            {% call srow('Server API key', 'From the server\'s Security & Access settings.',
+                         'Must match the API key configured on the main server, under Settings, Security & Access.') %}
+              <div style="max-width:420px">{{ secret_input('upstream_api_key', 'The API key set on the main server') }}</div>
+            {% endcall %}
+            {% call srow('Sync', 'Pull the shared config now.') %}
+              <button class="btn btn-primary btn-sm" onclick="syncFromUpstream()">
+                <i class="bi bi-arrow-repeat me-1"></i>Sync from server
+              </button>
+              <div class="test-result mt-1" id="upstream-result"></div>
+            {% endcall %}
+          {% endcall %}
+
+          {% set _ls = s.satellite_last_sync or {} %}
+          {% call panel('Sync status',
+                        'Health of the last pull from the main server. This device also re-syncs on its own every ' ~ s.satellite_sync_minutes ~ ' minutes.',
+                        pill_text=('Synced' if _ls.get('ok') else ('Failed' if _ls.get('at') else 'Never')),
+                        pill_kind=('good' if _ls.get('ok') else ('bad' if _ls.get('at') else 'neutral'))) %}
+            {% call srow('Last sync', 'When and what came across.') %}
+              <div id="sync-status">
+                {% if _ls.get('at') %}
+                <div class="d-flex align-items-center mb-2">
+                  {% if _ls.get('ok') %}
+                  <span class="badge bg-success me-2"><i class="bi bi-check-circle me-1"></i>Succeeded</span>
+                  {% else %}
+                  <span class="badge bg-danger me-2"><i class="bi bi-x-circle me-1"></i>Failed</span>
+                  {% endif %}
+                  <span class="text-secondary small">Last sync: <span class="sync-time" data-iso="{{ _ls.get('at') }}">{{ _ls.get('at') }}</span></span>
+                </div>
+                {% if _ls.get('ok') %}
+                <div class="small mb-1">Applied {{ _ls.get('applied') | length }} setting(s){% if _ls.get('defaults') %}, {{ _ls.get('defaults') }} expiry default(s){% endif %}.</div>
+                  {% if _ls.get('applied') %}
+                  <div class="small text-secondary">Fields: <code>{{ _ls.get('applied') | join(', ') }}</code></div>
+                  {% endif %}
+                {% else %}
+                <div class="small text-danger">{{ _ls.get('error') or 'Sync failed.' }}</div>
+                {% endif %}
+                {% else %}
+                <div class="text-secondary small">No sync has run yet on this device.</div>
+                {% endif %}
+              </div>
+              <button class="btn btn-outline-info btn-sm mt-2" onclick="syncFromUpstream()">
+                <i class="bi bi-arrow-repeat me-1"></i>Sync Now
+              </button>
+              <div class="test-result mt-1" id="sync-now-result"></div>
+            {% endcall %}
+          {% endcall %}
+
+          {% call panel('About satellite mode', 'What this device manages on its own, and what comes from the server.') %}
+            <p class="text-secondary small mt-1 mb-1">Backend settings and expiry defaults are managed on the main server and mirrored here read-only. Edit them there, then Sync. This device keeps its own display, Stream Deck, and security settings.</p>
+          {% endcall %}
+
+          <button type="button" class="btn btn-outline-info btn-sm" onclick="savePaneUpstream(this)">
+            <i class="bi bi-check-lg me-1"></i>Save Main Server
+          </button>
+          <div class="test-result mt-2" id="upstream-save-result"></div>
+        {% endmacro %}
+
+
+{# Mealie and the external recipe sources render inside Connections
+           (docs/design/settings-reorg.md, iteration 2): they are service
+           hookups, while the taste-level tuning lives in Personalization
+           under Recipe Preferences. The macro keeps the cards defined here
+           and drops them into the Connections pane below. #}
+        {% macro recipe_connection_cards() %}
+          {% call panel('Mealie recipe manager',
+                        'Enables the Recipes, Cook, Meal Plan, and Shopping pages.',
+                        pill_text=('Running' if mealie_action == 'running' else ('Connected' if s.mealie_api_key else 'Optional')),
+                        pill_kind=('good' if (mealie_action == 'running' or s.mealie_api_key) else 'neutral')) %}
+            {% if mealie_action == 'running' %}
+            <div class="mb-2 mt-1">
+              <span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>Mealie is running on this device</span>
+              {% if suggested_mealie_url %}
+              <a class="btn btn-outline-secondary btn-sm ms-1" href="{{ suggested_mealie_url }}" target="_blank">
+                <i class="bi bi-box-arrow-up-right me-1"></i>Open Mealie
+              </a>
+              {% endif %}
+              <p class="text-secondary small mt-2 mb-0">Open Mealie, sign in as admin, go to User Profile, and create an API token, then paste it below.</p>
+              <div class="test-result mt-1" id="mealie-start-result"></div>
+              <pre class="install-log d-none bg-body-tertiary border rounded p-2 small mt-2 mb-0" data-log="mealie"></pre>
+            </div>
+            {% elif mealie_action == 'start' %}
+            <div class="mb-2 mt-1">
+              <button class="btn btn-outline-info btn-sm" type="button" onclick="startMealie(this)">
+                <i class="bi bi-play me-1"></i>Start Mealie on this device
+              </button>
+              {% if suggested_mealie_url %}
+              <a class="btn btn-outline-secondary btn-sm ms-1" href="{{ suggested_mealie_url }}" target="_blank">
+                <i class="bi bi-box-arrow-up-right me-1"></i>Open Mealie
+              </a>
+              {% endif %}
+              <p class="text-secondary small mt-2 mb-0">The first start downloads Mealie and can take several minutes. Keep this page open to watch the progress; if you do leave, the download keeps running on the device and this section reconnects to it when you come back.</p>
+              <div class="test-result mt-1" id="mealie-start-result"></div>
+              <pre class="install-log d-none bg-body-tertiary border rounded p-2 small mt-2 mb-0" data-log="mealie"></pre>
+            </div>
+            {% endif %}
+            {% call srow('Server address', 'Where Mealie runs, for API calls.') %}
+              <div class="input-group" style="max-width:420px">
+                <input type="url" class="form-control" id="mealie_base_url"
+                       placeholder="http://192.168.1.10:9285" value="{{ s.mealie_base_url or suggested_mealie_internal_url or suggested_mealie_url }}" {% if features.satellite %}readonly{% endif %}>
+                <a class="btn btn-outline-secondary" id="mealie-open-link" href="{{ mealie_browser_link or suggested_mealie_url or '#' }}" target="_blank" title="Open Mealie in new tab">
+                  <i class="bi bi-box-arrow-up-right"></i>
+                </a>
+              </div>
+            {% endcall %}
+            {% call srow('Public address', 'Optional, for browser links.',
+                         'External address used when the UI links you to Mealie. Leave empty to use the internal address above.') %}
+              <input type="url" class="form-control" id="mealie_public_url" style="max-width:420px"
+                     placeholder="https://mealie.example.com" value="{{ s.mealie_public_url }}" {% if features.satellite %}readonly{% endif %}>
+            {% endcall %}
+            {% call srow('API token', 'From Mealie, User Profile.') %}
+              <div style="max-width:420px">{{ secret_input('mealie_api_key', 'Mealie → User Profile → API Tokens') }}</div>
+            {% endcall %}
+            {% call srow('Connection', 'Check the address and token work.') %}
+              <div class="set-row-actions">
+                <button class="btn btn-outline-info btn-sm" onclick="testMealie()">
+                  <i class="bi bi-plug me-1"></i>Test Mealie
+                </button>
+              </div>
+              <div class="test-result mt-1" id="mealie-result"></div>
+            {% endcall %}
+          {% endcall %}
+
+          {% call panel('External recipe suggestions',
+                        '"What can I cook?" can pull recipe ideas from the web too. Picked recipes are saved into Mealie.') %}
+            {% call srow('Source', 'Where extra ideas come from.') %}
+              <select class="form-select" id="recipe_source" style="max-width:420px" onchange="showRecipeSource()" {% if features.satellite %}disabled{% endif %}>
+                <option value="themealdb" {{ 'selected' if s.recipe_source == 'themealdb' else '' }}>TheMealDB (free, default)</option>
+                <option value="spoonacular" {{ 'selected' if s.recipe_source == 'spoonacular' else '' }}>Spoonacular (API key required)</option>
+                <option value="off" {{ 'selected' if s.recipe_source == 'off' else '' }}>Off (Mealie recipes only)</option>
+              </select>
+            {% endcall %}
+            <div id="source-themealdb">
+              {% call srow('TheMealDB API key', 'Optional.',
+                           'The public key works out of the box (~300 recipes). A premium supporter key from themealdb.com/api.php unlocks the full catalog and removes rate limits.') %}
+                <div style="max-width:420px">{{ secret_input('themealdb_api_key', 'empty = free public key "1"') }}</div>
+              {% endcall %}
+            </div>
+            <div id="source-spoonacular">
+              {% call srow('Spoonacular API key', 'From your Spoonacular console.',
+                           'Much larger catalog with ingredient-aware search. Free tier is ~150 points a day; results are cached for an hour to stretch it.') %}
+                <div style="max-width:420px">{{ secret_input('spoonacular_api_key', 'spoonacular.com/food-api → My Console') }}</div>
+              {% endcall %}
+            </div>
+            {% call srow('Source', 'Check the recipe source responds.') %}
+              <div class="set-row-actions">
+                <button class="btn btn-outline-info btn-sm" onclick="testRecipes()">
+                  <i class="bi bi-plug me-1"></i>Test source
+                </button>
+              </div>
+              <div class="test-result mt-1" id="recipes-result"></div>
+            {% endcall %}
+          {% endcall %}
+
+          {% if features.satellite %}
+          <div class="form-text mb-3"><i class="bi bi-hdd-network me-1"></i>Recipe settings are managed on the main server and synced here automatically. Edit them there, then Sync.</div>
+          {% else %}
+          <button type="button" class="btn btn-outline-info btn-sm" onclick="savePaneRecipes(this)">
+            <i class="bi bi-check-lg me-1"></i>Save Recipes
+          </button>
+          <div class="test-result mt-2 mb-3" id="recipes-save-result"></div>
+          {% endif %}
+        {% endmacro %}
+
+
+{# --- Stripe-style dense settings components (FoodAssistant-jcnh) ---------
+   A reusable panel/row/pill/toggle vocabulary so a settings section reads as a
+   tight table of labelled controls rather than a stack of big cards. The long
+   paragraphs of helper text become info() tooltips, leaving a one-line label
+   plus a short hint. All scoped under .setup-wrap in setup.html so the classes
+   never leak onto the /ui pages. #}
+
+{# A small state chip. kind: good (green), neutral (muted), pink (accent),
+   warn (amber). pill_id lets a caller update it live (e.g. auth on/off). #}
+{% macro pill(text, kind='neutral', pill_id='') -%}
+<span class="set-pill set-pill-{{ kind }}"{% if pill_id %} id="{{ pill_id }}"{% endif %}>{{ text }}</span>
+{%- endmacro %}
+
+{# A toggle switch (pink when on). Renders a plain checkbox with the given id so
+   the existing save/read JS keeps working; only the chrome around it changes.
+   disabled locks it read-only on a satellite (server-managed settings). #}
+{% macro toggle(id, checked=False, onchange='', label='', disabled=False) -%}
+<label class="set-toggle{{ ' set-toggle-disabled' if disabled else '' }}"{% if label %} aria-label="{{ label }}"{% endif %}>
+  <input type="checkbox" role="switch" id="{{ id }}"{% if checked %} checked{% endif %}{% if disabled %} disabled{% endif %}{% if onchange %} onchange="{{ onchange }}"{% endif %}>
+  <span class="set-toggle-track"><span class="set-toggle-thumb"></span></span>
+</label>
+{%- endmacro %}
+
+{# A bordered panel with a header (title + optional one-line desc + optional
+   right-aligned state pill) wrapping a set of rows. Use with {% call %}. #}
+{% macro panel(title, desc='', pill_text='', pill_kind='neutral', pill_id='') -%}
+<div class="set-panel">
+  <div class="set-panel-head">
+    <div class="set-panel-head-main">
+      <div class="set-panel-title">{{ title }}</div>
+      {% if desc %}<div class="set-panel-desc">{{ desc }}</div>{% endif %}
+    </div>
+    {% if pill_text or pill_id %}
+    <div class="set-panel-head-aside">{{ pill(pill_text, pill_kind, pill_id) }}</div>
+    {% endif %}
+  </div>
+  <div class="set-panel-body">
+    {{ caller() }}
+  </div>
+</div>
+{%- endmacro %}
+
+{# One dense row: a fixed-width label column (bold name, optional short hint,
+   optional info tooltip) and a control column. Use with {% call %} to fill the
+   control. #}
+{% macro srow(name, hint='', tip='') -%}
+<div class="set-row">
+  <div class="set-row-label">
+    <div class="set-row-name">{{ name }}{% if tip %}{{ info(tip) }}{% endif %}</div>
+    {% if hint %}<div class="set-row-hint">{{ hint }}</div>{% endif %}
+  </div>
+  <div class="set-row-control">{{ caller() }}</div>
+</div>
+{%- endmacro %}
+
+{# An Overview landing card: a pink icon tile, a title, and a one-line
+   description. Clicking it opens the matching settings pane. #}
+{% macro ov_card(icon, title, desc, pane) -%}
+<button type="button" class="ov-card" onclick="openSettingsPane('{{ pane }}')">
+  <span class="ov-card-icon"><i class="bi {{ icon }}"></i></span>
+  <span class="ov-card-main">
+    <span class="ov-card-title">{{ title }}</span>
+    <span class="ov-card-desc">{{ desc }}</span>
+  </span>
+</button>
+{%- endmacro %}
+
+
+{# Sub-area toggle for the Start Page & Stream Deck pane: the two
+           editors stay separate tab-panes so their long editors keep working;
+           showDeckStart() flips between them. Off-Pi there is no deck, so the
+           Start Page stands alone and no toggle renders. #}
+        {% macro ds_toggle(active) %}
+        {% if is_pi %}
+        <div class="btn-group mb-3 ds-toggle" role="group" aria-label="Switch between the Start Page and the Stream Deck">
+          <button type="button" class="btn btn-outline-primary{{ ' active' if active == 'start' else '' }}" data-ds="start" onclick="showDeckStart('start')"><i class="bi bi-display me-1"></i>Start Page</button>
+          <button type="button" class="btn btn-outline-primary{{ ' active' if active == 'deck' else '' }}" data-ds="deck" onclick="showDeckStart('deck')"><i class="bi bi-grid-3x3-gap me-1"></i>Stream Deck</button>
+        </div>
+        {% endif %}
+        {% endmacro %}

@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Log in: Forager{% endblock %}
+{% block main_class %}narrow{% endblock %}
+{% block content %}
+<h1>Welcome back</h1>
+<div class="card">
+  {% if notice %}<div class="alert alert-notice">{{ notice }}</div>{% endif %}
+  {% if error %}<div class="alert alert-error">{{ error }}</div>{% endif %}
+  <form method="post" action="/login">
+    <label for="email">Email</label>
+    <input type="email" id="email" name="email" value="{{ email or '' }}"
+           autocomplete="email" required autofocus>
+    <label for="password">Password</label>
+    <input type="password" id="password" name="password"
+           autocomplete="current-password" required>
+    {# Honeypot: hidden from people; only a bot fills it, and the server
+       refuses any non-empty value. #}
+    <div class="hp-field" aria-hidden="true">
+      <label for="website">Website</label>
+      <input type="text" id="website" name="website" tabindex="-1" autocomplete="off">
+    </div>
+    <button class="btn btn-block" type="submit">Log in</button>
+  </form>
+  {% if email_enabled %}
+  <p class="muted small" style="margin-top:0.9rem;margin-bottom:0;">
+    <a href="/forgot">Forgot your password?</a>
+  </p>
+  {% endif %}
+  {% if google %}
+  <div class="or-divider"><span>or</span></div>
+  <a class="btn btn-outline btn-block" href="/auth/google/start?intent=signin">Continue with Google</a>
+  {% endif %}
+</div>
+<p class="muted small">No account yet? <a href="/signup">Sign up free</a>.</p>
+{% endblock %}
