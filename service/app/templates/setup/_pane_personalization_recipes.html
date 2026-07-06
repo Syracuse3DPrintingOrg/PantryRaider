@@ -1,0 +1,84 @@
+{% from "setup/_macros.html" import info, secret_input, extra_keys, ai_model_field, satellite_keys, upstream_cards, recipe_connection_cards, ds_toggle with context %}
+<!-- Recipe Preferences: how "What can I cook?" ranks recipes -->
+        <div class="tab-pane fade" id="pane-personalization-recipes">
+          <p class="pane-intro">How "What can I cook?" picks and ranks recipes: your pantry staples, your tastes, and the kitchen you cook in.</p>
+
+          {# Suggestion tuning + the kitchen appliances checklist share the
+             card: they all shape the same Cook page. On a satellite the
+             inputs are read-only (managed on the main server). #}
+          <div class="section-card">
+            <div class="section-title"><i class="bi bi-sliders text-primary"></i> Suggestion Tuning</div>
+            <div class="mb-3">
+              <label class="form-label">Pantry Staples <span class="text-secondary small">(comma-separated)</span></label>
+              <textarea class="form-control" id="staple_items" rows="3"
+                        placeholder="empty = built-in list: eggs, butter, flour, sugar, salt, pepper, oil, milk, garlic, onion, vinegar, honey, mustard, ketchup, mayonnaise, soy sauce, common dried spices" {% if features.satellite %}readonly{% endif %}>{{ s.staple_items }}</textarea>
+              <div class="form-text">Items assumed on hand even when not in inventory, used by the
+                "With Pantry Staples" tier of recipe suggestions.</div>
+            </div>
+            <div class="mb-3">
+              <label class="form-label"><i class="bi bi-stars me-1"></i>AI Recipe Preferences
+                <span class="text-secondary small">(optional)</span></label>
+              <textarea class="form-control" id="cook_ai_context" rows="3"
+                        placeholder="e.g. I prefer Italian and Mexican food. I don't eat pork. My family loves spicy dishes. Avoid nuts due to allergies." {% if features.satellite %}readonly{% endif %}>{{ s.cook_ai_context }}</textarea>
+              <div class="form-text">Sent to the AI when generating recipe suggestions on the Cook page
+                ("Ask AI"). Describe tastes, restrictions, or cuisines you enjoy.</div>
+            </div>
+            <!-- Kitchen appliances (FoodAssistant-k2kv framework). Steers the AI
+                 cook suggestions to dishes this kitchen can actually make. -->
+            <div class="mb-2" id="kitchen-appliances">
+              <label class="form-label mb-1"><i class="bi bi-tools me-1"></i>My Kitchen Appliances
+                <span class="text-secondary small">(optional)</span></label>
+              <div class="form-text mt-0 mb-2">Tell the AI what you can cook with. Common items are
+                pre-selected; turn off anything you don't have and add the rest.</div>
+              {% if not features.satellite %}
+              <div class="d-flex gap-2 mb-2">
+                <button type="button" class="btn btn-outline-secondary btn-sm" onclick="applianceSelectAll(true)">Select all</button>
+                <button type="button" class="btn btn-outline-secondary btn-sm" onclick="applianceSelectAll(false)">Clear</button>
+              </div>
+              {% endif %}
+              {% for group, title in [('major', 'Major appliances'), ('minor', 'Smaller tools and cookware'), ('attachment', 'Stand mixer attachments')] %}
+              <div class="mb-2 appliance-group" data-group="{{ group }}">
+                <div class="text-secondary small text-uppercase mb-1">{{ title }}</div>
+                <div class="row row-cols-2 row-cols-sm-3 row-cols-md-4 g-1">
+                  {% for a in appliance_groups[group] %}
+                  <div class="col">
+                    <div class="form-check">
+                      <input class="form-check-input appliance-chk" type="checkbox"
+                             id="appliance_{{ a.key }}" value="{{ a.key }}"
+                             {{ 'checked' if a.checked else '' }} {% if features.satellite %}disabled{% endif %}>
+                      <label class="form-check-label small" for="appliance_{{ a.key }}">{{ a.label }}</label>
+                    </div>
+                  </div>
+                  {% endfor %}
+                </div>
+              </div>
+              {% endfor %}
+            </div>
+            <div class="row g-2">
+              <div class="col-sm-4">
+                <label class="form-label">Perishable window <span class="text-secondary small">(days)</span></label>
+                <input type="number" class="form-control" id="perishable_days" min="1" max="60" value="{{ s.perishable_days }}" {% if features.satellite %}readonly{% endif %}>
+                <div class="form-text">Non-refrigerated items expiring within this count as perishable.</div>
+              </div>
+              <div class="col-sm-4">
+                <label class="form-label">Expiring soon <span class="text-secondary small">(days)</span></label>
+                <input type="number" class="form-control" id="expiring_soon_days" min="1" max="30" value="{{ s.expiring_soon_days }}" {% if features.satellite %}readonly{% endif %}>
+                <div class="form-text">"Uses expiring" highlight threshold.</div>
+              </div>
+              <div class="col-sm-4">
+                <label class="form-label">Suggestions per tier</label>
+                <input type="number" class="form-control" id="suggest_per_tier" min="1" max="20" value="{{ s.suggest_per_tier }}" {% if features.satellite %}readonly{% endif %}>
+                <div class="form-text">Cards shown in each Cook tier.</div>
+              </div>
+            </div>
+          </div>
+
+          {% if features.satellite %}
+          <div class="form-text"><i class="bi bi-hdd-network me-1"></i>Recipe settings are managed on the main server and synced here automatically. Edit them there, then Sync.</div>
+          {% else %}
+          <button type="button" class="btn btn-outline-info btn-sm" onclick="savePaneRecipePrefs(this)">
+            <i class="bi bi-check-lg me-1"></i>Save Recipe Preferences
+          </button>
+          <div class="test-result mt-2" id="recipe-prefs-save-result"></div>
+          {% endif %}
+        </div>

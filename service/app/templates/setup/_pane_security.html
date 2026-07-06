@@ -1,0 +1,141 @@
+{% from "setup/_macros.html" import info, secret_input, extra_keys, ai_model_field, satellite_keys, upstream_cards, recipe_connection_cards, ds_toggle with context %}
+<!-- Security -->
+        <div class="tab-pane fade" id="pane-security">
+          <p class="pane-intro">Who can reach the app and how login is protected.</p>
+
+          <div class="section-card">
+            <div class="section-title"><i class="bi bi-shield-lock text-success"></i> Authentication
+              <span class="badge bg-danger badge-req">Required</span></div>
+            <p class="text-secondary small">A UI password is required by default. Turn off
+              <em>Require authentication</em> only when an outer layer already gates access, such as a
+              reverse proxy (Pangolin, Authelia, Cloudflare Access) or the Home Assistant add-on,
+              which authenticates through HA itself.</p>
+            <div class="form-check form-switch mb-3">
+              <input class="form-check-input" type="checkbox" role="switch" id="auth_required"
+                     {% if s.auth_required %}checked{% endif %} onchange="toggleAuthRequired()">
+              <label class="form-check-label" for="auth_required">Require authentication to use the app</label>
+            </div>
+            {% if s.auth_password %}
+            <div class="mb-3">
+              <label class="form-label" for="current_password">Current password</label>
+              <input type="password" class="form-control" id="current_password" autocomplete="current-password"
+                     placeholder="Enter your current password to change it">
+              <div class="form-text">Needed to change or remove the password below, so no one can lock you out
+                from an open settings page.</div>
+            </div>
+            {% endif %}
+            <div class="mb-3">
+              <label class="form-label">UI Password</label>
+              {{ secret_input('auth_password', 'Protects the web UI login page') }}
+              <div class="form-text" id="auth-pw-hint">Required while authentication is on. The app will not
+                finish setup without it.</div>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Viewer Password <span class="text-secondary small">(optional)</span></label>
+              {{ secret_input('viewer_password', 'A second password for kitchen-only access') }}
+              <div class="form-text">Share this one with the household: it opens the kitchen pages
+                (inventory, timers, scanning, recipes) but keeps Settings, backups, and updates behind
+                the main password. Leave blank if everyone should use the main password.</div>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">API Key <span class="text-secondary small">(Home Assistant, headless clients, satellite devices)</span></label>
+              {{ secret_input('api_key', 'Sent as X-API-Key header') }}
+              <div class="d-flex align-items-center gap-2 mt-1">
+                <button class="btn btn-outline-secondary btn-sm" type="button" onclick="generateApiKey()">
+                  <i class="bi bi-arrow-repeat me-1"></i>Generate
+                </button>
+                <span class="form-text mb-0">Primary key: regenerating this disconnects all existing satellites.</span>
+              </div>
+            </div>
+            {% if not features.satellite %}
+            {{ satellite_keys() }}
+            <div class="alert alert-secondary py-2 small mb-0">
+              <i class="bi bi-broadcast me-1"></i>Satellites enter one of these keys in their setup wizard under "Main Server." Use <strong>Add satellite key</strong> to give each satellite its own key so you can rotate or remove it without touching the others.
+            </div>
+            {% endif %}
+          </div>
+
+          {% if features.satellite %}
+          <div class="section-card">
+            <div class="section-title"><i class="bi bi-keypad text-info"></i> Kiosk PIN
+              <span class="badge bg-secondary badge-req">Optional</span></div>
+            <p class="text-secondary small">A satellite turns the UI password off by default (the main server owns access control). Set a short numeric PIN for a lightweight lock that is easy to enter on the touchscreen. Leave blank for no lock.</p>
+            <div class="mb-2" style="max-width: 220px;">
+              <label class="form-label">PIN <span class="text-secondary small">(digits only)</span></label>
+              {{ secret_input('kiosk_pin', 'e.g. 1234') }}
+            </div>
+            <div class="form-check mt-2">
+              <input class="form-check-input" type="checkbox" id="kiosk_readonly_when_locked"
+                     {% if s.kiosk_readonly_when_locked %}checked{% endif %}>
+              <label class="form-check-label" for="kiosk_readonly_when_locked">
+                Allow read-only browsing while locked
+              </label>
+              <div class="form-text">When enabled, visitors can browse inventory without entering the PIN. Write actions (adding or editing items) are blocked until they log in.</div>
+            </div>
+            <div class="form-text mt-1">Applies only to this device's screen; it does not affect the main server. Saved with Save Security below.</div>
+          </div>
+          {% endif %}
+
+          <div class="section-card">
+            <div class="section-title"><i class="bi bi-shield-check text-success"></i> Two-factor authentication (this device)
+              <span class="badge bg-secondary badge-req">Optional</span></div>
+            <p class="text-secondary small">Add a second step to the device password: a 6-digit code from an
+              authenticator app (Google Authenticator, Authy, Bitwarden, 1Password, and others). Works offline,
+              with no email or text message. Signing in from outside your home network always asks for it.</p>
+            {% if s.local_totp_enabled or s.totp_secret %}
+            <div class="alert alert-success py-2 small">
+              <i class="bi bi-check-circle-fill me-1"></i>Two-factor authentication is <strong>on</strong> for this device.
+            </div>
+            <div class="mb-2" style="max-width: 320px;">
+              <label class="form-label small">Current code or password</label>
+              <input type="text" class="form-control font-monospace" id="totp-disable-code"
+                     placeholder="Code or your password" autocomplete="off">
+              <div class="form-text">Needed to turn 2FA off or make new recovery codes, so no one at an open
+                settings page can do it for you.</div>
+            </div>
+            <div class="d-flex flex-wrap gap-2">
+              <button class="btn btn-outline-secondary btn-sm" onclick="regenRecoveryCodes()">
+                <i class="bi bi-arrow-repeat me-1"></i>New recovery codes
+              </button>
+              <button class="btn btn-outline-danger btn-sm" onclick="disableTOTP()">
+                <i class="bi bi-shield-x me-1"></i>Turn off 2FA
+              </button>
+            </div>
+            <div id="totp-manage-result" class="mt-2"></div>
+            {% else %}
+            <button class="btn btn-outline-info btn-sm" onclick="setupTOTP()">
+              <i class="bi bi-shield-plus me-1"></i>Set up 2FA
+            </button>
+            {% endif %}
+            <div id="totp-setup" class="mt-3 d-none">
+              <div class="text-center mb-2">
+                <img id="totp-qr" src="" alt="QR code" style="max-width:200px">
+              </div>
+              <p class="small text-secondary">Scan with your authenticator app, then enter the code to confirm.</p>
+              <div class="input-group mb-2">
+                <input type="text" class="form-control font-monospace" id="totp-code"
+                       placeholder="000000" maxlength="6" inputmode="numeric">
+                <button class="btn btn-success" onclick="verifyTOTP()">
+                  <i class="bi bi-check2 me-1"></i>Enable
+                </button>
+              </div>
+              <div class="form-text small" id="totp-secret-display"></div>
+              <div id="totp-result" class="mt-2"></div>
+            </div>
+          </div>
+
+          <div class="section-card">
+            <div class="section-title"><i class="bi bi-info-circle text-secondary"></i> How secrets are stored</div>
+            <ul class="small text-secondary mb-0">
+              <li>Saved keys are never sent back to the browser: fields show a placeholder instead.</li>
+              <li>Leave a field blank to keep the stored value; use the <i class="bi bi-trash3"></i> button to erase it.</li>
+              <li><code>settings.json</code> is written with owner-only permissions (0600).</li>
+              <li>Connection-test errors have key material redacted before display.</li>
+            </ul>
+          </div>
+
+          <button type="button" class="btn btn-outline-info btn-sm" onclick="savePaneSecurity(this)">
+            <i class="bi bi-check-lg me-1"></i>Save Security
+          </button>
+          <div class="test-result mt-2" id="security-save-result"></div>
+        </div>

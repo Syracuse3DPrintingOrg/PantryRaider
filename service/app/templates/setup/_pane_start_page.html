@@ -1,0 +1,74 @@
+{% from "setup/_macros.html" import info, secret_input, extra_keys, ai_model_field, satellite_keys, upstream_cards, recipe_connection_cards, ds_toggle with context %}
+<!-- On-screen Start Page: the Start Page & Stream Deck pill's home -->
+        <div class="tab-pane fade" id="pane-start-page">
+          {{ ds_toggle('start') }}
+          <p class="pane-intro">An optional full-screen launcher that works like an on-screen Stream Deck. It opens at <a href="ui/start" target="_blank">/ui/start</a> and replaces the fixed and floating menus while shown. The app opens on whatever page leads the navigation menu, so with Start at the top of the menu (where it sits by default once enabled) the Start Page is this device's home screen.</p>
+          <div class="section-card editor-dense">
+            <div class="section-title"><i class="bi bi-grid-3x3-gap text-success"></i> Start Page</div>
+            <div class="editor-block d-flex flex-wrap align-items-center gap-4">
+              <div class="form-check form-switch mb-0">
+                <input class="form-check-input" type="checkbox" role="switch" id="start_page_enabled"
+                       {{ 'checked' if s.start_page_enabled else '' }}>
+                <label class="form-check-label" for="start_page_enabled">Enable the Start Page{{ info('Off by default. When on, open it at /ui/start or point the kiosk there.') }}</label>
+              </div>
+              <div class="d-flex align-items-center gap-2">
+                <label class="form-label mb-0" for="start_page_keys">Keys</label>
+                <select class="form-select form-select-sm" id="start_page_keys" style="max-width:150px" onchange="_startEditorRender()">
+                  <option value="6"  {{ 'selected' if s.start_page_keys == 6 else '' }}>6 (3 x 2)</option>
+                  <option value="15" {{ 'selected' if s.start_page_keys == 15 else '' }}>15 (5 x 3)</option>
+                  <option value="32" {{ 'selected' if s.start_page_keys == 32 else '' }}>32 (8 x 4)</option>
+                </select>
+                {{ info('The keys scale to fill the screen without scrolling.') }}
+              </div>
+            </div>
+
+            <div class="editor-block">
+              <div class="block-head"><i class="bi bi-grid text-success"></i>Layout
+                {{ info('Drag an action from the palette onto a key, drag keys to rearrange them, or click a key to clear it. Custom buttons are shared with the Stream Deck.') }}
+              </div>
+              {# Grid and palette sit side by side on wide screens (less scrolling),
+                 stacking on narrow/mobile widths. #}
+              <div class="d-flex flex-column flex-lg-row gap-3 align-items-start">
+                <div id="start-grid" class="d-inline-grid gap-2" style="grid-template-columns: repeat(5, minmax(0,1fr));"></div>
+                <div id="start-palette" class="d-flex flex-column gap-1" style="flex:1 1 260px;min-width:0;max-width:700px;"></div>
+              </div>
+            </div>
+
+            <div class="editor-block">
+              <div class="block-head"><i class="bi bi-sliders text-success"></i>Custom keys
+                {{ info('Build your own keys (Home Assistant actions, timers, weather, cameras, media, macros), the same as the Stream Deck. Each appears as a chip in the palette above; drag it onto a key. Custom keys are shared with the Stream Deck both ways.') }}
+              </div>
+              <div id="start-overrides" class="d-flex flex-column gap-2 mb-2"></div>
+              <button type="button" class="btn btn-outline-secondary btn-sm" onclick="_startAddOverrideRow()">
+                <i class="bi bi-plus-lg me-1"></i>Add custom key
+              </button>
+            </div>
+
+            {# Key style + icon treatment, the same options the Stream Deck has
+               (shared settings, so changing one changes both). #}
+            <div class="editor-block row g-3">
+              <div class="col-auto">
+                <label class="form-label" for="start_key_style">Key style{{ info('Rich and Glass have depth; Clean drops the coloured background so the icons stand out; Minimalist is flat.') }}</label>
+                <select class="form-select form-select-sm" id="start_key_style" style="max-width:180px">
+                  <option value="rich"    {{ 'selected' if s.streamdeck_key_style == 'rich' else '' }}>Rich (gradient)</option>
+                  <option value="glass"   {{ 'selected' if s.streamdeck_key_style == 'glass' else '' }}>Glass</option>
+                  <option value="clean"   {{ 'selected' if s.streamdeck_key_style == 'clean' else '' }}>Clean (no background)</option>
+                  <option value="minimal" {{ 'selected' if s.streamdeck_key_style == 'minimal' else '' }}>Minimalist (flat)</option>
+                </select>
+              </div>
+              <div class="col-auto">
+                <label class="form-label" for="start_icon_color">Icons{{ info('Full colour uses bundled artwork (best with Clean); Tinted recolours the line glyph; Monochrome leaves it plain.') }}</label>
+                <select class="form-select form-select-sm" id="start_icon_color" style="max-width:200px">
+                  <option value="color" {{ 'selected' if s.streamdeck_icon_color == 'color' else '' }}>Full colour (emoji set)</option>
+                  <option value="full"  {{ 'selected' if s.streamdeck_icon_color == 'full' else '' }}>Tinted glyph</option>
+                  <option value="mono"  {{ 'selected' if s.streamdeck_icon_color == 'mono' else '' }}>Monochrome</option>
+                </select>
+              </div>
+            </div>
+
+            <div><button type="button" class="btn btn-outline-info btn-sm" onclick="savePaneStartPage(this)">
+              <i class="bi bi-check-lg me-1"></i>Save Start Page
+            </button></div>
+            <div class="test-result mt-2" id="start-page-result"></div>
+          </div>
+        </div>

@@ -1,0 +1,274 @@
+{% from "setup/_macros.html" import info, secret_input, extra_keys, ai_model_field, satellite_keys, upstream_cards, recipe_connection_cards, ds_toggle with context %}
+<!-- Connections: Mealie and recipe sources, Home Assistant, cameras,
+             and the phone QR code. Remote access moved to the Forager pane. -->
+        <div class="tab-pane fade" id="pane-connections">
+          <p class="pane-intro">Links to the world around the app: Mealie and the recipe sources, Home Assistant, camera feeds, and the "add from your phone" QR code. Remote access lives under Settings, Forager.</p>
+
+          {{ recipe_connection_cards() }}
+
+          <div class="alert alert-secondary d-flex align-items-center gap-2 mt-2">
+            <i class="bi bi-info-circle"></i>
+            <div><strong>Home Assistant is optional.</strong> If you don't run a Home Assistant
+              server, skip its two cards. Everything else works without it.</div>
+          </div>
+
+          <div class="section-card">
+            <div class="section-title"><i class="bi bi-house-gear text-success"></i> Home Assistant Connection
+              {% if s.streamdeck_ha_base_url and has.streamdeck_ha_token %}
+              <span class="badge bg-success ms-2" id="ha-conn-status"><i class="bi bi-check-circle me-1"></i>Configured</span>
+              {% else %}
+              <span class="badge bg-secondary ms-2" id="ha-conn-status">Not configured</span>
+              {% endif %}
+            </div>
+            <p class="text-secondary small">Create a token in Home Assistant under your profile, Security, Long-lived access tokens, then paste it here. The URL and token power the Stream Deck Home Assistant keys and the camera discovery on the Cameras page.{% if features.satellite %} The connection is set on the main server and synced here.{% endif %}</p>
+            <div class="row g-2 mb-2">
+              <div class="col-md-6">
+                <label class="form-label small mb-1" for="streamdeck_ha_base_url">Base URL</label>
+                <input type="text" class="form-control form-control-sm" id="streamdeck_ha_base_url"
+                       placeholder="http://homeassistant.local:8123" value="{{ s.streamdeck_ha_base_url or '' }}"
+                       {% if features.satellite %}readonly{% endif %}>
+              </div>
+              <div class="col-md-6">
+                <label class="form-label small mb-1" for="streamdeck_ha_token">Long-lived access token</label>
+                <input type="password" class="form-control form-control-sm" id="streamdeck_ha_token" autocomplete="off"
+                       {% if features.satellite %}disabled{% endif %}
+                       placeholder="{% if has.streamdeck_ha_token %}(unchanged){% else %}(token){% endif %}">
+              </div>
+            </div>
+            {% if features.satellite %}
+            <div class="form-text"><i class="bi bi-hdd-network me-1"></i>Home Assistant is configured on the main server and syncs here automatically. Change it there.</div>
+            <button type="button" class="btn btn-outline-secondary btn-sm mt-2" onclick="_haTestConnection(this)">
+              <i class="bi bi-plug me-1"></i>Test connection
+            </button>
+            <div class="test-result mt-2" id="ha-result"></div>
+            {% else %}
+            <div class="d-flex gap-2">
+              <button type="button" class="btn btn-outline-info btn-sm" onclick="savePaneHomeAssistant(this)">
+                <i class="bi bi-check-lg me-1"></i>Save Home Assistant
+              </button>
+              <button type="button" class="btn btn-outline-secondary btn-sm" onclick="_haTestConnection(this)">
+                <i class="bi bi-plug me-1"></i>Test connection
+              </button>
+            </div>
+            <div class="test-result mt-2" id="ha-result"></div>
+            {% endif %}
+          </div>
+
+          <div class="section-card">
+            <div class="section-title"><i class="bi bi-bell text-success"></i> On-screen notifications &amp; camera pop-ups</div>
+            <p class="text-secondary small">Show messages and camera pop-ups pushed from Home Assistant on this device's screen
+              (the kiosk and any open browser tab). A Home Assistant automation calls Pantry Raider with a <code>rest_command</code>,
+              for example to pop up the doorbell camera when a person is detected.</p>
+            <div class="form-check form-switch mb-2">
+              <input class="form-check-input" type="checkbox" role="switch" id="ha_events_enabled"
+                     {% if s.ha_events_enabled %}checked{% endif %} {% if features.satellite %}disabled{% endif %}>
+              <label class="form-check-label" for="ha_events_enabled">Show Home Assistant notifications and camera pop-ups on screen{% if not features.satellite %} (default for all devices){% endif %}</label>
+            </div>
+            {# Per-device override (FoodAssistant-vcuz): each device (the server,
+               each Pi Remote) decides for itself whether to show events, since
+               the server may be headless and there can be several displays. #}
+            <div class="form-check form-switch mb-2">
+              <select class="form-select form-select-sm" id="ha_events_device" style="max-width:320px" onchange="_haSetDeviceEvents(this.value)">
+                <option value="default">This device: follow the default above</option>
+                <option value="1">This device: always show</option>
+                <option value="0">This device: never show</option>
+              </select>
+              <div class="form-text">A per-device choice, stored on this device only. Use it on a headless server (never show) or to pick which Pi Remote displays pop-ups.</div>
+            </div>
+            <div class="row g-2 mb-2" style="max-width:360px">
+              <div class="col-auto">
+                <label class="form-label small mb-1" for="ha_camera_popup_seconds">Camera pop-up seconds</label>
+                <input type="number" min="3" max="300" class="form-control form-control-sm" style="max-width:120px"
+                       id="ha_camera_popup_seconds" value="{{ s.ha_camera_popup_seconds }}" {% if features.satellite %}disabled{% endif %}>
+              </div>
+            </div>
+            {% if features.satellite %}
+            <div class="form-text"><i class="bi bi-hdd-network me-1"></i>Configured on the main server and synced here. Point your Home Assistant automation at <strong>this device</strong> (the one with the screen).</div>
+            {% else %}
+            <div class="d-flex gap-2">
+              <button type="button" class="btn btn-outline-info btn-sm" onclick="savePaneNotifications(this)">
+                <i class="bi bi-check-lg me-1"></i>Save notifications
+              </button>
+              <button type="button" class="btn btn-outline-secondary btn-sm" onclick="_haSendTestEvent(this)">
+                <i class="bi bi-send me-1"></i>Send test notification
+              </button>
+            </div>
+            <div class="test-result mt-2" id="ha-events-result"></div>
+            {% endif %}
+            <details class="mt-3" id="ha-setup-details">
+              <summary class="small text-info" style="cursor:pointer">Home Assistant setup (rest_command + automation)</summary>
+              <p class="text-secondary small mt-2 mb-1">This device's URL is filled in below. Paste an API key from
+                <a href="#" onclick="document.querySelector('[data-bs-target=&quot;#pane-security&quot;]')?.click();return false;">Settings &gt; Security &amp; Access</a>
+                where the placeholder is, then add this to your Home Assistant <code>configuration.yaml</code>:
+                <button type="button" class="btn btn-outline-secondary btn-sm ms-1" onclick="_haCopySnippet('ha-snippet-rest', this)"><i class="bi bi-clipboard"></i> Copy</button></p>
+<pre class="small bg-body-tertiary border rounded p-2" id="ha-snippet-rest" style="white-space:pre-wrap">rest_command:
+  foodassistant_notify:
+    url: "http://THIS-DEVICE:9284/events/notify"
+    method: POST
+    headers:
+      X-API-Key: "YOUR_FOODASSISTANT_API_KEY"
+    content_type: "application/json"
+    payload: '{"title":"{{ title }}","message":"{{ message }}","level":"{{ level }}"}'
+  foodassistant_camera_popup:
+    url: "http://THIS-DEVICE:9284/events/camera-popup"
+    method: POST
+    headers:
+      X-API-Key: "YOUR_FOODASSISTANT_API_KEY"
+    content_type: "application/json"
+    payload: '{"camera":"{{ camera }}","seconds":{{ seconds }}}'</pre>
+              <p class="text-secondary small mt-2 mb-1">Then an automation, for example pop up the door camera on a person:
+                <button type="button" class="btn btn-outline-secondary btn-sm ms-1" onclick="_haCopySnippet('ha-snippet-auto', this)"><i class="bi bi-clipboard"></i> Copy</button></p>
+<pre class="small bg-body-tertiary border rounded p-2" id="ha-snippet-auto" style="white-space:pre-wrap">automation:
+  - alias: "Person at door -> pop up camera"
+    trigger:
+      - platform: state
+        entity_id: binary_sensor.front_door_person
+        to: "on"
+    action:
+      - service: rest_command.foodassistant_camera_popup
+        data:
+          camera: "Front Door"
+          seconds: 20</pre>
+              <p class="text-secondary small mb-0">The <code>camera</code> name must match one configured on the Cameras page. Notifications take <code>message</code>, optional <code>title</code>, and <code>level</code> (info/success/warning/error).</p>
+            </details>
+          </div>
+
+          <p class="text-secondary small mb-2 mt-3"><i class="bi bi-camera-video me-1"></i>The camera cards below feed the on-screen <a href="ui/camera" target="_blank">Camera page</a> and, when a Stream Deck is connected, a snapshot key or the full-deck overlay. Add cameras from Home Assistant, by IP, or by hand.</p>
+
+          {% if not features.satellite %}
+          <div class="section-card">
+            <div class="section-title"><i class="bi bi-pci-card text-info"></i> Add a camera by IP</div>
+            <p class="text-secondary small">Build the stream and snapshot URLs for a network camera from its address. Pick the closest
+              brand template, fill in the address and any login, then add it. You can edit the generated URLs below before saving.
+              Note: RTSP-only cameras cannot play in a browser or on the deck; use a camera that also offers an MJPEG stream or a
+              JPEG snapshot, or run an RTSP-to-HLS bridge and paste that .m3u8 URL by hand.</p>
+            <div class="row g-2">
+              <div class="col-md-3">
+                <label class="form-label small mb-1">Brand template</label>
+                <select class="form-select form-select-sm" id="cam-ip-preset" onchange="_camPresetChanged()">
+                  <option value="generic_mjpeg">Generic MJPEG</option>
+                  <option value="generic_snapshot">Generic snapshot (JPEG)</option>
+                  <option value="reolink">Reolink</option>
+                  <option value="amcrest">Amcrest / Dahua</option>
+                  <option value="hikvision">Hikvision</option>
+                  <option value="onvif">ONVIF (snapshot)</option>
+                  <option value="custom">Custom path</option>
+                </select>
+              </div>
+              <div class="col-md-3">
+                <label class="form-label small mb-1">Name</label>
+                <input type="text" class="form-control form-control-sm" id="cam-ip-name" placeholder="Driveway">
+              </div>
+              <div class="col-md-4">
+                <label class="form-label small mb-1">IP or host</label>
+                <input type="text" class="form-control form-control-sm" id="cam-ip-host" placeholder="192.168.1.50">
+              </div>
+              <div class="col-md-2">
+                <label class="form-label small mb-1">Port</label>
+                <input type="text" class="form-control form-control-sm" id="cam-ip-port" placeholder="(default)">
+              </div>
+            </div>
+            <div class="row g-2 mt-1">
+              <div class="col-md-3">
+                <label class="form-label small mb-1">Username</label>
+                <input type="text" class="form-control form-control-sm" id="cam-ip-user" placeholder="(optional)" autocomplete="off">
+              </div>
+              <div class="col-md-3">
+                <label class="form-label small mb-1">Password</label>
+                <input type="password" class="form-control form-control-sm" id="cam-ip-pass" placeholder="(optional)" autocomplete="off">
+              </div>
+              <div class="col-md-6 sd-cam-ip-pathwrap d-none">
+                <label class="form-label small mb-1">Path</label>
+                <input type="text" class="form-control form-control-sm" id="cam-ip-path" placeholder="/video">
+                <div class="form-text">Stream path appended to the address. The snapshot path is derived where the brand has one.</div>
+              </div>
+            </div>
+            <div class="d-flex gap-2 mt-2 flex-wrap align-items-center">
+              <button type="button" class="btn btn-outline-info btn-sm" onclick="_camAddFromIp()">
+                <i class="bi bi-plus-lg me-1"></i>Add camera from IP
+              </button>
+              <!-- Scan the LAN for cameras, like the HA discovery (d9rx). -->
+              <button type="button" class="btn btn-outline-secondary btn-sm" id="cam-scan-btn" onclick="_camScanLan(this)">
+                <i class="bi bi-search me-1"></i>Scan network for cameras
+              </button>
+              <input type="text" class="form-control form-control-sm" id="cam-scan-cidr" style="max-width:200px"
+                     placeholder="192.168.1.0/24 (optional)" autocomplete="off" oninput="_camUpdateScanHint()">
+            </div>
+            <div id="cam-scan-hint" class="form-text text-warning mt-1 d-none"></div>
+            <div class="test-result mt-2" id="cam-ip-result"></div>
+            <div id="cam-scan-results" class="mt-2"></div>
+          </div>
+          {% endif %}
+
+          <div class="section-card">
+            <div class="section-title"><i class="bi bi-camera-video text-success"></i> Cameras</div>
+            <p class="text-secondary small">Stream URL is the live feed (an .m3u8 HLS stream or an MJPEG URL); Snapshot URL is a
+              still image. Use <strong>Discover from Home Assistant</strong> to pull cameras from the connected instance, add one by
+              IP above, or fill a row by hand. The house button on a row fills both URLs from its Home Assistant entity.</p>
+            <div id="streamdeck-cameras" class="d-flex flex-column gap-2 mb-2">
+              {% for cam in s.streamdeck_cameras %}
+              <div class="row g-2 align-items-end sd-camera-row">
+                <div class="col-md-2">
+                  <label class="form-label small mb-1">Name</label>
+                  <input type="text" class="form-control form-control-sm sd-cam-name" placeholder="Front door" value="{{ cam.name or '' }}" {% if features.satellite %}readonly{% endif %}>
+                </div>
+                <div class="col-md-3">
+                  <label class="form-label small mb-1">Stream URL</label>
+                  <input type="text" class="form-control form-control-sm sd-cam-stream" placeholder="http://.../stream.m3u8" value="{{ cam.stream_url or '' }}" {% if features.satellite %}readonly{% endif %}>
+                </div>
+                <div class="col-md-3">
+                  <label class="form-label small mb-1">Snapshot URL</label>
+                  <input type="text" class="form-control form-control-sm sd-cam-snapshot" placeholder="http://.../snapshot.jpg" value="{{ cam.snapshot_url or '' }}" {% if features.satellite %}readonly{% endif %}>
+                </div>
+                {% if not features.satellite %}
+                <div class="col-md-3">
+                  <label class="form-label small mb-1">HA entity</label>
+                  <input type="text" class="form-control form-control-sm sd-cam-entity" placeholder="camera.front_door">
+                </div>
+                <div class="col-md-1 d-flex gap-1">
+                  <button type="button" class="btn btn-outline-secondary btn-sm" title="From Home Assistant" onclick="_sdCameraFromHa(this)"><i class="bi bi-house"></i></button>
+                  <button type="button" class="btn btn-outline-danger btn-sm" title="Remove" onclick="this.closest('.sd-camera-row').remove()"><i class="bi bi-trash"></i></button>
+                </div>
+                {% endif %}
+              </div>
+              {% endfor %}
+            </div>
+            {% if features.satellite %}
+            <div class="form-text"><i class="bi bi-hdd-network me-1"></i>Cameras are configured on the main server and sync here automatically. Change them there.</div>
+            {% else %}
+            <div class="d-flex gap-2 flex-wrap">
+              <button type="button" class="btn btn-outline-secondary btn-sm" onclick="_sdAddCameraRow()">
+                <i class="bi bi-plus-lg me-1"></i>Add camera
+              </button>
+              <button type="button" class="btn btn-outline-secondary btn-sm" onclick="_sdDiscoverCameras(this)">
+                <i class="bi bi-search me-1"></i>Discover from Home Assistant
+              </button>
+              <button type="button" class="btn btn-outline-info btn-sm" onclick="savePaneCameras(this)">
+                <i class="bi bi-check-lg me-1"></i>Save cameras
+              </button>
+            </div>
+            <div id="cameras-discovered" class="mt-2"></div>
+            <div class="test-result mt-2" id="cameras-result"></div>
+            {% endif %}
+          </div>
+
+          <div class="section-card">
+            <div class="section-title"><i class="bi bi-qr-code text-info"></i> Phone QR code</div>
+            <p class="text-secondary small">The Manage Pantry page shows an "Add items from your phone" QR code so a phone can add items without typing an address. Pick which address it encodes.</p>
+            <div class="mb-3">
+              <label class="form-label" for="qr_url_mode">Phone QR code address{{ info('Which address the "Add items from your phone" QR code points at. Auto uses this device\'s network address, so a phone on the same network can open it even when the kiosk itself browses at localhost. Public URL encodes the external address below, for phones that reach this app through a reverse proxy or tunnel.') }}</label>
+              <select class="form-select form-select-sm" id="qr_url_mode" style="max-width:320px">
+                <option value="auto"   {{ 'selected' if (s.qr_url_mode or 'auto') == 'auto' else '' }}>Auto (this device's network address)</option>
+                <option value="public" {{ 'selected' if s.qr_url_mode == 'public' else '' }}>Public URL</option>
+              </select>
+              <input type="url" class="form-control form-control-sm mt-2" id="qr_public_url"
+                     placeholder="https://pantry.yourdomain.com" style="max-width:420px"
+                     value="{{ s.qr_public_url }}">
+              <div class="form-text">Public URL to encode when the mode above is Public URL. Leave it empty to use the remote-access tunnel address when one is active.</div>
+            </div>
+            <button type="button" class="btn btn-outline-info btn-sm" onclick="saveQrSettings(this)">
+              <i class="bi bi-check-lg me-1"></i>Save QR address
+            </button>
+            <div class="test-result mt-2" id="qr-save-result"></div>
+          </div>
+        </div>

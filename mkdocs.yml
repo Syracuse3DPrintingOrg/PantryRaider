@@ -1,0 +1,44 @@
+site_name: Pantry Raider
+site_description: Self-hosted food spoilage tracker built on Grocy, with optional Mealie and Ollama.
+repo_url: https://github.com/Syracuse3DPrintingOrg/PantryRaider
+repo_name: Syracuse3DPrintingOrg/PantryRaider
+docs_dir: docs
+
+# Keep internal working notes and the separately deployed browser demo out of
+# the published site (the demo's README also collides with its index.html).
+exclude_docs: |
+  demo/README.md
+  hardware-bead-drafts.md
+  design/
+
+theme:
+  name: material
+  palette:
+    scheme: slate
+  features:
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+
+nav:
+  - Home: index.md
+  - Platforms and deployment: platforms.md
+  - What needs the internet: what-needs-internet.md
+  - Personalization and on-screen features: personalization.md
+  - Settings matrix: settings-matrix.md
+  - API reference: api.md
+  - Hardware:
+      - Overview: hardware.md
+      - Supported hardware: hardware/supported-hardware.md
+      - SD-card image: hardware/sd-image.md
+      - Waveshare barcode scanner: hardware/waveshare-barcode-scanner.md
+  - Recipe backend comparison: recipe-backend-comparison.md
+  - AI declarations: AI_DECLARATIONS.md
+
+markdown_extensions:
+  - admonition
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.highlight
+  - pymdownx.superfences

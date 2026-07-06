@@ -1,0 +1,647 @@
+{% extends "base.html" %}
+{% block title %}Recipes: Pantry Raider{% endblock %}
+{% block content %}
+
+{% if not mealie_configured %}
+<div class="alert alert-info mt-3">
+  <i class="bi bi-journal-richtext me-2"></i>
+  Recipes are stored in <a href="https://mealie.io" target="_blank">Mealie</a>.
+  Add your Mealie URL and API token in <a href="setup">Settings</a> to enable this page.
+</div>
+{% else %}
+
+<div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mt-3 mb-3">
+  <h4 class="mb-0"><i class="bi bi-journal-richtext me-2"></i>Recipes</h4>
+  <div class="d-flex gap-2">
+    <a class="btn btn-sm btn-outline-secondary" href="{{ mealie_url }}" target="_blank">
+      <i class="bi bi-box-arrow-up-right me-1"></i>Open Mealie
+    </a>
+    <div class="btn-group">
+      <button class="btn btn-sm btn-primary" data-bs-toggle="modal" data-bs-target="#importUrlModal">
+        <i class="bi bi-link-45deg me-1"></i>From URL
+      </button>
+      {% if ai_configured %}
+      <button class="btn btn-sm btn-primary" onclick="document.getElementById('photo-input').click()">
+        <i class="bi bi-camera me-1"></i>From Photo
+      </button>
+      {% endif %}
+      <button class="btn btn-sm btn-primary" onclick="document.getElementById('file-input').click()">
+        <i class="bi bi-filetype-json me-1"></i>From File
+      </button>
+      <button class="btn btn-sm btn-outline-primary" onclick="openEditor()">
+        <i class="bi bi-pencil me-1"></i>Manual
+      </button>
+    </div>
+  </div>
+</div>
+
+<input type="file" id="photo-input" accept="image/*" capture="environment" class="d-none"
+       onchange="extractPhoto(this)">
+<input type="file" id="file-input" accept=".json,.txt" class="d-none"
+       onchange="importFile(this)">
+
+<!-- Photo extraction progress -->
+<div class="alert alert-info d-none" id="photo-progress">
+  <span class="spinner-border spinner-border-sm me-2"></span>Reading recipe from photo…
+</div>
+
+<!-- File import progress -->
+<div class="alert alert-info d-none" id="file-progress">
+  <span class="spinner-border spinner-border-sm me-2"></span>Importing recipe from file…
+</div>
+
+<!-- Browse -->
+<div class="row g-3" id="browse-section">
+  <div class="col-lg-8 col-xl-6">
+    <div class="input-group mb-2">
+      <input type="search" class="form-control" id="recipe-filter"
+             placeholder="Search recipes…" autocomplete="off">
+      {% if ai_configured %}
+      <button class="btn btn-outline-secondary d-none" id="btn-generate-ai"
+              onclick="generateFromSearch()" title="Ask AI to write this recipe">
+        <i class="bi bi-stars me-1"></i>Generate with AI
+      </button>
+      {% endif %}
+    </div>
+    <div class="d-flex gap-3 mb-3">
+      <div class="form-check form-check-inline mb-0">
+        <input class="form-check-input" type="checkbox" id="chk-mine" checked onchange="reloadRecipes()">
+        <label class="form-check-label small" for="chk-mine">My recipes</label>
+      </div>
+      <div class="form-check form-check-inline mb-0">
+        <input class="form-check-input" type="checkbox" id="chk-external" onchange="reloadRecipes()">
+        <label class="form-check-label small" for="chk-external">Other recipes <span class="text-secondary">(web)</span></label>
+      </div>
+    </div>
+    <div id="recipe-list" class="vstack gap-2">
+      <div class="text-secondary"><span class="spinner-border spinner-border-sm me-2"></span>Loading recipes…</div>
+    </div>
+  </div>
+</div>
+
+<!-- External recipe preview modal -->
+<div class="modal fade" id="previewModal" tabindex="-1">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="pv-name">Recipe</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="text-center text-secondary py-4 d-none" id="pv-loading">
+          <span class="spinner-border spinner-border-sm me-2"></span>Loading recipe…
+        </div>
+        <div id="pv-body" class="d-none">
+          <img id="pv-image" class="rounded mb-3 w-100 d-none" style="max-height:260px;object-fit:cover">
+          <div class="small text-secondary mb-2" id="pv-meta"></div>
+          <p class="small" id="pv-description"></p>
+          <h6><i class="bi bi-basket me-1"></i>Ingredients</h6>
+          <ul class="small" id="pv-ingredients"></ul>
+          <h6><i class="bi bi-list-ol me-1"></i>Instructions</h6>
+          <ol class="small" id="pv-instructions"></ol>
+          <a class="small d-none" id="pv-source-link" target="_blank">
+            <i class="bi bi-box-arrow-up-right me-1"></i>Original source</a>
+        </div>
+        <div class="alert alert-danger d-none" id="pv-error"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+        <button class="btn btn-info" id="pv-save" onclick="saveFromPreview(this)">
+          <i class="bi bi-download me-1"></i>Save to Mealie
+        </button>
+        <button class="btn btn-primary" id="pv-cook" onclick="cookFromPreview(this)">
+          <i class="bi bi-fire me-1"></i>Cook
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Import-from-URL modal -->
+<div class="modal fade" id="importUrlModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Import recipe from a webpage</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="url" class="form-control" id="import-url" placeholder="https://example.com/best-lasagna">
+        <div class="form-text">Tries Mealie's importer first; falls back to AI extraction for sites it can't read.</div>
+        <div class="mt-2 small d-none" id="import-url-status"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button class="btn btn-primary" id="import-url-btn" onclick="importUrl()">
+          <i class="bi bi-download me-1"></i>Import
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Review/edit + manual-add modal -->
+<div class="modal fade" id="editorModal" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="editor-title">New Recipe</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body vstack gap-3">
+        <div class="alert alert-warning py-2 small d-none" id="editor-note"></div>
+        <div>
+          <label class="form-label">Name</label>
+          <input type="text" class="form-control" id="ed-name">
+        </div>
+        <div>
+          <label class="form-label">Description</label>
+          <input type="text" class="form-control" id="ed-description">
+        </div>
+        <div class="row g-2">
+          <div class="col-6">
+            <label class="form-label">Servings</label>
+            <input type="text" class="form-control" id="ed-servings" placeholder="4 servings">
+          </div>
+          <div class="col-6">
+            <label class="form-label">Total Time</label>
+            <input type="text" class="form-control" id="ed-time" placeholder="45 minutes">
+          </div>
+        </div>
+        <div>
+          <label class="form-label">Ingredients <span class="text-secondary small">(one per line)</span></label>
+          <textarea class="form-control font-monospace" id="ed-ingredients" rows="7"></textarea>
+        </div>
+        <div>
+          <label class="form-label">Instructions <span class="text-secondary small">(one step per line)</span></label>
+          <textarea class="form-control" id="ed-instructions" rows="7"></textarea>
+        </div>
+        <div class="text-danger small d-none" id="editor-error"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button class="btn btn-success" id="editor-save" onclick="saveRecipe()">
+          <i class="bi bi-check-lg me-1"></i>Save to Mealie
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{% if mealie_configured %}
+<script>
+const MEALIE_URL = {{ mealie_url | tojson }};
+
+// Browse
+let filterTimer = null;
+document.getElementById('recipe-filter').addEventListener('input', e => {
+  const q = e.target.value.trim();
+  const genBtn = document.getElementById('btn-generate-ai');
+  if (genBtn) genBtn.classList.toggle('d-none', !q);  // absent when no AI is configured
+  clearTimeout(filterTimer);
+  filterTimer = setTimeout(() => loadRecipes(q), 300);
+});
+
+function reloadRecipes() {
+  loadRecipes(document.getElementById('recipe-filter').value.trim());
+}
+
+function recipeRow(r) {
+  if (r.source === 'mealie') {
+    return `
+      <div class="card">
+        <div class="card-body py-2 d-flex align-items-center justify-content-between gap-2">
+          <div class="min-width-0">
+            <a href="${MEALIE_URL}/g/home/r/${r.slug}" target="_blank" class="fw-semibold">${r.name}</a>
+            ${r.description ? `<div class="small text-secondary text-truncate">${r.description}</div>` : ''}
+          </div>
+          <div class="d-flex align-items-center gap-2 flex-shrink-0">
+            ${r.total_time ? `<span class="badge bg-secondary"><i class="bi bi-clock me-1"></i>${r.total_time}</span>` : ''}
+            <button class="btn btn-sm btn-outline-primary" title="Make this the Current Recipe"
+                    onclick="setCurrentFromMealie('${r.slug}', this)">
+              <i class="bi bi-fire me-1"></i>Cook
+            </button>
+          </div>
+        </div>
+      </div>`;
+  }
+  return `
+    <div class="card">
+      <div class="card-body py-2 d-flex align-items-center justify-content-between gap-2">
+        <div class="d-flex align-items-center gap-2 min-width-0">
+          ${r.image ? `<img src="${r.image}" class="rounded flex-shrink-0" style="width:48px;height:48px;object-fit:cover" loading="lazy" onerror="this.remove()">` : ''}
+          <div class="min-width-0">
+            <a href="#" class="fw-semibold" onclick="openPreview('${r.external_id}', '${r.source}'); return false;"
+               title="Preview this recipe">${r.name}</a>
+            <span class="badge bg-dark border ms-1" title="External recipe, save it to keep it">web</span>
+            ${r.description ? `<div class="small text-secondary text-truncate">${r.description}</div>` : ''}
+          </div>
+        </div>
+        <div class="d-flex gap-1 flex-shrink-0">
+          <button class="btn btn-sm btn-outline-secondary" title="Preview before saving"
+                  onclick="openPreview('${r.external_id}', '${r.source}')">
+            <i class="bi bi-eye"></i>
+          </button>
+          <button class="btn btn-sm btn-outline-info" title="Save this recipe into Mealie"
+                  onclick="saveExternal('${r.external_id}', '${r.source}', this)">
+            <i class="bi bi-download me-1"></i>Save
+          </button>
+          <button class="btn btn-sm btn-outline-primary" title="Save it and make it the Current Recipe"
+                  onclick="cookExternal('${r.external_id}', '${r.source}', this)">
+            <i class="bi bi-fire me-1"></i>Cook
+          </button>
+        </div>
+      </div>
+    </div>`;
+}
+
+// Make a Mealie recipe the active Current Recipe, then open the Current Recipe
+// page (FoodAssistant-1g4l). The backend fetches the full recipe and normalizes
+// it, so we only need the slug here.
+async function setCurrentFromMealie(slug, btn) {
+  const orig = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>'; }
+  try {
+    const r = await fetch('current-recipe/from-mealie', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({slug}),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || r.statusText);
+    window.location.href = 'ui/current-recipe';
+  } catch (e) {
+    if (btn) { btn.disabled = false; btn.innerHTML = orig; }
+    alert('Could not set the current recipe: ' + e.message);
+  }
+}
+
+async function loadRecipes(search = '') {
+  const el = document.getElementById('recipe-list');
+  const mine = document.getElementById('chk-mine').checked;
+  const external = document.getElementById('chk-external').checked;
+  if (!mine && !external) {
+    el.innerHTML = '<div class="text-secondary small p-2">Select at least one recipe source above.</div>';
+    return;
+  }
+  try {
+    const params = new URLSearchParams({per_page: 100, search, mine, external});
+    const r = await fetch(`mealie/recipes?${params}`);
+    if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
+    const items = await r.json();
+    if (!items.length) {
+      let hint = search ? ' matching that search.' : ' yet, import one above!';
+      if (!mine && external && !search) hint = '. Type a search to look up web recipes.';
+      el.innerHTML = `<div class="text-secondary small p-2">No recipes${hint}</div>`;
+      return;
+    }
+    let html = items.map(recipeRow).join('');
+    if (external && !search) {
+      html += '<div class="text-secondary small p-2"><i class="bi bi-info-circle me-1"></i>Type a search to include web recipes.</div>';
+    }
+    el.innerHTML = html;
+  } catch (e) {
+    el.innerHTML = `<div class="alert alert-danger">Could not load recipes: ${e.message}</div>`;
+  }
+}
+
+// External recipe preview
+let previewRecipe = null;   // {external_id, source} of the recipe in the modal
+
+async function openPreview(externalId, source) {
+  previewRecipe = {external_id: externalId, source};
+  const show = (id, on) => document.getElementById(id).classList.toggle('d-none', !on);
+  show('pv-loading', true); show('pv-body', false); show('pv-error', false);
+  document.getElementById('pv-name').textContent = 'Recipe';
+  const saveBtn = document.getElementById('pv-save');
+  saveBtn.disabled = true;
+  saveBtn.className = 'btn btn-info';
+  saveBtn.innerHTML = '<i class="bi bi-download me-1"></i>Save to Mealie';
+  saveBtn.onclick = () => saveFromPreview(saveBtn);
+  const cookBtn = document.getElementById('pv-cook');
+  cookBtn.classList.remove('d-none');   // external recipe: cooking is available
+  cookBtn.disabled = true;
+  cookBtn.innerHTML = '<i class="bi bi-fire me-1"></i>Cook';
+  cookBtn.onclick = () => cookFromPreview(cookBtn);
+  new bootstrap.Modal(document.getElementById('previewModal')).show();
+  try {
+    const params = new URLSearchParams({external_id: externalId, source});
+    const r = await fetch(`mealie/recipes/external-detail?${params}`);
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || r.statusText);
+    document.getElementById('pv-name').textContent = d.name || 'Recipe';
+    const img = document.getElementById('pv-image');
+    img.classList.toggle('d-none', !d.image);
+    if (d.image) img.src = d.image;
+    document.getElementById('pv-meta').textContent =
+      [d.servings, d.total_time].filter(Boolean).join(' · ');
+    document.getElementById('pv-description').textContent = d.description || '';
+    document.getElementById('pv-ingredients').innerHTML =
+      (d.ingredients || []).map(i => `<li>${i}</li>`).join('') || '<li class="text-secondary">None listed</li>';
+    document.getElementById('pv-instructions').innerHTML =
+      (d.instructions || []).map(s => `<li>${s}</li>`).join('') || '<li class="text-secondary">None listed</li>';
+    const link = document.getElementById('pv-source-link');
+    link.classList.toggle('d-none', !d.source_url);
+    if (d.source_url) link.href = d.source_url;
+    show('pv-loading', false); show('pv-body', true);
+    document.getElementById('pv-save').disabled = false;
+    document.getElementById('pv-cook').disabled = false;
+  } catch (e) {
+    show('pv-loading', false);
+    const err = document.getElementById('pv-error');
+    err.textContent = 'Could not load recipe: ' + e.message;
+    err.classList.remove('d-none');
+  }
+}
+
+// Cook from the preview modal: save the previewed external recipe, then make it
+// the Current Recipe (FoodAssistant-j278). Only external recipes carry an
+// external_id, so this button is shown for those and hidden for LLM previews.
+async function cookFromPreview(btn) {
+  if (!previewRecipe || previewRecipe._llm) return;
+  await cookExternal(previewRecipe.external_id, previewRecipe.source, btn);
+}
+
+async function saveFromPreview(btn) {
+  if (!previewRecipe) return;
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Saving…';
+  try {
+    let url, body;
+    if (previewRecipe._llm) {
+      // LLM-generated recipe: save via /recipes/create
+      const r = previewRecipe.recipe;
+      url = 'mealie/recipes/create';
+      body = {
+        name: r.name, description: r.description || '',
+        servings: r.servings || '', total_time: r.total_time || '',
+        ingredients: r.ingredients || [], instructions: r.instructions || [],
+      };
+    } else {
+      // External (TheMealDB/Spoonacular): import-external
+      url = 'mealie/recipes/import-external';
+      body = {...previewRecipe, add_missing_to_list: false};
+    }
+    const r = await fetch(url, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || r.statusText);
+    btn.className = 'btn btn-success';
+    btn.innerHTML = '<i class="bi bi-check-circle me-1"></i>Saved: view in Mealie';
+    btn.disabled = false;
+    btn.onclick = () => window.open(`${d.mealie_url}/g/home/r/${d.slug}`, '_blank');
+    reloadRecipes();
+  } catch (e) {
+    btn.disabled = false;
+    btn.innerHTML = orig;
+    alert('Save failed: ' + e.message);
+  }
+}
+
+// Save an external (web) recipe into Mealie, then make it the Current Recipe and
+// open that page (FoodAssistant-j278). Saving-to-cook is intentional: the web
+// recipe has to live in Mealie before it can be the active recipe, so we import
+// it (no shopping-list changes) and use the returned slug to set the current
+// recipe. Any failure restores the button rather than leaving it spinning.
+async function cookExternal(externalId, source, btn) {
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+  try {
+    const r = await fetch('mealie/recipes/import-external', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({external_id: externalId, source, add_missing_to_list: false}),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || r.statusText);
+    const r2 = await fetch('current-recipe/from-mealie', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({slug: d.slug}),
+    });
+    const d2 = await r2.json();
+    if (!r2.ok) throw new Error(d2.detail || r2.statusText);
+    window.location.href = 'ui/current-recipe';
+  } catch (e) {
+    btn.disabled = false;
+    btn.innerHTML = orig;
+    alert('Could not cook this recipe: ' + e.message);
+  }
+}
+
+async function saveExternal(externalId, source, btn) {
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+  try {
+    const r = await fetch('mealie/recipes/import-external', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({external_id: externalId, source, add_missing_to_list: false}),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || r.statusText);
+    btn.outerHTML = `<a href="${d.mealie_url}/g/home/r/${d.slug}" target="_blank"
+      class="small text-success flex-shrink-0"><i class="bi bi-check-circle me-1"></i>Saved</a>`;
+  } catch (e) {
+    btn.disabled = false;
+    btn.innerHTML = orig;
+    alert('Save failed: ' + e.message);
+  }
+}
+
+// URL import
+async function importUrl() {
+  const btn = document.getElementById('import-url-btn');
+  const status = document.getElementById('import-url-status');
+  const url = document.getElementById('import-url').value.trim();
+  if (!url) return;
+  btn.disabled = true;
+  status.classList.remove('d-none', 'text-danger');
+  status.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Importing, this can take ~30s if AI extraction kicks in…';
+  try {
+    const r = await fetch('mealie/recipes/import-url', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({url}),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || r.statusText);
+    if (d.saved) {
+      status.innerHTML = `<span class="text-success"><i class="bi bi-check-circle me-1"></i>${d.message}
+        <a href="${d.mealie_url}/g/home/r/${d.slug}" target="_blank">View recipe</a></span>`;
+      document.getElementById('import-url').value = '';
+      loadRecipes();
+    } else {
+      bootstrap.Modal.getInstance(document.getElementById('importUrlModal')).hide();
+      openEditor(d.recipe, d.message);
+    }
+  } catch (e) {
+    status.classList.add('text-danger');
+    status.textContent = e.message;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// Photo import
+async function extractPhoto(input) {
+  const file = input.files[0];
+  input.value = '';
+  if (!file) return;
+  const progress = document.getElementById('photo-progress');
+  progress.classList.remove('d-none');
+  try {
+    const fd = new FormData();
+    fd.append('file', file);
+    const r = await fetch('mealie/recipes/extract-photo', {method: 'POST', body: fd});
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || r.statusText);
+    openEditor(d.recipe, 'Extracted from your photo. Check it over, then save.');
+  } catch (e) {
+    progress.classList.add('d-none');
+    alert('Photo extraction failed: ' + e.message);
+    return;
+  }
+  progress.classList.add('d-none');
+}
+
+// File import (generic JSON / schema.org JSON-LD / Mealie export)
+async function importFile(input) {
+  const file = input.files[0];
+  input.value = '';
+  if (!file) return;
+  const progress = document.getElementById('file-progress');
+  progress.classList.remove('d-none');
+  try {
+    const fd = new FormData();
+    fd.append('file', file);
+    const r = await fetch('mealie/recipes/import-file', {method: 'POST', body: fd});
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || r.statusText);
+    progress.innerHTML = `<i class="bi bi-check-circle me-1"></i>${d.message}
+      <a href="${d.mealie_url}/g/home/r/${d.slug}" target="_blank">View recipe</a>`;
+    progress.classList.remove('alert-info');
+    progress.classList.add('alert-success');
+    loadRecipes();
+    setTimeout(() => {
+      progress.classList.add('d-none');
+      progress.classList.remove('alert-success');
+      progress.classList.add('alert-info');
+      progress.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Importing recipe from file…';
+    }, 5000);
+    return;
+  } catch (e) {
+    progress.classList.add('d-none');
+    alert('File import failed: ' + e.message);
+  }
+}
+
+// Editor (shared by photo / URL-fallback / manual)
+function openEditor(recipe = null, note = '') {
+  document.getElementById('editor-title').textContent = recipe ? 'Review Recipe' : 'New Recipe';
+  const noteEl = document.getElementById('editor-note');
+  noteEl.classList.toggle('d-none', !note);
+  noteEl.textContent = note;
+  document.getElementById('ed-name').value = recipe?.name || '';
+  document.getElementById('ed-description').value = recipe?.description || '';
+  document.getElementById('ed-servings').value = recipe?.servings || '';
+  document.getElementById('ed-time').value = recipe?.total_time || '';
+  document.getElementById('ed-ingredients').value = (recipe?.ingredients || []).join('\n');
+  document.getElementById('ed-instructions').value = (recipe?.instructions || []).join('\n');
+  document.getElementById('editor-error').classList.add('d-none');
+  new bootstrap.Modal(document.getElementById('editorModal')).show();
+}
+
+async function saveRecipe() {
+  const err = document.getElementById('editor-error');
+  const btn = document.getElementById('editor-save');
+  err.classList.add('d-none');
+  const body = {
+    name: document.getElementById('ed-name').value.trim(),
+    description: document.getElementById('ed-description').value.trim(),
+    servings: document.getElementById('ed-servings').value.trim(),
+    total_time: document.getElementById('ed-time').value.trim(),
+    ingredients: document.getElementById('ed-ingredients').value.split('\n').map(s => s.trim()).filter(Boolean),
+    instructions: document.getElementById('ed-instructions').value.split('\n').map(s => s.trim()).filter(Boolean),
+  };
+  if (!body.name) { err.textContent = 'Name is required.'; err.classList.remove('d-none'); return; }
+  btn.disabled = true;
+  try {
+    const r = await fetch('mealie/recipes/create', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || r.statusText);
+    bootstrap.Modal.getInstance(document.getElementById('editorModal')).hide();
+    loadRecipes();
+  } catch (e) {
+    err.textContent = e.message;
+    err.classList.remove('d-none');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// AI recipe generation
+async function generateFromSearch() {
+  const query = document.getElementById('recipe-filter').value.trim();
+  if (!query) return;
+  const btn = document.getElementById('btn-generate-ai');
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Generating…';
+  // Reuse the preview modal: it will show a spinner then the result.
+  previewRecipe = null;
+  const show = id => document.getElementById(id).classList.toggle('d-none', false);
+  const hide = id => document.getElementById(id).classList.add('d-none');
+  document.getElementById('pv-name').textContent = `Generating "${query}"…`;
+  const saveBtn = document.getElementById('pv-save');
+  saveBtn.disabled = true;
+  saveBtn.className = 'btn btn-info';
+  saveBtn.innerHTML = '<i class="bi bi-download me-1"></i>Save to Mealie';
+  saveBtn.onclick = () => saveFromPreview(saveBtn);
+  // LLM-generated previews have no external_id/slug to cook from; hide Cook.
+  document.getElementById('pv-cook').classList.add('d-none');
+  show('pv-loading'); hide('pv-body'); hide('pv-error');
+  new bootstrap.Modal(document.getElementById('previewModal')).show();
+  btn.disabled = false;
+  btn.innerHTML = orig;
+  try {
+    const r = await fetch('mealie/recipes/generate', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({name: query}),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || r.statusText);
+    // Store so saveFromPreview can POST to /recipes/create
+    previewRecipe = {_llm: true, recipe: d};
+    document.getElementById('pv-name').textContent = d.name || query;
+    const img = document.getElementById('pv-image');
+    img.classList.add('d-none');
+    document.getElementById('pv-meta').textContent =
+      [d.servings, d.total_time].filter(Boolean).join(' · ');
+    document.getElementById('pv-description').textContent = d.description || '';
+    document.getElementById('pv-ingredients').innerHTML =
+      (d.ingredients || []).map(i => `<li>${i}</li>`).join('') || '<li class="text-secondary">None listed</li>';
+    document.getElementById('pv-instructions').innerHTML =
+      (d.instructions || []).map(s => `<li>${s}</li>`).join('') || '<li class="text-secondary">None listed</li>';
+    document.getElementById('pv-source-link').classList.add('d-none');
+    hide('pv-loading'); show('pv-body');
+    saveBtn.disabled = false;
+  } catch (e) {
+    hide('pv-loading');
+    const err = document.getElementById('pv-error');
+    err.textContent = 'Generation failed: ' + e.message;
+    err.classList.remove('d-none');
+  }
+}
+
+loadRecipes();
+</script>
+{% endif %}
+{% endblock %}

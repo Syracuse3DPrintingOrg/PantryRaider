@@ -1,0 +1,117 @@
+{% from "setup/_macros.html" import info, secret_input, extra_keys, ai_model_field, satellite_keys, upstream_cards, recipe_connection_cards, ds_toggle with context %}
+<!-- Advanced: timezone, maintenance, diagnostics, and deployment-mode switches -->
+        <div class="tab-pane fade" id="pane-advanced">
+          <p class="pane-intro">Maintenance that is not day-to-day: the timezone, reloads and reboots, diagnostics, and switching this device's role.</p>
+
+          {% if s.deployment_mode == 'pi_hosted' %}
+          <div class="section-card">
+            <div class="section-title"><i class="bi bi-hdd-network text-warning"></i> Run as a satellite</div>
+            <p class="text-secondary small">Point this appliance at another Pantry Raider server and it becomes a
+              satellite: the screen and Stream Deck keep working, but inventory, recipes, and AI settings come from
+              that server. The local Grocy{% if s.mealie_base_url %} and Mealie{% endif %} stop running, and
+              <strong>all inventory data stays on this device</strong>, so you can switch back at any time and pick up
+              exactly where you left off.</p>
+            <div class="mb-2">
+              <label class="form-label">Main server URL</label>
+              <div class="input-group" style="max-width:520px">
+                <input type="url" class="form-control" id="switch_server_url"
+                       placeholder="http://192.168.1.10:9284" value="{{ s.remote_server_url or '' }}">
+                <button class="btn btn-outline-secondary btn-sm" type="button"
+                        onclick="scanLanForServer('switch_server_url', 'switch-scan-result')">
+                  <i class="bi bi-search me-1"></i>Scan LAN
+                </button>
+              </div>
+              <div id="switch-scan-result" class="small mt-1"></div>
+            </div>
+            <div class="mb-3" style="max-width:520px">
+              <label class="form-label">Main server API key</label>
+              <input type="text" class="form-control font-monospace" id="switch_upstream_api_key"
+                     placeholder="the API key from that server's Settings, under Security &amp; Access" autocomplete="off">
+            </div>
+            <button class="btn btn-outline-warning btn-sm" id="switch-satellite-btn" onclick="switchToSatellite(this)">
+              <i class="bi bi-hdd-network me-1"></i>Switch to satellite mode
+            </button>
+            <div class="test-result mt-2" id="switch-satellite-result"></div>
+          </div>
+          {% endif %}
+
+          <div class="section-card">
+            <div class="section-title"><i class="bi bi-clock text-info"></i> Date &amp; time</div>
+            {% if features.satellite %}
+            {# A Pi Remote inherits the fleet timezone from the main server (it is
+               a SATELLITE_PULL_FIELD), so there is no per-device option here. #}
+            <div class="form-text"><i class="bi bi-hdd-network me-1"></i>Timezone and clock format are managed on the main server and applied here automatically on each sync{% if timezone %} (currently <strong>{{ timezone }}</strong>){% endif %}.</div>
+            {% else %}
+            <div class="mb-2">
+              <label class="form-label" for="timezone">Timezone{{ info('Timezone for timestamps shown in the app (like the last update check). The clock stays NTP-synced; this only sets how times read. Auto follows the system clock. Pi Remotes inherit this from the server.') }}</label>
+              <select class="form-select form-select-sm" id="timezone" style="max-width:340px">
+                <option value="">Auto{% if system_timezone %} (system: {{ system_timezone }}){% endif %}</option>
+                {% for tz in common_timezones %}
+                <option value="{{ tz }}" {{ 'selected' if timezone == tz else '' }}>{{ tz }}</option>
+                {% endfor %}
+              </select>
+              {% if timezone and timezone not in common_timezones %}
+              <div class="form-text">Current: {{ timezone }} (custom, kept)</div>
+              {% endif %}
+            </div>
+            <div class="mb-2">
+              <label class="form-label" for="clock_format">Clock format{{ info('How times of day read everywhere: the screensaver clock, the weather page, and timestamps like the last update check. Auto keeps the usual reading for each surface. Pi Remotes inherit this from the server, so the whole kitchen agrees.') }}</label>
+              <select class="form-select form-select-sm" id="clock_format" style="max-width:340px">
+                <option value="auto" {{ 'selected' if clock_format in ('', 'auto') else '' }}>Auto</option>
+                <option value="12" {{ 'selected' if clock_format == '12' else '' }}>12-hour (3:42 PM)</option>
+                <option value="24" {{ 'selected' if clock_format == '24' else '' }}>24-hour (15:42)</option>
+              </select>
+            </div>
+            <button type="button" class="btn btn-outline-info btn-sm" onclick="saveTimezone(this)">
+              <i class="bi bi-check-lg me-1"></i>Save date &amp; time
+            </button>
+            <span class="test-result ms-2" id="timezone-result"></span>
+            {% endif %}
+          </div>
+
+          <div class="section-card">
+            <div class="section-title"><i class="bi bi-tools text-warning"></i> Maintenance</div>
+            <div class="d-flex flex-wrap gap-2 align-items-center mb-3">
+              <button type="button" class="btn btn-outline-secondary btn-sm" onclick="reloadSettings(this)">
+                <i class="bi bi-arrow-clockwise me-1"></i>Reload settings
+              </button>{{ info('Re-reads settings from disk and rebuilds the AI and Mealie clients so changes take effect without a restart. Handy after a restore or a hand edit.') }}
+              {% if is_pi_appliance %}
+              <button type="button" class="btn btn-outline-danger btn-sm" onclick="rebootNow(this)">
+                <i class="bi bi-power me-1"></i>Reboot now
+              </button>{{ info('Reboots this appliance immediately.') }}
+              {% endif %}
+              <span class="test-result ms-1" id="maintenance-result"></span>
+            </div>
+          </div>
+
+          <div class="section-card">
+            <div class="section-title"><i class="bi bi-bug text-warning"></i> Diagnostics</div>
+            <p class="text-secondary small">Turn on debug logging to capture detailed logs for troubleshooting, then
+              download them to share with support. Logs are written to a rotating file on this device and any saved
+              API keys or passwords are redacted from the download.</p>
+            <div class="form-check form-switch mb-2">
+              <input class="form-check-input" type="checkbox" id="debug_logging" onchange="toggleDebugLogging(this)">
+              <label class="form-check-label" for="debug_logging">Enable debug logging</label>
+            </div>
+            <button type="button" class="btn btn-outline-secondary btn-sm" onclick="downloadLogs()">
+              <i class="bi bi-download me-1"></i>Download logs
+            </button>
+            <button type="button" class="btn btn-outline-secondary btn-sm" onclick="downloadSupportBundle()">
+              <i class="bi bi-file-earmark-zip me-1"></i>Download support bundle
+            </button>{{ info('One zip with everything useful for a bug report: version, settings, logs, and (on a Pi) the device health report. Attach it when reporting a problem. Passwords and API keys are removed.') }}
+            <span class="test-result ms-2" id="logging-result"></span>
+          </div>
+
+          {% if features.satellite and s.hosted_stack_parked %}
+          <div class="section-card">
+            <div class="section-title"><i class="bi bi-box-arrow-in-left text-warning"></i> Return to full stack</div>
+            <p class="text-secondary small">This appliance used to run its own inventory stack, and that stack is
+              still on the device, paused, with all its data. Switching back starts it again, disconnects from the
+              main server, and restores the inventory, recipe, and AI settings this device had before the switch.</p>
+            <button class="btn btn-outline-warning btn-sm" id="switch-hosted-btn" onclick="switchToHosted(this)">
+              <i class="bi bi-box-arrow-in-left me-1"></i>Switch back to full stack
+            </button>
+            <div class="test-result mt-2" id="switch-hosted-result"></div>
+          </div>
+          {% endif %}
+        </div>

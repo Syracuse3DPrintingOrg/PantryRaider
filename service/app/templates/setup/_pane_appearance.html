@@ -1,0 +1,201 @@
+{% from "setup/_macros.html" import info, secret_input, extra_keys, ai_model_field, satellite_keys, upstream_cards, recipe_connection_cards, ds_toggle with context %}
+<!-- Appearance: theme, background image, and the navigation tabs -->
+        <div class="tab-pane fade show active" id="pane-appearance">
+          <p class="pane-intro">How the app looks everywhere: the colour theme, an optional background photo, and which pages appear in the navigation.</p>
+
+          <div class="section-card">
+            <div class="section-title"><i class="bi bi-palette text-success"></i> Theme</div>
+            <p class="text-secondary small">Choose the colour theme for the whole app. Applies on every page and
+              device (it's stored on the server). The "fun" themes use locally-bundled
+              <a href="https://bootswatch.com/" target="_blank">Bootswatch</a> styles (no external requests).</p>
+            <div class="mb-1">
+              <label class="form-label" for="ui_theme">Theme</label>
+              <select class="form-select" id="ui_theme" style="max-width:320px"
+                      onchange="applyTheme(this.value)">
+                {% for key, t in themes.items() %}
+                <option value="{{ key }}" {{ 'selected' if s.ui_theme == key else '' }}>{{ t.label }}</option>
+                {% endfor %}
+                {% if custom_themes %}
+                <optgroup label="Your custom themes">
+                  {% for ct in custom_themes %}
+                  <option value="custom:{{ ct.id }}" {{ 'selected' if s.ui_theme == 'custom:' ~ ct.id else '' }}>{{ ct.name }}</option>
+                  {% endfor %}
+                </optgroup>
+                {% endif %}
+              </select>
+              <div class="form-text" id="theme-hint">Theme applies immediately.</div>
+            </div>
+
+            {# Custom theme builder (FoodAssistant-hatd, named themes -nw49). The
+               swatches double as the editor for the active custom theme. Give it
+               a name and Save to add it to the dropdown above; saving applies it
+               straight away. Five curated colours plus a light/dark base, kept
+               deliberately small so any palette stays cohesive. #}
+            <div class="mt-3 pt-3 border-top" id="custom-theme-builder">
+              <div class="fw-semibold mb-1"><i class="bi bi-brush text-success me-1"></i>Build a custom theme</div>
+              <p class="text-secondary small mb-2">Pick your own colours, give the theme a name, then Save. It joins the
+                list above and applies immediately. Choose a light or dark base, then tweak the five swatches.</p>
+              <div class="row g-2 align-items-end mb-2" style="max-width:520px">
+                <div class="col-7">
+                  <label class="form-label small mb-1" for="custom_theme_name">Theme name</label>
+                  <input type="text" class="form-control form-control-sm" id="custom_theme_name"
+                         placeholder="My kitchen theme" value="{{ active_custom_name }}" maxlength="40">
+                </div>
+                <div class="col-5">
+                  <label class="form-label small mb-1" for="custom_theme_base">Base</label>
+                  <select class="form-select form-select-sm" id="custom_theme_base">
+                    <option value="dark"  {{ 'selected' if active_custom.base == 'dark' else '' }}>Dark</option>
+                    <option value="light" {{ 'selected' if active_custom.base == 'light' else '' }}>Light</option>
+                  </select>
+                </div>
+              </div>
+              <div class="d-flex flex-wrap gap-3">
+                <div>
+                  <label class="form-label small mb-1 d-block" for="custom_theme_primary">Primary</label>
+                  <input type="color" class="form-control form-control-color" id="custom_theme_primary"
+                         value="{{ active_custom.primary }}" title="Primary (buttons, links, active)">
+                </div>
+                <div>
+                  <label class="form-label small mb-1 d-block" for="custom_theme_accent">Accent</label>
+                  <input type="color" class="form-control form-control-color" id="custom_theme_accent"
+                         value="{{ active_custom.accent }}" title="Accent (success, secondary)">
+                </div>
+                <div>
+                  <label class="form-label small mb-1 d-block" for="custom_theme_bg">Background</label>
+                  <input type="color" class="form-control form-control-color" id="custom_theme_bg"
+                         value="{{ active_custom.bg }}" title="Page background">
+                </div>
+                <div>
+                  <label class="form-label small mb-1 d-block" for="custom_theme_surface">Surface</label>
+                  <input type="color" class="form-control form-control-color" id="custom_theme_surface"
+                         value="{{ active_custom.surface }}" title="Cards, inputs, chrome">
+                </div>
+                <div>
+                  <label class="form-label small mb-1 d-block" for="custom_theme_text">Text</label>
+                  <input type="color" class="form-control form-control-color" id="custom_theme_text"
+                         value="{{ active_custom.text }}" title="Body text">
+                </div>
+              </div>
+              <div class="mt-3 d-flex flex-wrap gap-2">
+                <button type="button" class="btn btn-outline-success btn-sm" onclick="saveCustomTheme(this)">
+                  <i class="bi bi-check-lg me-1"></i>Save custom theme
+                </button>
+                {% if s.ui_theme.startswith('custom:') %}
+                <button type="button" class="btn btn-outline-danger btn-sm" onclick="deleteCustomTheme(this)">
+                  <i class="bi bi-trash me-1"></i>Delete this theme
+                </button>
+                {% endif %}
+              </div>
+              <div class="test-result mt-2" id="custom-theme-result"></div>
+            </div>
+          </div>
+
+          {# Background image (FoodAssistant-e2t6): an optional photo behind the
+             whole UI, with an opacity slider so text stays readable. Upload a
+             file or paste a URL; the slider applies live and is saved with the
+             other theme settings. #}
+          <div class="section-card">
+            <div class="section-title"><i class="bi bi-image text-success"></i> Background image</div>
+            <p class="text-secondary small">Paint a photo behind the whole app. Upload an image or paste a URL, then use
+              the opacity slider so it stays subtle enough to read over. Applies on every page and device.</p>
+            <div class="mb-3">
+              <label class="form-label small mb-1" for="background_file">Upload an image</label>
+              <div class="input-group" style="max-width:480px">
+                <input type="file" class="form-control form-control-sm" id="background_file"
+                       accept="image/png,image/jpeg,image/webp,image/gif">
+                <button type="button" class="btn btn-outline-success btn-sm" onclick="uploadBackground(this)">
+                  <i class="bi bi-upload me-1"></i>Upload
+                </button>
+              </div>
+              <div class="form-text">JPG, PNG, WebP, or GIF, up to 8 MB.</div>
+            </div>
+            <div class="mb-3">
+              <label class="form-label small mb-1" for="background_image_url">…or an image URL</label>
+              <input type="text" class="form-control form-control-sm" id="background_image_url"
+                     style="max-width:480px" placeholder="https://example.com/kitchen.jpg"
+                     value="{{ '' if s.background_image_url.startswith('setup/background/image') else s.background_image_url }}">
+            </div>
+            <div class="mb-3" style="max-width:480px">
+              <label class="form-label small mb-1" for="background_opacity">Opacity:
+                <span id="background_opacity_val">{{ s.background_opacity }}</span>%</label>
+              <input type="range" class="form-range" id="background_opacity" min="0" max="100" step="5"
+                     value="{{ s.background_opacity }}"
+                     oninput="document.getElementById('background_opacity_val').textContent = this.value">
+              <div class="form-text">Lower opacity keeps the interface readable over a busy image.</div>
+            </div>
+            <div class="d-flex flex-wrap gap-2">
+              <button type="button" class="btn btn-outline-info btn-sm" onclick="saveBackground(this)">
+                <i class="bi bi-check-lg me-1"></i>Save background
+              </button>
+              <button type="button" class="btn btn-outline-danger btn-sm" onclick="clearBackground(this)">
+                <i class="bi bi-trash me-1"></i>Remove background
+              </button>
+            </div>
+            <div class="test-result mt-2" id="background-result"></div>
+          </div>
+
+          {# The nav tab editor shares the pane with the theme: both shape how
+             the app looks on every device. The on-screen nav bar and quiet
+             mode live under Screen & Sleep; the QR address under Connections. #}
+          <div class="section-card">
+            <div class="section-title"><i class="bi bi-layout-sidebar text-success"></i> Navigation Tabs</div>
+            <p class="text-secondary small">Drag a row to re-order it, or use the up and down buttons. Drop a tab onto
+              another top-level tab (or use the indent button) to nest it, which turns the parent into a dropdown
+              submenu; outdent to bring it back to the top level. Add a heading to make a folder that groups tabs but
+              has no page of its own. Hide the tabs you don't use with the switch. Tabs for services that aren't
+              configured (e.g. Mealie pages) hide automatically, and every page stays reachable by direct URL.</p>
+            <div class="vstack gap-1" id="nav-editor"></div>
+            <div class="mt-2">
+              <button type="button" class="btn btn-outline-secondary btn-sm" onclick="resetNavEditor(this)" title="Restore the default tab order, grouping, and visibility">
+                <i class="bi bi-arrow-counterclockwise me-1"></i>Reset to defaults
+              </button>
+              <span class="form-text ms-2">Restores the original tabs, order, and folders. Save to keep it.</span>
+            </div>
+            <div class="border-top mt-3 pt-3">
+              <div class="fw-semibold small mb-2"><i class="bi bi-folder-plus me-1"></i>Add a heading (folder)</div>
+              <div class="row g-2 align-items-end">
+                <div class="col-12 col-md-7">
+                  <label class="form-label small mb-1" for="custom-heading-label">Name</label>
+                  <input type="text" class="form-control form-control-sm" id="custom-heading-label" placeholder="Tools">
+                </div>
+                <div class="col-8 col-md-4">
+                  <label class="form-label small mb-1" for="custom-heading-icon">Icon (Bootstrap)</label>
+                  <input type="text" class="form-control form-control-sm" id="custom-heading-icon" placeholder="bi-folder">
+                </div>
+                <div class="col-4 col-md-1">
+                  <button type="button" class="btn btn-outline-warning btn-sm w-100" onclick="addHeading()" title="Add heading">
+                    <i class="bi bi-plus-lg"></i></button>
+                </div>
+              </div>
+              <div class="form-text" id="custom-heading-hint">A heading has no page; nest tabs under it to fill its dropdown. An empty heading stays hidden until it has children.</div>
+            </div>
+            <div class="border-top mt-3 pt-3">
+              <div class="fw-semibold small mb-2"><i class="bi bi-plus-circle me-1"></i>Add a custom tab</div>
+              <div class="row g-2 align-items-end">
+                <div class="col-12 col-md-4">
+                  <label class="form-label small mb-1" for="custom-tab-label">Label</label>
+                  <input type="text" class="form-control form-control-sm" id="custom-tab-label" placeholder="Home Assistant">
+                </div>
+                <div class="col-12 col-md-4">
+                  <label class="form-label small mb-1" for="custom-tab-url">URL or route</label>
+                  <input type="text" class="form-control form-control-sm" id="custom-tab-url" placeholder="https://ha.local or ui/about">
+                </div>
+                <div class="col-8 col-md-3">
+                  <label class="form-label small mb-1" for="custom-tab-icon">Icon (Bootstrap)</label>
+                  <input type="text" class="form-control form-control-sm" id="custom-tab-icon" placeholder="bi-house">
+                </div>
+                <div class="col-4 col-md-1">
+                  <button type="button" class="btn btn-outline-success btn-sm w-100" onclick="addCustomTab()" title="Add tab">
+                    <i class="bi bi-plus-lg"></i></button>
+                </div>
+              </div>
+              <div class="form-text" id="custom-tab-hint">Icons use <a href="https://icons.getbootstrap.com/" target="_blank" rel="noopener">Bootstrap Icons</a> names, e.g. bi-house. A full http(s) link opens in a new tab.</div>
+            </div>
+            <div class="mt-3">
+              <button type="button" class="btn btn-outline-info btn-sm" onclick="savePaneNavigation(this)">
+                <i class="bi bi-check-lg me-1"></i>Save Navigation
+              </button>
+              <div class="test-result mt-2" id="interface-save-result"></div>
+            </div>
+          </div>
+        </div>

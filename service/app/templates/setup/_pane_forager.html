@@ -1,0 +1,237 @@
+<!-- Forager: the optional Forager account (sign-in, plan and usage,
+             disconnect) and remote access to your kitchen from anywhere.
+             Main-install only: a Pi Remote forwards AI from the main server
+             and has no local app of its own to sign in or expose. -->
+        <div class="tab-pane fade" id="pane-forager">
+          <p class="pane-intro">Your optional Forager account: sign in for hands-off photo, receipt, and barcode scanning, see your plan and usage, and turn on remote access so you can reach your kitchen from anywhere.</p>
+
+          {# Forager sign-in (docs/design/cloud-platform.md, FoodAssistant-t6ab).
+             The link is per-install: this device signs in on its own and
+             appears as its own kitchen on the account, so it is never synced
+             from another device. The pairing-code path stays under Advanced
+             for portal-first setups. #}
+          <div class="section-card">
+            <div class="section-title"><i class="bi bi-cloud-check text-info"></i> Forager account</div>
+            {% if s.cloud_instance_token %}
+            <p class="text-secondary small">This device is connected to a Forager account. Photo
+              analysis, receipt reading, and barcode enrichment can run through your subscription.</p>
+            <div id="cloud-status" class="mb-3 small text-secondary">Checking the Forager connection…</div>
+            <div id="cloud-usage-display" class="mb-3 small text-secondary">Loading Forager plan and usage…</div>
+            {% if s.qr_public_url %}
+            <div class="mb-3 small text-secondary"><i class="bi bi-globe2 me-1"></i>Your kitchen's web address:
+              <a href="{{ s.qr_public_url }}" target="_blank" rel="noopener">{{ s.qr_public_url }}</a>.
+              Phone links and QR codes use this address, so it works at home and away.</div>
+            {% endif %}
+            {% if s.vision_provider != 'cloud' %}
+            <div class="alert alert-secondary py-2 small mb-3" style="max-width:520px">
+              <i class="bi bi-info-circle me-1"></i>Scanning still uses the provider you set up yourself;
+              connecting Forager changed nothing there.
+              <button type="button" class="btn btn-outline-info btn-sm ms-2" onclick="cloudUseForager(this)">
+                Use Forager for scanning
+              </button>
+            </div>
+            {% endif %}
+            <div class="mt-3">
+            <button type="button" class="btn btn-outline-danger btn-sm" onclick="cloudUnlink(this)">
+              <i class="bi bi-cloud-slash me-1"></i>Disconnect
+            </button>
+            <div class="form-text">Disconnecting signs this device out of the Forager account. You can also
+              remove it from your account page on the Forager website.</div>
+            </div>
+            {% else %}
+            <p class="text-secondary small">Pantry Raider is free and open source: bring your own AI key
+              and it works forever, no account needed. Forager is the optional convenience plan: sign in
+              and photo analysis, receipt reading, and barcode enrichment are handled for you, with
+              nothing else to set up. Every account starts with a 30 day free trial.</p>
+            <div style="max-width:420px">
+              <div class="mb-2">
+                <label class="form-label small mb-1" for="cloud_email">Email</label>
+                <input type="email" class="form-control form-control-sm" id="cloud_email"
+                       placeholder="you@example.com" autocomplete="email" spellcheck="false">
+              </div>
+              <div class="mb-2">
+                <label class="form-label small mb-1" for="cloud_password">Password</label>
+                <input type="password" class="form-control form-control-sm" id="cloud_password"
+                       placeholder="Your Forager password" autocomplete="current-password">
+              </div>
+              <div class="mb-2">
+                <label class="form-label small mb-1" for="cloud_kitchen_name">Kitchen name <span class="text-secondary">(optional)</span></label>
+                <input type="text" class="form-control form-control-sm" id="cloud_kitchen_name"
+                       value="{{ suggested_kitchen_name }}" placeholder="e.g. Home kitchen"
+                       autocomplete="off" spellcheck="false" oninput="sanitizeKitchenName(this)">
+                <div class="form-text">How this device appears on your Forager account. Letters, numbers, and dashes; it is used in your kitchen's web address.</div>
+              </div>
+              {# Shown only when the account has two-factor sign-in on and
+                 Forager asks for a code (cloudSignin reveals it). #}
+              <div class="mb-2 d-none" id="cloud_totp_wrap">
+                <label class="form-label small mb-1" for="cloud_totp">Code from your authenticator app</label>
+                <input type="text" class="form-control form-control-sm" id="cloud_totp"
+                       inputmode="text" autocomplete="one-time-code" spellcheck="false"
+                       placeholder="6-digit code, or a recovery code">
+                <div class="form-text">Your Forager account uses two-factor sign-in. Enter the current code from your authenticator app, or one of your recovery codes.</div>
+              </div>
+              <button type="button" class="btn btn-info btn-sm" onclick="cloudSignin(this)">
+                <i class="bi bi-box-arrow-in-right me-1"></i>Sign in and connect
+              </button>
+              <div class="form-text mt-2">New to Forager?
+                <a href="{{ cloud_signup_url }}" target="_blank" rel="noopener">Create an account</a>,
+                then come back here to sign in.</div>
+              {# Revealed by _initCloudMeta() only when Forager is reachable and
+                 offers Google sign-in; otherwise it stays hidden, no error. #}
+              <button type="button" class="btn btn-outline-light btn-sm ms-1 d-none" id="cloud-google-btn"
+                      onclick="cloudGoogleStart('')">
+                <i class="bi bi-google me-1"></i>Continue with Google
+              </button>
+              <div class="form-text">Your password goes to Forager only, to sign you in. It is never
+                saved on this device.</div>
+            </div>
+            <div class="mt-3">
+              <button class="btn btn-link btn-sm p-0 text-secondary text-decoration-none" type="button"
+                      data-bs-toggle="collapse" data-bs-target="#cloud-advanced-collapse" aria-expanded="false">
+                <i class="bi bi-chevron-down me-1"></i>Advanced: connect with a pairing code
+              </button>
+              <div class="collapse mt-2" id="cloud-advanced-collapse">
+                <p class="text-secondary small mb-2">Already signed in on the Forager website? Generate a
+                  pairing code there and enter it here instead.</p>
+                <div class="row g-2 align-items-end mb-2" style="max-width:420px">
+                  <div class="col">
+                    <label class="form-label small mb-1" for="cloud_pairing_code">Pairing code</label>
+                    <input type="text" class="form-control form-control-sm font-monospace" id="cloud_pairing_code"
+                           placeholder="from the Forager website" autocomplete="off" spellcheck="false">
+                  </div>
+                  <div class="col-auto">
+                    <button type="button" class="btn btn-outline-info btn-sm" onclick="cloudLink(this)">
+                      <i class="bi bi-link-45deg me-1"></i>Link
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+            {% endif %}
+            <div class="test-result mt-2" id="cloud-signin-result"></div>
+            <div class="test-result mt-2" id="cloud-link-result"></div>
+          </div>
+
+          {# Remote access: one section, two ways to reach your kitchen from
+             outside your home network. Off; Cloudflare Tunnel (free, DIY, a
+             cloudflared container you run yourself); or Forager (the managed
+             WireGuard hub tunnel, FoodAssistant-uczr), which uses your account
+             link and needs no token. tunnel_mode is the single source of truth;
+             a legacy stored "subscription" reads as Forager. #}
+          <div class="section-card">
+            <div class="section-title"><i class="bi bi-globe text-info"></i> Remote access</div>
+            <p class="text-secondary small">Reach your kitchen from anywhere, not just on your home
+              network, without opening ports on your router.
+              <strong>Cloudflare Tunnel</strong> is free and do-it-yourself: you run a small cloudflared
+              helper on this host. <strong>Forager</strong> is included with a plan: turn it on and your
+              kitchen gets a web address you can share, with nothing to set up. Remote access needs a
+              login password set under Settings, Security, so your kitchen stays private once it is
+              reachable from the internet.</p>
+
+            {# tunnel_mode is the single source of truth. A legacy stored
+               "subscription" reads as Forager. The WireGuard tunnel_enabled flag
+               only decides the Forager radio when Cloudflare is not the mode, so
+               exactly one radio is ever checked. #}
+            {% set _rmode = 'forager' if s.tunnel_mode == 'subscription' else s.tunnel_mode %}
+            {% set _cf_on = (_rmode == 'cloudflare') %}
+            {% set _forager_on = (_rmode == 'forager') or (s.tunnel_enabled and not _cf_on) %}
+            <div class="mb-3">
+              <label class="form-label">Mode</label>
+              <div class="d-flex flex-column gap-2" id="tunnel-mode-group">
+                <div class="form-check">
+                  <input class="form-check-input" type="radio" name="tunnel_mode" id="tunnel_mode_off"
+                         value="" {% if not _cf_on and not _forager_on %}checked{% endif %} onchange="tunnelModeChanged()">
+                  <label class="form-check-label" for="tunnel_mode_off">Off</label>
+                </div>
+                <div class="form-check">
+                  <input class="form-check-input" type="radio" name="tunnel_mode" id="tunnel_mode_cloudflare"
+                         value="cloudflare" {% if _cf_on %}checked{% endif %} onchange="tunnelModeChanged()">
+                  <label class="form-check-label" for="tunnel_mode_cloudflare">
+                    <i class="bi bi-cloud me-1 text-warning"></i>Cloudflare Tunnel
+                    <span class="badge bg-success ms-1">Free</span>
+                  </label>
+                </div>
+                <div class="form-check">
+                  <input class="form-check-input" type="radio" name="tunnel_mode" id="tunnel_mode_forager"
+                         value="forager" {% if _forager_on %}checked{% endif %} onchange="tunnelModeChanged()">
+                  <label class="form-check-label" for="tunnel_mode_forager">
+                    <i class="bi bi-cloud-check me-1 text-info"></i>Forager
+                    <span class="badge bg-info ms-1">Included with a plan</span>
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            {# Cloudflare sub-controls: the token this host uses and the
+               Connect/Disconnect buttons that run the cloudflared container. #}
+            <div id="tunnel-cf-controls" style="display:none">
+              <div class="mb-3">
+                <label class="form-label" for="tunnel_token">Cloudflare Tunnel token</label>
+                <input type="password" class="form-control font-monospace" id="tunnel_token"
+                       autocomplete="new-password"
+                       placeholder="{{ '•••• saved, leave blank to keep' if s.tunnel_token else 'Paste your tunnel token here' }}"
+                       value="">
+                <div class="form-text">
+                  Get your token from the
+                  <a href="https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/get-started/" target="_blank">
+                    Cloudflare Zero Trust dashboard</a>: create a tunnel, copy the token.
+                </div>
+              </div>
+              <div class="d-flex flex-wrap gap-2 align-items-center mb-3" id="tunnel-buttons">
+                <button class="btn btn-outline-success btn-sm" id="tunnel-connect-btn" onclick="tunnelConnect()">
+                  <i class="bi bi-plug me-1"></i>Connect
+                </button>
+                <button class="btn btn-outline-danger btn-sm" id="tunnel-disconnect-btn" onclick="tunnelDisconnect()">
+                  <i class="bi bi-plug-fill me-1"></i>Disconnect
+                </button>
+              </div>
+              <div class="d-flex align-items-center gap-2 mb-2" id="tunnel-status-row">
+                <span class="text-secondary small">Status:</span>
+                <span id="tunnel-status-badge" class="badge bg-secondary">Not connected</span>
+                <span id="tunnel-url-display" class="small"></span>
+              </div>
+            </div>
+
+            {# Forager sub-controls (WireGuard hub tunnel). No token: it uses the
+               account link. Turn on/off is gated server-side (linked, login
+               password set, and the device can host a tunnel: a Pi appliance,
+               or a server with WireGuard support). _loadTunnelStatus fills this
+               in. #}
+            <div id="tunnel-section" style="display:none">
+              <div id="tunnel-status" class="small text-secondary mb-2">Checking remote access…</div>
+              <div id="tunnel-controls" class="d-none">
+                {# Pick a web address before turning it on. Leave it blank and
+                   the address is taken from the device name, as before. The
+                   suffix is fixed; only the first label is yours to choose. #}
+                <div id="tunnel-address-chooser" class="mb-3" style="max-width:520px">
+                  <label class="form-label small mb-1" for="tunnel_subdomain">Web address <span class="text-secondary">(optional)</span></label>
+                  <div class="input-group input-group-sm">
+                    <input type="text" class="form-control" id="tunnel_subdomain"
+                           placeholder="{{ suggested_kitchen_name }}" autocomplete="off"
+                           spellcheck="false" oninput="tunnelSubdomainInput(this)">
+                    <span class="input-group-text">.{{ tunnel_apex }}</span>
+                  </div>
+                  <div class="form-text" id="tunnel-subdomain-hint">Choose the address people use to reach your kitchen. Leave it blank to use your device name.</div>
+                </div>
+                <button type="button" class="btn btn-outline-info btn-sm" id="tunnel-enable-btn"
+                        onclick="tunnelEnable(this)">
+                  <i class="bi bi-globe2 me-1"></i>Turn on remote access
+                </button>
+                <div class="d-none" id="tunnel-on-controls">
+                  <div class="small mb-2"><i class="bi bi-globe2 me-1"></i>Reachable at:
+                    <a href="#" id="tunnel-url-link" target="_blank" rel="noopener"></a>
+                    <button type="button" class="btn btn-link btn-sm p-0 ms-1 align-baseline"
+                            onclick="tunnelCopyUrl(this)">copy</button>
+                  </div>
+                  <div class="form-text mb-2">To change this web address, turn remote access off and back on with the new address.</div>
+                  <button type="button" class="btn btn-outline-danger btn-sm" id="tunnel-disable-btn"
+                          onclick="tunnelDisable(this)">
+                    <i class="bi bi-x-circle me-1"></i>Turn off remote access
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div class="test-result" id="tunnel-result"></div>
+          </div>
+        </div>

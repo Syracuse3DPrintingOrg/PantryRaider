@@ -1,0 +1,318 @@
+"""Settings reorganization (docs/design/settings-reorg.md, FoodAssistant-y78w).
+
+Iteration 2: the Settings page has two menus behind a top toggle, in the
+Plex/Jellyfin mold. Personalization (default) holds the everyday taste-level
+panes; Settings holds the set-and-forget administration. These tests guard
+that structure:
+
+* every pane pill renders in the right menu (``data-mgroup``) for the shapes
+  it applies to, and the top toggle is present with Personalization first,
+* no form control from the pre-reorg page was lost in the moves (the id lists
+  below were collected from the old template, per deployment shape),
+* both the original pre-reorg ``#pane-*`` deep links and the one-menu
+  iteration's links resolve through the ``PANE_HASH_ALIASES`` map,
+* the Start Page & Stream Deck pane keeps its two-editor toggle.
+"""
+from __future__ import annotations
+
+import os
+import re
+import sys
+from pathlib import Path
+from unittest.mock import patch
+
+import pytest
+
+_SERVICE = Path(__file__).resolve().parents[1] / "service"
+sys.path.insert(0, str(_SERVICE))
+
+from app.config import settings  # noqa: E402
+
+
+@pytest.fixture
+def client(monkeypatch, tmp_path):
+    from fastapi.testclient import TestClient
+    from app.main import app
+
+    cwd = os.getcwd()
+    os.chdir(_SERVICE)
+    monkeypatch.setattr(settings, "data_dir", str(tmp_path), raising=False)
+    monkeypatch.setattr(settings, "auth_required", False)
+    monkeypatch.setattr(settings, "auth_password", "")
+    try:
+        yield TestClient(app)
+    finally:
+        os.chdir(cwd)
+
+
+def _render(client, monkeypatch, *, mode: str, is_pi: bool) -> str:
+    monkeypatch.setattr(settings, "deployment_mode", mode)
+    with patch.object(type(settings), "is_configured", lambda self: True), \
+         patch("app.routers.setup.is_raspberry_pi", return_value=is_pi), \
+         patch("app.templating.is_raspberry_pi", return_value=is_pi):
+        r = client.get("/setup")
+    assert r.status_code == 200
+    return r.text
+
+
+SHAPES = [("server", False), ("pi_hosted", True), ("pi_remote", True)]
+
+# Menu membership: pane -> (menu group, shapes that get the pill).
+MENU_PILLS = {
+    # Personalization: touched often, the default menu.
+    "pane-appearance": ("p", {"server", "pi_hosted", "pi_remote"}),
+    "pane-screen": ("p", {"server", "pi_hosted", "pi_remote"}),
+    "pane-start-page": ("p", {"server", "pi_hosted", "pi_remote"}),
+    "pane-personalization-recipes": ("p", {"server", "pi_hosted", "pi_remote"}),
+    # Settings: set-and-forget server administration.
+    "pane-connections": ("s", {"server", "pi_hosted", "pi_remote"}),
+    "pane-scanning": ("s", {"server", "pi_hosted", "pi_remote"}),
+    # Forager (account sign-in + remote access) is main-install only.
+    "pane-forager": ("s", {"server", "pi_hosted"}),
+    "pane-inventory": ("s", {"server", "pi_hosted"}),
+    "pane-devices": ("s", {"server", "pi_hosted", "pi_remote"}),
+    "pane-security": ("s", {"server", "pi_hosted", "pi_remote"}),
+    "pane-backups": ("s", {"server", "pi_hosted", "pi_remote"}),
+    "pane-advanced": ("s", {"server", "pi_hosted", "pi_remote"}),
+}
+
+# Every form-control id the settings side (below the side menu) rendered
+# before the reorganization, per deployment shape. The reorganization moves
+# markup between panes; it must never drop a control. Collected from the
+# pre-reorg template render.
+_COMMON = [
+    "anthropic_api_key", "anthropic_model", "anthropic_model_sel", "api_key",
+    "auth_password", "auth_required", "auto_update",
+    "background_file", "background_image_url", "background_opacity",
+    "backup_include_secrets", "barcode_autocheck_shopping",
+    "barcode_enrichment", "barcode_global_capture", "barcode_llm_fallback",
+    "cook_ai_context",
+    "custom-heading-icon", "custom-heading-label",
+    "custom-tab-icon", "custom-tab-label", "custom-tab-url",
+    "custom_theme_accent", "custom_theme_base", "custom_theme_bg",
+    "custom_theme_name", "custom_theme_primary", "custom_theme_surface",
+    "custom_theme_text",
+    "debug_logging", "device_hostname",
+    "enrich_model", "enrich_model_sel", "enrich_provider",
+    "expiring_soon_days",
+    "floating_nav_autohide_streamdeck", "floating_nav_position",
+    "gemini_api_key", "gemini_model", "gemini_model_sel",
+    "grocy_api_key", "grocy_base_url", "grocy_public_url",
+    "ha_camera_popup_seconds", "ha_events_device", "ha_events_enabled",
+    "mealie_api_key", "mealie_base_url", "mealie_public_url",
+    "nav_visibility",
+    "ollama_base_url", "ollama_model", "ollama_model_sel",
+    "openai_api_key", "openai_model", "openai_model_sel",
+    "perishable_days", "qr_public_url", "qr_url_mode", "quiet_mode",
+    "rclone_remote", "rclone_schedule_hours", "recipe_source",
+    "restore-file", "scanner-test-input", "scanner_type",
+    "settings-search", "spoonacular_api_key", "staple_items",
+    "start_icon_color", "start_key_style", "start_page_enabled",
+    "start_page_keys",
+    "streamdeck_ha_base_url", "streamdeck_ha_token",
+    "streamdeck_weather_location", "streamdeck_weather_units",
+    "suggest_per_tier", "themealdb_api_key", "totp-code",
+    "ui_theme", "usb_backup_interval_hours", "vision_provider",
+    "appliance_stand_mixer", "appliance_air_fryer", "appliance_oven",
+]
+_PI_COMMON = [
+    "display_idle_timeout", "display_touch", "display_type",
+    "full-restore-source", "has_streamdeck", "kms_rotation", "new_hostname",
+    "scheduled_reboot_time", "screensaver_minutes", "screensaver_mode",
+    "screensaver_speed", "sd-profile-name-input", "sd-profile-select",
+    "streamdeck_brightness", "streamdeck_icon_color",
+    "streamdeck_idle_timeout", "streamdeck_key_count",
+    "streamdeck_key_style", "streamdeck_rotation",
+    "ui_scale", "wake_on_motion", "wifi_password", "wifi_ssid",
+]
+EXPECTED_IDS = {
+    "server": _COMMON + [
+        "ai_token_budget",
+        "cam-ip-host", "cam-ip-name", "cam-ip-pass", "cam-ip-path",
+        "cam-ip-port", "cam-ip-preset", "cam-ip-user", "cam-scan-cidr",
+        "scan_cidr", "timezone",
+        "tunnel_mode_cloudflare", "tunnel_mode_off",
+        "tunnel_mode_forager", "tunnel_token",
+    ],
+    "pi_hosted": _COMMON + _PI_COMMON + [
+        "ai_token_budget",
+        "cam-ip-host", "cam-ip-name", "cam-ip-pass", "cam-ip-path",
+        "cam-ip-port", "cam-ip-preset", "cam-ip-user", "cam-scan-cidr",
+        "scan_cidr", "timezone",
+        "tunnel_mode_cloudflare", "tunnel_mode_off",
+        "tunnel_mode_forager", "tunnel_token",
+        "switch_server_url", "switch_upstream_api_key",
+    ],
+    "pi_remote": _COMMON + _PI_COMMON + [
+        "kiosk_pin", "kiosk_readonly_when_locked",
+        "remote_server_url", "upstream_api_key",
+    ],
+}
+
+
+def test_two_menus_with_grouped_pills(client, monkeypatch):
+    for mode, is_pi in SHAPES:
+        html = _render(client, monkeypatch, mode=mode, is_pi=is_pi)
+        for pane, (group, shapes) in MENU_PILLS.items():
+            pill = re.search(
+                r'data-mgroup="([ps])" data-bs-toggle="pill" '
+                rf'data-bs-target="#{pane}"',
+                html,
+            )
+            if mode in shapes:
+                assert pill, (mode, pane, "pill missing")
+                assert pill.group(1) == group, (mode, pane, pill.group(1))
+            else:
+                assert not pill, (mode, pane, "unexpected pill")
+        # The dissolved Recipes & Meals pane has no pill and no pane div.
+        assert 'data-bs-target="#pane-recipes"' not in html
+        assert 'id="pane-recipes"' not in html
+        # The top toggle is back, with Personalization as the default menu.
+        assert 'id="menu-toggle-p"' in html
+        assert 'id="menu-toggle-s"' in html
+        assert "showSettingsMenu(" in html
+        # The menu wiring itself lives in the setup JS module.
+        menu_js = client.get("static/js/setup/menu.js").text
+        assert "localStorage.getItem('settingsMenu') || 'p'" in menu_js
+
+
+def test_no_setting_lost_in_reorg(client, monkeypatch):
+    """Every form control from the pre-reorg settings page still renders."""
+    for mode, is_pi in SHAPES:
+        html = _render(client, monkeypatch, mode=mode, is_pi=is_pi)
+        region = html.split('<div class="side-menu">', 1)[1]
+        found = set(
+            m.group(2)
+            for m in re.finditer(
+                r'<(input|select|textarea)\b[^>]*\bid="([^"]+)"', region
+            )
+        )
+        missing = [i for i in EXPECTED_IDS[mode] if i not in found]
+        assert not missing, (mode, missing)
+
+
+def test_old_pane_hashes_have_aliases(client, monkeypatch):
+    html = _render(client, monkeypatch, mode="server", is_pi=False)
+    # PANE_HASH_ALIASES lives in the setup menu module, not inline in the page.
+    menu_js = client.get("static/js/setup/menu.js").text
+    for old, new in {
+        # Original (pre-reorg) anchors.
+        "pane-theme": "pane-appearance",
+        "pane-navigation": "pane-appearance",
+        "pane-display": "pane-screen",
+        "pane-ai": "pane-scanning",
+        "pane-hardware": "pane-scanning",
+        "pane-personalization-storage": "pane-inventory",
+        "pane-homeassistant": "pane-connections",
+        "pane-cameras": "pane-connections",
+        "pane-tunnel": "pane-forager",
+        "pane-network": "pane-devices",
+        "pane-upstream": "pane-devices",
+        "pane-data": "pane-backups",
+        "pane-streamdeck": "pane-start-page",
+        # One-menu iteration anchor whose pane dissolved.
+        "pane-recipes": "pane-connections",
+    }.items():
+        assert f"'{old}': '{new}'," in menu_js, f"missing alias {old} -> {new}"
+    # Every iteration-1 anchor still lands: as a live pane div, or via alias.
+    for anchor in ("pane-appearance", "pane-screen", "pane-scanning",
+                   "pane-inventory", "pane-connections", "pane-devices",
+                   "pane-security", "pane-backups", "pane-advanced",
+                   "pane-start-page"):
+        assert f'id="{anchor}"' in html, f"iteration-1 anchor lost: {anchor}"
+    # Revived panes must not shadow themselves in the alias map.
+    assert "'pane-personalization-recipes':" not in menu_js
+    assert "'pane-start-page':" not in menu_js
+    # Dissolved panes leave no dead pane divs behind.
+    for gone in ("pane-theme", "pane-navigation", "pane-display", "pane-ai",
+                 "pane-hardware", "pane-personalization-storage",
+                 "pane-homeassistant", "pane-cameras", "pane-tunnel",
+                 "pane-network", "pane-upstream", "pane-data",
+                 "pane-recipes"):
+        assert f'id="{gone}"' not in html, f"stale pane div: {gone}"
+
+
+def test_start_deck_pane_sub_toggle(client, monkeypatch):
+    # On a Pi the pill offers both editors through the pane toggle; off-Pi
+    # there is no deck, so the Start Page stands alone with no toggle.
+    pi = _render(client, monkeypatch, mode="pi_hosted", is_pi=True)
+    assert "showDeckStart('start')" in pi
+    assert "showDeckStart('deck')" in pi
+    assert 'id="pane-start-page"' in pi and 'id="pane-streamdeck"' in pi
+    assert "Start Page &amp; Stream Deck" in pi
+    srv = _render(client, monkeypatch, mode="server", is_pi=False)
+    assert 'id="pane-start-page"' in srv
+    assert 'id="pane-streamdeck"' not in srv
+    assert 'class="btn-group mb-3 ds-toggle"' not in srv
+    # The old three-way This Device toggle is gone everywhere.
+    assert "showDeckStart('devices')" not in pi
+    assert "showDeckStart('devices')" not in srv
+
+
+def test_recipe_split_between_menus(client, monkeypatch):
+    """Mealie + external sources live in Connections (Settings menu); the
+    suggestion tuning lives in Recipe Preferences (Personalization menu)."""
+    html = _render(client, monkeypatch, mode="server", is_pi=False)
+    conn = html.split('id="pane-connections"', 1)[1].split('id="pane-', 1)[0]
+    for field in ("mealie_base_url", "mealie_api_key", "recipe_source",
+                  "themealdb_api_key", "spoonacular_api_key"):
+        assert field in conn, f"{field} not in Connections"
+    assert 'onclick="savePaneRecipes(this)"' in conn
+    prefs = html.split('id="pane-personalization-recipes"', 1)[1] \
+                .split('id="pane-', 1)[0]
+    for field in ("staple_items", "cook_ai_context", "kitchen-appliances",
+                  "perishable_days", "expiring_soon_days", "suggest_per_tier"):
+        assert field in prefs, f"{field} not in Recipe Preferences"
+    assert 'onclick="savePaneRecipePrefs(this)"' in prefs
+
+
+def test_satellite_devices_pane_holds_main_server(client, monkeypatch):
+    sat = _render(client, monkeypatch, mode="pi_remote", is_pi=True)
+    dev = sat.split('id="pane-devices"', 1)[1].split('id="pane-', 1)[0]
+    assert "remote_server_url" in dev
+    assert "syncFromUpstream" in dev
+    # The kiosk PIN stays in Security & Access.
+    sec = sat.split('id="pane-security"', 1)[1].split('id="pane-', 1)[0]
+    assert "kiosk_pin" in sec
+    assert "kiosk_readonly_when_locked" in sec
+
+
+def test_scheduled_reboot_frequency_controls(client, monkeypatch):
+    """The scheduled reboot offers Off/Nightly/Weekly with a day picker on the
+    Pi appliance shapes, and a pre-frequency install whose only stored value is
+    a reboot time renders as Nightly, so its behaviour is unchanged
+    (FoodAssistant-8x4u)."""
+    monkeypatch.setattr(settings, "scheduled_reboot_time", "", raising=False)
+    monkeypatch.setattr(settings, "scheduled_reboot_frequency", "", raising=False)
+    for mode, is_pi in SHAPES:
+        html = _render(client, monkeypatch, mode=mode, is_pi=is_pi)
+        present = 'id="scheduled_reboot_frequency"' in html
+        assert present == (mode in ("pi_hosted", "pi_remote")), mode
+        if present:
+            assert 'id="scheduled_reboot_day"' in html
+            # Nothing stored: the schedule renders as Off.
+            assert re.search(r'value="off"\s+selected', html)
+    # Legacy install: a stored time with no frequency stays nightly.
+    monkeypatch.setattr(settings, "scheduled_reboot_time", "03:30", raising=False)
+    html = _render(client, monkeypatch, mode="pi_hosted", is_pi=True)
+    assert re.search(r'value="nightly"\s+selected', html)
+
+
+def test_scheduled_reboot_save_validation(client, monkeypatch):
+    """/setup/save keeps only sane reboot frequency/day values; junk keeps the
+    stored setting (FoodAssistant-8x4u)."""
+    # Server mode so the save never tries to reach a host bridge.
+    monkeypatch.setattr(settings, "deployment_mode", "server")
+    saved = {}
+    monkeypatch.setattr(type(settings), "save", lambda self, d: saved.update(d))
+    r = client.post("/setup/save", json={
+        "scheduled_reboot_frequency": "weekly", "scheduled_reboot_day": 3})
+    assert r.status_code == 200
+    assert saved["scheduled_reboot_frequency"] == "weekly"
+    assert saved["scheduled_reboot_day"] == 3
+    saved.clear()
+    r = client.post("/setup/save", json={
+        "scheduled_reboot_frequency": "sometimes", "scheduled_reboot_day": 9})
+    assert r.status_code == 200
+    assert "scheduled_reboot_frequency" not in saved
+    assert "scheduled_reboot_day" not in saved

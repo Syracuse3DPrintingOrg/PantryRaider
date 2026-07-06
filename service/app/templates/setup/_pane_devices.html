@@ -1,0 +1,149 @@
+{% from "setup/_macros.html" import info, secret_input, extra_keys, ai_model_field, satellite_keys, upstream_cards, recipe_connection_cards, ds_toggle with context %}
+<!-- Devices & Fleet: this device's hardware and network, and the
+             satellite fleet -->
+        <div class="tab-pane fade" id="pane-devices">
+          {% if features.satellite %}
+          <p class="pane-intro">This device is a satellite: it runs the full app but pulls its backend config (Grocy, Mealie, AI keys, and expiry defaults) from your main Pantry Raider server.</p>
+          {{ upstream_cards() }}
+          {% else %}
+          <p class="pane-intro">This device's hardware and links, plus any Pi Remote satellites that pull their config from this server. Each satellite checks in on every config sync, so the list updates itself.</p>
+          <div class="section-card mb-3">
+            <div class="section-title d-flex align-items-center">
+              <i class="bi bi-hdd-stack text-info"></i> Known Devices
+              <button class="btn btn-outline-secondary btn-sm ms-auto" onclick="loadDevices()" title="Refresh">
+                <i class="bi bi-arrow-clockwise"></i>
+              </button>
+            </div>
+            <div id="devices-list">
+              <span class="text-secondary small"><span class="spinner-border spinner-border-sm me-2"></span>Loading...</span>
+            </div>
+          </div>
+
+          <div class="section-card">
+            <div class="section-title"><i class="bi bi-search text-info"></i> Find Devices on the LAN</div>
+            <p class="text-secondary small">Scan your local network for Pantry Raider instances that have not checked in yet. Leave the range blank to scan this server's own subnet.</p>
+            <div class="input-group mb-2" style="max-width:420px">
+              <input type="text" class="form-control" id="scan_cidr" placeholder="192.168.1.0/24 (optional)" autocomplete="off">
+              <button class="btn btn-outline-info" type="button" onclick="scanLan()" id="scan-lan-btn">
+                <i class="bi bi-search me-1"></i>Scan LAN
+              </button>
+            </div>
+            <div class="test-result" id="scan-result"></div>
+          </div>
+          {% endif %}
+
+          <div class="section-card">
+            <div class="section-title"><i class="bi bi-link-45deg text-info"></i> Device hostname</div>
+            <div class="mb-3">
+              <label class="form-label">Device hostname <span class="text-secondary small">(optional, for local browser links)</span></label>
+              <input type="text" class="form-control" id="device_hostname" name="device_hostname"
+                     placeholder="kitchen-pi"
+                     value="{{ s.device_hostname }}">
+              <div class="form-text">Used to build <span class="text-info">&lt;hostname&gt;.local</span> links to Grocy and Mealie on this device.
+                Empty = auto-detect. Set this when several Pantry Raider devices share one network.{% if is_pi %} The Hostname card below changes the device's actual network name; this field only shapes the links the app shows.{% endif %}</div>
+            </div>
+            <button type="button" class="btn btn-outline-info btn-sm" onclick="saveDeviceHostname(this)">
+              <i class="bi bi-check-lg me-1"></i>Save hostname
+            </button>
+            <div class="test-result mt-2" id="device-hostname-result"></div>
+          </div>
+
+          {% if is_pi %}
+          {# Pi system warnings (FoodAssistant-y06w): filled by
+             loadSystemWarnings() in setup/hardware.js from the host bridge's
+             continuous monitor (undervoltage, throttling, heat, storage).
+             Dismissing hides it until the page is next opened; the same
+             warnings also land in the action-items inbox and clear themselves
+             when the condition does. #}
+          <div id="system-warnings-banner" class="alert alert-warning alert-dismissible d-none" role="alert">
+            <div class="fw-semibold mb-1"><i class="bi bi-exclamation-triangle-fill me-1"></i>This device needs attention</div>
+            <ul class="mb-1 ps-4" id="system-warnings-list"></ul>
+            <div class="small" id="system-warnings-help"></div>
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Dismiss"></button>
+          </div>
+          <div class="section-card">
+            <div class="section-title"><i class="bi bi-hdd-stack text-info"></i> Attached hardware</div>
+            <div class="form-text mb-2">Live detection from the appliance host. Plug hardware in, then use Refresh.</div>
+            <div class="d-flex flex-column gap-2 mb-2" style="max-width:480px">
+              <div class="d-flex align-items-center justify-content-between">
+                <span><i class="bi bi-display me-1"></i>Display</span>
+                <span id="hwdetect-display"><span class="badge bg-secondary">Checking...</span></span>
+              </div>
+              <div class="d-flex align-items-center justify-content-between">
+                <span><i class="bi bi-grid-3x3-gap me-1"></i>Stream Deck</span>
+                <span id="hwdetect-streamdeck"><span class="badge bg-secondary">Checking...</span></span>
+              </div>
+            </div>
+            {# Detected-but-not-set-up hints: shown only when the hardware is
+               attached and the matching service was never provisioned, with a
+               one-click enable (FoodAssistant-92e.3). #}
+            <div id="hwdetect-kiosk-hint" class="d-none mb-2">
+              <div class="text-warning small mb-1"><i class="bi bi-exclamation-circle me-1"></i>Display detected, but the kiosk is not set up.</div>
+              <button type="button" class="btn btn-outline-info btn-sm" onclick="_installHw('kiosk', this, 'hwdetect-enable-result')">
+                <i class="bi bi-display me-1"></i>Enable kiosk
+              </button>
+            </div>
+            <div id="hwdetect-streamdeck-hint" class="d-none mb-2">
+              <div class="text-warning small mb-1"><i class="bi bi-exclamation-circle me-1"></i>Stream Deck detected, but its service is not set up.</div>
+              <button type="button" class="btn btn-outline-info btn-sm" onclick="_installHw('streamdeck', this, 'hwdetect-enable-result')">
+                <i class="bi bi-grid-3x3-gap me-1"></i>Enable Stream Deck
+              </button>
+            </div>
+            <div class="test-result mb-2" id="hwdetect-enable-result"></div>
+            <button type="button" class="btn btn-outline-secondary btn-sm" onclick="loadHardwareDetect()">
+              <i class="bi bi-arrow-repeat me-1"></i>Refresh
+            </button>
+          </div>
+          <div class="section-card mb-3">
+            <div class="section-title"><i class="bi bi-wifi text-info"></i> Wi-Fi</div>
+            <div id="wifi-status-row" class="mb-3">
+              <span class="text-secondary small"><span class="spinner-border spinner-border-sm me-2"></span>Checking connection...</span>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Network name (SSID)</label>
+              <div class="input-group">
+                <input type="text" class="form-control" id="wifi_ssid" placeholder="Your Wi-Fi network name" autocomplete="off">
+                <button class="btn btn-outline-secondary" type="button" onclick="scanWifi()" id="wifi-scan-btn" title="Scan for networks">
+                  <i class="bi bi-search me-1"></i>Scan
+                </button>
+              </div>
+              <div id="wifi-scan-results" class="mt-2"></div>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Password</label>
+              <div class="input-group">
+                <input type="password" class="form-control" id="wifi_password" placeholder="Leave blank for open networks" autocomplete="new-password">
+                <button class="btn btn-outline-secondary" type="button" onclick="toggleVis('wifi_password')" title="Show/hide">
+                  <i class="bi bi-eye"></i>
+                </button>
+              </div>
+            </div>
+            <div class="alert alert-warning py-2 small mb-3">
+              <i class="bi bi-exclamation-triangle me-1"></i>The device will briefly disconnect while switching networks.
+              If you are connected via Wi-Fi you may need to reconnect on the new network to reach the web UI.
+              Connecting via Ethernet avoids this.
+            </div>
+            <button class="btn btn-outline-warning btn-sm" onclick="changeWifi()">
+              <i class="bi bi-wifi me-1"></i>Switch Network
+            </button>
+            <div class="test-result mt-2" id="wifi-result"></div>
+          </div>
+
+          <div class="section-card">
+            <div class="section-title"><i class="bi bi-pc-display text-info"></i> Hostname</div>
+            <div id="hostname-status-row" class="mb-3">
+              <span class="text-secondary small">Checking...</span>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Hostname</label>
+              <input type="text" class="form-control" id="new_hostname" placeholder="foodassistant" autocomplete="off" style="max-width:320px">
+              <div class="form-text">This device is reachable at <code>&lt;hostname&gt;.local</code>.
+                Lowercase letters, digits, and hyphens only. Takes effect immediately.</div>
+            </div>
+            <button class="btn btn-outline-info btn-sm" onclick="changeHostname()">
+              <i class="bi bi-check-lg me-1"></i>Update Hostname
+            </button>
+            <div class="test-result mt-2" id="hostname-result"></div>
+          </div>
+          {% endif %}
+        </div>

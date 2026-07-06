@@ -1,0 +1,195 @@
+{% from "setup/_macros.html" import info, secret_input, extra_keys, ai_model_field, satellite_keys, upstream_cards, recipe_connection_cards, ds_toggle with context %}
+<!-- Backups & Updates -->
+        <div class="tab-pane fade" id="pane-backups">
+          <p class="pane-intro">Save your data off-box and keep the app up to date.</p>
+
+          <div class="section-card">
+            <div class="section-title"><i class="bi bi-archive text-success"></i> Backup</div>
+            <p class="text-secondary small">Pantry Raider's data directory (settings, database, staples list) as a zip.
+              Grocy and Mealie data live in separate containers: use
+              <code>scripts/backup.sh</code> on the host for a full snapshot.</p>
+            <div class="form-check mb-2">
+              <input class="form-check-input" type="checkbox" id="backup_include_secrets">
+              <label class="form-check-label small" for="backup_include_secrets">
+                Include API keys &amp; passwords
+                <span class="text-warning"><i class="bi bi-exclamation-triangle-fill"></i></span>
+              </label>
+              <div class="form-text">By default secrets are stripped (and <code>rclone.conf</code> is omitted) so the
+                file is safe to store off-box; after restoring you re-enter keys here. Only include them if the
+                destination is trusted.</div>
+            </div>
+            {% if has.auth_password %}
+            <div class="mb-2" style="max-width:320px">
+              <label class="form-label small mb-1" for="backup_password">Confirm your password</label>
+              <input type="password" class="form-control form-control-sm" id="backup_password"
+                     autocomplete="current-password" placeholder="Current app password">
+              <div class="form-text">This backup can carry your API keys and passwords, so confirm your
+                current password to download it.</div>
+            </div>
+            {% endif %}
+            <div class="d-flex flex-wrap gap-2 mb-2">
+              <button id="download-backup" class="btn btn-outline-info btn-sm" onclick="downloadBackup(this)">
+                <i class="bi bi-download me-1"></i>Download Backup
+              </button>
+              <button class="btn btn-outline-secondary btn-sm" onclick="pushToRemote(this)"
+                      {% if not s.rclone_remote %}disabled title="Configure a remote below first"{% endif %}>
+                <i class="bi bi-cloud-upload me-1"></i>Push to Remote
+              </button>
+            </div>
+            <div class="test-result mb-3" id="backup-result"></div>
+            <div class="mb-2">
+              <div class="subsection-title"><i class="bi bi-file-zip me-1"></i>Restore from a backup zip</div>
+              <div class="input-group input-group-sm" style="max-width:520px">
+                <input type="file" class="form-control" id="restore-file" accept=".zip">
+                <button class="btn btn-outline-warning" onclick="restoreBackup(this)">
+                  <i class="bi bi-upload me-1"></i>Restore
+                </button>
+              </div>
+              <div class="form-text">Rewrites this app's data (settings, database, staples) from the zip. The
+                current data is copied aside first, and a redacted backup keeps the API keys you already have.
+                Grocy and Mealie data are not touched here. Reload the page after a restore.</div>
+              <div class="test-result mt-1" id="restore-result"></div>
+            </div>
+            {% if is_pi %}
+            <div class="mb-2 border-top border-secondary pt-3">
+              <div class="subsection-title"><i class="bi bi-hdd-stack me-1"></i>Full restore (Grocy + Mealie)</div>
+              <div class="input-group input-group-sm" style="max-width:560px">
+                <input type="text" class="form-control font-monospace" id="full-restore-source"
+                       placeholder="/path/to/foodassistant-YYYYMMDD.tar.gz  or  rclone:remote:bucket/snapshot.tar.gz">
+                <button class="btn btn-outline-danger" onclick="fullRestore(this)">
+                  <i class="bi bi-hdd-stack me-1"></i>Restore
+                </button>
+              </div>
+              <div class="form-text">Restores the <strong>entire stack snapshot</strong> made by
+                <code>scripts/backup.sh</code> (this app's data, Grocy inventory, and Mealie). Give a device path,
+                or <code>rclone:remote:path</code> to pull from the configured remote first. This
+                <strong>stops the container stack and replaces all data</strong>; the current data is moved aside
+                (<code>.pre-restore-&lt;stamp&gt;</code>, nothing deleted) and the stack restarts. Distinct from the
+                app-data Restore above.</div>
+              <div class="test-result mt-1" id="full-restore-result"></div>
+            </div>
+            {% endif %}
+            <div class="mb-2">
+              <label class="form-label">Rclone Remote Path <span class="text-secondary small">(optional)</span></label>
+              <input type="text" class="form-control font-monospace" id="rclone_remote"
+                     placeholder="s3:mybucket/foodassistant  or  gdrive:backups/food"
+                     value="{{ s.rclone_remote }}">
+              <div class="form-text">Any <a href="https://rclone.org/docs/" target="_blank">rclone remote</a>
+                you've configured via <code>docker exec foodassistant-service rclone config</code>.
+                Config is stored at <code>/app/data/rclone.conf</code>.</div>
+            </div>
+            <div class="mb-2">
+              <label class="form-label">Auto-backup interval <span class="text-secondary small">(hours, 0 = off)</span>{{ info('How often a backup is pushed to the rclone remote above automatically. 0 turns the schedule off; Push to Remote always works on demand.') }}</label>
+              <input type="number" class="form-control" id="rclone_schedule_hours" min="0" max="720"
+                     value="{{ s.rclone_schedule_hours }}" style="width:120px">
+            </div>
+            <button class="btn btn-outline-secondary btn-sm" onclick="testRcloneRemote(this)">
+              <i class="bi bi-plug me-1"></i>Test Remote
+            </button>
+            <div class="test-result" id="rclone-result"></div>
+            <div class="mb-2 border-top border-secondary pt-3 mt-3">
+              <div class="subsection-title"><i class="bi bi-usb-drive me-1"></i>USB drive backup</div>
+              <div class="form-text">Plug a flash drive into this device and Pantry Raider saves backups to a
+                <code>pantryraider-backups</code> folder on it, on a schedule or on demand. The drive just needs
+                to be formatted and mounted; the newest 14 backups are kept, and nothing else on the drive is
+                touched.{% if is_satellite %} On this device a backup holds its settings and local data, so a
+                replacement unit can be restored from it.{% endif %}</div>
+              <div class="test-result my-2" id="usb-status"></div>
+              <div class="mb-2">
+                <label class="form-label">Automatic USB backup interval <span class="text-secondary small">(hours, 0 = off)</span>{{ info('How often a backup is written to the attached USB drive. 0 turns the schedule off; Back up now always works on demand.') }}</label>
+                <input type="number" class="form-control" id="usb_backup_interval_hours" min="0" max="720"
+                       value="{{ s.usb_backup_interval_hours }}" style="width:120px">
+              </div>
+              <button class="btn btn-outline-secondary btn-sm" onclick="usbBackupNow(this)">
+                <i class="bi bi-usb-drive me-1"></i>Back up now
+              </button>
+              <div class="test-result mt-1" id="usb-backup-result"></div>
+            </div>
+            <div class="mt-2">
+              <button type="button" class="btn btn-outline-info btn-sm" onclick="savePaneData(this)">
+                <i class="bi bi-check-lg me-1"></i>Save Backup Settings
+              </button>
+              <div class="test-result mt-2" id="data-save-result"></div>
+            </div>
+          </div>
+
+          <div class="section-card">
+            <div class="section-title"><i class="bi bi-arrow-repeat text-success"></i> Updates
+              <span class="badge bg-secondary">v{{ version }}</span>
+              <a href="https://github.com/{{ github_repo }}/blob/main/CHANGELOG.md" target="_blank" rel="noopener"
+                 class="small ms-2 text-decoration-none"><i class="bi bi-journal-text me-1"></i>Release notes</a></div>
+            {% if is_pi_appliance %}
+            <p class="text-secondary small">Check for a newer version, then update in place. Updating downloads the
+              latest Pantry Raider and restarts the app (no SSH needed). On a Pi Hosted box it refreshes the Docker
+              image; on a Pi Remote it refreshes the local install. A failed update leaves the running version
+              untouched.</p>
+            <div class="test-result mb-2" id="update-avail"></div>
+            <button class="btn btn-outline-secondary btn-sm" id="update-check-btn" onclick="checkSatelliteUpdate(this)">
+              <i class="bi bi-cloud-arrow-down me-1"></i>Check for updates
+            </button>
+            <button class="btn btn-outline-primary btn-sm" id="update-btn" onclick="checkForUpdates()">
+              <i class="bi bi-arrow-repeat me-1"></i>Update now
+            </button>
+            <div class="test-result" id="update-result"></div>
+            <pre class="small text-secondary mt-2 d-none" id="update-log" style="white-space:pre-wrap; max-height:220px; overflow:auto;"></pre>
+            {% else %}
+            <p class="text-secondary small">Check for a newer version and install it. Update now downloads the
+              latest version and restarts the app. If automatic updates are turned off, use the commands below
+              instead.</p>
+            <div class="test-result mb-2" id="update-avail"></div>
+            <button class="btn btn-outline-secondary btn-sm" onclick="checkSatelliteUpdate(this)">
+              <i class="bi bi-cloud-arrow-down me-1"></i>Check for updates
+            </button>
+            <button class="btn btn-outline-primary btn-sm" id="server-update-btn" onclick="updateServerNow(this)">
+              <i class="bi bi-arrow-repeat me-1"></i>Update now
+            </button>
+            <div class="test-result" id="update-result"></div>
+            <div class="mt-3">
+              <div class="small text-secondary mb-1"><strong>Manual update (if the updater is off):</strong></div>
+              <pre class="bg-body-tertiary border rounded p-2 small mb-2"><code>docker compose pull
+docker compose up -d</code></pre>
+              <div class="small text-secondary mb-1"><strong>Home Assistant add-on:</strong> update from the
+                add-on page when a new version is offered.</div>
+              <div class="small text-secondary"><strong>Built from source:</strong>
+                <code>git pull &amp;&amp; docker compose up -d --build service</code></div>
+            </div>
+            {% endif %}
+
+            <div class="form-text mt-1" id="update-last-checked">
+              {%- if update_last_checked_display %}Last checked: {{ update_last_checked_display }}
+              {%- if update_last_available %} <span class="text-warning">(v{{ update_last_latest }} available)</span>{% else %} (up to date){% endif %}
+              {%- else %}Not checked yet.{% endif %}
+            </div>
+
+            <hr class="my-3">
+            <div class="form-check form-switch mb-1">
+              <input class="form-check-input" type="checkbox" id="auto_update"
+                     {{ 'checked' if s.auto_update else '' }}
+                     {% if is_satellite %}disabled{% else %}onchange="saveAutoUpdate(this)"{% endif %}>
+              <label class="form-check-label" for="auto_update">Install updates automatically</label>
+            </div>
+            {% if is_satellite %}
+            <div class="form-text"><i class="bi bi-hdd-network me-1"></i>Managed on the main server. A remote follows the server so the whole fleet stays on the same version.</div>
+            {% elif is_pi_appliance %}
+            <div class="form-text">On by default. This device and any remotes connected to it update themselves and stay on the same version. Turn it off to update only with the button above.</div>
+            {% else %}
+            <div class="form-text">On by default. This setting also applies to any Pi Remotes connected to this server, so the fleet stays on the same version. This server itself auto-updates through the Watchtower container (see the README).</div>
+            {% endif %}
+            <span class="test-result ms-1" id="auto-update-result"></span>
+            <div class="mt-3">
+              <label class="form-label" for="update_channel">Update channel</label>
+              <select class="form-select form-select-sm" id="update_channel" style="max-width:340px"
+                      {% if is_satellite %}disabled{% else %}onchange="saveUpdateChannel(this)"{% endif %}>
+                <option value="main" {{ 'selected' if s.update_channel != 'stable' else '' }}>Latest (every change)</option>
+                <option value="stable" {{ 'selected' if s.update_channel == 'stable' else '' }}>Releases only</option>
+              </select>
+              {% if is_satellite %}
+              <div class="form-text"><i class="bi bi-hdd-network me-1"></i>Managed on the main server. A remote follows the server's channel so the whole fleet updates from the same source.</div>
+              {% else %}
+              <div class="form-text">Releases only updates to tested, numbered releases. Latest installs every change as soon as it is published, and is the default for now. Starting with release 0.8.0, Releases only is the recommended choice for everyday kitchens.</div>
+              {% endif %}
+              <span class="test-result ms-1" id="update-channel-result"></span>
+            </div>
+          </div>
+
+        </div>

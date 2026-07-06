@@ -1,0 +1,103 @@
+{% from "setup/_macros.html" import info, secret_input, extra_keys, ai_model_field, satellite_keys, upstream_cards, recipe_connection_cards, ds_toggle with context %}
+<!-- Inventory & Storage (Grocy + custom storage categories) -->
+        <div class="tab-pane fade" id="pane-inventory">
+          <p class="pane-intro">Where your stock lives: the Grocy backend and the storage buckets it's grouped into.</p>
+
+          <div class="section-card">
+            <div class="section-title"><i class="bi bi-fridge text-info"></i> Grocy: Inventory Backend</div>
+            <p class="text-secondary small">Grocy is the open-source inventory app that stores your stock, storage
+              locations, and consumption history. Pantry Raider reads and updates it through Grocy's API, so it
+              needs the Grocy address and an API key.
+              {% if is_pi %}Grocy is running on this device at port 9383.{% else %}Connect to a Grocy instance running on your network or server.{% endif %}</p>
+            <div class="alert alert-secondary py-2 small d-flex flex-wrap gap-3 mb-3">
+              <span><i class="bi bi-book me-1"></i><a href="https://grocy.info" target="_blank" rel="noopener">Grocy docs</a></span>
+              <span><i class="bi bi-journal-text me-1"></i><a href="https://github.com/Syracuse3DPrintingOrg/PantryRaider#readme" target="_blank" rel="noopener">Pantry Raider install guide</a></span>
+              <span><i class="bi bi-key me-1"></i>API key: in Grocy, open Settings then Manage API keys and add one.</span>
+              {% if is_pi %}<span><i class="bi bi-hdd-network me-1"></i>Default URL on this appliance: <code>http://{{ s.device_hostname or 'foodassistant' }}.local:9383</code></span>{% endif %}
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Grocy URL</label>
+              <input type="url" class="form-control" id="grocy_base_url"
+                     placeholder="http://192.168.1.10:9383"
+                     value="{{ s.grocy_base_url if (s.grocy_base_url and s.grocy_base_url != 'http://grocy:80') else suggested_grocy_url }}">
+              <div class="form-text">Full URL to your Grocy instance, no trailing slash.
+                {% if suggested_grocy_url and not s.grocy_base_url %}
+                <span class="text-success"><i class="bi bi-check-circle me-1"></i>Grocy detected locally, URL pre-filled.</span>
+                {% endif %}
+                {% if is_pi and not features.satellite %}
+                <span class="d-block">On a Pi Hosted box Grocy runs alongside the app, so the pre-filled default works as is. You do not need to change it.</span>
+                {% endif %}
+              </div>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Grocy API Key</label>
+              {{ secret_input('grocy_api_key', 'Grocy → Profile → Manage API Keys') }}
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Grocy Public URL <span class="text-secondary small">(optional, for browser links via reverse proxy)</span></label>
+              <input type="url" class="form-control" id="grocy_public_url" name="grocy_public_url"
+                     placeholder="https://grocy.yourdomain.com"
+                     value="{{ s.grocy_public_url }}">
+              <div class="form-text">External address used when the UI links you to Grocy. Empty = internal URL.</div>
+            </div>
+            <button class="btn btn-outline-info btn-sm" onclick="testGrocy()">
+              <i class="bi bi-plug me-1"></i>Test Connection
+            </button>
+            <div class="test-result" id="grocy-result"></div>
+            <div class="mt-2">
+              <button type="button" class="btn btn-outline-info btn-sm" onclick="savePaneGrocy(this)">
+                <i class="bi bi-check-lg me-1"></i>Save Grocy
+              </button>
+              <div class="test-result mt-2" id="grocy-save-result"></div>
+            </div>
+          </div>
+
+          {# Custom Storage Categories share the pane with the Grocy backend:
+             both describe where stock lives. A satellite pulls categories from
+             the main server, so the card is gated out for it. #}
+          {% if not features.satellite %}
+          <div class="section-card">
+            <div class="section-title"><i class="bi bi-grid-3x3-gap text-info"></i> Custom Storage Categories</div>
+            <p class="text-secondary small">Add storage buckets beyond the four built-ins (Refrigerated, Frozen,
+              Room Temp, Pantry), e.g. Wine Cellar, Garage Fridge, Liquor Cabinet. Each maps to a Grocy location;
+              assign items to it from the <strong>Move</strong> button on the Inventory page. Saved separately from
+              the main settings: use <em>Save categories</em> below.</p>
+            <div class="vstack gap-2" id="storage-cat-editor">
+              {% for c in custom_categories %}
+              <div class="cat-row border rounded p-2">
+                <div class="row g-2 align-items-end">
+                  <div class="col-6 col-md-3">
+                    <label class="form-label small mb-1">Name</label>
+                    <input class="form-control form-control-sm cat-label" value="{{ c.label }}" placeholder="Wine Cellar">
+                  </div>
+                  <div class="col-6 col-md-2">
+                    <label class="form-label small mb-1">Icon <a href="https://icons.getbootstrap.com/" target="_blank" class="text-secondary" title="Browse icons"><i class="bi bi-box-arrow-up-right"></i></a></label>
+                    <input class="form-control form-control-sm cat-icon" value="{{ c.icon }}" placeholder="bi-database">
+                  </div>
+                  <div class="col-4 col-md-1">
+                    <label class="form-label small mb-1">Color</label>
+                    <input type="color" class="form-control form-control-sm form-control-color cat-color" value="{{ c.color }}">
+                  </div>
+                  <div class="col-8 col-md-3">
+                    <label class="form-label small mb-1">Grocy location</label>
+                    <input class="form-control form-control-sm cat-location" value="{{ c.location }}" placeholder="Wine Cellar">
+                  </div>
+                  <div class="col-9 col-md-2">
+                    <label class="form-label small mb-1">Match <span class="text-secondary">keywords</span></label>
+                    <input class="form-control form-control-sm cat-match" value="{{ c.match | join(', ') }}" placeholder="wine, cellar">
+                  </div>
+                  <div class="col-3 col-md-1 d-grid">
+                    <button class="btn btn-outline-danger btn-sm" onclick="this.closest('.cat-row').remove()" title="Remove"><i class="bi bi-trash"></i></button>
+                  </div>
+                </div>
+              </div>
+              {% endfor %}
+            </div>
+            <div class="d-flex flex-wrap gap-2 mt-2 align-items-center">
+              <button class="btn btn-outline-secondary btn-sm" onclick="addCatRow()"><i class="bi bi-plus-lg me-1"></i>Add category</button>
+              <button class="btn btn-primary btn-sm" onclick="saveStorageCategories()" id="catSaveBtn"><i class="bi bi-check2 me-1"></i>Save categories</button>
+              <span id="catSaveResult" class="small"></span>
+            </div>
+          </div>
+          {% endif %}
+        </div>

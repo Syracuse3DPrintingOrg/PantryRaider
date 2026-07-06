@@ -1,0 +1,371 @@
+{% from "setup/_macros.html" import info, secret_input, extra_keys, ai_model_field, satellite_keys, upstream_cards, recipe_connection_cards, ds_toggle with context %}
+<!-- Screen & Sleep: the kiosk panel plus the on-screen nav bar -->
+        <div class="tab-pane fade" id="pane-screen">
+          {% if is_pi %}
+          <p class="pane-intro">The screen wired to this appliance, plus the on-screen navigation bar. Panel settings only affect the local kiosk display, not browsers on other devices.</p>
+          {% else %}
+          <p class="pane-intro">How the app behaves on a screen: the on-screen navigation bar and quiet mode. Panel, sleep, and screensaver settings appear here on a device with an attached display.</p>
+          {% endif %}
+
+          {% if is_pi and hardware_presets %}
+          <div class="section-card mb-3">
+            <div class="section-title"><i class="bi bi-magic text-info"></i> Hardware preset</div>
+            <p class="text-secondary small">Running one of our known setups? Apply its preset to set the rotation, screen size, display, and Stream Deck all at once. You can still fine-tune each setting afterward.</p>
+            <div class="d-flex flex-wrap gap-2 align-items-center">
+              <select class="form-select form-select-sm w-auto" id="hw_preset">
+                <option value="">Choose a preset...</option>
+                {% for pid, preset in hardware_presets.items() %}
+                <option value="{{ pid }}">{{ preset.label }}</option>
+                {% endfor %}
+              </select>
+              <button type="button" class="btn btn-outline-info btn-sm" onclick="applyHardwarePreset('hw_preset')">
+                <i class="bi bi-check-lg me-1"></i>Apply preset
+              </button>
+              <span class="test-result hw-preset-result ms-1"></span>
+            </div>
+          </div>
+          {% endif %}
+
+          {% if is_pi %}
+          <div class="section-card mb-3">
+            <div class="section-title"><i class="bi bi-aspect-ratio text-info"></i> Kiosk Display</div>
+            <p class="text-secondary small">Scale and CSS rotation apply immediately in the kiosk browser without a reboot.</p>
+            <div class="row g-3 mb-3">
+              <div class="col-sm-6">
+                <label class="form-label" for="ui_scale">Scale</label>
+                <select class="form-select" id="ui_scale" onchange="applyDisplay()">
+                  {% for key, sc in ui_scales.items() %}
+                  <option value="{{ key }}" {{ 'selected' if s.ui_scale == key else '' }}>{{ sc.label }}</option>
+                  {% endfor %}
+                </select>
+                <div class="form-text">Larger for a small panel; smaller for a wide monitor.</div>
+              </div>
+            </div>
+            <div class="mb-3">
+              <label class="form-label" for="display_type">Display type</label>
+              <select class="form-select form-select-sm" style="max-width:320px" id="display_type">
+                {% for key, dt in display_types.items() %}
+                <option value="{{ key }}" {{ 'selected' if (s.display_type or 'generic') == key else '' }}>{{ dt.label }}</option>
+                {% endfor %}
+              </select>
+              <div class="form-text">Pick the type that matches your panel. A <strong>resistive</strong> Waveshare 3.5-4 inch HDMI LCD is the <em>ADS7846 SPI</em> option; a Waveshare HDMI HAT with a USB touch cable is the <em>USB touch</em> option. After choosing, use "Apply touch driver" below so the boot overlay is written (a reboot loads it).</div>
+            </div>
+            <div class="form-check form-switch mb-2">
+              <input class="form-check-input" type="checkbox" role="switch" id="display_touch"
+                     {{ 'checked' if s.display_touch else '' }}>
+              <label class="form-check-label" for="display_touch">Touch-compatible display{{ info('Turn on when the panel accepts touch input. Pick the matching display type above, then use Apply touch driver so the right driver loads.') }}</label>
+            </div>
+            {% if is_pi %}
+            <div class="mb-3" id="touch-provision-row">
+              <button class="btn btn-outline-secondary btn-sm" onclick="applyTouchDriver(this)">
+                <i class="bi bi-usb-plug me-1"></i>Apply touch driver
+              </button>
+              <button class="btn btn-outline-secondary btn-sm ms-1" onclick="applyTouchDriver(this, true)"
+                      title="Write the overlay and reboot now to load it">
+                <i class="bi bi-arrow-repeat me-1"></i>Apply &amp; reboot
+              </button>
+              <div class="form-text">Writes the boot config the selected display type needs (for an ADS7846 SPI panel this enables SPI and adds the touch overlay). Needed once, and again only if you change the display type. Takes effect after a reboot.</div>
+              <div class="test-result mt-2" id="touch-provision-result"></div>
+            </div>
+            <div class="mb-3" id="touch-calibrate-row">
+              <button class="btn btn-outline-secondary btn-sm" onclick="startTouchCalibration()">
+                <i class="bi bi-crosshair me-1"></i>Calibrate touchscreen
+              </button>
+              <button class="btn btn-outline-secondary btn-sm ms-1" onclick="resetTouchCalibration()"
+                      title="Remove the calibration matrix and revert to the panel default">
+                <i class="bi bi-arrow-counterclockwise me-1"></i>Reset calibration
+              </button>
+              <div class="form-text">Launches a four-corner tap test on the Pi's attached touchscreen. Stand at the device and tap each crosshair. If a calibration comes out wrong, Reset reverts to the panel default. Recalibrate after changing the display rotation.</div>
+              <div class="test-result mt-2" id="touch-calibrate-result"></div>
+            </div>
+            {% endif %}
+            <div class="mb-3">
+              <label class="form-label" for="display_idle_timeout">Display sleep after N minutes idle (0 = off)</label>
+              <input class="form-control form-control-sm" style="max-width:120px" type="number"
+                     id="display_idle_timeout" min="0" max="120" step="5"
+                     value="{{ s.display_idle_timeout }}">
+              <div class="form-text">Blanks the kiosk screen after inactivity. A touch, key press, or a Stream Deck button press wakes it. The Stream Deck has its own separate timeout. 0 disables.</div>
+            </div>
+            <div class="mb-3">
+              <label class="form-label" for="wake_on_motion">Wake on motion</label>
+              <select class="form-select form-select-sm" style="max-width:280px" id="wake_on_motion">
+                <option value="auto" {{ 'selected' if s.wake_on_motion == 'auto' or not s.wake_on_motion else '' }}>Auto (on when a motion sensor is fitted)</option>
+                <option value="on" {{ 'selected' if s.wake_on_motion == 'on' else '' }}>On</option>
+                <option value="off" {{ 'selected' if s.wake_on_motion == 'off' else '' }}>Off</option>
+              </select>
+              <div class="form-text">Wakes a sleeping screen when the device is moved or bumped, using the built-in accelerometer on kits that include one. A screen touch or a Stream Deck button press always wakes the display, with or without this. Auto keeps it off on devices without the sensor.</div>
+            </div>
+            <div class="mb-3">
+              <label class="form-label" for="screensaver_minutes">Screensaver after N minutes idle (0 = off)</label>
+              <input class="form-control form-control-sm" style="max-width:120px" type="number"
+                     id="screensaver_minutes" min="0" max="120" step="1"
+                     value="{{ s.screensaver_minutes }}">
+              <div class="form-text">Dims the page to the gliding logo and clock after inactivity; any touch brings the page right back. Unlike Display sleep above, which switches the panel off, the screensaver keeps the display on, so it suits panels that wake slowly or misbehave when powered off. This is a per-device choice.</div>
+            </div>
+            <div class="mb-3">
+              <label class="form-label" for="screensaver_speed">Screensaver speed</label>
+              <select class="form-select form-select-sm" style="max-width:280px" id="screensaver_speed">
+                <option value="slow" {{ 'selected' if s.screensaver_speed == 'slow' else '' }}>Slow</option>
+                <option value="normal" {{ 'selected' if s.screensaver_speed == 'normal' or not s.screensaver_speed else '' }}>Normal</option>
+                <option value="fast" {{ 'selected' if s.screensaver_speed == 'fast' else '' }}>Fast</option>
+              </select>
+              <div class="form-text">How quickly the logo glides across the screen.</div>
+            <div class="mb-2">
+              <label class="form-label" for="screensaver_pill_scale">Timer pill size</label>
+              <select class="form-select form-select-sm" style="max-width:280px" id="screensaver_pill_scale">
+                <option value="normal" {{ 'selected' if s.screensaver_pill_scale == 'normal' or not s.screensaver_pill_scale else '' }}>Normal</option>
+                <option value="large" {{ 'selected' if s.screensaver_pill_scale == 'large' else '' }}>Large</option>
+                <option value="xlarge" {{ 'selected' if s.screensaver_pill_scale == 'xlarge' else '' }}>Extra large</option>
+              </select>
+              <div class="form-text">How big the floating timers render on the screensaver. Pick Large or Extra large if the countdowns are hard to read from across the kitchen.</div>
+            </div>
+            </div>
+            <div class="mb-3">
+              <label class="form-label" for="screensaver_mode">Screensaver style</label>
+              <select class="form-select form-select-sm" style="max-width:280px" id="screensaver_mode" onchange="screensaverModeChanged()">
+                <option value="bounce" {{ 'selected' if s.screensaver_mode == 'bounce' or not s.screensaver_mode else '' }}>Bouncing logo</option>
+                <option value="photos" {{ 'selected' if s.screensaver_mode == 'photos' else '' }}>Photo slideshow</option>
+              </select>
+              <div class="form-text">Photos plays images from a USB drive's photos folder and falls back to the logo when no drive is present. Put your pictures in a folder named photos or pictures at the top of the drive. This is a per-device choice.</div>
+            </div>
+            <div id="photo-advanced" class="ms-1 mb-3 {{ '' if s.screensaver_mode == 'photos' else 'd-none' }}">
+              <div class="mb-2">
+                <label class="form-label" for="screensaver_photo_seconds">Seconds per photo</label>
+                <input type="number" class="form-control form-control-sm" id="screensaver_photo_seconds"
+                       min="2" max="120" style="max-width:120px"
+                       value="{{ s.screensaver_photo_seconds or 25 }}">
+                <div class="form-text">How long each photo stays up before the next fades in (2 to 120 seconds).</div>
+              </div>
+              <div class="form-check form-switch">
+                <input class="form-check-input" type="checkbox" role="switch" id="screensaver_ken_burns"
+                       {{ 'checked' if s.screensaver_ken_burns or s.screensaver_ken_burns is none else '' }}>
+                <label class="form-check-label" for="screensaver_ken_burns">Ken Burns effect{{ info('A slow pan and zoom across each photo, the classic slideshow motion. Turn it off to hold each photo perfectly still.') }}</label>
+              </div>
+            </div>
+            <div class="form-check form-switch mb-3">
+              <input class="form-check-input" type="checkbox" role="switch" id="screensaver_all_clients"
+                     {{ 'checked' if s.screensaver_all_clients else '' }}>
+              <label class="form-check-label" for="screensaver_all_clients">Screensaver on every browser{{ info('Normally the screensaver only runs on the kiosk display. Turn this on to have every browser viewing this install, a desktop or a phone included, dim to the screensaver after the same idle minutes. Any touch, click, or key press brings the page right back.') }}</label>
+            </div>
+            <div class="form-check form-switch mb-3">
+              <input class="form-check-input" type="checkbox" role="switch" id="osk_enabled"
+                     {{ 'checked' if s.osk_enabled else '' }}>
+              <label class="form-check-label" for="osk_enabled">On-screen keyboard{{ info('In kiosk mode a touch keyboard slides up from the bottom of the screen whenever a text field is tapped, so names, barcodes, and searches can be typed without a physical keyboard. Turn it off if this kiosk has a keyboard attached. This is a per-device choice.') }}</label>
+            </div>
+            <div class="d-flex gap-2 flex-wrap">
+              <button class="btn btn-outline-info btn-sm" onclick="saveDisplaySettings()">
+                <i class="bi bi-check-lg me-1"></i>Save display settings
+              </button>
+              <button class="btn btn-outline-secondary btn-sm" onclick="testScreensaver()">
+                <i class="bi bi-moon-stars me-1"></i>Test screensaver
+              </button>
+            </div>
+            <div class="form-text mt-1">Test starts the screensaver on this screen right away with the style and speed picked above; any touch or key press dismisses it. To preview a kiosk panel, open its own settings page and press Test there.</div>
+            <div class="test-result mt-2" id="display-save-result"></div>
+            <div class="form-text mt-2" id="display-hint">CSS changes apply on the kiosk immediately.</div>
+          </div>
+
+          <div class="section-card mb-3">
+            <div class="section-title"><i class="bi bi-aspect-ratio text-warning"></i> Orientation</div>
+            <p class="text-secondary small">Rotates the kiosk display using the compositor. The change applies when the kiosk restarts (a few seconds); no reboot is needed.</p>
+            <div id="kms-rotation-status" class="mb-3">
+              <span class="text-secondary small">Checking...</span>
+            </div>
+            <div class="row g-3 mb-3">
+              <div class="col-sm-6">
+                <label class="form-label">Framebuffer rotation{{ info('Rotates the whole display output, including the boot screen and the kiosk browser. Use 90 or 270 for a portrait-mounted panel. Recalibrate the touchscreen after changing it.') }}</label>
+                <select class="form-select" id="kms_rotation">
+                  <option value="0">0&deg; (normal)</option>
+                  <option value="90">90&deg;</option>
+                  <option value="180">180&deg;</option>
+                  <option value="270">270&deg;</option>
+                </select>
+              </div>
+            </div>
+            <div class="d-flex gap-2 flex-wrap align-items-center">
+              <button class="btn btn-outline-warning btn-sm" onclick="setKmsRotation(false)">
+                <i class="bi bi-arrow-repeat me-1"></i>Apply (restart kiosk)
+              </button>
+              <button class="btn btn-outline-danger btn-sm" onclick="setKmsRotation(true)">
+                <i class="bi bi-power me-1"></i>Apply and reboot device
+              </button>
+            </div>
+            <div class="test-result mt-2" id="kms-rotation-result"></div>
+            <div class="alert alert-secondary py-2 small mt-3 mb-0">
+              <i class="bi bi-info-circle me-1"></i>Run <code>sudo foodassistant-set-rotation 90</code> via SSH for the same effect.
+            </div>
+          </div>
+          {% endif %}
+
+          {% if not is_pi %}
+          <div class="section-card mb-3">
+            <div class="section-title"><i class="bi bi-moon-stars text-info"></i> Screensaver</div>
+            <p class="text-secondary small">Dims the page to a floating clock after inactivity. It normally runs only on a kiosk display; the switch below extends it to every browser viewing this install.</p>
+            <div class="mb-3">
+              <label class="form-label" for="screensaver_minutes">Screensaver after N minutes idle (0 = off)</label>
+              <input class="form-control form-control-sm" style="max-width:120px" type="number"
+                     id="screensaver_minutes" min="0" max="120" step="1"
+                     value="{{ s.screensaver_minutes }}">
+              <div class="form-text">Any touch, click, or key press brings the page right back.</div>
+            </div>
+            <div class="mb-3">
+              <label class="form-label" for="screensaver_speed">Screensaver speed</label>
+              <select class="form-select form-select-sm" style="max-width:280px" id="screensaver_speed">
+                <option value="slow" {{ 'selected' if s.screensaver_speed == 'slow' else '' }}>Slow</option>
+                <option value="normal" {{ 'selected' if s.screensaver_speed == 'normal' or not s.screensaver_speed else '' }}>Normal</option>
+                <option value="fast" {{ 'selected' if s.screensaver_speed == 'fast' else '' }}>Fast</option>
+              </select>
+              <div class="form-text">How quickly the logo glides across the screen.</div>
+            <div class="mb-2">
+              <label class="form-label" for="screensaver_pill_scale">Timer pill size</label>
+              <select class="form-select form-select-sm" style="max-width:280px" id="screensaver_pill_scale">
+                <option value="normal" {{ 'selected' if s.screensaver_pill_scale == 'normal' or not s.screensaver_pill_scale else '' }}>Normal</option>
+                <option value="large" {{ 'selected' if s.screensaver_pill_scale == 'large' else '' }}>Large</option>
+                <option value="xlarge" {{ 'selected' if s.screensaver_pill_scale == 'xlarge' else '' }}>Extra large</option>
+              </select>
+              <div class="form-text">How big the floating timers render on the screensaver. Pick Large or Extra large if the countdowns are hard to read from across the kitchen.</div>
+            </div>
+            </div>
+            <div class="mb-3">
+              <label class="form-label" for="screensaver_mode">Screensaver style</label>
+              <select class="form-select form-select-sm" style="max-width:280px" id="screensaver_mode" onchange="screensaverModeChanged()">
+                <option value="bounce" {{ 'selected' if s.screensaver_mode == 'bounce' or not s.screensaver_mode else '' }}>Bouncing logo</option>
+                <option value="photos" {{ 'selected' if s.screensaver_mode == 'photos' else '' }}>Photo slideshow</option>
+              </select>
+              <div class="form-text">Photos plays images from a USB drive's photos folder on the host and falls back to the logo when none are present.</div>
+            </div>
+            <div id="photo-advanced" class="ms-1 mb-3 {{ '' if s.screensaver_mode == 'photos' else 'd-none' }}">
+              <div class="mb-2">
+                <label class="form-label" for="screensaver_photo_seconds">Seconds per photo</label>
+                <input type="number" class="form-control form-control-sm" id="screensaver_photo_seconds"
+                       min="2" max="120" style="max-width:120px"
+                       value="{{ s.screensaver_photo_seconds or 25 }}">
+                <div class="form-text">How long each photo stays up before the next fades in (2 to 120 seconds).</div>
+              </div>
+              <div class="form-check form-switch">
+                <input class="form-check-input" type="checkbox" role="switch" id="screensaver_ken_burns"
+                       {{ 'checked' if s.screensaver_ken_burns or s.screensaver_ken_burns is none else '' }}>
+                <label class="form-check-label" for="screensaver_ken_burns">Ken Burns effect{{ info('A slow pan and zoom across each photo, the classic slideshow motion. Turn it off to hold each photo perfectly still.') }}</label>
+              </div>
+            </div>
+            <div class="form-check form-switch mb-3">
+              <input class="form-check-input" type="checkbox" role="switch" id="screensaver_all_clients"
+                     {{ 'checked' if s.screensaver_all_clients else '' }}>
+              <label class="form-check-label" for="screensaver_all_clients">Screensaver on every browser{{ info('Normally the screensaver only runs on a kiosk display. Turn this on to have every browser viewing this install, a desktop or a phone included, dim to the screensaver after the same idle minutes.') }}</label>
+            </div>
+            <div class="form-check form-switch mb-3">
+              <input class="form-check-input" type="checkbox" role="switch" id="osk_enabled"
+                     {{ 'checked' if s.osk_enabled else '' }}>
+              <label class="form-check-label" for="osk_enabled">On-screen keyboard{{ info('A browser put in kiosk (touch) mode gets a touch keyboard that slides up from the bottom of the screen whenever a text field is tapped. Turn it off if the kiosk screen has a keyboard attached.') }}</label>
+            </div>
+            <div class="d-flex gap-2 flex-wrap">
+              <button class="btn btn-outline-info btn-sm" onclick="saveScreensaverSettings()">
+                <i class="bi bi-check-lg me-1"></i>Save screensaver settings
+              </button>
+              <button class="btn btn-outline-secondary btn-sm" onclick="testScreensaver()">
+                <i class="bi bi-moon-stars me-1"></i>Test screensaver
+              </button>
+            </div>
+            <div class="form-text mt-1">Test starts the screensaver on this screen right away with the style and speed picked above; any touch or key press dismisses it.</div>
+            <div class="test-result mt-2" id="screensaver-save-result"></div>
+          </div>
+          {% endif %}
+
+          <div class="section-card">
+            <div class="section-title"><i class="bi bi-layout-sidebar-inset text-success"></i> On-screen navigation bar</div>
+            <p class="text-secondary small">An optional fixed bar of nav icons docked to a screen edge, handy on touch
+              screens. It reserves space so it never overlaps the page. Bottom is a horizontal bar; left and right are
+              vertical. The setting below is the default for devices that haven't been customised on this device.</p>
+            <div class="mb-3">
+              <label class="form-label" for="nav_visibility">On-screen nav menu{{ info('Whether the on-screen nav bar shows at all. Auto hides it on a Stream Deck kiosk at large / extra-large scale, where the deck does the navigating and the small screen is better used for content. The top bar keeps a hamburger menu either way, so you can always reach Settings.') }}</label>
+              <select class="form-select form-select-sm" id="nav_visibility" style="max-width:320px">
+                <option value="auto"   {{ 'selected' if (s.nav_visibility or 'auto') == 'auto' else '' }}>Auto (hide on a Stream Deck kiosk at large scale)</option>
+                <option value="shown"  {{ 'selected' if s.nav_visibility == 'shown' else '' }}>Always show</option>
+                <option value="hidden" {{ 'selected' if s.nav_visibility == 'hidden' else '' }}>Always hide</option>
+              </select>
+            </div>
+            <div class="mb-3">
+              <label class="form-label" for="floating_nav_position">Dock position{{ info('Which screen edge the on-screen nav bar docks to. Bottom is a horizontal bar; left and right are vertical. A drag on the device overrides this per-device.') }}</label>
+              <select class="form-select form-select-sm" id="floating_nav_position" style="max-width:260px">
+                <option value="off"    {{ 'selected' if s.floating_nav_position == 'off' else '' }}>Off</option>
+                <option value="bottom" {{ 'selected' if s.floating_nav_position == 'bottom' else '' }}>Bottom edge</option>
+                <option value="left"   {{ 'selected' if s.floating_nav_position == 'left' else '' }}>Left edge</option>
+                <option value="right"  {{ 'selected' if s.floating_nav_position == 'right' else '' }}>Right edge</option>
+              </select>
+            </div>
+            <div class="form-check form-switch mb-3">
+              <input class="form-check-input" type="checkbox" role="switch" id="floating_nav_autohide_streamdeck"
+                     {{ 'checked' if s.floating_nav_autohide_streamdeck else '' }}>
+              <label class="form-check-label" for="floating_nav_autohide_streamdeck">Hide it when a Stream Deck is connected{{ info('A narrower version of Auto: hides the on-screen nav whenever a Stream Deck is connected, at any scale.') }}</label>
+            </div>
+            <div class="mb-3">
+              <label class="form-label" for="timer_chips">Floating timer chips{{ info('Small countdown chips in the bottom corner of every page while timers are running; tap one to open the Timers page. Auto keeps them off at large / extra-large interface scale, where a small kiosk screen has no room to spare.') }}</label>
+              <select class="form-select form-select-sm" id="timer_chips" style="max-width:320px">
+                <option value="auto" {{ 'selected' if (s.timer_chips or 'auto') == 'auto' else '' }}>Auto (hide at large / extra-large scale)</option>
+                <option value="on"   {{ 'selected' if s.timer_chips == 'on' else '' }}>Always show</option>
+                <option value="off"  {{ 'selected' if s.timer_chips == 'off' else '' }}>Always hide</option>
+              </select>
+            </div>
+            <div class="form-check form-switch mb-3">
+              <input class="form-check-input" type="checkbox" role="switch" id="quiet_mode"
+                     {{ 'checked' if s.quiet_mode else '' }}>
+              <label class="form-check-label" for="quiet_mode">Quiet mode (visual-only alerts){{ info('When on, a finished kitchen timer is shown only by highlighting its floating chip, with no audible chime. This setting is per device, so each kiosk can be loud or silent.') }}</label>
+            </div>
+            <button type="button" class="btn btn-outline-info btn-sm" onclick="saveFloatingNav()">
+              <i class="bi bi-check-lg me-1"></i>Save navigation menu
+            </button>
+            <div class="test-result mt-2" id="floating-nav-result"></div>
+          </div>
+
+          {% if is_pi_appliance %}
+          {# The frequency defaults preserve the pre-frequency behaviour: a
+             stored time with no frequency means nightly (FoodAssistant-8x4u). #}
+          {% set _reboot_freq = scheduled_reboot_frequency or ('nightly' if scheduled_reboot_time else 'off') %}
+          <div class="section-card">
+            <div class="section-title"><i class="bi bi-moon text-info"></i> Scheduled reboot</div>
+            <p class="text-secondary small">Reboot the appliance automatically, every night or once a week, to keep a long-running kiosk fresh.</p>
+            <div class="d-flex flex-wrap gap-2 align-items-end">
+              <div>
+                <label class="form-label" for="scheduled_reboot_frequency">Frequency{{ info('How often the appliance reboots itself: never, every night, or once a week on the day you pick.') }}</label>
+                <select class="form-select form-select-sm" id="scheduled_reboot_frequency" style="max-width:150px" onchange="rebootFreqChanged()">
+                  <option value="off" {{ 'selected' if _reboot_freq == 'off' else '' }}>Off</option>
+                  <option value="nightly" {{ 'selected' if _reboot_freq == 'nightly' else '' }}>Nightly</option>
+                  <option value="weekly" {{ 'selected' if _reboot_freq == 'weekly' else '' }}>Weekly</option>
+                </select>
+              </div>
+              <div id="scheduled-reboot-day-wrap" class="{{ '' if _reboot_freq == 'weekly' else 'd-none' }}">
+                <label class="form-label" for="scheduled_reboot_day">Day</label>
+                <select class="form-select form-select-sm" id="scheduled_reboot_day" style="max-width:150px">
+                  {% for _day in ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'] %}
+                  <option value="{{ loop.index0 }}" {{ 'selected' if scheduled_reboot_day == loop.index0 else '' }}>{{ _day }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+              <div id="scheduled-reboot-time-wrap" class="{{ 'd-none' if _reboot_freq == 'off' else '' }}">
+                <label class="form-label" for="scheduled_reboot_time">Time{{ info('Local time of the automatic reboot, 24-hour clock.') }}</label>
+                <input type="time" class="form-control form-control-sm" id="scheduled_reboot_time" style="max-width:150px" value="{{ scheduled_reboot_time }}">
+              </div>
+              <button type="button" class="btn btn-outline-info btn-sm" onclick="saveScheduledReboot(this)">
+                <i class="bi bi-check-lg me-1"></i>Save schedule
+              </button>
+              <span class="test-result" id="scheduled-reboot-result"></span>
+            </div>
+          </div>
+          {% endif %}
+
+          {% if is_pi %}
+
+          {# Kiosk Service sits at the bottom: it is a one-time provision step and
+             rarely touched, so the everyday display controls come first. #}
+          <div class="section-card">
+            <div class="section-title"><i class="bi bi-display text-info"></i> Kiosk Service</div>
+            <p class="text-secondary small">Runs the on-device browser in full-screen kiosk mode. If you attached the screen after the first install, provision it here, no SSH needed.</p>
+            <div id="kiosk-status-row" class="mb-2"><span class="text-secondary small">Checking...</span></div>
+            <button class="btn btn-outline-info btn-sm d-none" id="btn-install-kiosk" onclick="installKiosk(this)">
+              <i class="bi bi-download me-1"></i>Install kiosk service
+            </button>
+            <div class="test-result mt-2" id="kiosk-install-result"></div>
+            <pre class="install-log d-none bg-body-tertiary border rounded p-2 small mt-2 mb-0" data-log="kiosk"></pre>
+          </div>
+          {% endif %}
+        </div>
