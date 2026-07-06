@@ -1,0 +1,149 @@
+{% extends "base.html" %}
+{% block title %}My account: Forager{% endblock %}
+{% block content %}
+<div class="dash-head">
+  <h1 style="margin-bottom:0.25rem;">My account</h1>
+  <span class="pill">{{ plan_label }}</span>
+</div>
+<p class="muted">{{ email }}</p>
+
+{% if notice %}<div class="alert alert-notice">{{ notice }}</div>{% endif %}
+{% if error %}<div class="alert alert-error">{{ error }}</div>{% endif %}
+
+{% if email_enabled and not email_verified %}
+<div class="card" style="border-color: var(--primary);">
+  <h2 style="margin-bottom:0.4rem;">Please confirm your email</h2>
+  <p class="muted small">Confirm {{ email }} to keep your account secure and make
+  sure you can receive password-reset emails. Send the confirmation link below,
+  then open it from your inbox. Everything still works in the meantime.</p>
+  <form method="post" action="/account/verify/resend" style="margin:0">
+    <button class="btn btn-outline" type="submit">Send confirmation email</button>
+  </form>
+</div>
+{% endif %}
+
+<div class="card">
+  <h2>Your plan</h2>
+  {% if plan == "trial" and trial_days_left is not none %}
+  <p class="muted small">{{ trial_days_left }} days left on your free trial.</p>
+  {% endif %}
+  <div class="meter" role="progressbar" aria-valuenow="{{ percent }}"
+       aria-valuemin="0" aria-valuemax="100"
+       aria-label="Monthly scanning allowance used">
+    <span {% if over_quota %}class="full" {% endif %}style="width: {{ percent }}%"></span>
+  </div>
+  {% if over_quota %}
+  <p>You have used all of this month's scanning allowance. It refills at the
+  start of next month{% if not plan_active %}, or right away if you
+  subscribe{% endif %}.</p>
+  {% else %}
+  <p>You have used {{ percent }}% of this month's scanning allowance.</p>
+  {% endif %}
+  <p class="muted small">Scans this month: {{ scans }}</p>
+  {% if plan_active %}
+    {% if manage_url %}
+    <a class="btn btn-outline" href="{{ manage_url }}">Manage subscription</a>
+    {% endif %}
+  {% elif checkout_options %}
+    <div class="plan-buttons">
+      {% for opt in checkout_options %}
+      <a class="btn" href="{{ opt.url }}">{{ opt.label }}</a>
+      {% endfor %}
+    </div>
+    <p class="muted small">A subscription keeps your kitchen reachable from
+    anywhere and refills your scanning allowance. Cancel anytime. Pantry Raider
+    itself is always free with your own AI key.</p>
+  {% else %}
+    <p class="muted small">Billing is not live yet. Everyone is on the free
+    trial for now, on us.</p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>Your kitchens</h2>
+  {% if kitchens %}
+  <ul class="plain">
+    {% for k in kitchens %}
+    <li>
+      <div>
+        <strong>{{ k.name or "Unnamed kitchen" }}</strong><br>
+        <span class="muted small">
+          Added {{ k.created_at[:10] }}{% if k.last_seen_at %}, last active
+          {{ k.last_seen_at[:10] }}{% endif %}
+        </span>
+      </div>
+      <form method="post" action="/account/kitchens/{{ k.id }}/remove"
+            onsubmit="return confirm('Remove this kitchen? It will no longer be able to scan with your account.')"
+            style="margin:0">
+        <button class="btn btn-quiet" type="submit">Remove</button>
+      </form>
+    </li>
+    {% endfor %}
+  </ul>
+  <p class="muted small">Removing a kitchen signs that device out of your
+  account. You can always sign it back in from the app.</p>
+  {% else %}
+  <p class="muted">No kitchens linked yet. Open the Pantry Raider app in your
+  kitchen, go to Settings, and sign in with this email and password. It will
+  show up here.</p>
+  {% endif %}
+</div>
+
+<div class="card">
+  {% if has_password %}
+  <h2>Change password</h2>
+  {% else %}
+  <h2>Set a password</h2>
+  <p class="muted small">You signed up with Google. Add a password if you also
+  want to log in with your email address.</p>
+  {% endif %}
+  <form method="post" action="/account/password">
+    {% if has_password %}
+    <label for="current_password">Current password</label>
+    <input type="password" id="current_password" name="current_password"
+           autocomplete="current-password" required>
+    {% endif %}
+    <label for="new_password">New password</label>
+    <input type="password" id="new_password" name="new_password"
+           autocomplete="new-password" minlength="10" required>
+    <label for="confirm_password">Confirm new password</label>
+    <input type="password" id="confirm_password" name="confirm_password"
+           autocomplete="new-password" minlength="10" required>
+    <button class="btn btn-outline" type="submit">
+      {% if has_password %}Update password{% else %}Set password{% endif %}
+    </button>
+  </form>
+</div>
+
+<div class="card">
+  <h2>Two-factor authentication</h2>
+  {% if totp_enabled %}
+  <p class="muted small">Two-factor authentication is on. When you log in,
+  we ask for a code from your authenticator app after your password.</p>
+  <form method="post" action="/account/2fa/disable" style="margin-bottom:1.25rem;"
+        onsubmit="return confirm('Turn off two-factor authentication?')">
+    <label for="credential">
+      {% if has_password %}Enter a code from your authenticator app, or your
+      password, to turn it off{% else %}Enter a code from your authenticator
+      app to turn it off{% endif %}
+    </label>
+    <input type="text" id="credential" name="credential"
+           autocomplete="one-time-code" inputmode="text" required>
+    <button class="btn btn-quiet" type="submit">Turn off two-factor</button>
+  </form>
+  <h3>Recovery codes</h3>
+  <p class="muted small">Recovery codes let you get in if you lose your
+  authenticator app. Each one works once. Regenerating gives you a new set and
+  cancels the old one.</p>
+  <form method="post" action="/account/2fa/recovery/regenerate"
+        onsubmit="return confirm('Get a new set of recovery codes? Your current codes will stop working.')">
+    <button class="btn btn-outline" type="submit">Regenerate recovery codes</button>
+  </form>
+  {% else %}
+  <p class="muted small">Add a second step to your sign-in. After your
+  password, we ask for a code from an authenticator app on your phone, so a
+  stolen password is not enough to get in on its own.</p>
+  <a class="btn btn-outline" href="/account/2fa/setup">Turn on two-factor</a>
+  {% endif %}
+</div>
+{% endblock %}

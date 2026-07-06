@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="{{ theme_mode }}">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <base href="{{ ingress_path }}/">
+  <title>Start: Pantry Raider</title>
+  {% if theme_css %}
+  <link href="{{ theme_css }}" rel="stylesheet">
+  {% else %}
+  <link href="static/vendor/bootstrap.min.css" rel="stylesheet">
+  {% endif %}
+  {% if theme_overlay %}<link href="{{ theme_overlay }}" rel="stylesheet">{% endif %}
+  {% if custom_theme_active %}
+  <style>
+    :root, [data-bs-theme="{{ theme_mode }}"] {
+      --bs-primary: {{ custom_theme_primary }}; --bs-link-color: {{ custom_theme_primary }};
+      --bs-body-bg: {{ custom_theme_bg }}; --bs-body-color: {{ custom_theme_text }};
+      --bs-secondary-bg: {{ custom_theme_surface }}; --bs-tertiary-bg: {{ custom_theme_surface }};
+    }
+    body { background-color: var(--bs-body-bg); color: var(--bs-body-color); }
+  </style>
+  {% endif %}
+  {% if background_image_url %}
+  <style>
+    body::before { content: ""; position: fixed; inset: 0; z-index: -1;
+      background: url("{{ background_image_url }}") center / cover no-repeat;
+      opacity: {{ background_opacity }}; pointer-events: none; }
+  </style>
+  {% endif %}
+  <link href="static/vendor/bootstrap-icons.min.css" rel="stylesheet">
+  <link rel="icon" type="image/svg+xml" href="static/icons/favicon.svg">
+  {# Kiosk boot intro: pre-paint blackout guard + intro.js (FoodAssistant-a8xy) #}
+  {% include "_intro.html" %}
+  {# On-screen keyboard for kiosk touchscreens (FoodAssistant-wo9j) #}
+  {% include "_osk.html" %}
+  <style>
+    html, body { height: 100%; margin: 0; overflow: hidden; }
+    /* The Start Page is full screen and replaces the fixed/floating menus, so it
+       deliberately renders no navbar. A small Exit affordance keeps it escapable. */
+    .start-wrap { position: fixed; inset: 0; display: flex; flex-direction: column; padding: 1.2vmin; }
+    .start-grid {
+      flex: 1 1 auto; display: grid; gap: 1.2vmin; min-height: 0;
+      grid-template-columns: repeat({{ cols }}, 1fr);
+      grid-template-rows: repeat({{ rows }}, 1fr);
+    }
+    .start-key {
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 0.6vmin; border: 2px solid rgba(255,255,255,0.15);
+      border-radius: 1.4vmin; background: #1f2937; color: #fff;
+      cursor: pointer; user-select: none; overflow: hidden; text-align: center;
+      padding: 0.8vmin; transition: transform 0.05s ease, filter 0.1s ease;
+    }
+    .start-key:hover { filter: brightness(1.12); }
+    .start-key:active { transform: scale(0.96); }
+    .start-key.blank { background: transparent; border-style: dashed; opacity: 0.25; cursor: default; }
+    .start-key.blank:hover { filter: none; }
+    .start-key.deckonly { opacity: 0.85; }
+    /* Live timer key faces (FoodAssistant-uzra): running keys show the shared
+       countdown like a deck key; expired keys pulse until pressed. */
+    .start-key .countdown { font-size: min(6vw, 8vh); font-weight: 700; line-height: 1; color: #fff; }
+    .start-key.timer-running { filter: brightness(1.15); }
+    .start-key.timer-done { animation: sk-done 1.1s ease-in-out infinite; }
+    @keyframes sk-done {
+      0%, 100% { background-color: #7f1d1d !important; }
+      50% { background-color: #b45309 !important; }
+    }
+    .start-key .ico { font-size: min(7vw, 9vh); line-height: 1; color: #fff; }
+    .start-key .lbl { font-size: min(2.2vw, 3.2vh); font-weight: 600; line-height: 1.05; color: #fff;
+      max-width: 100%; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical; }
+    .start-exit { position: fixed; top: 1vmin; right: 1vmin; z-index: 5; opacity: 0.5; }
+    .start-exit:hover { opacity: 1; }
+    .start-toast { position: fixed; bottom: 2vmin; left: 50%; transform: translateX(-50%);
+      background: var(--bs-secondary-bg); color: var(--bs-body-color); border: 1px solid var(--bs-border-color);
+      border-radius: 0.6rem; padding: 0.5rem 1rem; z-index: 6; display: none; }
+  </style>
+</head>
+<body>
+  {% if not enabled %}
+  <div class="d-flex flex-column align-items-center justify-content-center" style="height:100%; gap:1rem; text-align:center; padding:2rem">
+    <i class="bi bi-grid-3x3-gap" style="font-size:3rem; opacity:0.6"></i>
+    <h4 class="mb-0">The Start Page is turned off</h4>
+    <p class="text-secondary mb-2">Turn it on in Settings &rarr; Personalization &rarr; Start Page, then choose its keys.</p>
+    <div class="d-flex gap-2">
+      <a href="setup#pane-start-page" class="btn btn-primary btn-sm"><i class="bi bi-gear me-1"></i>Open Settings</a>
+      <a href="ui/inventory" class="btn btn-outline-secondary btn-sm">Back to app</a>
+    </div>
+  </div>
+  {% else %}
+  <a href="ui/inventory" class="btn btn-outline-secondary btn-sm start-exit" title="Exit the Start Page"><i class="bi bi-box-arrow-up-right"></i></a>
+  <div class="start-wrap">
+    <div class="start-grid">
+      {% for k in layout %}
+        {% if k.kind == 'blank' %}
+        <div class="start-key blank"></div>
+        {% elif k.kind == 'builtin' %}
+        <div class="start-key" role="button" tabindex="0" style="background: {{ k.color }}"
+             data-kind="builtin" data-href="{{ k.href }}" data-key="{{ k.key }}">
+          <i class="bi {{ k.icon }} ico"></i><span class="lbl">{{ k.label }}</span>
+        </div>
+        {% elif k.kind == 'custom' %}
+        <div class="start-key custom" role="button" tabindex="0" style="background: {{ k.color }}"
+             data-kind="custom" data-type="{{ k.type }}" data-id="{{ k.id }}"{% if k.timer_label %} data-timer-label="{{ k.timer_label }}"{% endif %}>
+          <i class="bi {{ k.icon }} ico"></i><span class="lbl">{{ k.label }}</span>
+        </div>
+        {% else %}
+        <div class="start-key deckonly" role="button" tabindex="0" style="background: {{ k.color }}"
+             data-kind="deckonly" data-label="{{ k.label }}" data-key="{{ k.key }}">
+          <i class="bi {{ k.icon }} ico"></i><span class="lbl">{{ k.label }}</span>
+        </div>
+        {% endif %}
+      {% endfor %}
+    </div>
+  </div>
+  <div class="start-toast" id="start-toast"></div>
+  <script>
+    (function () {
+      // Where a shared custom button sends you on-screen. The action-typed deck
+      // buttons (HA toggle, media, macro) and the built-in HA slot keys fire
+      // server-side via ui/start/fire, so they work without a connected deck.
+      const ROUTE = { shopping_add: 'ui/shopping',
+        weather: 'ui/weather', camera: 'ui/camera' };
+      const FIRE = { ha_action: 1, media: 1, macro: 1, timer: 1 };
+      // Built-in timer keys start/advance the shared timer instead of just
+      // opening the Timers page, matching the deck key (FoodAssistant-6ifu).
+      // The timers_view key still navigates.
+      const FIRE_KEYS = { timer_1: 1, timer_2: 1, timer_3: 1,
+        timer_eggs: 1, timer_pasta: 1, timer_rice: 1 };
+      function toast(msg) {
+        const t = document.getElementById('start-toast');
+        t.textContent = msg; t.style.display = 'block';
+        clearTimeout(t._h); t._h = setTimeout(() => { t.style.display = 'none'; }, 2200);
+      }
+      // Resolve a relative app path against the <base href>, not the current
+      // /ui/start URL. Setting location.href on a relative value resolves it
+      // against the page URL, which would make "ui/" become "/ui/ui/" and the
+      // key appear to do nothing (Pantry Raider).
+      function go(path) { location.href = new URL(path, document.baseURI).href; }
+      function fireServer(name, long) {
+        const url = new URL('ui/start/fire/' + encodeURIComponent(name), document.baseURI);
+        if (long) url.searchParams.set('long', 'true');
+        fetch(url, { method: 'POST' })
+          .then(r => r.json())
+          .then(d => { toast(d.detail || (d.ok ? 'Done.' : 'That did not work.')); pollTimers(); })
+          .catch(() => toast('Could not reach the server.'));
+      }
+
+      // Live timer faces: keys that can start a timer adopt the matching
+      // shared-registry timer by label (the deck does the same), show its
+      // remaining time ticking locally from deadline_epoch, and pulse when
+      // done until a press dismisses it.
+      const TIMER_LABELS = { timer_1: 'Timer 1', timer_2: 'Timer 2', timer_3: 'Timer 3',
+        timer_eggs: 'Eggs', timer_pasta: 'Pasta', timer_rice: 'Rice' };
+      const timerKeys = [];  // { el, label, orig: {icoHTML, lbl} }
+      document.querySelectorAll('.start-key[role="button"]').forEach(el => {
+        let label = null;
+        if (el.dataset.kind === 'builtin' && TIMER_LABELS[el.dataset.key]) label = TIMER_LABELS[el.dataset.key];
+        if (el.dataset.kind === 'custom' && el.dataset.timerLabel) label = el.dataset.timerLabel;
+        if (label) {
+          timerKeys.push({ el, label,
+            orig: { ico: el.querySelector('.ico').outerHTML, lbl: el.querySelector('.lbl').textContent } });
+        }
+      });
+      let liveTimers = [];
+      function mmss(sec) {
+        sec = Math.max(0, Math.round(sec));
+        return Math.floor(sec / 60) + ':' + String(sec % 60).padStart(2, '0');
+      }
+      function renderTimerKeys() {
+        const now = Date.now() / 1000;
+        timerKeys.forEach(k => {
+          const t = liveTimers.find(x => x.label === k.label);
+          if (!t) {
+            if (k.el.classList.contains('timer-running') || k.el.classList.contains('timer-done')) {
+              k.el.classList.remove('timer-running', 'timer-done');
+              k.el.innerHTML = k.orig.ico + '<span class="lbl">' + k.orig.lbl + '</span>';
+            }
+            return;
+          }
+          const remaining = t.deadline_epoch - now;
+          const done = remaining <= 0;
+          k.el.classList.toggle('timer-running', !done);
+          k.el.classList.toggle('timer-done', done);
+          k.el.innerHTML = '<span class="countdown">' + (done ? 'Done' : mmss(remaining)) + '</span>' +
+                           '<span class="lbl">' + k.orig.lbl + '</span>';
+        });
+      }
+      function pollTimers() {
+        if (!timerKeys.length) return;
+        // Hidden (background tab): the local render tick keeps the visible
+        // countdown honest from deadline_epoch; resync when shown again.
+        if (document.hidden) return;
+        fetch(new URL('timers', document.baseURI))
+          .then(r => r.json())
+          .then(d => { liveTimers = (d && d.timers) || d || []; renderTimerKeys(); })
+          .catch(() => {});
+      }
+      if (timerKeys.length) {
+        pollTimers();
+        setInterval(pollTimers, 3000);
+        setInterval(renderTimerKeys, 1000);
+        document.addEventListener('visibilitychange', () => {
+          if (!document.hidden) pollTimers();
+        });
+      }
+      function fire(el) {
+        if (el.dataset.kind === 'builtin') {
+          if (FIRE_KEYS[el.dataset.key]) { fireServer(el.dataset.key); return; }
+          go(el.dataset.href); return;
+        }
+        if (el.dataset.kind === 'deckonly') {
+          // The built-in HA slot keys (ha_1..ha_5) execute server-side; the
+          // rest (paging, brightness, deck workflow) really do need hardware.
+          if (/^ha_[1-5]$/.test(el.dataset.key || '')) { fireServer(el.dataset.key); return; }
+          toast('"' + (el.dataset.label || 'This') + '" runs on a connected Stream Deck.'); return;
+        }
+        const t = el.dataset.type;
+        if (ROUTE[t]) { go(ROUTE[t]); return; }
+        if (FIRE[t]) { fireServer(el.dataset.id); return; }
+        go('ui/');
+      }
+      // Long press on a timer key resets it, like holding the deck key
+      // (FoodAssistant-b8o1). Pointer events cover touch and mouse; a long
+      // press swallows the click that follows so it cannot also short-press.
+      const LONG_MS = 550;
+      function timerName(el) {
+        if (el.dataset.kind === 'builtin' && FIRE_KEYS[el.dataset.key]) return el.dataset.key;
+        if (el.dataset.kind === 'custom' && el.dataset.type === 'timer') return el.dataset.id;
+        return null;
+      }
+      document.querySelectorAll('.start-key[role="button"]').forEach(el => {
+        const tname = timerName(el);
+        if (tname) {
+          let holdT = null;
+          el.addEventListener('pointerdown', () => {
+            holdT = setTimeout(() => {
+              holdT = null;
+              el._longFired = true;
+              fireServer(tname, true);
+            }, LONG_MS);
+          });
+          ['pointerup', 'pointercancel', 'pointerleave'].forEach(evn =>
+            el.addEventListener(evn, () => { if (holdT) { clearTimeout(holdT); holdT = null; } }));
+        }
+        el.addEventListener('click', () => {
+          if (el._longFired) { el._longFired = false; return; }
+          fire(el);
+        });
+        el.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fire(el); } });
+      });
+    })();
+  </script>
+  {% endif %}
+</body>
+</html>

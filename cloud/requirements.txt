@@ -1,0 +1,25 @@
+# Web framework and server (required)
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+
+# Database ORM (required); psycopg2 is the production Postgres driver.
+# Tests run on SQLite and do not need it.
+sqlalchemy==2.0.35
+psycopg2-binary==2.9.9
+
+# Settings management (required)
+pydantic==2.9.2
+pydantic-settings==2.5.2
+
+# Templates for the web portal (required)
+jinja2==3.1.4
+
+# Async HTTP client, for the AI forwarder once a provider is wired up
+httpx==0.27.2
+
+# Form and file upload parsing for the AI proxy endpoint (required)
+python-multipart==0.0.12
+
+# QR codes for two-factor sign-in enrollment. The SVG image factory renders
+# the authenticator QR with no Pillow dependency, so it stays light.
+qrcode==8.2
