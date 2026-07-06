@@ -1,0 +1,433 @@
+[
+  {
+    "color": "#b54708",
+    "description": "Count of items expired or expiring within the soon window. Press to open the expiring list and refresh.",
+    "group": "Status",
+    "icon": "clock-history",
+    "kind": "status",
+    "label": "Expiring",
+    "name": "expiring"
+  },
+  {
+    "color": "#1d4ed8",
+    "description": "Count of scanned items waiting to be committed. Press to open the pending list and refresh.",
+    "group": "Status",
+    "icon": "hourglass-split",
+    "kind": "status",
+    "label": "Pending",
+    "name": "pending"
+  },
+  {
+    "color": "#15803d",
+    "description": "Commit every pending scan into the inventory.",
+    "group": "Actions",
+    "icon": "cloud-upload",
+    "kind": "trigger",
+    "label": "Commit",
+    "name": "commit"
+  },
+  {
+    "color": "#b45309",
+    "description": "Open the Manage Pantry page on the attached display.",
+    "group": "Navigation",
+    "icon": "plus-circle",
+    "kind": "nav",
+    "label": "Pantry",
+    "name": "add"
+  },
+  {
+    "color": "#0f766e",
+    "description": "Open the inventory dashboard on the attached display.",
+    "group": "Navigation",
+    "icon": "grid",
+    "kind": "nav",
+    "label": "Stock",
+    "name": "inventory"
+  },
+  {
+    "color": "#7e22ce",
+    "description": "Open the recipe suggestions page on the attached display.",
+    "group": "Navigation",
+    "icon": "fire",
+    "kind": "nav",
+    "label": "Cook",
+    "name": "cook"
+  },
+  {
+    "color": "#7e22ce",
+    "description": "Open the Recipes page.",
+    "group": "Navigation",
+    "icon": "journal-richtext",
+    "kind": "nav",
+    "label": "Recipes",
+    "name": "recipes"
+  },
+  {
+    "color": "#7e22ce",
+    "description": "Open the Meal Plan page.",
+    "group": "Navigation",
+    "icon": "calendar-week",
+    "kind": "nav",
+    "label": "Plan",
+    "name": "mealplan"
+  },
+  {
+    "color": "#7e22ce",
+    "description": "Open the Shopping list page.",
+    "group": "Navigation",
+    "icon": "cart",
+    "kind": "nav",
+    "label": "Shop",
+    "name": "shopping"
+  },
+  {
+    "color": "#7e22ce",
+    "description": "Open the storage Defaults page.",
+    "group": "Navigation",
+    "icon": "table",
+    "kind": "nav",
+    "label": "Defaults",
+    "name": "defaults"
+  },
+  {
+    "color": "#475569",
+    "description": "Cycle the deck brightness.",
+    "group": "System",
+    "icon": "brightness-high",
+    "kind": "system",
+    "label": "Bright",
+    "name": "brightness"
+  },
+  {
+    "color": "#334155",
+    "description": "Show the next page of keys.",
+    "group": "System",
+    "icon": "chevron-right",
+    "kind": "system",
+    "label": "More",
+    "name": "page_next"
+  },
+  {
+    "color": "#334155",
+    "description": "Show the previous page of keys.",
+    "group": "System",
+    "icon": "chevron-left",
+    "kind": "system",
+    "label": "Back",
+    "name": "page_prev"
+  },
+  {
+    "color": "#1d4ed8",
+    "description": "Switch the deck into a numeric keypad to unlock the PIN-locked app, then return to the normal layout.",
+    "group": "Other",
+    "icon": "shield-lock",
+    "kind": "pin",
+    "label": "Unlock",
+    "name": "pin"
+  },
+  {
+    "color": "#0d9488",
+    "description": "Shared countdown timer (press to cycle: 5/10/15/30/60 min or stop; hold to reset). Shows on every screen too.",
+    "group": "Timers",
+    "icon": "stopwatch",
+    "kind": "timer",
+    "label": "Timer 1",
+    "name": "timer_1"
+  },
+  {
+    "color": "#0d9488",
+    "description": "Second independent countdown timer.",
+    "group": "Timers",
+    "icon": "stopwatch",
+    "kind": "timer",
+    "label": "Timer 2",
+    "name": "timer_2"
+  },
+  {
+    "color": "#0d9488",
+    "description": "Third independent countdown timer.",
+    "group": "Timers",
+    "icon": "stopwatch",
+    "kind": "timer",
+    "label": "Timer 3",
+    "name": "timer_3"
+  },
+  {
+    "color": "#1e40af",
+    "description": "Current weather from wttr.in. Configure location and units in config.toml. Press to refresh. No API key required.",
+    "group": "Weather",
+    "icon": "cloud-sun",
+    "kind": "weather",
+    "label": "Weather",
+    "name": "weather"
+  },
+  {
+    "color": "#0e7490",
+    "description": "Today's high/low from wttr.in. Shares the weather fetch. Press to refresh. No API key required.",
+    "group": "Weather",
+    "icon": "thermometer-half",
+    "kind": "forecast",
+    "label": "Forecast",
+    "name": "forecast"
+  },
+  {
+    "color": "#475569",
+    "description": "Home Assistant entity slot 1. Configure in config.toml.",
+    "group": "Home Assistant",
+    "icon": "house",
+    "kind": "ha_entity",
+    "label": "HA 1",
+    "name": "ha_1"
+  },
+  {
+    "color": "#475569",
+    "description": "Home Assistant entity slot 2. Configure in config.toml.",
+    "group": "Home Assistant",
+    "icon": "house",
+    "kind": "ha_entity",
+    "label": "HA 2",
+    "name": "ha_2"
+  },
+  {
+    "color": "#475569",
+    "description": "Home Assistant entity slot 3. Configure in config.toml.",
+    "group": "Home Assistant",
+    "icon": "house",
+    "kind": "ha_entity",
+    "label": "HA 3",
+    "name": "ha_3"
+  },
+  {
+    "color": "#475569",
+    "description": "Home Assistant entity slot 4. Configure in config.toml.",
+    "group": "Home Assistant",
+    "icon": "house",
+    "kind": "ha_entity",
+    "label": "HA 4",
+    "name": "ha_4"
+  },
+  {
+    "color": "#475569",
+    "description": "Home Assistant entity slot 5. Configure in config.toml.",
+    "group": "Home Assistant",
+    "icon": "house",
+    "kind": "ha_entity",
+    "label": "HA 5",
+    "name": "ha_5"
+  },
+  {
+    "color": "#1f2937",
+    "description": "Current time (HH:MM) and date, updated every second. Pure local clock, no network.",
+    "group": "Info",
+    "icon": "clock",
+    "kind": "clock",
+    "label": "Clock",
+    "name": "clock"
+  },
+  {
+    "color": "#0f766e",
+    "description": "Count of items on the Mealie shopping list. Press to open the shopping list and refresh.",
+    "group": "Status",
+    "icon": "cart",
+    "kind": "status",
+    "label": "Shop",
+    "name": "shopping_count"
+  },
+  {
+    "color": "#15803d",
+    "description": "How many recipes are cookable from current stock alone. Press to open the Cook page and refresh.",
+    "group": "Status",
+    "icon": "check2-circle",
+    "kind": "status",
+    "label": "Ready",
+    "name": "ready"
+  },
+  {
+    "color": "#7e22ce",
+    "description": "Today's planned meal from the meal plan. Press to open the Meal Plan page.",
+    "group": "Info",
+    "icon": "calendar-event",
+    "kind": "info",
+    "label": "Tonight",
+    "name": "meal_today"
+  },
+  {
+    "color": "#b45309",
+    "description": "Mark the active Current Recipe as cooked, consuming its matched inventory items. No-op when no recipe is active.",
+    "group": "Actions",
+    "icon": "fire",
+    "kind": "trigger",
+    "label": "Cooked",
+    "name": "cooked"
+  },
+  {
+    "color": "#0d9488",
+    "description": "Preset 6-minute timer for soft-boiled eggs.",
+    "group": "Timers",
+    "icon": "egg-fried",
+    "kind": "timer",
+    "label": "Eggs",
+    "name": "timer_eggs"
+  },
+  {
+    "color": "#0d9488",
+    "description": "Preset 10-minute pasta timer.",
+    "group": "Timers",
+    "icon": "stopwatch",
+    "kind": "timer",
+    "label": "Pasta",
+    "name": "timer_pasta"
+  },
+  {
+    "color": "#0d9488",
+    "description": "Preset 18-minute rice timer.",
+    "group": "Timers",
+    "icon": "stopwatch",
+    "kind": "timer",
+    "label": "Rice",
+    "name": "timer_rice"
+  },
+  {
+    "color": "#9333ea",
+    "description": "Halve the active Current Recipe's serving scale. No-op when no recipe is active.",
+    "group": "Recipe",
+    "icon": "arrows-angle-contract",
+    "kind": "recipe_scale",
+    "label": "0.5x",
+    "name": "scale_half"
+  },
+  {
+    "color": "#9333ea",
+    "description": "Reset the active Current Recipe to its original scale. No-op when no recipe is active.",
+    "group": "Recipe",
+    "icon": "arrow-repeat",
+    "kind": "recipe_scale",
+    "label": "1x",
+    "name": "scale_1x"
+  },
+  {
+    "color": "#9333ea",
+    "description": "Double the active Current Recipe's serving scale. No-op when no recipe is active.",
+    "group": "Recipe",
+    "icon": "arrows-angle-expand",
+    "kind": "recipe_scale",
+    "label": "2x",
+    "name": "scale_2x"
+  },
+  {
+    "color": "#334155",
+    "description": "Blank the kiosk display now (via the host bridge).",
+    "group": "System",
+    "icon": "lightbulb-off",
+    "kind": "display_power",
+    "label": "Screen\nOff",
+    "name": "screen_off"
+  },
+  {
+    "color": "#475569",
+    "description": "Wake the kiosk display now (via the host bridge).",
+    "group": "System",
+    "icon": "lightbulb",
+    "kind": "display_power",
+    "label": "Screen\nOn",
+    "name": "screen_on"
+  },
+  {
+    "color": "#15803d",
+    "description": "Pi power/thermal/disk health from the host bridge. Green when clear, amber when warnings are present. Press to open Setup.",
+    "group": "System",
+    "icon": "heart-pulse",
+    "kind": "health",
+    "label": "Health",
+    "name": "health"
+  },
+  {
+    "color": "#0f766e",
+    "description": "Open the unit-conversion page on the attached display.",
+    "group": "Navigation",
+    "icon": "calculator",
+    "kind": "nav",
+    "label": "Convert",
+    "name": "convert"
+  },
+  {
+    "color": "#0d9488",
+    "description": "Open the shared timers page on the attached display.",
+    "group": "Navigation",
+    "icon": "clock-history",
+    "kind": "nav",
+    "label": "Timers",
+    "name": "timers_view"
+  },
+  {
+    "color": "#b45309",
+    "description": "Restart the kiosk browser (via the host bridge).",
+    "group": "System",
+    "icon": "arrow-clockwise",
+    "kind": "bridge_action",
+    "label": "Kiosk",
+    "name": "kiosk_restart"
+  },
+  {
+    "color": "#1d4ed8",
+    "description": "Pull and redeploy the latest app + Stream Deck (host bridge OTA). Best-effort: the request is fired and the deck does not block.",
+    "group": "System",
+    "icon": "cloud-arrow-down",
+    "kind": "bridge_action",
+    "label": "Update",
+    "name": "update"
+  },
+  {
+    "color": "#b91c1c",
+    "description": "Reboot the host (via the host bridge). Best-effort: the request is fired and the deck does not block.",
+    "group": "System",
+    "icon": "power",
+    "kind": "bridge_action",
+    "label": "Reboot",
+    "name": "reboot"
+  },
+  {
+    "color": "#0f172a",
+    "description": "Live camera snapshot. The key face shows the latest frame; press to open the full feed on the attached display.",
+    "group": "Camera",
+    "icon": "camera-video",
+    "kind": "camera",
+    "label": "Camera",
+    "name": "camera"
+  },
+  {
+    "color": "#0f172a",
+    "description": "Take over the whole deck with a single live camera frame sliced across every key. Press any key to exit.",
+    "group": "Camera",
+    "icon": "camera",
+    "kind": "camera_full",
+    "label": "Camera\nFull",
+    "name": "camera_full"
+  },
+  {
+    "color": "#0369a1",
+    "description": "Cycle the barcode scanner mode (Stock, Use, Shop, Audit). The same physical scanner then adds to inventory, consumes stock, adds to the shopping list, or counts stock. The key face shows the active mode.",
+    "group": "Actions",
+    "icon": "upc-scan",
+    "kind": "scan_mode",
+    "label": "Scan\nMode",
+    "name": "scan_mode"
+  },
+  {
+    "color": "#0f766e",
+    "description": "Open a quick-check page whose keys are the top items on the Mealie shopping list. Press an item to check it off (handy while unpacking groceries). A Back key returns to the normal layout.",
+    "group": "Actions",
+    "icon": "cart-check",
+    "kind": "shopping_check_page",
+    "label": "Check\nOff",
+    "name": "shopping_check"
+  },
+  {
+    "color": "#1f2937",
+    "description": "Leave this key blank.",
+    "group": "System",
+    "kind": "blank",
+    "label": "Empty",
+    "name": "blank"
+  }
+]

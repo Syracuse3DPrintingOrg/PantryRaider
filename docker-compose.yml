@@ -1,0 +1,86 @@
+services:
+  service:
+    build: ./service
+    container_name: foodassistant-service
+    env_file: .env
+    environment:
+      - TZ=${TZ:-America/New_York}
+    # Dev workflow: mount the code and run with --reload so `git pull` applies
+    # changes live. The published image's default command omits --reload.
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    volumes:
+      - ./service/app:/app/app
+      - ./service/data:/app/data
+    ports:
+      - "9284:8000"
+    # These enable Forager remote access (a WireGuard hub tunnel run inside this
+    # container) and are otherwise inert: NET_ADMIN plus /dev/net/tun let
+    # wg-quick create the interface, and the src_valid_mark sysctl keeps
+    # wg-quick happy about the fwmark it sets for the split-tunnel route.
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - "/dev/net/tun:/dev/net/tun"
+    sysctls:
+      - net.ipv4.conf.all.src_valid_mark=1
+    restart: unless-stopped
+    depends_on:
+      grocy:
+        condition: service_started
+        required: false   # Grocy is only present when --profile with-grocy is used
+
+  # Optional Grocy instance, only started with:
+  #   docker compose --profile with-grocy up -d
+  # Skip this if you already have Grocy running elsewhere and just point
+  # GROCY_BASE_URL at it in the web setup (/setup) or .env.
+  grocy:
+    image: lscr.io/linuxserver/grocy:4.6.0   # pinned; see "Upgrading pinned images" in README
+    container_name: foodassistant-grocy
+    profiles: ["with-grocy"]
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=${TZ:-America/New_York}
+    volumes:
+      - ./grocy/config:/config
+    ports:
+      - "9383:80"
+    restart: unless-stopped
+
+  # Optional Mealie recipe manager / meal planner, only started with:
+  #   docker compose --profile with-mealie up -d
+  # First run: open http://localhost:9285, log in (changeme@example.com /
+  # MyPassword, change it!), then create an API token under
+  # User Profile → API Tokens and paste it into /setup.
+  mealie:
+    image: ghcr.io/mealie-recipes/mealie:v3.19.2   # pinned; see "Upgrading pinned images" in README
+    container_name: foodassistant-mealie
+    profiles: ["with-mealie"]
+    environment:
+      - TZ=${TZ:-America/New_York}
+      - ALLOW_SIGNUP=false
+      - BASE_URL=http://localhost:9285
+    volumes:
+      - ./mealie/data:/app/data
+    ports:
+      - "9285:9000"
+    restart: unless-stopped
+
+  # Ollama local vision, only started with:
+  #   docker compose --profile with-ollama up -d
+  # After starting, pull a vision model:
+  #   docker exec foodassistant-ollama ollama pull llava:7b
+  ollama:
+    image: ollama/ollama:0.30.8   # pinned; see "Upgrading pinned images" in README
+    container_name: foodassistant-ollama
+    profiles: ["with-ollama"]
+    volumes:
+      - ./ollama/models:/root/.ollama
+    ports:
+      - "11434:11434"
+    restart: unless-stopped
+    # Intel Arc GPU passthrough (uncomment if applicable):
+    # devices:
+    #   - /dev/dri:/dev/dri
+    # environment:
+    #   - OLLAMA_GPU=intel

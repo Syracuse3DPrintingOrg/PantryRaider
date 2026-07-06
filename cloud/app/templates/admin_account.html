@@ -1,0 +1,158 @@
+{% extends "admin_base.html" %}
+{% block title %}Admin: {{ account.email }}: Forager{% endblock %}
+{% block admin_content %}
+<p class="small"><a href="/admin">&larr; Back to admin</a></p>
+<h1>{{ account.email }}</h1>
+<p class="muted small">
+  Account #{{ account.id }}, {{ account.auth_provider or "password" }} auth,
+  created {{ account.created_at[:10] }}
+  {% if account.email_verified %}<span class="badge badge-success">email verified</span>
+  {% else %}<span class="badge">email unverified</span>{% endif %}
+  {% if account.disabled %}<span class="badge badge-danger">disabled</span>{% endif %}
+</p>
+
+<div class="card">
+  <h2>Entitlement</h2>
+  <p>
+    Plan <strong>{{ state.plan }}</strong>
+    {% if ent_active %}<span class="badge badge-success">active</span>
+    {% else %}<span class="badge">free tier fallback</span>{% endif %}
+    {% if ent and ent.source %}<span class="badge">{{ ent.source }}</span>{% endif %}
+  </p>
+  <p class="muted small">
+    Quota {{ "{:,}".format(state.quota) }} tokens/month,
+    used {{ "{:,}".format(state.used) }} in {{ state.month }}.
+    {% if ent and ent.expires_at %}Expires {{ ent.expires_at[:10] }}.{% endif %}
+    {% if ent %}Entitlement status: {{ ent.status }}.{% endif %}
+  </p>
+  {% if subs %}
+  <div class="table-wrap">
+    <table class="admin">
+      <thead>
+        <tr><th>Stripe subscription</th><th>Customer</th><th>Status</th><th>Updated</th></tr>
+      </thead>
+      <tbody>
+        {% for s in subs %}
+        <tr>
+          <td>{{ s.stripe_subscription_id }}</td>
+          <td>{{ s.stripe_customer_id }}</td>
+          <td>{{ s.status }}</td>
+          <td>{{ s.updated_at[:10] }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="muted small">No Stripe subscriptions on record.</p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>Actions</h2>
+  <div class="actions-row">
+    {% if account.disabled %}
+    <form class="inline" method="post" action="/admin/accounts/{{ account.id }}/enable">
+      <button class="btn" type="submit">Enable account</button>
+    </form>
+    {% else %}
+    <form class="inline" method="post" action="/admin/accounts/{{ account.id }}/disable"
+          onsubmit="return confirm('Disable this account? Login, provisioning, and the AI proxy will all refuse it.')">
+      <button class="btn btn-quiet" type="submit">Disable account</button>
+    </form>
+    {% endif %}
+    <form class="inline actions-row" method="post" action="/admin/accounts/{{ account.id }}/comp">
+      <label for="expires_on" style="margin:0">Comp starter until</label>
+      <input type="date" id="expires_on" name="expires_on" required>
+      <button class="btn btn-outline" type="submit">Comp plan</button>
+    </form>
+    {% if ent and ent.source == "comp" and ent.status == "active" %}
+    <form class="inline" method="post" action="/admin/accounts/{{ account.id }}/comp/expire">
+      <button class="btn btn-quiet" type="submit">Expire comp</button>
+    </form>
+    {% endif %}
+  </div>
+</div>
+
+<div class="card">
+  <h2>Kitchens</h2>
+  {% if kitchens %}
+  <div class="table-wrap">
+    <table class="admin">
+      <thead>
+        <tr><th>Name</th><th>Version</th><th>Mode</th><th>Created</th><th>Last used</th><th></th></tr>
+      </thead>
+      <tbody>
+        {% for k in kitchens %}
+        <tr>
+          <td>{{ k.name or "Unnamed" }}</td>
+          <td>{{ k.app_version or "-" }}</td>
+          <td>{{ k.deployment_mode or "-" }}</td>
+          <td>{{ k.created_at[:10] }}</td>
+          <td>{{ k.last_seen_at[:10] if k.last_seen_at else "never" }}</td>
+          <td>
+            <form class="inline" method="post"
+                  action="/admin/accounts/{{ account.id }}/kitchens/{{ k.id }}/revoke"
+                  onsubmit="return confirm('Revoke this kitchen? Its token dies immediately.')">
+              <button class="btn btn-quiet" type="submit">Revoke</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="muted">No kitchens linked.</p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>Usage by month</h2>
+  {% if by_month %}
+  <div class="table-wrap">
+    <table class="admin">
+      <thead>
+        <tr><th>Month</th><th class="num">Tokens</th><th class="num">Requests</th></tr>
+      </thead>
+      <tbody>
+        {% for m in by_month %}
+        <tr>
+          <td>{{ m.month }}</td>
+          <td class="num">{{ "{:,}".format(m.tokens) }}</td>
+          <td class="num">{{ m.requests }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="muted">No usage recorded.</p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>Audit trail</h2>
+  {% if trail %}
+  <div class="table-wrap">
+    <table class="admin">
+      <thead>
+        <tr><th>When</th><th>Admin</th><th>Action</th><th>Detail</th></tr>
+      </thead>
+      <tbody>
+        {% for a in trail %}
+        <tr>
+          <td>{{ a.created_at[:16].replace("T", " ") }}</td>
+          <td>{{ a.admin_email }}</td>
+          <td>{{ a.action }}</td>
+          <td>{{ a.detail }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="muted">No admin actions against this account.</p>
+  {% endif %}
+</div>
+{% endblock %}

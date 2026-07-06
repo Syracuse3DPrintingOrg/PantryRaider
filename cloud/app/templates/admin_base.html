@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block content %}
+{# Admin-only additions to the portal stylesheet: a wider main column,
+   stat tiles, tables, and badges. Scoped here so subscriber pages keep
+   the narrow single-column look. #}
+<style>
+  main { max-width: 1100px; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+           gap: 0.75rem; margin-bottom: 1.25rem; }
+  .stat { background: var(--surface); border: 1px solid var(--border);
+          border-radius: 0.5rem; padding: 0.75rem 1rem; }
+  .stat .label { color: var(--muted); font-size: 0.8rem; text-transform: uppercase;
+                 letter-spacing: 0.04em; }
+  .stat .value { font-size: 1.35rem; font-weight: 700; margin-top: 0.15rem; }
+  .table-wrap { overflow-x: auto; }
+  table.admin { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+  table.admin th, table.admin td { text-align: left; padding: 0.5rem 0.6rem;
+    border-top: 1px solid var(--border); white-space: nowrap; }
+  table.admin th { color: var(--muted); font-weight: 600; border-top: none; }
+  table.admin td.num, table.admin th.num { text-align: right; }
+  .badge { display: inline-block; padding: 0.1rem 0.5rem; border-radius: 0.75rem;
+           font-size: 0.75rem; border: 1px solid var(--border); color: var(--muted); }
+  .badge-danger { border-color: var(--danger); color: var(--danger); }
+  .badge-success { border-color: var(--success); color: var(--success); }
+  .badge-primary { border-color: var(--primary); color: var(--primary); }
+  form.inline { display: inline; margin: 0; }
+  .searchbar { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
+  .searchbar input { margin-bottom: 0; flex: 1; }
+  .actions-row { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
+  input[type=date] { padding: 0.4rem 0.6rem; background: var(--bg);
+    color: var(--text); border: 1px solid var(--border); border-radius: 0.375rem; }
+</style>
+{% block admin_content %}{% endblock %}
+{% endblock %}
