@@ -1,0 +1,53 @@
+{% from "setup/_macros.html" import ov_card with context %}
+<!-- Overview: the Settings landing (FoodAssistant-jcnh). A grid of category
+             cards grouped under the four plain-language headings, mirroring the
+             side menu. Each card opens its section. Cards are shown or hidden by
+             deployment mode exactly as the matching menu pills are: a satellite
+             has no local inventory to configure and no local app to sign a
+             Forager account into, so it drops those cards. -->
+        <div class="tab-pane fade show active" id="pane-overview">
+          <p class="pane-intro">Everything you can set up, grouped by area. Pick a card to open that section, or use the menu on the left.</p>
+
+          <div class="ov-group">
+            <div class="ov-group-head">Kitchen</div>
+            <div class="ov-grid">
+              {% if not features.satellite %}
+              {{ ov_card('bi-fridge', 'Inventory', 'Your Grocy stock, locations, and expiry rules.', 'pane-inventory') }}
+              {% endif %}
+              {{ ov_card('bi-journal-richtext', 'Recipes', 'Connect Mealie and pick your recipe sources.', 'pane-personalization-recipes') }}
+              {{ ov_card('bi-sliders', 'Recipe suggestions', 'Your tastes, staples, and kitchen tools for ranking ideas.', 'pane-recipe-tuning') }}
+              {{ ov_card('bi-upc-scan', 'Scanning & AI', 'Barcode scanner and the vision provider for photo scans.', 'pane-scanning') }}
+            </div>
+          </div>
+
+          <div class="ov-group">
+            <div class="ov-group-head">This Device</div>
+            <div class="ov-grid">
+              {{ ov_card('bi-display', 'Display & Sleep', 'Screen size, rotation, and when the display sleeps.', 'pane-screen') }}
+              {{ ov_card('bi-wifi', 'Network', "Wi-Fi, Ethernet, and this device's name on the network.", 'pane-network') }}
+              {{ ov_card('bi-grid-3x3-gap', 'Start Page & Deck', 'The kiosk start page and Stream Deck keys.', 'pane-start-page') }}
+              {{ ov_card('bi-palette', 'Appearance', 'Theme, accent, and the look of the app.', 'pane-appearance') }}
+            </div>
+          </div>
+
+          <div class="ov-group">
+            <div class="ov-group-head">Connections</div>
+            <div class="ov-grid">
+              {{ ov_card('bi-house-gear', 'Home Assistant', 'Connect HA for cameras and on-screen notifications.', 'pane-home-assistant') }}
+              {{ ov_card('bi-camera-video', 'Cameras', 'IP cameras and the phone-scan QR code.', 'pane-connections') }}
+              {% if not features.satellite %}
+              {{ ov_card('bi-cloud', 'Forager', 'Your cloud account, plan, and remote access.', 'pane-forager') }}
+              {% endif %}
+            </div>
+          </div>
+
+          <div class="ov-group">
+            <div class="ov-group-head">System</div>
+            <div class="ov-grid">
+              {{ ov_card('bi-hdd-stack', 'Fleet & Remote', 'Satellite displays and remote-access status.', 'pane-devices') }}
+              {{ ov_card('bi-shield-lock', 'Security', 'Password, kitchen access, and API keys.', 'pane-security') }}
+              {{ ov_card('bi-cloud-arrow-down', 'Backups & Updates', 'Snapshot your data and manage updates.', 'pane-backups') }}
+              {{ ov_card('bi-tools', 'Advanced', 'Diagnostics and low-level options.', 'pane-advanced') }}
+            </div>
+          </div>
+        </div>
