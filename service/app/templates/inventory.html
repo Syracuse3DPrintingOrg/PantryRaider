@@ -1,0 +1,485 @@
+{% extends "base.html" %}
+{% block title %}Inventory: Pantry Raider{% endblock %}
+{% block content %}
+<style>
+  .panel-header {
+    font-size: 0.95rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    padding: 0.6rem 1rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    border-radius: 0.5rem 0.5rem 0 0;
+    cursor: pointer;
+    user-select: none;
+  }
+  .panel-header .chevron { transition: transform 0.2s; margin-left: 0.25rem; }
+  .panel-collapsed .chevron { transform: rotate(-90deg); }
+  .panel-collapsed .panel-body { display: none; }
+  .panel-collapsed { border-radius: 0.5rem !important; }
+  .panel-count {
+    font-size: 0.75rem;
+    font-weight: 500;
+    margin-left: auto;
+    padding: 0.15rem 0.5rem;
+    border-radius: 999px;
+    background: rgba(255,255,255,0.15);
+  }
+  .panel-body {
+    max-height: 60vh;
+    overflow-y: auto;
+  }
+  .item-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.45rem 0.75rem;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+    font-size: 0.875rem;
+  }
+  .item-row:last-child { border-bottom: none; }
+  .item-name { flex: 1; min-width: 0; }
+  .item-name-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .item-qty {
+    font-size: 0.78rem;
+    color: var(--bs-secondary-color);
+    white-space: nowrap;
+  }
+  .expiry-badge {
+    font-size: 0.72rem;
+    padding: 0.15rem 0.45rem;
+    border-radius: 999px;
+    white-space: nowrap;
+    font-weight: 500;
+  }
+  .badge-expired  { background:#4d1010; color:#ff6b6b; }
+  .badge-today    { background:#4d2a0a; color:#ffa94d; }
+  .badge-3d       { background:#3d3000; color:#ffd43b; }
+  .badge-7d       { background:#1a2e10; color:#69db7c; }
+  .badge-ok       { background:#0f2010; color:#69db7c; }
+  .badge-unknown  { background:#1e1e2e; color:#888; }
+  .panel-empty {
+    text-align: center;
+    color: var(--bs-secondary-color);
+    font-size: 0.85rem;
+    padding: 2rem 1rem;
+  }
+  .item-row[draggable="true"] { cursor: grab; }
+  .item-row.dragging { opacity: 0.4; }
+  .drop-target {
+    outline: 2px dashed var(--bs-primary);
+    outline-offset: -2px;
+    background: rgba(13,110,253,0.08);
+  }
+  {% for c in panels %}
+  .panel-{{ c.key }} .panel-header { background: {{ c.bg }}; color: {{ c.color }}; }
+  .panel-{{ c.key }} { border-color: {{ c.bg }} !important; }
+  {% endfor %}
+  #loading-spinner { display: none; }
+</style>
+
+<!-- Top bar: sort + refresh -->
+<div class="d-flex justify-content-between align-items-center my-3 flex-wrap gap-2">
+  <h4 class="mb-0"><i class="bi bi-grid me-2"></i>Inventory</h4>
+  <div class="d-flex align-items-center flex-wrap gap-2">
+    <label class="form-label mb-0 me-1 text-nowrap" for="sortSelect">Sort by:</label>
+    <select class="form-select" id="sortSelect" style="width:auto" onchange="loadDashboard()">
+      <option value="expiry_asc">Expiring soonest</option>
+      <option value="expiry_desc">Expiring latest</option>
+      <option value="added_desc">Recently added (newest)</option>
+      <option value="added_asc">Recently added (oldest)</option>
+      <option value="name_asc">Name A → Z</option>
+      <option value="name_desc">Name Z → A</option>
+      <option value="qty_desc">Quantity (most first)</option>
+      <option value="qty_asc">Quantity (least first)</option>
+    </select>
+    <a class="btn btn-outline-secondary" href="ui/journal" title="Stock journal">
+      <i class="bi bi-journal-text"></i>
+    </a>
+    <button class="btn btn-outline-secondary" onclick="loadDashboard()" title="Refresh">
+      <i class="bi bi-arrow-clockwise"></i>
+    </button>
+    <span id="loading-spinner" class="spinner-border spinner-border-sm text-secondary"></span>
+  </div>
+</div>
+
+<!-- Outage banner (FoodAssistant-2cmm): shown when the inventory data cannot
+     be fetched, with the honest reason from the API. The page stays up. -->
+<div class="alert alert-warning d-none align-items-center gap-2" id="inventory-status" role="alert">
+  <i class="bi bi-plug"></i>
+  <div id="inventory-status-text"></div>
+</div>
+
+<div class="row g-3" id="panels">
+  {% for c in panels %}
+  <div class="col-md-6" id="col-{{ c.key }}">
+    <div class="border rounded panel-{{ c.key }}" style="border-width:1px !important"
+         data-bucket="{{ c.key }}"
+         {% if c.key != 'other' %}ondragover="dragOver(event)" ondragleave="dragLeave(event)" ondrop="dropItem(event)"{% endif %}>
+      <div class="panel-header" onclick="togglePanel('{{ c.key }}')">
+        <i class="bi {{ c.icon }}"></i> {{ c.label }}
+        <span class="panel-count" id="count-{{ c.key }}">—</span>
+        <i class="bi bi-chevron-down chevron" id="chevron-{{ c.key }}"></i>
+      </div>
+      <div class="panel-body" id="panel-{{ c.key }}"><div class="panel-empty">Loading…</div></div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+<!-- Move-item modal (tap-friendly alternative to drag & drop) -->
+<div class="modal fade" id="moveModal" tabindex="-1">
+  <div class="modal-dialog modal-sm modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h6 class="modal-title">Move <span id="moveModalName"></span> to…</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body d-grid gap-2">
+        {% for c in categories %}
+        <button class="btn" style="border:1px solid {{ c.color }}; color:{{ c.color }}"
+                onclick="moveFromModal('{{ c.key }}')">
+          <i class="bi {{ c.icon }} me-1"></i>{{ c.label }}
+        </button>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Edit-item modal -->
+<div class="modal fade" id="editModal" tabindex="-1">
+  <div class="modal-dialog modal-sm modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h6 class="modal-title"><i class="bi bi-pencil me-1"></i><span id="editModalName"></span></h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Category</label>
+          <select class="form-select" id="editCategory">
+            <option value="">(unchanged)</option>
+            <option>Poultry</option><option>Meat</option><option>Seafood</option>
+            <option>Dairy</option><option>Produce</option><option>Grains</option>
+            <option>Condiments</option><option>Beverages</option><option>Snacks</option>
+            <option>Frozen</option><option>Canned</option><option>Other</option>
+          </select>
+        </div>
+        <div class="mb-1">
+          <label class="form-label fw-semibold">Best By Date</label>
+          <input type="date" class="form-control" id="editBestBy">
+          <div class="form-text">Applies to all open stock entries for this product.</div>
+        </div>
+      </div>
+      <div class="modal-footer py-2">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-primary" id="editSaveBtn" onclick="saveEdit()">
+          <i class="bi bi-check2 me-1"></i>Save
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Consume confirmation toast -->
+<div class="position-fixed bottom-0 end-0 p-3" style="z-index:9999">
+  <div id="consumeToast" class="toast align-items-center text-bg-success border-0" role="alert">
+    <div class="d-flex">
+      <div class="toast-body" id="toastMsg">Consumed.</div>
+      <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Panels (built-in + custom + "other"), injected from the server-side registry.
+const PANELS = {{ panels | tojson }};
+const PANEL_KEYS = PANELS.map(c => c.key);
+const BUCKET_LABELS = Object.fromEntries(PANELS.map(c => [c.key, c.label]));
+
+const URGENCY_BADGE = {
+  expired: ['badge-expired', '⚠ Expired'],
+  today:   ['badge-today',   'Expires today'],
+  '3d':    ['badge-3d',      null],  // filled dynamically
+  '7d':    ['badge-7d',      null],
+  ok:      ['badge-ok',      null],
+  unknown: ['badge-unknown', 'No date'],
+};
+
+function expiryBadge(item) {
+  const u = item.urgency;
+  const cls = (URGENCY_BADGE[u] || URGENCY_BADGE.unknown)[0];
+  let label;
+  if (u === 'expired') {
+    label = `⚠ ${Math.abs(item.days_remaining)}d ago`;
+  } else if (u === 'today') {
+    label = 'Today';
+  } else if (item.days_remaining != null) {
+    label = `${item.days_remaining}d`;
+  } else {
+    label = 'No date';
+  }
+  return `<span class="expiry-badge ${cls}">${label}</span>`;
+}
+
+function esc(s) {
+  return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
+}
+
+function renderPanel(panelId, countId, items, bucket) {
+  const el = document.getElementById(panelId);
+  const cnt = document.getElementById(countId);
+  const showAdded = document.getElementById('sortSelect').value.startsWith('added');
+  cnt.textContent = items.length;
+  if (items.length === 0) {
+    el.innerHTML = '<div class="panel-empty"><i class="bi bi-check-circle text-success me-1"></i>Empty</div>';
+    return;
+  }
+  el.innerHTML = items.map(item => `
+    <div class="item-row" id="row-${item.product_id}" draggable="true"
+         data-product-id="${item.product_id}" data-bucket="${bucket}" data-name="${esc(item.name)}"
+         ondragstart="dragStart(event)" ondragend="dragEnd(event)">
+      <div class="item-name">
+        <div class="item-name-text" title="${esc(item.name)}${item.added_date ? ', added ' + item.added_date.slice(0,10) : ''}">${esc(item.name)}</div>
+      </div>
+      ${showAdded && item.added_date ? `<span class="item-qty">${item.added_date.slice(0,10)}</span>` : ''}
+      <span class="item-qty">${item.amount % 1 === 0 ? item.amount : item.amount.toFixed(1)}${item.unit ? ' ' + esc(item.unit) : ''}</span>
+      ${expiryBadge(item)}
+      <button class="btn btn-outline-secondary btn-icon ms-1" title="Edit category / expiry"
+              onclick="openEditModal(${item.product_id})">
+        <i class="bi bi-pencil"></i>
+      </button>
+      <button class="btn btn-outline-secondary btn-icon" title="Move to another location"
+              onclick="openMoveModal(${item.product_id}, '${esc(item.name)}')">
+        <i class="bi bi-arrow-left-right"></i>
+      </button>
+      <button class="btn btn-outline-secondary btn-icon" title="Mark consumed"
+              onclick="consume(${item.product_id}, ${item.amount}, '${esc(item.name)}')">
+        <i class="bi bi-check2"></i>
+      </button>
+    </div>
+  `).join('');
+}
+
+// Item lookup map (keyed by product_id) for pre-filling modals
+const itemsById = {};
+
+function storeItems(items) {
+  items.forEach(i => { itemsById[i.product_id] = i; });
+}
+
+// Edit modal
+let editTarget = null;  // product_id
+
+function openEditModal(productId) {
+  const item = itemsById[productId];
+  if (!item) return;
+  editTarget = productId;
+  document.getElementById('editModalName').textContent = item.name;
+
+  const catSel = document.getElementById('editCategory');
+  catSel.value = item.category || '';
+  if (!catSel.value && item.category) {
+    // category exists but wasn't in the list, so add a temporary option
+    const opt = new Option(item.category, item.category, true, true);
+    catSel.add(opt);
+  }
+
+  document.getElementById('editBestBy').value = item.best_before_date || '';
+  new bootstrap.Modal(document.getElementById('editModal')).show();
+}
+
+async function saveEdit() {
+  if (editTarget == null) return;
+  const btn = document.getElementById('editSaveBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Saving…';
+
+  const category = document.getElementById('editCategory').value || null;
+  const bestBy   = document.getElementById('editBestBy').value || null;
+
+  try {
+    const r = await fetch(`/inventory/edit/${editTarget}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ category, best_before_date: bestBy }),
+    });
+    if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
+    bootstrap.Modal.getInstance(document.getElementById('editModal')).hide();
+    showToast('✓ Item updated');
+    await loadDashboard();
+  } catch(e) {
+    showToast(`Save failed: ${e.message}`, true);
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="bi bi-check2 me-1"></i>Save';
+    editTarget = null;
+  }
+}
+
+// Drag & Drop
+let dragged = null;  // { productId, fromBucket, name }
+
+function dragStart(e) {
+  const row = e.currentTarget;
+  dragged = {
+    productId: parseInt(row.dataset.productId),
+    fromBucket: row.dataset.bucket,
+    name: row.dataset.name,
+  };
+  row.classList.add('dragging');
+  e.dataTransfer.effectAllowed = 'move';
+  e.dataTransfer.setData('text/plain', row.dataset.productId);
+}
+
+function dragEnd(e) {
+  e.currentTarget.classList.remove('dragging');
+  document.querySelectorAll('.drop-target').forEach(p => p.classList.remove('drop-target'));
+}
+
+function dragOver(e) {
+  if (!dragged) return;
+  const panel = e.currentTarget;
+  if (panel.dataset.bucket !== dragged.fromBucket) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    panel.classList.add('drop-target');
+  }
+}
+
+function dragLeave(e) {
+  e.currentTarget.classList.remove('drop-target');
+}
+
+async function dropItem(e) {
+  e.preventDefault();
+  const panel = e.currentTarget;
+  panel.classList.remove('drop-target');
+  if (!dragged || panel.dataset.bucket === dragged.fromBucket) return;
+  const { productId, name } = dragged;
+  dragged = null;
+  await moveItem(productId, panel.dataset.bucket, name);
+}
+
+// Move via modal (touch devices)
+let moveTarget = null;  // { productId, name }
+
+function openMoveModal(productId, name) {
+  moveTarget = { productId, name };
+  document.getElementById('moveModalName').textContent = name;
+  new bootstrap.Modal(document.getElementById('moveModal')).show();
+}
+
+async function moveFromModal(bucket) {
+  bootstrap.Modal.getInstance(document.getElementById('moveModal')).hide();
+  if (!moveTarget) return;
+  const { productId, name } = moveTarget;
+  moveTarget = null;
+  await moveItem(productId, bucket, name);
+}
+
+async function moveItem(productId, bucket, name) {
+  try {
+    const r = await fetch(`/inventory/move/${productId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ bucket }),
+    });
+    if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
+    showToast(`✓ Moved ${name} to ${BUCKET_LABELS[bucket]}`);
+    await loadDashboard();
+  } catch(e) {
+    showToast(`Move failed: ${e.message}`, true);
+  }
+}
+
+async function loadDashboard() {
+  const sort = document.getElementById('sortSelect').value;
+  document.getElementById('loading-spinner').style.display = '';
+  const status = document.getElementById('inventory-status');
+  try {
+    const r = await fetch(`/inventory/dashboard?sort=${sort}`);
+    if (!r.ok) {
+      // Outages answer with a JSON detail written for people ("Grocy is not
+      // reachable..."), so surface that, never a raw error page.
+      const detail = (await r.json().catch(() => ({}))).detail;
+      throw new Error(detail || 'The inventory list did not load. It usually comes back on its own; Refresh retries now.');
+    }
+    const data = await r.json();
+    status.classList.add('d-none');
+    status.classList.remove('d-flex');
+    const allItems = PANEL_KEYS.flatMap(k => data[k] || []);
+    storeItems(allItems);
+    PANEL_KEYS.forEach(k => renderPanel(`panel-${k}`, `count-${k}`, data[k] || [], k));
+  } catch(e) {
+    document.getElementById('inventory-status-text').textContent = e.message;
+    status.classList.remove('d-none');
+    status.classList.add('d-flex');
+    PANEL_KEYS.forEach(b => {
+      document.getElementById(`panel-${b}`).innerHTML =
+        '<div class="panel-empty">Unavailable right now</div>';
+      document.getElementById(`count-${b}`).textContent = '—';
+    });
+  } finally {
+    document.getElementById('loading-spinner').style.display = 'none';
+  }
+}
+
+async function consume(productId, amount, name) {
+  const fd = new FormData();
+  fd.append('amount', amount);
+  try {
+    const r = await fetch(`/ui/consume/${productId}`, { method: 'POST', body: fd,
+      redirect: 'manual' });
+    // 303 redirect is expected on success
+    const row = document.getElementById(`row-${productId}`);
+    if (row) row.remove();
+    showToast(`✓ Consumed: ${name}`);
+    // Update panel count
+    PANEL_KEYS.forEach(b => {
+      const panel = document.getElementById(`panel-${b}`);
+      const rows = panel.querySelectorAll('.item-row').length;
+      if (rows === 0) renderPanel(`panel-${b}`, `count-${b}`, []);
+      else document.getElementById(`count-${b}`).textContent = rows;
+    });
+  } catch(e) {
+    showToast(`Error: ${e.message}`, true);
+  }
+}
+
+function showToast(msg, isError = false) {
+  const toast = document.getElementById('consumeToast');
+  toast.className = `toast align-items-center border-0 text-bg-${isError ? 'danger' : 'success'}`;
+  document.getElementById('toastMsg').textContent = msg;
+  new bootstrap.Toast(toast, { delay: 3000 }).show();
+}
+
+// Collapsible panels
+function togglePanel(bucket) {
+  const panel = document.querySelector(`[data-bucket="${bucket}"]`);
+  const isCollapsed = panel.classList.toggle('panel-collapsed');
+  const collapsed = JSON.parse(localStorage.getItem('inv_collapsed') || '[]');
+  const updated = isCollapsed
+    ? [...new Set([...collapsed, bucket])]
+    : collapsed.filter(b => b !== bucket);
+  localStorage.setItem('inv_collapsed', JSON.stringify(updated));
+}
+
+function restoreCollapsed() {
+  const collapsed = JSON.parse(localStorage.getItem('inv_collapsed') || '[]');
+  collapsed.forEach(bucket => {
+    const panel = document.querySelector(`[data-bucket="${bucket}"]`);
+    if (panel) panel.classList.add('panel-collapsed');
+  });
+}
+
+// Initial load
+restoreCollapsed();
+loadDashboard();
+</script>
+{% endblock %}
