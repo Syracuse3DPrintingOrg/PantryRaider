@@ -1,0 +1,1381 @@
+{% extends "base.html" %}
+{% block title %}What Can I Cook: Pantry Raider{% endblock %}
+
+{% block content %}
+
+{% if not mealie_configured %}
+<div class="alert alert-info mt-3">
+  <i class="bi bi-fire me-2"></i>
+  Recipe suggestions are powered by <a href="https://mealie.io" target="_blank">Mealie</a>.
+  Add your Mealie URL and API token in <a href="setup">Settings</a> to enable this page.
+</div>
+{% else %}
+
+<div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mt-3 mb-1">
+  <h4 class="mb-0"><i class="bi bi-fire me-2"></i>What Can I Cook?</h4>
+  <div class="d-flex flex-wrap gap-2">
+    <a class="btn btn-outline-secondary" href="ui/current-recipe" title="Open the active recipe">
+      <i class="bi bi-journal-check me-1"></i>Current Recipe
+    </a>
+    {% if ai_configured %}
+    <button class="btn btn-outline-secondary" id="btn-ask-ai" onclick="loadAiSuggestions()">
+      <i class="bi bi-stars me-1"></i>Ask AI
+    </button>
+    <button class="btn btn-outline-secondary" id="btn-surprise" onclick="surpriseMe()"
+            title="Invent a random recipe from your preferences and inventory">
+      <i class="bi bi-dice-5 me-1"></i>Surprise me
+    </button>
+    <button class="btn btn-outline-secondary" id="btn-copycat" onclick="copycatDish()"
+            title="Recreate a famous restaurant dish at home">
+      <i class="bi bi-shop me-1"></i>Copycat
+    </button>
+    {% endif %}
+    <button class="btn btn-outline-secondary" onclick="loadSuggestions()" title="Refresh">
+      <i class="bi bi-arrow-clockwise me-1"></i>Refresh
+    </button>
+  </div>
+</div>
+<p class="text-secondary small mb-3" id="cook-meta">Matching recipes against your inventory…</p>
+
+{% if ai_configured %}
+<!-- Optional custom prompt for the AI recipe path (FoodAssistant-2mh9). Hidden
+     behind a click-to-expand control; empty means use the default prompt. -->
+<div class="mb-3">
+  <a class="small text-decoration-none" data-bs-toggle="collapse" href="#aiCustomPromptBox"
+     role="button" aria-expanded="false" aria-controls="aiCustomPromptBox">
+    <i class="bi bi-chat-left-text me-1"></i>Custom AI prompt <span class="text-secondary">(optional)</span>
+  </a>
+  <div class="collapse" id="aiCustomPromptBox">
+    <textarea class="form-control form-control-sm mt-2" id="ai-custom-prompt" rows="2"
+              placeholder="Extra instructions for AI suggestions and generated recipes, e.g. 'lean high-protein, no dairy, sheet-pan only'"></textarea>
+    <div class="form-text">Applies to the AI path (Ask AI and Generate full recipe), not the stock-based suggestions.</div>
+  </div>
+</div>
+{% endif %}
+
+<!-- Preference tuning panel -->
+<!-- Icon compatibility note (FoodAssistant-438t): every icon in this panel is a
+     plain emoji character rendered by the client's emoji font, so stick to
+     glyphs from Emoji 12.0 (2019) or older. Newer glyphs (the Unicode 13/14
+     food emoji) and flag sequences render as empty boxes or bare letters on
+     Windows and on devices with an older Noto Color Emoji. A pure test
+     (tests/test_cook_emoji.py) enforces this. -->
+<div class="cook-prefs-bar mb-3" id="cook-prefs-bar">
+  <button class="cook-prefs-toggle" onclick="togglePrefs()">
+    🎛️ Tune My Suggestions <span id="prefs-active-badge" class="badge text-bg-primary ms-1 d-none">●</span>
+    <i class="bi bi-chevron-down ms-1" id="prefs-chevron"></i>
+  </button>
+  <div class="cook-prefs-panel" id="cook-prefs-panel">
+
+    <!-- Complexity -->
+    <div class="pref-row">
+      <input type="checkbox" class="pref-toggle" id="on-complexity" title="Include this factor" checked>
+      <span class="end-label">Trash Panda 🦝</span>
+      <input type="range" class="pref-slider" id="pref-complexity" min="1" max="5" value="3">
+      <span class="end-label right">Michelin Star ⭐</span>
+    </div>
+    <div class="pref-mid-label"><span id="lbl-complexity">Getting Fancy</span> <span class="ai-only">✨ AI only</span></div>
+
+    <!-- Spice -->
+    <div class="pref-row">
+      <input type="checkbox" class="pref-toggle" id="on-spice" title="Include this factor" checked>
+      <span class="end-label">Midwest Mayo 🥪</span>
+      <input type="range" class="pref-slider" id="pref-spice" min="1" max="5" value="3">
+      <span class="end-label right">Asian Fury 🌶️</span>
+    </div>
+    <div class="pref-mid-label"><span id="lbl-spice">Flavor Town</span> <span class="ai-only">✨ AI only</span></div>
+
+    <!-- Time -->
+    <div class="pref-row">
+      <input type="checkbox" class="pref-toggle" id="on-time" title="Include this factor" checked>
+      <span class="end-label">Microwave Minutes ⚡</span>
+      <input type="range" class="pref-slider" id="pref-time" min="1" max="5" value="3">
+      <span class="end-label right">All Day Affair ☕</span>
+    </div>
+    <div class="pref-mid-label" id="lbl-time">~1 hour</div>
+
+    <!-- Portions -->
+    <div class="pref-row">
+      <input type="checkbox" class="pref-toggle" id="on-portions" title="Include this factor" checked>
+      <span class="end-label">Solo Snack 🙋</span>
+      <input type="range" class="pref-slider" id="pref-portions" min="1" max="5" value="3">
+      <span class="end-label right">Feed the Horde 🏟️</span>
+    </div>
+    <div class="pref-mid-label"><span id="lbl-portions">4–6 servings</span> <span class="ai-only">✨ AI only</span></div>
+
+    <!-- Dietary toggles -->
+    <div class="pref-section-label">Dietary</div>
+    <div class="diet-pills" id="diet-pills">
+      <span class="diet-pill" data-diet="Vegan" onclick="toggleDiet(this)">🌱 Vegan</span>
+      <span class="diet-pill" data-diet="Vegetarian" onclick="toggleDiet(this)">🥦 Vegetarian</span>
+      <span class="diet-pill" data-diet="Dairy Free" onclick="toggleDiet(this)">🥛 Dairy Free</span>
+      <span class="diet-pill" data-diet="Gluten Free" onclick="toggleDiet(this)">🌾 Gluten Free</span>
+      <span class="diet-pill" data-diet="Keto" onclick="toggleDiet(this)">🥑 Keto</span>
+      <span class="diet-pill" data-diet="Low Carb" onclick="toggleDiet(this)">🍞 Low Carb</span>
+      <span class="diet-pill" data-diet="Nut Free" onclick="toggleDiet(this)">🥜 Nut Free</span>
+      <span class="diet-pill" data-diet="Pescatarian" onclick="toggleDiet(this)">🐟 Pescatarian</span>
+      <span class="diet-pill" data-diet="Low Sodium" onclick="toggleDiet(this)">🧂 Low Sodium</span>
+      <span class="diet-pill" data-diet="Low Sugar" onclick="toggleDiet(this)">🍬 Low Sugar</span>
+      <span class="diet-pill" data-diet="High Protein" onclick="toggleDiet(this)">💪 High Protein</span>
+      <span class="diet-pill" data-diet="Paleo" onclick="toggleDiet(this)">🍖 Paleo</span>
+      <span class="diet-pill" data-diet="Whole30" onclick="toggleDiet(this)">🥗 Whole30</span>
+      <span class="diet-pill" data-diet="Halal" onclick="toggleDiet(this)">☪️ Halal</span>
+      <span class="diet-pill" data-diet="Kosher" onclick="toggleDiet(this)">✡️ Kosher</span>
+      <span class="diet-pill" data-diet="Kid Friendly" onclick="toggleDiet(this)">🧒 Kid Friendly</span>
+    </div>
+
+    <!-- Cuisine (optional) -->
+    <div class="pref-section-label">Cuisine <span class="text-secondary fw-normal">(optional)</span></div>
+    <div class="cuisine-pills" id="cuisine-pills">
+      <span class="cuisine-group-label">Regions</span>
+      <span class="cuisine-pill" data-cuisine="Asian" onclick="toggleCuisine(this)">🥢 Asian</span>
+      <span class="cuisine-pill" data-cuisine="Mediterranean" onclick="toggleCuisine(this)">🥙 Mediterranean</span>
+      <span class="cuisine-pill" data-cuisine="European" onclick="toggleCuisine(this)">🏰 European</span>
+      <span class="cuisine-pill" data-cuisine="Latin American" onclick="toggleCuisine(this)">🌮 Latin American</span>
+      <span class="cuisine-pill" data-cuisine="Middle Eastern" onclick="toggleCuisine(this)">🧆 Middle Eastern</span>
+      <span class="cuisine-pill" data-cuisine="American" onclick="toggleCuisine(this)">🍔 American</span>
+      <span class="cuisine-pill" data-cuisine="African" onclick="toggleCuisine(this)">🌍 African</span>
+      <span class="cuisine-pill" data-cuisine="Caribbean" onclick="toggleCuisine(this)">🏝️ Caribbean</span>
+      <span class="cuisine-pill" data-cuisine="Nordic" onclick="toggleCuisine(this)">🧊 Nordic</span>
+      <span class="cuisine-group-label">Cuisines</span>
+      <span class="cuisine-pill" data-cuisine="Italian" onclick="toggleCuisine(this)">🍝 Italian</span>
+      <span class="cuisine-pill" data-cuisine="French" onclick="toggleCuisine(this)">🥐 French</span>
+      <span class="cuisine-pill" data-cuisine="Greek" onclick="toggleCuisine(this)">🏛️ Greek</span>
+      <span class="cuisine-pill" data-cuisine="Spanish" onclick="toggleCuisine(this)">🥘 Spanish</span>
+      <span class="cuisine-pill" data-cuisine="Chinese" onclick="toggleCuisine(this)">🥟 Chinese</span>
+      <span class="cuisine-pill" data-cuisine="Japanese" onclick="toggleCuisine(this)">🍣 Japanese</span>
+      <span class="cuisine-pill" data-cuisine="Thai" onclick="toggleCuisine(this)">🌶️ Thai</span>
+      <span class="cuisine-pill" data-cuisine="Vietnamese" onclick="toggleCuisine(this)">🍜 Vietnamese</span>
+      <span class="cuisine-pill" data-cuisine="Indian" onclick="toggleCuisine(this)">🍛 Indian</span>
+      <span class="cuisine-pill" data-cuisine="Mexican" onclick="toggleCuisine(this)">🌯 Mexican</span>
+      <span class="cuisine-pill" data-cuisine="Korean" onclick="toggleCuisine(this)">🥩 Korean</span>
+      <span class="cuisine-pill" data-cuisine="Filipino" onclick="toggleCuisine(this)">🍧 Filipino</span>
+      <span class="cuisine-pill" data-cuisine="African American (Soul Food)" onclick="toggleCuisine(this)">🍗 Soul Food</span>
+      <span class="cuisine-pill" data-cuisine="Cajun and Creole" onclick="toggleCuisine(this)">🦞 Cajun &amp; Creole</span>
+      <span class="cuisine-pill" data-cuisine="British" onclick="toggleCuisine(this)">🥧 British</span>
+    </div>
+
+    <!-- Occasion / dish-type / extra tags (FoodAssistant-stqb, -n9aq, -qaes,
+         -2513, -irxk, -u3rh). These steer the AI suggestion and generation
+         prompts only (there is no clean external-search filter for them). -->
+    <div class="pref-section-label">Occasion <span class="ai-only">✨ AI only</span></div>
+    <div class="cuisine-pills" id="tag-pills">
+      <span class="tag-pill" data-tag="Meal Prep" onclick="toggleTag(this)">🥡 Meal Prep</span>
+      <span class="tag-pill" data-tag="Lunch Box" onclick="toggleTag(this)">🍱 Lunch Box</span>
+      <span class="tag-pill" data-tag="Camping" onclick="toggleTag(this)">⛺ Camping</span>
+      <span class="tag-pill" data-tag="Picnic" onclick="toggleTag(this)">🧺 Picnic</span>
+      <span class="tag-pill" data-tag="Party" onclick="toggleTag(this)">🎉 Party / Crowd</span>
+      <span class="tag-pill" data-tag="Game Day" onclick="toggleTag(this)">🏈 Game Day</span>
+      <span class="tag-pill" data-tag="Holiday" onclick="toggleTag(this)">🎄 Holiday</span>
+      <span class="tag-pill" data-tag="Date Night" onclick="toggleTag(this)">🕯️ Date Night</span>
+    </div>
+
+    <div class="pref-section-label">Dish type <span class="ai-only">✨ AI only</span></div>
+    <div class="cuisine-pills" id="course-pills">
+      <span class="tag-pill" data-tag="Breakfast" onclick="toggleTag(this)">🍳 Breakfast</span>
+      <span class="tag-pill" data-tag="Appetizer" onclick="toggleTag(this)">🥟 Appetizer</span>
+      <span class="tag-pill" data-tag="Soup" onclick="toggleTag(this)">🍲 Soup</span>
+      <span class="tag-pill" data-tag="Salad" onclick="toggleTag(this)">🥗 Salad</span>
+      <span class="tag-pill" data-tag="Main Course" onclick="toggleTag(this)">🍽️ Main</span>
+      <span class="tag-pill" data-tag="Side Dish" onclick="toggleTag(this)">🥔 Side</span>
+      <span class="tag-pill" data-tag="Snack" onclick="toggleTag(this)">🍿 Snack</span>
+      <span class="tag-pill" data-tag="Dessert" onclick="toggleTag(this)">🍰 Dessert</span>
+      <span class="tag-pill" data-tag="Baked Goods" onclick="toggleTag(this)">🥖 Baked Goods</span>
+      <span class="tag-pill" data-tag="Candy" onclick="toggleTag(this)">🍬 Candy</span>
+      <span class="tag-pill" data-tag="Drink" onclick="toggleTag(this)">🍹 Drink</span>
+    </div>
+
+    <div class="pref-section-label">Extras <span class="ai-only">✨ AI only</span></div>
+    <div class="cuisine-pills" id="extra-pills">
+      <span class="tag-pill" data-tag="Cooks With Wine" onclick="toggleTag(this)">🍷 Cooks With Wine</span>
+      <span class="tag-pill" data-tag="Leftover Friendly" onclick="toggleTag(this)">♻️ Leftover Friendly</span>
+      <span class="tag-pill" data-tag="One Pot" onclick="toggleTag(this)">🍲 One Pot</span>
+      <span class="tag-pill" data-tag="No Cook" onclick="toggleTag(this)">🧊 No Cook</span>
+      <span class="tag-pill" data-tag="Budget" onclick="toggleTag(this)">💸 Budget</span>
+    </div>
+
+    <!-- Appliance steering (FoodAssistant-q098 part 1). Declare what you can cook
+         with; the AI tailors recipes to that equipment. AI-only, same mechanism
+         as the tags above. -->
+    <div class="pref-section-label">Appliances <span class="ai-only">✨ AI only</span></div>
+    <div class="cuisine-pills" id="appliance-pills">
+      <span class="tag-pill" data-tag="Air Fryer" onclick="toggleTag(this)">🍟 Air Fryer</span>
+      <span class="tag-pill" data-tag="Instant Pot" onclick="toggleTag(this)">⏲️ Instant Pot</span>
+      <span class="tag-pill" data-tag="Slow Cooker" onclick="toggleTag(this)">🍲 Slow Cooker</span>
+      <span class="tag-pill" data-tag="Grill" onclick="toggleTag(this)">🔥 Grill / BBQ</span>
+      <span class="tag-pill" data-tag="Sous Vide" onclick="toggleTag(this)">🌡️ Sous Vide</span>
+      <span class="tag-pill" data-tag="Cast Iron" onclick="toggleTag(this)">🍳 Cast Iron</span>
+      <span class="tag-pill" data-tag="Wok" onclick="toggleTag(this)">🥢 Wok</span>
+      <span class="tag-pill" data-tag="Stand Mixer" onclick="toggleTag(this)">🧁 Stand Mixer</span>
+      <span class="tag-pill" data-tag="Blender" onclick="toggleTag(this)">🥤 Blender</span>
+      <span class="tag-pill" data-tag="Toaster Oven" onclick="toggleTag(this)">🍞 Toaster Oven</span>
+      <span class="tag-pill" data-tag="Microwave Only" onclick="toggleTag(this)">📡 Microwave Only</span>
+      <span class="tag-pill" data-tag="No Oven" onclick="toggleTag(this)">🚫 No Oven</span>
+    </div>
+
+    <!-- Ingredient include/exclude filter (FoodAssistant-w3s5). Free-text,
+         comma-separated; AI-only steering like the tags above. -->
+    <div class="pref-section-label">Ingredients <span class="ai-only">✨ AI only</span></div>
+    <div class="ingredient-filter">
+      <input type="text" class="form-control form-control-sm" id="pref-include"
+             placeholder="Must include, e.g. chicken, basil" oninput="savePrefs(); updatePrefLabels();">
+      <input type="text" class="form-control form-control-sm" id="pref-exclude"
+             placeholder="Avoid, e.g. cilantro, mushrooms" oninput="savePrefs(); updatePrefLabels();">
+    </div>
+
+    <div class="pref-reset-row">
+      <a href="#" onclick="resetPrefs(); return false;">Reset to defaults</a>
+    </div>
+  </div>
+</div>
+
+<div class="row g-3" id="tiers">
+  <div class="col-12 text-secondary">
+    <span class="spinner-border spinner-border-sm me-2"></span>Checking your recipes and TheMealDB against current stock…
+  </div>
+</div>
+
+<!-- External (web) recipe tiers: always visible regardless of local count -->
+<div class="d-none mt-3" id="ext-section">
+  <div class="d-flex align-items-baseline gap-2 mb-2">
+    <h5 class="text-secondary mb-0"><i class="bi bi-globe2 me-1"></i>From the Web</h5>
+    <span class="small text-secondary">External recipes matched against your inventory</span>
+  </div>
+  <div id="ext-tiers"></div>
+</div>
+
+<!-- AI suggestions section (hidden until asked) -->
+<div class="d-none mt-3" id="ai-section">
+  <div class="d-flex align-items-baseline gap-2 mb-2">
+    <h5 class="text-primary mb-0"><i class="bi bi-stars me-1"></i>AI Suggestions</h5>
+    <span class="small text-secondary">Based on your current inventory</span>
+    <button type="button" class="btn-close ms-auto" aria-label="Close"
+            onclick="document.getElementById('ai-section').classList.add('d-none')"></button>
+  </div>
+  <div id="ai-cards" class="row g-2 row-cols-1 row-cols-md-2 row-cols-lg-3 row-cols-xxl-4"></div>
+</div>
+
+<!-- AI recipe preview modal -->
+<div class="modal fade" id="aiPreviewModal" tabindex="-1">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="aipv-name">Recipe</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="text-center text-secondary py-4" id="aipv-loading">
+          <span class="spinner-border spinner-border-sm me-2"></span>Generating recipe…
+        </div>
+        <div id="aipv-body" class="d-none">
+          <div class="small text-secondary mb-2" id="aipv-meta"></div>
+          <p class="small" id="aipv-description"></p>
+          <h6><i class="bi bi-basket me-1"></i>Ingredients</h6>
+          <ul class="small" id="aipv-ingredients"></ul>
+          <h6><i class="bi bi-list-ol me-1"></i>Instructions</h6>
+          <ol class="small" id="aipv-instructions"></ol>
+        </div>
+        <div class="alert alert-danger d-none" id="aipv-error"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+        <button class="btn btn-outline-primary" id="aipv-cook" disabled onclick="cookAiRecipe(this)">
+          <i class="bi bi-fire me-1"></i>Cook this
+        </button>
+        <button class="btn btn-info" id="aipv-save" disabled onclick="saveAiRecipe(this)">
+          <i class="bi bi-download me-1"></i>Save to Mealie
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Add-to-mealplan modal -->
+<div class="modal fade" id="planModal" tabindex="-1">
+  <div class="modal-dialog modal-sm">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h6 class="modal-title">Plan: <span id="plan-recipe-name"></span></h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body vstack gap-2">
+        <input type="date" class="form-control" id="plan-date">
+        <select class="form-select" id="plan-type">
+          <option value="breakfast">Breakfast</option>
+          <option value="lunch">Lunch</option>
+          <option value="dinner" selected>Dinner</option>
+          <option value="side">Side</option>
+        </select>
+        <div class="text-danger small d-none" id="plan-error"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button class="btn btn-primary" onclick="savePlan()">Add to Plan</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{% if mealie_configured %}
+<style>
+.cook-prefs-bar {
+  border: 1px solid var(--bs-border-color);
+  border-radius: 0.5rem;
+  background: var(--bs-tertiary-bg);
+  overflow: hidden;
+}
+.cook-prefs-toggle {
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 0.6rem 1rem;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--bs-body-color);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+.cook-prefs-toggle:hover {
+  background: var(--bs-secondary-bg);
+}
+.cook-prefs-panel {
+  display: none;
+  padding: 1rem;
+  border-top: 1px solid var(--bs-border-color);
+}
+.cook-prefs-panel.open {
+  display: block;
+}
+.pref-row {
+  display: grid;
+  grid-template-columns: 1.1rem 7rem 1fr 7rem;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.25rem;
+}
+.pref-row .pref-toggle {
+  accent-color: var(--bs-primary);
+  cursor: pointer;
+  margin: 0;
+}
+.pref-row.disabled .end-label {
+  opacity: 0.4;
+}
+input[type=range].pref-slider:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.pref-row .end-label {
+  font-size: 0.75rem;
+  color: var(--bs-secondary-color);
+  white-space: nowrap;
+}
+.pref-row .end-label.right { text-align: right; }
+.pref-mid-label {
+  text-align: center;
+  font-size: 0.72rem;
+  color: var(--bs-secondary-color);
+  margin-bottom: 0.75rem;
+  margin-top: 0.1rem;
+}
+input[type=range].pref-slider {
+  width: 100%;
+  accent-color: var(--bs-primary);
+}
+.diet-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.75rem;
+}
+.diet-pill {
+  padding: 0.2rem 0.65rem;
+  border-radius: 999px;
+  border: 1px solid var(--bs-border-color);
+  background: var(--bs-secondary-bg);
+  font-size: 0.78rem;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.diet-pill.active {
+  background: var(--bs-primary);
+  border-color: var(--bs-primary);
+  color: #fff;
+}
+.ai-only {
+  display: inline-block;
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 0.05rem 0.4rem;
+  border-radius: 999px;
+  color: var(--bs-info);
+  border: 1px solid var(--bs-info);
+  vertical-align: middle;
+  opacity: 0.85;
+}
+.pref-section-label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--bs-secondary-color);
+  margin: 0.85rem 0 0.4rem;
+}
+.cuisine-pills {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+}
+.cuisine-group-label {
+  font-size: 0.68rem;
+  color: var(--bs-tertiary-color, var(--bs-secondary-color));
+  margin-right: 0.1rem;
+  flex-basis: 100%;
+}
+.cuisine-group-label:not(:first-child) { margin-top: 0.35rem; }
+.cuisine-pill {
+  padding: 0.2rem 0.65rem;
+  border-radius: 999px;
+  border: 1px solid var(--bs-border-color);
+  background: var(--bs-secondary-bg);
+  font-size: 0.78rem;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.cuisine-pill.active {
+  background: var(--bs-info);
+  border-color: var(--bs-info);
+  color: #fff;
+}
+.tag-pill {
+  padding: 0.2rem 0.65rem;
+  border-radius: 999px;
+  border: 1px solid var(--bs-border-color);
+  background: var(--bs-secondary-bg);
+  font-size: 0.78rem;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.tag-pill.active {
+  background: var(--bs-success);
+  border-color: var(--bs-success);
+  color: #fff;
+}
+.ingredient-filter {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.4rem;
+}
+@media (max-width: 520px) {
+  .ingredient-filter { grid-template-columns: 1fr; }
+}
+.pref-reset-row {
+  text-align: right;
+  margin-top: 0.75rem;
+}
+.pref-reset-row a {
+  font-size: 0.78rem;
+  color: var(--bs-secondary-color);
+}
+</style>
+<script>
+const MEALIE_URL = {{ mealie_url | tojson }};
+
+// Preference state
+let cVal = 3, sVal = 3, tVal = 3, pVal = 3;
+// Per-factor on/off: unchecking keeps the slider value but excludes the
+// factor from the suggestion request. All on by default.
+let prefOn = {complexity: true, spice: true, time: true, portions: true};
+let activeDiets = new Set();
+let activeCuisines = new Set();
+let activeTags = new Set();
+let prefsOpen = false;
+let prefsDebounce = null;
+
+const PREF_SLIDER_IDS = {complexity: 'pref-complexity', spice: 'pref-spice',
+                         time: 'pref-time', portions: 'pref-portions'};
+
+const COMPLEXITY_LABELS = {1:'Instant Ramen', 2:'Home Cook', 3:'Getting Fancy', 4:'Chef Mode', 5:'Michelin Star'};
+const SPICE_LABELS      = {1:'Zero Heat', 2:'A Little Kick', 3:'Flavor Town', 4:'Send Help 🥵', 5:'Inferno'};
+const TIME_LABELS       = {1:'≤15 min', 2:'≤30 min', 3:'~1 hour', 4:'~2 hours', 5:'No limit'};
+const PORTIONS_LABELS   = {1:'1–2 servings', 2:'2–3 servings', 3:'4–6 servings', 4:'8–10 servings', 5:'12+ servings'};
+
+function togglePrefs() {
+  prefsOpen = !prefsOpen;
+  document.getElementById('cook-prefs-panel').classList.toggle('open', prefsOpen);
+  const chevron = document.getElementById('prefs-chevron');
+  chevron.className = prefsOpen ? 'bi bi-chevron-up ms-1' : 'bi bi-chevron-down ms-1';
+}
+
+function updatePrefLabels() {
+  document.getElementById('lbl-complexity').textContent = COMPLEXITY_LABELS[cVal];
+  document.getElementById('lbl-spice').textContent      = SPICE_LABELS[sVal];
+  document.getElementById('lbl-time').textContent       = TIME_LABELS[tVal];
+  document.getElementById('lbl-portions').textContent   = PORTIONS_LABELS[pVal];
+  const anyDisabled = Object.values(prefOn).some(on => !on);
+  const hasIng = ((document.getElementById('pref-include')?.value || '').trim()
+    || (document.getElementById('pref-exclude')?.value || '').trim());
+  const nonDefault = cVal !== 3 || sVal !== 3 || tVal !== 3 || pVal !== 3
+    || anyDisabled || activeDiets.size > 0 || activeCuisines.size > 0 || activeTags.size > 0
+    || hasIng;
+  document.getElementById('prefs-active-badge').classList.toggle('d-none', !nonDefault);
+}
+
+function applyPrefToggle(factor) {
+  // Grey out and disable the slider when its factor is off, without touching
+  // the slider's value so the choice is preserved.
+  const on = prefOn[factor];
+  const slider = document.getElementById(PREF_SLIDER_IDS[factor]);
+  slider.disabled = !on;
+  slider.closest('.pref-row').classList.toggle('disabled', !on);
+}
+
+function toggleDiet(el) {
+  const diet = el.dataset.diet;
+  if (activeDiets.has(diet)) {
+    activeDiets.delete(diet);
+    el.classList.remove('active');
+  } else {
+    activeDiets.add(diet);
+    el.classList.add('active');
+  }
+  savePrefs();
+  updatePrefLabels();
+  scheduleRefresh();
+}
+
+function toggleCuisine(el) {
+  const c = el.dataset.cuisine;
+  if (activeCuisines.has(c)) {
+    activeCuisines.delete(c);
+    el.classList.remove('active');
+  } else {
+    activeCuisines.add(c);
+    el.classList.add('active');
+  }
+  savePrefs();
+  updatePrefLabels();
+  scheduleRefresh();
+}
+
+// Occasion / dish-type / extra tags (AI-only steering). These do not change the
+// stock/external search, so toggling one does not trigger a suggestion refresh;
+// they apply the next time the AI path runs (Ask AI, Generate, Surprise me).
+function toggleTag(el) {
+  const t = el.dataset.tag;
+  if (activeTags.has(t)) {
+    activeTags.delete(t);
+    el.classList.remove('active');
+  } else {
+    activeTags.add(t);
+    el.classList.add('active');
+  }
+  savePrefs();
+  updatePrefLabels();
+}
+
+function savePrefs() {
+  localStorage.setItem('cookPrefs', JSON.stringify({
+    complexity: cVal, spice: sVal, time: tVal, portions: pVal,
+    enabled: {...prefOn},
+    diets: [...activeDiets], cuisines: [...activeCuisines], tags: [...activeTags],
+    include: document.getElementById('pref-include')?.value || '',
+    exclude: document.getElementById('pref-exclude')?.value || '',
+  }));
+}
+
+function loadPrefs() {
+  try {
+    const raw = localStorage.getItem('cookPrefs');
+    if (!raw) return;
+    const p = JSON.parse(raw);
+    cVal = p.complexity || 3;
+    sVal = p.spice     || 3;
+    tVal = p.time      || 3;
+    pVal = p.portions  || 3;
+    const en = p.enabled || {};
+    for (const f of Object.keys(prefOn)) {
+      prefOn[f] = en[f] !== false;   // default on for older saved blobs
+    }
+    activeDiets = new Set(p.diets || []);
+    activeCuisines = new Set(p.cuisines || []);
+    activeTags = new Set(p.tags || []);
+    const incEl = document.getElementById('pref-include');
+    const excEl = document.getElementById('pref-exclude');
+    if (incEl) incEl.value = p.include || '';
+    if (excEl) excEl.value = p.exclude || '';
+  } catch (_) {}
+  document.getElementById('pref-complexity').value = cVal;
+  document.getElementById('pref-spice').value      = sVal;
+  document.getElementById('pref-time').value       = tVal;
+  document.getElementById('pref-portions').value   = pVal;
+  for (const f of Object.keys(prefOn)) {
+    document.getElementById('on-' + f).checked = prefOn[f];
+    applyPrefToggle(f);
+  }
+  document.querySelectorAll('.diet-pill').forEach(el => {
+    el.classList.toggle('active', activeDiets.has(el.dataset.diet));
+  });
+  document.querySelectorAll('.cuisine-pill').forEach(el => {
+    el.classList.toggle('active', activeCuisines.has(el.dataset.cuisine));
+  });
+  document.querySelectorAll('.tag-pill').forEach(el => {
+    el.classList.toggle('active', activeTags.has(el.dataset.tag));
+  });
+  updatePrefLabels();
+}
+
+function resetPrefs() {
+  cVal = 3; sVal = 3; tVal = 3; pVal = 3;
+  prefOn = {complexity: true, spice: true, time: true, portions: true};
+  activeDiets = new Set();
+  activeCuisines = new Set();
+  activeTags = new Set();
+  document.getElementById('pref-complexity').value = 3;
+  document.getElementById('pref-spice').value      = 3;
+  document.getElementById('pref-time').value       = 3;
+  document.getElementById('pref-portions').value   = 3;
+  for (const f of Object.keys(prefOn)) {
+    document.getElementById('on-' + f).checked = true;
+    applyPrefToggle(f);
+  }
+  document.querySelectorAll('.diet-pill').forEach(el => el.classList.remove('active'));
+  document.querySelectorAll('.cuisine-pill').forEach(el => el.classList.remove('active'));
+  document.querySelectorAll('.tag-pill').forEach(el => el.classList.remove('active'));
+  const incEl = document.getElementById('pref-include');
+  const excEl = document.getElementById('pref-exclude');
+  if (incEl) incEl.value = '';
+  if (excEl) excEl.value = '';
+  savePrefs();
+  updatePrefLabels();
+  scheduleRefresh();
+}
+
+function scheduleRefresh() {
+  clearTimeout(prefsDebounce);
+  prefsDebounce = setTimeout(loadSuggestions, 300);
+}
+
+function buildPrefsString() {
+  // Disabled factors are excluded entirely (treated as "no preference").
+  const complexity = prefOn.complexity ? ['very simple and quick', 'simple', null, 'complex', 'very sophisticated and complex'][cVal - 1] : null;
+  const spice      = prefOn.spice ? ['absolutely no spice or heat', 'mild heat', null, 'hot and spicy', 'extremely spicy, lots of chili'][sVal - 1] : null;
+  const timeMap    = {1: 'ready in 15 minutes or less', 2: 'ready in 30 minutes or less', 4: 'up to 2 hours cooking time', 5: null};
+  const time       = prefOn.time ? timeMap[tVal] : null;
+  const portions   = prefOn.portions ? {1: '1-2 servings', 2: '2-3 servings', 4: '8-10 servings', 5: '12 or more servings'}[pVal] : null;
+  const diets      = [...activeDiets].join(', ');
+  const cuisines   = [...activeCuisines].join(', ');
+  const parts = [];
+  if (complexity) parts.push(`Recipes should be ${complexity}`);
+  if (spice)      parts.push(`spice level: ${spice}`);
+  if (time)       parts.push(time);
+  if (portions)   parts.push(`serving size: ${portions}`);
+  if (diets)      parts.push(`dietary requirements: ${diets}`);
+  if (cuisines)   parts.push(`preferred cuisine: ${cuisines}`);
+  const tagPhrase = buildTagsPhrase();
+  if (tagPhrase)  parts.push(tagPhrase);
+  const ingPhrase = buildIngredientPhrase();
+  if (ingPhrase)  parts.push(ingPhrase);
+  return parts.join('. ');
+}
+
+// Map each occasion/dish-type/extra tag to a richer phrase so the AI gets real
+// guidance, not just a keyword. Unmapped tags fall back to their own label.
+const TAG_PHRASES = {
+  'Meal Prep': 'suitable for meal prep (batchable, keeps and reheats well, portionable)',
+  'Lunch Box': 'packable for a lunch box (eats well cold or reheated, not messy)',
+  'Camping': 'campfire/camping friendly (minimal refrigeration, packable, simple gear)',
+  'Picnic': 'picnic friendly (served cold or at room temperature, easy to transport)',
+  'Party': 'a crowd-pleasing party dish (scales up, shareable)',
+  'Game Day': 'game-day food (finger food, snacks, shareable)',
+  'Holiday': 'a festive holiday dish',
+  'Date Night': 'an impressive date-night dish for two',
+  'Cooks With Wine': 'uses wine as a cooking ingredient',
+  'Leftover Friendly': 'leftover friendly (reheats well the next day)',
+  'One Pot': 'one-pot or one-pan, minimal cleanup',
+  'No Cook': 'no-cook (no stove or oven required)',
+  'Budget': 'budget friendly with inexpensive, common ingredients',
+  'Air Fryer': 'can be made in an air fryer',
+  'Instant Pot': 'can be made in an Instant Pot or electric pressure cooker',
+  'Slow Cooker': 'can be made in a slow cooker / crock pot',
+  'Grill': 'can be cooked on a grill or BBQ',
+  'Sous Vide': 'uses sous vide cooking',
+  'Cast Iron': 'can be made in a cast iron pan',
+  'Wok': 'can be made in a wok',
+  'Stand Mixer': 'practical to make with a stand mixer',
+  'Blender': 'can be made with a blender',
+  'Toaster Oven': 'can be made in a toaster oven',
+  'Microwave Only': 'must be cookable with only a microwave (no stove or oven)',
+  'No Oven': 'must not require an oven',
+};
+const COURSE_TAGS = new Set(['Breakfast', 'Appetizer', 'Soup', 'Salad', 'Main Course',
+  'Side Dish', 'Snack', 'Dessert', 'Baked Goods', 'Candy', 'Drink']);
+
+function ingValue(id) {
+  return (document.getElementById(id)?.value || '')
+    .split(',').map(s => s.trim()).filter(Boolean);
+}
+
+function buildIngredientPhrase() {
+  const inc = ingValue('pref-include');
+  const exc = ingValue('pref-exclude');
+  const out = [];
+  if (inc.length) out.push(`must use these ingredients: ${inc.join(', ')}`);
+  if (exc.length) out.push(`must NOT use these ingredients: ${exc.join(', ')}`);
+  return out.join('. ');
+}
+
+function buildTagsPhrase() {
+  if (!activeTags.size) return '';
+  const courses = [...activeTags].filter(t => COURSE_TAGS.has(t));
+  const others  = [...activeTags].filter(t => !COURSE_TAGS.has(t)).map(t => TAG_PHRASES[t] || t);
+  const out = [];
+  if (courses.length) out.push(`dish type: ${courses.join(', ')}`);
+  if (others.length)  out.push(`additional requirements: ${others.join('; ')}`);
+  return out.join('. ');
+}
+
+function buildPrefsParams() {
+  // Disabled factors are omitted so the server applies no filter for them
+  // (complexity/spice/portions steer the AI only; time filters the external
+  // search). Omitting matches each param's "no preference" default.
+  const p = new URLSearchParams();
+  if (prefOn.complexity) p.set('complexity', cVal);
+  if (prefOn.spice)      p.set('spice', sVal);
+  if (prefOn.time)       p.set('max_time', {1:15, 2:30, 3:0, 4:120, 5:0}[tVal] || 0);
+  if (prefOn.portions)   p.set('portions', pVal);
+  if (activeDiets.size) p.set('dietary', [...activeDiets].join(','));
+  if (activeCuisines.size) p.set('cuisine', [...activeCuisines].join(','));
+  return p;
+}
+
+// Wire up slider events
+['pref-complexity','pref-spice','pref-time','pref-portions'].forEach(id => {
+  document.getElementById(id).addEventListener('input', function() {
+    if (id === 'pref-complexity') cVal = +this.value;
+    if (id === 'pref-spice')      sVal = +this.value;
+    if (id === 'pref-time')       tVal = +this.value;
+    if (id === 'pref-portions')   pVal = +this.value;
+    updatePrefLabels();
+    savePrefs();
+    scheduleRefresh();
+  });
+});
+
+// Wire up per-factor on/off checkboxes
+Object.keys(prefOn).forEach(factor => {
+  document.getElementById('on-' + factor).addEventListener('change', function() {
+    prefOn[factor] = this.checked;
+    applyPrefToggle(factor);
+    updatePrefLabels();
+    savePrefs();
+    scheduleRefresh();
+  });
+});
+
+const TIER_META = {
+  ready:    {label: 'Ready to Cook',       icon: 'bi-check-circle',  color: 'success',
+             desc: 'Everything is already in stock.',
+             empty: 'Nothing cookable from stock alone yet.'},
+  staples:  {label: 'With Pantry Staples', icon: 'bi-egg-fried',     color: 'info',
+             desc: 'In stock plus basics like eggs, butter, flour, and spices.',
+             empty: 'Nothing within reach of basic staples.'},
+  shopping: {label: 'Worth a Shop Run',    icon: 'bi-cart-plus',     color: 'warning',
+             desc: 'Uses up your perishables but needs a few extra ingredients.',
+             empty: 'No recipes found that use your perishables.'},
+};
+
+let cardSeq = 0;
+
+// Per-ingredient breakdown (FoodAssistant-x1tt): each ingredient the recipe
+// needs is tagged with what you already own. Items in your Grocy stock get an
+// "In stock" chip, items on your staples list (the things you always keep on
+// hand) get an "On hand" chip, and the rest form the short buy list. A link
+// drops straight into the staples settings so you can teach it what you always
+// have. The owned/needed split mirrors what the suggestion ranker already
+// computed on the server (matched + staples vs unmatched).
+function ownRow(name, cls, icon, label, title) {
+  return `<div class="d-flex justify-content-between align-items-center gap-2 small py-1">
+      <span class="text-truncate">${name}</span>
+      <span class="badge ${cls} flex-shrink-0" title="${title}"><i class="bi ${icon} me-1"></i>${label}</span>
+    </div>`;
+}
+
+function ingredientDetail(s, cid) {
+  const inStock = (s.matched_ingredients || []).map(n =>
+    ownRow(n, 'text-bg-success', 'bi-check2-circle', 'In stock', 'Already in your inventory'));
+  const onHand = (s.staple_ingredients || []).map(n =>
+    ownRow(n, 'text-bg-info', 'bi-house-heart', 'On hand', 'On your staples list, assumed on hand'));
+  const owned = inStock.concat(onHand);
+  const need = s.unmatched_ingredients || [];
+  const needRows = need.map(n =>
+    ownRow(n, 'text-bg-warning', 'bi-cart', 'Buy', 'Not in stock or on your staples list'));
+  const buyList = need.length
+    ? `<div class="small text-secondary fw-semibold mt-2 mb-1"><i class="bi bi-cart-plus me-1"></i>Shopping list</div>${needRows.join('')}`
+    : `<div class="small text-success mt-2"><i class="bi bi-check2-all me-1"></i>You own everything for this one.</div>`;
+  const staplesLink = `<div class="small mt-2 pt-2 border-top">
+      <a href="setup#pane-recipe-tuning" class="text-decoration-none">
+        <i class="bi bi-sliders me-1"></i>Add things you always keep on hand</a>
+    </div>`;
+  return `
+    <a class="small text-secondary" data-bs-toggle="collapse" href="#ing-${cid}" role="button">
+      <i class="bi bi-list-ul me-1"></i>${s.total_ingredients} ingredients
+    </a>
+    <div class="collapse mt-1" id="ing-${cid}">
+      ${owned.join('')}${buyList}${staplesLink}
+    </div>`;
+}
+
+function actions(s, tier) {
+  const missing = (s.unmatched_ingredients || []).length;
+  const btns = [];
+  if (s.source === 'themealdb' || s.source === 'spoonacular') {
+    // A web recipe can be cooked straight away (set as the Current Recipe)
+    // without first saving it to Mealie (FoodAssistant-wqef).
+    btns.push(`<button class="btn btn-sm btn-outline-primary" onclick="cookExternal('${s.external_id}', '${s.source}', false, this)"
+      title="Make this the Current Recipe (no need to save it first)"><i class="bi bi-fire me-1"></i>Cook</button>`);
+    btns.push(`<button class="btn btn-sm btn-outline-secondary" onclick="cookExternal('${s.external_id}', '${s.source}', true, this)"
+      title="Add as another concurrent recipe (appetizer, dessert...)"><i class="bi bi-plus-lg me-1"></i>Add course</button>`);
+    // Plain Save is always offered so saving never forces a shopping-list edit;
+    // in the shopping tier we add Save + list alongside it (FoodAssistant-j278).
+    btns.push(`<button class="btn btn-sm btn-outline-info" onclick="importExternal('${s.external_id}', '${s.source}', false, this)"
+      title="Save this recipe into Mealie"><i class="bi bi-download me-1"></i>Save</button>`);
+    if (tier === 'shopping') {
+      btns.push(`<button class="btn btn-sm btn-outline-warning" onclick="importExternal('${s.external_id}', '${s.source}', true, this)"
+        title="Save to Mealie and add ${missing} missing ingredients to the shopping list">
+        <i class="bi bi-cart-plus me-1"></i>Save + list</button>`);
+    }
+  } else {
+    btns.push(`<button class="btn btn-sm btn-outline-primary" onclick="cookThis('${s.slug}', this)"
+      title="Make this the Current Recipe"><i class="bi bi-fire me-1"></i>Cook</button>`);
+    btns.push(`<button class="btn btn-sm btn-outline-secondary" onclick="addCourse('${s.slug}', this)"
+      title="Add as another concurrent recipe (appetizer, dessert...)"><i class="bi bi-plus-lg me-1"></i>Add course</button>`);
+    btns.push(`<button class="btn btn-sm btn-outline-primary" onclick="openPlan('${s.id}', '${(s.name || '').replace(/'/g, '&#39;')}')"
+      title="Add to meal plan"><i class="bi bi-calendar-plus me-1"></i>Plan</button>`);
+    btns.push(`<button class="btn btn-sm btn-outline-success" onclick="cookedRecipe('${s.slug}', ${s.matched_ingredients.length}, this)"
+      title="Mark as cooked: consumes the ${s.matched_ingredients.length} matched item${s.matched_ingredients.length !== 1 ? 's' : ''} from inventory">
+      <i class="bi bi-check2-circle me-1"></i>Cooked it</button>`);
+    if (tier === 'shopping' && missing) {
+      btns.push(`<button class="btn btn-sm btn-outline-warning" onclick="addMissing('${s.slug}', this)"
+        title="Add ${missing} missing ingredient${missing !== 1 ? 's' : ''} to the shopping list">
+        <i class="bi bi-cart-plus me-1"></i>${missing}</button>`);
+    }
+  }
+  return btns.join(' ');
+}
+
+// In-stock coverage for a suggestion card (FoodAssistant-crxh): how many of
+// the recipe's ingredients are already on hand, plus a traffic-light colour so
+// the card reads at a glance. Green means nothing is missing beyond pantry
+// staples, amber means at least half the ingredients are in stock, red means
+// most are missing.
+function stockCoverage(s) {
+  const have = (s.matched_ingredients || []).length;
+  const total = s.total_ingredients || 0;
+  const missing = (s.unmatched_ingredients || []).length;
+  const pct = total ? Math.round((have / total) * 100) : 0;
+  const color = missing === 0 ? 'success'
+    : (total && have / total >= 0.5 ? 'warning' : 'danger');
+  return {have, total, pct, color};
+}
+
+// Unified source chip (FoodAssistant-5frk) and "Made N times" note
+// (FoodAssistant-bjps), driven by the backend fields on each suggestion.
+function srcBadge(s) {
+  if (!s.badge || !s.badge.label) return '';
+  return `<span class="badge ${s.badge.css_class} ms-1">${s.badge.label}</span>`;
+}
+function madeNote(s) {
+  const n = s.cook_count || 0;
+  if (!n) return '';
+  const label = n === 1 ? 'Made once' : `Made ${n} times`;
+  const when = s.last_cooked_at ? ` title="Last cooked ${s.last_cooked_at.slice(0, 10)}"` : '';
+  return `<div class="small text-secondary mt-1"${when}><i class="bi bi-check2-circle me-1"></i>${label}</div>`;
+}
+
+function suggestionCard(s, tier) {
+  const cid = ++cardSeq;
+  const cov = stockCoverage(s);
+  const external = s.source !== 'mealie';
+  const title = external
+    ? `<span class="fw-semibold">${s.name}</span>${srcBadge(s)}`
+    : `<a href="${MEALIE_URL}/g/home/r/${s.slug}" target="_blank" class="fw-semibold">${s.name}</a>${srcBadge(s)}`;
+  return `
+  <div class="card h-100">
+    ${s.image ? `<img src="${s.image}" alt="${s.name || 'Recipe'} photo" class="card-img-top" style="height:120px;object-fit:cover" loading="lazy" onerror="this.remove()">` : ''}
+    <div class="card-body py-2 d-flex flex-column">
+      <div class="d-flex justify-content-between align-items-start gap-2">
+        <div class="min-width-0">${title}</div>
+        <span class="badge text-bg-${cov.color} flex-shrink-0" title="Ingredients you already have in stock">
+          ${cov.have}/${cov.total}</span>
+      </div>
+      <div class="small mt-1">
+        <span class="fw-semibold">${cov.have} of ${cov.total} in stock</span>
+        <div class="progress mt-1" style="height:3px" role="progressbar"
+             aria-label="In-stock coverage" aria-valuenow="${cov.pct}" aria-valuemin="0" aria-valuemax="100">
+          <div class="progress-bar bg-${cov.color}" style="width:${cov.pct}%"></div>
+        </div>
+      </div>
+      ${s.expiring_items_used.length ? `
+        <div class="small urgency-3d mt-1"><i class="bi bi-clock-history me-1"></i>Uses expiring: ${s.expiring_items_used.join(', ')}</div>` : ''}
+      ${s.description ? `<div class="small text-secondary mt-1 text-truncate">${s.description}</div>` : ''}
+      ${madeNote(s)}
+      <div class="mt-1">${ingredientDetail(s, cid)}</div>
+      <div class="mt-auto pt-2 d-flex gap-1 flex-wrap" id="actions-${cid}">${actions(s, tier)}</div>
+    </div>
+  </div>`;
+}
+
+function renderTiers(tiers, containerEl) {
+  containerEl.innerHTML = Object.entries(TIER_META).map(([key, m]) => {
+    const items = (tiers[key] || []);
+    if (!items.length) return '';
+    return `
+    <div class="col-12 mb-1">
+      <div class="d-flex align-items-baseline gap-2 mb-1">
+        <h6 class="text-${m.color} mb-0"><i class="bi ${m.icon} me-1"></i>${m.label}</h6>
+        <span class="badge text-bg-${m.color}">${items.length}</span>
+      </div>
+      <div class="row g-2 row-cols-1 row-cols-md-2 row-cols-lg-3 row-cols-xxl-4">
+        ${items.map(s => `<div class="col">${suggestionCard(s, key)}</div>`).join('')}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function loadSuggestions() {
+  const el = document.getElementById('tiers');
+  const meta = document.getElementById('cook-meta');
+  const extSection = document.getElementById('ext-section');
+  const extTiers = document.getElementById('ext-tiers');
+  el.innerHTML = `<div class="col-12 text-secondary">
+    <span class="spinner-border spinner-border-sm me-2"></span>Checking your recipes and the web against current stock…</div>`;
+  extSection.classList.add('d-none');
+  try {
+    const params = buildPrefsParams();
+    const r = await fetch('mealie/suggest?' + params.toString());
+    if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
+    const data = await r.json();
+    const tiers = data.tiers || {};
+    meta.textContent = `${data.recipes_considered} recipes (${data.external_considered} from the web) matched against ${data.inventory_items} inventory items.`;
+
+    // Inventory outage (FoodAssistant-2cmm): the recipes still list, but with
+    // no stock to match against every tier reads "worth shopping for". Say so.
+    const grocyNote = data.grocy_error
+      ? `<div class="col-12"><div class="alert alert-warning mb-2"><i class="bi bi-plug me-2"></i>${data.grocy_error} Matching against your stock is paused, so recipes may look like they need more shopping than they do.</div></div>`
+      : '';
+
+    // Local (Mealie) tiers
+    el.innerHTML = grocyNote + Object.entries(TIER_META).map(([key, m]) => {
+      const items = tiers[key] || [];
+      return `
+      <div class="col-12">
+        <div class="d-flex align-items-baseline gap-2 mb-1">
+          <h5 class="text-${m.color} mb-0"><i class="bi ${m.icon} me-1"></i>${m.label}</h5>
+          <span class="badge text-bg-${m.color}">${items.length}</span>
+          <span class="small text-secondary d-none d-md-inline">${m.desc}</span>
+        </div>
+        ${items.length ? `
+        <div class="row g-2 row-cols-1 row-cols-md-2 row-cols-lg-3 row-cols-xxl-4">
+          ${items.map(s => `<div class="col">${suggestionCard(s, key)}</div>`).join('')}
+        </div>` : `<div class="small text-secondary mb-2">${m.empty}</div>`}
+      </div>`;
+    }).join('');
+
+    // External (web) tiers: rendered separately so local results can't squeeze them out
+    const extData = data.external_tiers || {};
+    const hasExt = Object.values(extData).some(arr => arr.length > 0);
+    if (hasExt) {
+      renderTiers(extData, extTiers);
+      extSection.classList.remove('d-none');
+    }
+  } catch (e) {
+    el.innerHTML = `<div class="col-12"><div class="alert alert-danger">Could not load suggestions: ${e.message}</div></div>`;
+    meta.textContent = '';
+  }
+}
+
+// Make a Mealie suggestion the active Current Recipe, then open that page
+// (FoodAssistant-1g4l). The backend fetches and normalizes the recipe by slug.
+async function cookThis(slug, btn) {
+  const orig = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>'; }
+  try {
+    const r = await fetch('current-recipe/from-mealie', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({slug}),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || r.statusText);
+    window.location.href = 'ui/current-recipe';
+  } catch (e) {
+    if (btn) { btn.disabled = false; btn.innerHTML = orig; }
+    alert('Could not set the current recipe: ' + e.message);
+  }
+}
+
+// Cook a web recipe that has not been saved to Mealie (FoodAssistant-wqef):
+// fetch its full detail, set it as the Current Recipe (or add it as a course),
+// then open the recipe page. No Mealie save required.
+async function cookExternal(externalId, source, asCourse, btn) {
+  const orig = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>'; }
+  try {
+    const d = await fetch('mealie/recipes/external-detail?external_id=' +
+      encodeURIComponent(externalId) + '&source=' + encodeURIComponent(source)).then(r => r.json());
+    if (!d || d.detail) throw new Error((d && d.detail) || 'could not load the recipe');
+    const payload = {
+      title: d.name || 'Recipe', source: source,
+      servings: parseInt(d.servings, 10) || 1,
+      ingredients: (d.ingredients || []).map(i => ({ name: i })),
+      steps: d.instructions || [],
+      notes: d.description || '',
+    };
+    const endpoint = asCourse ? 'current-recipe/courses' : 'current-recipe';
+    const r = await fetch(endpoint, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.statusText);
+    window.location.href = 'ui/current-recipe';
+  } catch (e) {
+    if (btn) { btn.disabled = false; btn.innerHTML = orig; }
+    alert('Could not cook this recipe: ' + e.message);
+  }
+}
+
+// Add a Mealie recipe as another concurrent course (FoodAssistant-dbgx), then
+// open the in-progress page so the user sees the whole meal.
+async function addCourse(slug, btn) {
+  const orig = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>'; }
+  try {
+    const r = await fetch('current-recipe/from-mealie', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({slug, as_course: true}),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || r.statusText);
+    window.location.href = 'ui/current-recipe';
+  } catch (e) {
+    if (btn) { btn.disabled = false; btn.innerHTML = orig; }
+    alert('Could not add the course: ' + e.message);
+  }
+}
+
+// Load the AI-generated recipe (already in memory client-side) as the active
+// Current Recipe via the generic set endpoint, then open that page.
+async function cookAiRecipe(btn) {
+  if (!aiGeneratedRecipe) return;
+  const d = aiGeneratedRecipe;
+  const orig = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>'; }
+  try {
+    const r = await fetch('current-recipe', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        title: d.name || 'AI recipe',
+        source: 'ai',
+        servings: parseInt(d.servings, 10) || 1,
+        ingredients: (d.ingredients || []).map(i => ({name: i})),
+        steps: d.instructions || [],
+      }),
+    });
+    if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.detail || r.statusText); }
+    window.location.href = 'ui/current-recipe';
+  } catch (e) {
+    if (btn) { btn.disabled = false; btn.innerHTML = orig; }
+    alert('Could not set the current recipe: ' + e.message);
+  }
+}
+
+async function cookedRecipe(slug, matchedCount, btn) {
+  if (!confirm(`Mark as cooked? This consumes ${matchedCount} matched item${matchedCount !== 1 ? 's' : ''} from your Grocy inventory.`)) return;
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+  try {
+    const r = await fetch('mealie/cooked', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({slug}),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || r.statusText);
+    btn.outerHTML = `<span class="small text-success align-self-center" title="${(d.consumed || []).join(', ')}">
+      <i class="bi bi-check-circle me-1"></i>${d.message}</span>`;
+  } catch (e) {
+    btn.disabled = false;
+    btn.innerHTML = orig;
+    alert('Failed: ' + e.message);
+  }
+}
+
+async function addMissing(slug, btn) {
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+  try {
+    const r = await fetch('mealie/suggest/add-missing', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({slug}),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || r.statusText);
+    btn.outerHTML = `<span class="small text-success align-self-center"><i class="bi bi-check-circle me-1"></i>${d.message}</span>`;
+  } catch (e) {
+    btn.disabled = false;
+    btn.innerHTML = orig;
+    alert('Failed: ' + e.message);
+  }
+}
+
+async function importExternal(externalId, source, addToList, btn) {
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+  try {
+    const r = await fetch('mealie/recipes/import-external', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({external_id: externalId, source, add_missing_to_list: addToList}),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || r.statusText);
+    btn.outerHTML = `<span class="small text-success align-self-center"><i class="bi bi-check-circle me-1"></i>${d.message}
+      <a href="${d.mealie_url}/g/home/r/${d.slug}" target="_blank">View</a></span>`;
+  } catch (e) {
+    btn.disabled = false;
+    btn.innerHTML = orig;
+    alert('Import failed: ' + e.message);
+  }
+}
+
+// Add to meal plan
+let planRecipeId = null;
+
+function openPlan(recipeId, name) {
+  planRecipeId = recipeId;
+  document.getElementById('plan-recipe-name').textContent = name;
+  document.getElementById('plan-date').value = new Date().toISOString().slice(0, 10);
+  document.getElementById('plan-error').classList.add('d-none');
+  new bootstrap.Modal(document.getElementById('planModal')).show();
+}
+
+async function savePlan() {
+  const err = document.getElementById('plan-error');
+  err.classList.add('d-none');
+  try {
+    const r = await fetch('mealie/mealplan', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        date: document.getElementById('plan-date').value,
+        entry_type: document.getElementById('plan-type').value,
+        recipe_id: planRecipeId,
+      }),
+    });
+    if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
+    bootstrap.Modal.getInstance(document.getElementById('planModal')).hide();
+  } catch (e) {
+    err.textContent = e.message;
+    err.classList.remove('d-none');
+  }
+}
+
+// AI inventory-based suggestions
+let aiGeneratedRecipe = null;
+
+async function loadAiSuggestions() {
+  const btn = document.getElementById('btn-ask-ai');
+  const section = document.getElementById('ai-section');
+  const cards = document.getElementById('ai-cards');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Thinking…';
+  section.classList.remove('d-none');
+  cards.innerHTML = '<div class="col-12 text-secondary"><span class="spinner-border spinner-border-sm me-2"></span>Asking AI for suggestions…</div>';
+  try {
+    const r = await fetch('mealie/suggest/llm', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({preferences: buildPrefsString(), custom_prompt: aiCustomPrompt()}),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || r.statusText);
+    const sug = d.suggestions || [];
+    if (!sug.length) {
+      cards.innerHTML = '<div class="col-12 text-secondary small">No suggestions returned. Try again or add more inventory items.</div>';
+    } else {
+      cards.innerHTML = sug.map(s => `
+        <div class="col">
+          <div class="card h-100">
+            <div class="card-body py-2 d-flex flex-column">
+              <a href="#" class="fw-semibold" onclick="openAiPreview('${escHtml(s.name)}'); return false;">${escHtml(s.name)}</a>
+              ${s.description ? `<div class="small text-secondary mt-1">${escHtml(s.description)}</div>` : ''}
+              ${(s.uses||[]).length ? `<div class="small text-success mt-1"><i class="bi bi-check2 me-1"></i>${s.uses.map(escHtml).join(', ')}</div>` : ''}
+              <div class="mt-auto pt-2">
+                <button class="btn btn-sm btn-outline-primary"
+                        onclick="openAiPreview('${escHtml(s.name)}')">
+                  <i class="bi bi-stars me-1"></i>Generate full recipe
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>`).join('');
+    }
+  } catch (e) {
+    cards.innerHTML = `<div class="col-12"><div class="alert alert-danger">Could not get AI suggestions: ${e.message}</div></div>`;
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="bi bi-stars me-1"></i>Ask AI';
+  }
+}
+
+function escHtml(s) {
+  return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+// The optional custom AI prompt (FoodAssistant-2mh9). Absent element (no AI
+// configured) yields an empty string, so the default prompt is used.
+function aiCustomPrompt() {
+  return (document.getElementById('ai-custom-prompt')?.value || '').trim();
+}
+
+// The full steer for the generate path: the tuned preference pills plus the
+// free-text box, so generated recipes honor diet/cuisine/occasion tags too.
+function combinedAiPrompt() {
+  return [buildPrefsString(), aiCustomPrompt()].filter(Boolean).join('. ');
+}
+
+// Random recipe (FoodAssistant-dazq). Design choice: AI-generated random (not a
+// pick from the Mealie library) so it always honors the active preferences. If
+// a cuisine or dish-type tag is set, the random concept is built from it;
+// otherwise a concept is drawn from a broad pool. The AI then writes and names
+// the full dish, varied by a per-click nonce.
+const SURPRISE_POOL = [
+  'a hearty one-pan dinner', 'a comforting noodle bowl', 'a vibrant grain salad',
+  'a rustic stew', 'a stuffed flatbread', 'a sheet-pan roast', 'a savory hand pie',
+  'a creamy pasta bake', 'a spiced rice skillet', 'a loaded baked potato dish',
+  'a bright citrus salad', 'a warming soup', 'a crispy fritter plate',
+  'a glazed traybake', 'a smoky taco filling', 'a fragrant curry',
+  'a cheesy gratin', 'a quick stir-fry', 'a brothy dumpling bowl', 'a layered casserole',
+];
+
+function surpriseMe() {
+  const courses = [...activeTags].filter(t => COURSE_TAGS.has(t));
+  const cuisines = [...activeCuisines];
+  let concept;
+  if (courses.length || cuisines.length) {
+    const c = cuisines.length ? cuisines[Math.floor(Math.random() * cuisines.length)] : '';
+    const d = courses.length ? courses[Math.floor(Math.random() * courses.length)].toLowerCase() : 'dish';
+    concept = `a surprising ${c} ${d}`.replace(/\s+/g, ' ').trim();
+  } else {
+    concept = SURPRISE_POOL[Math.floor(Math.random() * SURPRISE_POOL.length)];
+  }
+  const nonce = Math.random().toString(36).slice(2, 7);
+  openAiPreview(concept, `Invent ONE creative dish and give it a real, appetizing name (do not call it "${concept}"). Variation seed: ${nonce}.`);
+}
+
+// Copycat a well-known restaurant dish (FoodAssistant-sk80). Reuses the AI
+// generate path with a copycat-styled instruction so the result previews and
+// saves exactly like any other generated recipe.
+function copycatDish() {
+  const dish = (prompt('Which restaurant dish do you want a copycat of?\n' +
+    'e.g. "Olive Garden Alfredo", "Chipotle barbacoa", "In-N-Out animal fries"') || '').trim();
+  if (!dish) return;
+  openAiPreview(dish,
+    'Recreate this as a faithful COPYCAT of the well-known restaurant version: match the ' +
+    'flavors, texture, and presentation as closely as you can using common home ingredients ' +
+    'and techniques. Call out any signature components or sauces.');
+}
+
+async function openAiPreview(name, extraInstruction) {
+  aiGeneratedRecipe = null;
+  const modal = new bootstrap.Modal(document.getElementById('aiPreviewModal'));
+  document.getElementById('aipv-name').textContent = `Generating "${name}"…`;
+  document.getElementById('aipv-save').disabled = true;
+  document.getElementById('aipv-loading').classList.remove('d-none');
+  document.getElementById('aipv-body').classList.add('d-none');
+  document.getElementById('aipv-error').classList.add('d-none');
+  modal.show();
+  try {
+    const prompt = [combinedAiPrompt(), extraInstruction].filter(Boolean).join('. ');
+    const r = await fetch('mealie/recipes/generate', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({name, custom_prompt: prompt}),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || r.statusText);
+    aiGeneratedRecipe = d;
+    document.getElementById('aipv-name').textContent = d.name || name;
+    document.getElementById('aipv-meta').textContent =
+      [d.servings, d.total_time].filter(Boolean).join(' · ');
+    document.getElementById('aipv-description').textContent = d.description || '';
+    document.getElementById('aipv-ingredients').innerHTML =
+      (d.ingredients || []).map(i => `<li>${escHtml(i)}</li>`).join('') || '<li class="text-secondary">None listed</li>';
+    document.getElementById('aipv-instructions').innerHTML =
+      (d.instructions || []).map(s => `<li>${escHtml(s)}</li>`).join('') || '<li class="text-secondary">None listed</li>';
+    document.getElementById('aipv-loading').classList.add('d-none');
+    document.getElementById('aipv-body').classList.remove('d-none');
+    document.getElementById('aipv-save').disabled = false;
+    document.getElementById('aipv-cook').disabled = false;
+  } catch (e) {
+    document.getElementById('aipv-loading').classList.add('d-none');
+    const err = document.getElementById('aipv-error');
+    err.textContent = 'Generation failed: ' + e.message;
+    err.classList.remove('d-none');
+  }
+}
+
+async function saveAiRecipe(btn) {
+  if (!aiGeneratedRecipe) return;
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Saving…';
+  try {
+    const d = aiGeneratedRecipe;
+    const r = await fetch('mealie/recipes/create', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        name: d.name, description: d.description || '',
+        servings: d.servings || '', total_time: d.total_time || '',
+        ingredients: d.ingredients || [], instructions: d.instructions || [],
+      }),
+    });
+    const res = await r.json();
+    if (!r.ok) throw new Error(res.detail || r.statusText);
+    btn.className = 'btn btn-success';
+    btn.innerHTML = '<i class="bi bi-check-circle me-1"></i>Saved';
+    btn.onclick = () => window.open(`${res.mealie_url}/g/home/r/${res.slug}`, '_blank');
+    btn.disabled = false;
+  } catch (e) {
+    btn.disabled = false;
+    btn.innerHTML = orig;
+    alert('Save failed: ' + e.message);
+  }
+}
+
+loadPrefs();
+loadSuggestions();
+
+// Deep link from the Expiring page's use-it-up ideas (FoodAssistant-w0kh):
+// ?generate=<dish name> opens the AI preview for that dish right away, so
+// "Cook this" on an idea lands on a full generated recipe, not a blank page.
+{% if ai_configured %}
+(function () {
+  const dish = new URLSearchParams(window.location.search).get('generate');
+  if (dish && dish.trim()) openAiPreview(dish.trim());
+})();
+{% endif %}
+</script>
+{% endif %}
+{% endblock %}

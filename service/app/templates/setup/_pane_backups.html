@@ -1,0 +1,179 @@
+{% from "setup/_macros.html" import info, panel, srow, pill, toggle with context %}
+<!-- Backups & Updates (FoodAssistant-jcnh): dense panel/row pattern. Backup,
+             restore, remote/USB schedules, and updates are grouped into panels.
+             Updates renders first (FoodAssistant-hidb) so staying current is the
+             lead action. Every control id (backup_include_secrets,
+             backup_password, restore-file, full-restore-source, rclone_remote,
+             rclone_schedule_hours, usb_backup_interval_hours, auto_update,
+             update_channel) and the update/restore JS hooks are unchanged. The
+             manual command-line update block hides behind a collapse
+             (FoodAssistant-btep). -->
+        <div class="tab-pane fade" id="pane-backups">
+          <p class="pane-intro">Keep the app up to date, and save your data off-box.</p>
+
+          {% call panel('Updates', 'Whether this install is on the latest version, and how it updates.',
+                        pill_text=('v' ~ version), pill_kind='neutral') %}
+            <div class="mt-1 mb-2">
+              <a href="https://github.com/{{ github_repo }}/blob/main/CHANGELOG.md" target="_blank" rel="noopener"
+                 class="small text-decoration-none"><i class="bi bi-journal-text me-1"></i>Release notes</a>
+            </div>
+            {% if is_pi_appliance %}
+            {% call srow('Check and update', 'Downloads the latest and restarts the app.',
+                         'On a Pi Hosted box this refreshes the Docker image; on a Pi Remote it refreshes the local install. A failed update leaves the running version untouched. No SSH needed.') %}
+              <div class="test-result mb-2" id="update-avail"></div>
+              <div class="d-flex flex-wrap gap-2">
+                <button class="btn btn-outline-secondary btn-sm" id="update-check-btn" onclick="checkSatelliteUpdate(this)">
+                  <i class="bi bi-cloud-arrow-down me-1"></i>Check for updates
+                </button>
+                <button class="btn btn-outline-primary btn-sm" id="update-btn" onclick="checkForUpdates()">
+                  <i class="bi bi-arrow-repeat me-1"></i>Update now
+                </button>
+              </div>
+              <div class="test-result" id="update-result"></div>
+              <pre class="small text-secondary mt-2 d-none" id="update-log" style="white-space:pre-wrap; max-height:220px; overflow:auto;"></pre>
+            {% endcall %}
+            {% else %}
+            {% call srow('Check and update', 'Downloads the latest and restarts the app.',
+                         'Update now triggers the Watchtower container. If automatic updates are off, use the commands below instead.') %}
+              <div class="test-result mb-2" id="update-avail"></div>
+              <div class="d-flex flex-wrap gap-2">
+                <button class="btn btn-outline-secondary btn-sm" onclick="checkSatelliteUpdate(this)">
+                  <i class="bi bi-cloud-arrow-down me-1"></i>Check for updates
+                </button>
+                <button class="btn btn-outline-primary btn-sm" id="server-update-btn" onclick="updateServerNow(this)">
+                  <i class="bi bi-arrow-repeat me-1"></i>Update now
+                </button>
+              </div>
+              <div class="test-result" id="update-result"></div>
+              <div class="mt-3">
+                <button class="btn btn-link btn-sm p-0 text-secondary text-decoration-none" type="button"
+                        data-bs-toggle="collapse" data-bs-target="#update-commands-collapse" aria-expanded="false">
+                  <i class="bi bi-chevron-down me-1"></i>Command line update
+                </button>
+                <div class="collapse mt-2" id="update-commands-collapse">
+                  <div class="small text-secondary mb-1"><strong>Manual update (if the updater is off):</strong></div>
+                  <pre class="bg-body-tertiary border rounded p-2 small mb-2"><code>docker compose pull
+docker compose up -d</code></pre>
+                  <div class="small text-secondary mb-1"><strong>Home Assistant add-on:</strong> update from the
+                    add-on page when a new version is offered.</div>
+                  <div class="small text-secondary"><strong>Built from source:</strong>
+                    <code>git pull &amp;&amp; docker compose up -d --build service</code></div>
+                </div>
+              </div>
+            {% endcall %}
+            {% endif %}
+            {% call srow('Last checked', 'When the app last looked for a newer version.') %}
+              <div class="small text-secondary" id="update-last-checked">
+                {%- if update_last_checked_display %}Last checked: {{ update_last_checked_display }}
+                {%- if update_last_available %} <span class="text-warning">(v{{ update_last_latest }} available)</span>{% else %} (up to date){% endif %}
+                {%- else %}Not checked yet.{% endif %}
+              </div>
+            {% endcall %}
+            {% call srow('Install updates automatically', 'Keeps the fleet on the same version.',
+                         ('Managed on the main server. A remote follows the server so the whole fleet stays on the same version.' if is_satellite else ('This device and any remotes connected to it update themselves and stay on the same version. Turn it off to update only with the button above.' if is_pi_appliance else 'This also applies to any Pi Remotes connected to this server. The server itself auto-updates through the Watchtower container (see the README).'))) %}
+              {{ toggle('auto_update', checked=s.auto_update, disabled=is_satellite, onchange=('' if is_satellite else 'saveAutoUpdate(this)'), label='Install updates automatically') }}
+              <span class="test-result ms-1" id="auto-update-result"></span>
+            {% endcall %}
+            {% call srow('Update channel', 'Latest changes, or tested releases only.',
+                         ('Managed on the main server. A remote follows the server\'s channel so the whole fleet updates from the same source.' if is_satellite else 'Releases only updates to tested, numbered releases. Latest installs every change as soon as it is published, and is the default for now. Starting with release 0.8.0, Releases only is the recommended choice for everyday kitchens.')) %}
+              <select class="form-select form-select-sm" id="update_channel" style="max-width:340px"
+                      {% if is_satellite %}disabled{% else %}onchange="saveUpdateChannel(this)"{% endif %}>
+                <option value="main" {{ 'selected' if s.update_channel != 'stable' else '' }}>Latest (every change)</option>
+                <option value="stable" {{ 'selected' if s.update_channel == 'stable' else '' }}>Releases only</option>
+              </select>
+              <span class="test-result ms-1" id="update-channel-result"></span>
+            {% endcall %}
+          {% endcall %}
+
+          {% call panel('Backup', 'Pantry Raider\'s data directory (settings, database, staples list) as a zip.') %}
+            <p class="text-secondary small mt-1 mb-2">Grocy and Mealie data live in separate containers; use <code>scripts/backup.sh</code> on the host for a full snapshot.</p>
+            {% call srow('Include secrets', 'Off keeps the zip safe to store anywhere.',
+                         'By default API keys, passwords, and rclone.conf are stripped so the file is safe to store off-box; after restoring you re-enter keys here. Only include them if the destination is trusted.') %}
+              <label class="set-toggle-row d-inline-flex align-items-center gap-2">
+                {{ toggle('backup_include_secrets', label='Include API keys and passwords') }}
+                <span class="small">Include API keys &amp; passwords <span class="text-warning"><i class="bi bi-exclamation-triangle-fill"></i></span></span>
+              </label>
+            {% endcall %}
+            {% if has.auth_password %}
+            {% call srow('Confirm password', 'Needed to download a secret-carrying backup.') %}
+              <input type="password" class="form-control form-control-sm" id="backup_password" style="max-width:320px"
+                     autocomplete="current-password" placeholder="Current app password">
+            {% endcall %}
+            {% endif %}
+            {% call srow('Download or push', 'Save the app-data zip.') %}
+              <div class="d-flex flex-wrap gap-2">
+                <button id="download-backup" class="btn btn-outline-info btn-sm" onclick="downloadBackup(this)">
+                  <i class="bi bi-download me-1"></i>Download Backup
+                </button>
+                <button class="btn btn-outline-secondary btn-sm" onclick="pushToRemote(this)"
+                        {% if not s.rclone_remote %}disabled title="Configure a remote below first"{% endif %}>
+                  <i class="bi bi-cloud-upload me-1"></i>Push to Remote
+                </button>
+              </div>
+              <div class="test-result mt-1" id="backup-result"></div>
+            {% endcall %}
+            {% call srow('Restore from a zip', 'Rewrites this app\'s data from a backup.',
+                         'Restores settings, database, and staples from the zip. The current data is copied aside first, and a redacted backup keeps the API keys you already have. Grocy and Mealie data are not touched. Reload the page after a restore.') %}
+              <div class="input-group input-group-sm" style="max-width:520px">
+                <input type="file" class="form-control" id="restore-file" accept=".zip">
+                <button class="btn btn-outline-warning" onclick="restoreBackup(this)">
+                  <i class="bi bi-upload me-1"></i>Restore
+                </button>
+              </div>
+              {% if has.auth_password %}
+              <label for="restore_password" class="form-label small mt-2 mb-1">Confirm your current app password to restore.</label>
+              <input type="password" class="form-control form-control-sm" id="restore_password" style="max-width:320px"
+                     autocomplete="current-password" placeholder="Current app password">
+              {% endif %}
+              <div class="test-result mt-1" id="restore-result"></div>
+            {% endcall %}
+            {% if is_pi %}
+            {% call srow('Full restore', 'Grocy + Mealie + this app, whole snapshot.',
+                         'Restores the entire stack snapshot made by scripts/backup.sh. Give a device path, or rclone:remote:path to pull from the configured remote first. This stops the container stack and replaces all data; the current data is moved aside (.pre-restore-<stamp>, nothing deleted) and the stack restarts.') %}
+              <div class="input-group input-group-sm" style="max-width:560px">
+                <input type="text" class="form-control font-monospace" id="full-restore-source"
+                       placeholder="/path/to/foodassistant-YYYYMMDD.tar.gz  or  rclone:remote:bucket/snapshot.tar.gz">
+                <button class="btn btn-outline-danger" onclick="fullRestore(this)">
+                  <i class="bi bi-hdd-stack me-1"></i>Restore
+                </button>
+              </div>
+              <div class="test-result mt-1" id="full-restore-result"></div>
+            {% endcall %}
+            {% endif %}
+            {% call srow('Rclone remote', 'Optional off-box destination.',
+                         'Any rclone remote you have configured via docker exec foodassistant-service rclone config. Config is stored at /app/data/rclone.conf.') %}
+              <input type="text" class="form-control font-monospace" id="rclone_remote" style="max-width:520px"
+                     placeholder="s3:mybucket/foodassistant  or  gdrive:backups/food"
+                     value="{{ s.rclone_remote }}">
+            {% endcall %}
+            {% call srow('Auto-backup to remote', 'Hours between pushes, 0 = off.',
+                         'How often a backup is pushed to the rclone remote above automatically. Push to Remote always works on demand.') %}
+              <div class="d-flex align-items-center gap-2">
+                <input type="number" class="form-control form-control-sm" id="rclone_schedule_hours" min="0" max="720"
+                       value="{{ s.rclone_schedule_hours }}" style="width:120px">
+                <button class="btn btn-outline-secondary btn-sm" onclick="testRcloneRemote(this)">
+                  <i class="bi bi-plug me-1"></i>Test Remote
+                </button>
+              </div>
+              <div class="test-result mt-1" id="rclone-result"></div>
+            {% endcall %}
+            {% call srow('USB drive backup', 'Saves to a flash drive, on a schedule or on demand.',
+                         'Plug a formatted, mounted flash drive into this device and Pantry Raider saves backups to a pantryraider-backups folder on it. The newest 14 backups are kept, and nothing else on the drive is touched.' ~ (' On this device a backup holds its settings and local data, so a replacement unit can be restored from it.' if is_satellite else '')) %}
+              <div class="test-result mb-2" id="usb-status"></div>
+              <div class="d-flex align-items-center gap-2">
+                <input type="number" class="form-control form-control-sm" id="usb_backup_interval_hours" min="0" max="720"
+                       value="{{ s.usb_backup_interval_hours }}" style="width:120px">
+                <span class="form-text mb-0">hours between backups, 0 = off</span>
+                <button class="btn btn-outline-secondary btn-sm" onclick="usbBackupNow(this)">
+                  <i class="bi bi-usb-drive me-1"></i>Back up now
+                </button>
+              </div>
+              <div class="test-result mt-1" id="usb-backup-result"></div>
+            {% endcall %}
+          {% endcall %}
+
+          <button type="button" class="btn btn-outline-info btn-sm" onclick="savePaneData(this)">
+            <i class="bi bi-check-lg me-1"></i>Save Backup Settings
+          </button>
+          <div class="test-result mt-2 mb-3" id="data-save-result"></div>
+        </div>
