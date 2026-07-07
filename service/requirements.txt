@@ -33,7 +33,7 @@ Pillow==10.4.0
 # PDF text extraction for the "Import from PDF" recipe upload. Pure Python (no
 # poppler or other system deps); the recipe's text is handed to the same LLM
 # extractor the URL import fallback uses.
-pypdf==5.1.0
+pypdf==6.14.2
 
 # Flexible date parsing for expiry date extraction (required)
 python-dateutil==2.9.0
