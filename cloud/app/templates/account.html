@@ -1,0 +1,371 @@
+{% extends "base.html" %}
+{% from "_settings.html" import svgicon, ov_card with context %}
+{% block title %}My account: Forager{% endblock %}
+{% block main_class %}settings-page{% endblock %}
+{% block content %}
+<div class="settings-head dash-head">
+  <div>
+    <h1>Account settings</h1>
+    <p class="muted" style="margin:0">{{ email }}</p>
+  </div>
+  <span class="pill">{{ plan_label }}</span>
+</div>
+
+{% if notice %}<div class="alert alert-notice">{{ notice }}</div>{% endif %}
+{% if error %}<div class="alert alert-error">{{ error }}</div>{% endif %}
+
+<div class="settings-shell">
+  <aside class="settings-side">
+    <nav class="settings-nav" aria-label="Account settings sections">
+      <button type="button" class="nav-item" id="nav-overview" onclick="showPane('overview')">{{ svgicon('grid') }}Overview</button>
+      <div class="nav-head">Your account</div>
+      <button type="button" class="nav-item" id="nav-profile" onclick="showPane('profile')">{{ svgicon('user') }}Profile</button>
+      <button type="button" class="nav-item" id="nav-security" onclick="showPane('security')">{{ svgicon('shield') }}Security</button>
+      <button type="button" class="nav-item" id="nav-billing" onclick="showPane('billing')">{{ svgicon('card') }}Plan and billing</button>
+      <div class="nav-head">Your kitchens</div>
+      <button type="button" class="nav-item" id="nav-kitchens" onclick="showPane('kitchens')">{{ svgicon('house') }}Kitchens</button>
+      <div class="nav-head">Community</div>
+      <button type="button" class="nav-item" id="nav-community" onclick="showPane('community')">{{ svgicon('book') }}Share recipes</button>
+    </nav>
+  </aside>
+
+  <div class="settings-body">
+
+    {# --- Overview landing ------------------------------------------------ #}
+    <section class="pane active" id="pane-overview">
+      <p class="muted">Everything about your account, grouped by area. Pick a
+      card to open that section, or use the menu on the left.</p>
+
+      {% if email_enabled and not email_verified %}
+      <div class="card" style="border-color: var(--primary);">
+        <h2 style="margin-bottom:0.4rem;">Please confirm your email</h2>
+        <p class="muted small">Confirm {{ email }} to keep your account secure and
+        make sure you can receive password-reset emails. Everything still works in
+        the meantime.</p>
+        <form method="post" action="/account/verify/resend" style="margin:0">
+          <button class="btn btn-outline" type="submit">Send confirmation email</button>
+        </form>
+      </div>
+      {% endif %}
+
+      <div class="ov-group">
+        <div class="ov-group-head">Your account</div>
+        <div class="ov-grid">
+          {{ ov_card('user', 'Profile', 'Your email, plan, and how you sign in.', pane='profile') }}
+          {{ ov_card('shield', 'Security', 'Your password and two-factor sign-in.', pane='security') }}
+          {{ ov_card('card', 'Plan and billing', 'Your plan, scanning allowance, and subscription.', pane='billing') }}
+        </div>
+      </div>
+
+      <div class="ov-group">
+        <div class="ov-group-head">Your kitchens</div>
+        <div class="ov-grid">
+          {{ ov_card('house', 'Kitchens', 'The kitchens linked to your account and their web addresses.', pane='kitchens') }}
+        </div>
+      </div>
+
+      <div class="ov-group">
+        <div class="ov-group-head">Community</div>
+        <div class="ov-grid">
+          {{ ov_card('book', 'Share recipes', 'Share a recipe with other cooks and see your submissions.', pane='community') }}
+        </div>
+      </div>
+    </section>
+
+    {# --- Profile --------------------------------------------------------- #}
+    <section class="pane" id="pane-profile">
+      <div class="card">
+        <h2>Profile</h2>
+        <div class="set-row">
+          <div class="set-row-label">
+            <div class="set-row-name">Email</div>
+            <div class="set-row-hint">The address you sign in with.</div>
+          </div>
+          <div class="set-row-control">
+            <span>{{ email }}</span>
+            {% if email_enabled %}
+            <span class="set-pill {{ 'good' if email_verified else '' }}">{{ 'Confirmed' if email_verified else 'Not confirmed' }}</span>
+            {% endif %}
+          </div>
+        </div>
+        <div class="set-row">
+          <div class="set-row-label">
+            <div class="set-row-name">Plan</div>
+            <div class="set-row-hint">Your current Forager plan.</div>
+          </div>
+          <div class="set-row-control"><span class="set-pill accent">{{ plan_label }}</span></div>
+        </div>
+        <div class="set-row">
+          <div class="set-row-label">
+            <div class="set-row-name">Sign in</div>
+            <div class="set-row-hint">
+              {% if google_linked %}You signed in with Google.{% else %}You sign in with your email and password.{% endif %}
+            </div>
+          </div>
+          <div class="set-row-control">
+            {% if google_linked %}<span class="set-pill good">Google connected</span>{% else %}<span class="set-pill">Email and password</span>{% endif %}
+          </div>
+        </div>
+        <div class="set-row">
+          <div class="set-row-label">
+            <div class="set-row-name">Sign out</div>
+            <div class="set-row-hint">Sign out of Forager on this browser.</div>
+          </div>
+          <div class="set-row-control">
+            <form method="post" action="/logout" style="margin:0">
+              <button class="btn btn-quiet" type="submit">Sign out</button>
+            </form>
+          </div>
+        </div>
+      </div>
+
+      {% if email_enabled and not email_verified %}
+      <div class="card">
+        <h3>Confirm your email</h3>
+        <p class="muted small">Send yourself a confirmation link for {{ email }}.
+        Open it from your inbox to confirm the address.</p>
+        <form method="post" action="/account/verify/resend" style="margin:0">
+          <button class="btn btn-outline" type="submit">Send confirmation email</button>
+        </form>
+      </div>
+      {% endif %}
+    </section>
+
+    {# --- Security -------------------------------------------------------- #}
+    <section class="pane" id="pane-security">
+      <div class="card">
+        {% if has_password %}
+        <h2>Change password</h2>
+        {% else %}
+        <h2>Set a password</h2>
+        <p class="muted small">You signed up with Google. Add a password if you
+        also want to sign in with your email address.</p>
+        {% endif %}
+        <form method="post" action="/account/password">
+          {% if has_password %}
+          <label for="current_password">Current password</label>
+          <input type="password" id="current_password" name="current_password"
+                 autocomplete="current-password" required>
+          {% endif %}
+          <label for="new_password">New password</label>
+          <input type="password" id="new_password" name="new_password"
+                 autocomplete="new-password" minlength="10" required>
+          <label for="confirm_password">Confirm new password</label>
+          <input type="password" id="confirm_password" name="confirm_password"
+                 autocomplete="new-password" minlength="10" required>
+          <button class="btn btn-outline" type="submit">
+            {% if has_password %}Update password{% else %}Set password{% endif %}
+          </button>
+        </form>
+      </div>
+
+      <div class="card">
+        <h2>Two-factor authentication</h2>
+        {% if totp_enabled %}
+        <p class="muted small">Two-factor authentication is on. When you sign in,
+        we ask for a code from your authenticator app after your password.</p>
+        <form method="post" action="/account/2fa/disable" style="margin-bottom:1.25rem;"
+              onsubmit="return confirm('Turn off two-factor authentication?')">
+          <label for="credential">
+            {% if has_password %}Enter a code from your authenticator app, or your
+            password, to turn it off{% else %}Enter a code from your authenticator
+            app to turn it off{% endif %}
+          </label>
+          <input type="text" id="credential" name="credential"
+                 autocomplete="one-time-code" inputmode="text" required>
+          <button class="btn btn-quiet" type="submit">Turn off two-factor</button>
+        </form>
+        <h3>Recovery codes</h3>
+        <p class="muted small">Recovery codes let you get in if you lose your
+        authenticator app. Each one works once. Regenerating gives you a new set
+        and cancels the old one.</p>
+        <form method="post" action="/account/2fa/recovery/regenerate"
+              onsubmit="return confirm('Get a new set of recovery codes? Your current codes will stop working.')">
+          <button class="btn btn-outline" type="submit">Regenerate recovery codes</button>
+        </form>
+        {% else %}
+        <p class="muted small">Add a second step to your sign-in. After your
+        password, we ask for a code from an authenticator app on your phone, so a
+        stolen password is not enough to get in on its own.</p>
+        <a class="btn btn-outline" href="/account/2fa/setup">Turn on two-factor</a>
+        {% endif %}
+      </div>
+    </section>
+
+    {# --- Plan and billing ------------------------------------------------ #}
+    <section class="pane" id="pane-billing">
+      <div class="card">
+        <h2>Your plan</h2>
+        {% if plan == "trial" and trial_days_left is not none %}
+        <p class="muted small">{{ trial_days_left }} days left on your free trial.</p>
+        {% endif %}
+        <div class="meter" role="progressbar" aria-valuenow="{{ percent }}"
+             aria-valuemin="0" aria-valuemax="100"
+             aria-label="Monthly scanning allowance used">
+          <span {% if over_quota %}class="full" {% endif %}style="width: {{ percent }}%"></span>
+        </div>
+        {% if over_quota %}
+        <p>You have used all of this month's scanning allowance. It refills at the
+        start of next month{% if not plan_active %}, or right away if you
+        subscribe{% endif %}.</p>
+        {% else %}
+        <p>You have used {{ percent }}% of this month's scanning allowance.</p>
+        {% endif %}
+        <p class="muted small">Scans this month: {{ scans }}</p>
+        {% if plan_active %}
+          {% if manage_url %}
+          <a class="btn btn-outline" href="{{ manage_url }}">Manage subscription</a>
+          <p class="muted small" style="margin-top:0.75rem;">Manage your
+          subscription, payment method, and receipts.</p>
+          {% endif %}
+        {% elif checkout_options %}
+          <div class="plan-buttons">
+            {% for opt in checkout_options %}
+            <a class="btn" href="{{ opt.url }}">{{ opt.label }}</a>
+            {% endfor %}
+          </div>
+          <p class="muted small">A subscription keeps your kitchen reachable from
+          anywhere and refills your scanning allowance. Cancel anytime. Pantry
+          Raider itself is always free with your own AI key.</p>
+        {% else %}
+          <p class="muted small">Billing is not live yet. Everyone is on the free
+          trial for now, on us.</p>
+        {% endif %}
+      </div>
+    </section>
+
+    {# --- Kitchens -------------------------------------------------------- #}
+    <section class="pane" id="pane-kitchens">
+      <div class="card">
+        <h2>Your kitchens</h2>
+        {% if kitchens %}
+        <ul class="plain">
+          {% for k in kitchens %}
+          <li>
+            <div>
+              <strong>{{ k.name or "Unnamed kitchen" }}</strong><br>
+              <span class="muted small">
+                Added {{ k.created_at[:10] }}{% if k.last_seen_at %}, last active
+                {{ k.last_seen_at[:10] }}{% endif %}{% if k.app_version %}, version {{ k.app_version }}{% endif %}
+              </span>
+              <div class="kitchen-web small">
+                {% if k.public_url %}
+                <span class="muted">Web address (reach this kitchen from anywhere):</span>
+                <span class="web-addr-row">
+                  <a href="{{ k.public_url }}" target="_blank" rel="noopener"
+                     class="web-addr">{{ k.public_url }}</a>
+                  <button type="button" class="btn btn-quiet copy-btn"
+                          data-copy="{{ k.public_url }}">Copy</button>
+                </span>
+                {% else %}
+                <span class="muted">Remote access is not set up for this kitchen.
+                Turn it on in the app to reach this kitchen from outside your
+                home.</span>
+                {% endif %}
+              </div>
+            </div>
+            <form method="post" action="/account/kitchens/{{ k.id }}/remove"
+                  onsubmit="return confirm('Remove this kitchen? It will no longer be able to scan with your account.')"
+                  style="margin:0">
+              <button class="btn btn-quiet" type="submit">Remove</button>
+            </form>
+          </li>
+          {% endfor %}
+        </ul>
+        <p class="muted small">Removing a kitchen signs that device out of your
+        account. You can always sign it back in from the app.</p>
+        {% else %}
+        <p class="muted">No kitchens linked yet. Open the Pantry Raider app in your
+        kitchen, go to Settings, and sign in with this email and password. It will
+        show up here.</p>
+        {% endif %}
+      </div>
+    </section>
+
+    {# --- Community recipes ----------------------------------------------- #}
+    <section class="pane" id="pane-community">
+      <div class="card">
+        <h2>Share a recipe</h2>
+        <p class="muted small">Have a recipe you love? Add it to the community for
+        other Pantry Raider cooks. Type it in, or upload a PDF or a photo and we
+        will tidy up the formatting for you to check before it is shared.</p>
+        {% if recipe_upload_authorized %}
+        <p class="muted small"><span class="set-pill good">Sharing enabled</span>
+        You can share recipes without an active kitchen.</p>
+        {% endif %}
+        <a class="btn btn-outline" href="/recipes/upload">Share a recipe</a>
+      </div>
+
+      <div class="card">
+        <h2>Your shared recipes</h2>
+        {% if my_recipes %}
+        <ul class="plain">
+          {% for r in my_recipes %}
+          <li>
+            <strong>{{ r.title }}</strong>
+            <span class="set-pill {{ 'good' if r.status == 'approved' else '' }}">{{ r.status_label }}</span>
+          </li>
+          {% endfor %}
+        </ul>
+        <p class="muted small">Approved recipes are the ones other cooks can find
+        and save. Anything still pending is waiting on a quick review.</p>
+        {% else %}
+        <p class="muted">You have not shared any recipes yet. Share your first one
+        above.</p>
+        {% endif %}
+      </div>
+    </section>
+
+  </div>
+</div>
+
+<style>
+  .kitchen-web { margin-top: 0.5rem; }
+  .kitchen-web .web-addr-row {
+    display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;
+    margin-top: 0.2rem;
+  }
+  .kitchen-web .web-addr {
+    word-break: break-all; color: var(--primary); font-weight: 600;
+  }
+  .kitchen-web .copy-btn { padding: 0.2rem 0.6rem; font-size: 0.8rem; }
+</style>
+<script>
+  // Sidebar pane switching. All panes render in the page so it works with or
+  // without a script; this just shows one at a time and keeps the URL hash in
+  // step so a section can be linked to directly.
+  var PANES = ["overview", "profile", "security", "billing", "kitchens", "community"];
+  function showPane(id) {
+    if (PANES.indexOf(id) === -1) id = "overview";
+    PANES.forEach(function (p) {
+      var pane = document.getElementById("pane-" + p);
+      var nav = document.getElementById("nav-" + p);
+      if (pane) pane.classList.toggle("active", p === id);
+      if (nav) nav.classList.toggle("active", p === id);
+    });
+    if (window.history && history.replaceState) {
+      history.replaceState(null, "", "#" + id);
+    }
+  }
+  (function () {
+    var start = (window.location.hash || "").replace("#", "");
+    showPane(PANES.indexOf(start) !== -1 ? start : "overview");
+  })();
+
+  document.querySelectorAll(".copy-btn").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var text = btn.getAttribute("data-copy") || "";
+      var done = function () {
+        var was = btn.textContent;
+        btn.textContent = "Copied";
+        setTimeout(function () { btn.textContent = was; }, 1500);
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(done, done);
+      } else {
+        done();
+      }
+    });
+  });
+</script>
+{% endblock %}

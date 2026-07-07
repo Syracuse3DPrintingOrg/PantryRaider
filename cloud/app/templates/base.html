@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#212529">
+  <link rel="icon" href="/static/mark.svg" type="image/svg+xml">
+  <title>{% block title %}Forager{% endblock %}</title>
+  {# A hand-written stylesheet that echoes the Pantry Raider app's Bootstrap
+     dark look (same background, surface, and pink accent) without importing
+     anything from service/. Kept inline: one page-weight, no CDN. The raccoon
+     mark in the header is the only external asset, served from /static. #}
+  <style>
+    :root {
+      --bg: #212529; --surface: #2b3035; --surface-2: #32383e;
+      --border: #495057; --border-soft: #3a4046;
+      --text: #dee2e6; --muted: #adb5bd;
+      --primary: #F2006E; --primary-hover: #d1005f; --primary-soft: rgba(242,0,110,0.12);
+      --danger: #dc3545; --success: #75b798;
+      --radius: 0.6rem; --radius-lg: 0.9rem;
+      --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 8px 24px rgba(0,0,0,0.22);
+      --shadow-sm: 0 1px 2px rgba(0,0,0,0.25);
+    }
+    * { box-sizing: border-box; }
+    html { -webkit-text-size-adjust: 100%; }
+    body {
+      margin: 0; background: var(--bg); color: var(--text);
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      line-height: 1.6; min-height: 100vh;
+      display: flex; flex-direction: column;
+      -webkit-font-smoothing: antialiased;
+    }
+    a { color: var(--primary); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    :focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; border-radius: 4px; }
+
+    header.nav {
+      display: flex; align-items: center; justify-content: space-between;
+      flex-wrap: wrap; gap: 0.75rem 1.25rem;
+      padding: 0.8rem 1.4rem; border-bottom: 1px solid var(--border-soft);
+      background: rgba(43,48,53,0.94); backdrop-filter: saturate(1.1) blur(8px);
+      position: sticky; top: 0; z-index: 10;
+    }
+    .brand-wrap { display: flex; align-items: center; gap: 0.55rem; }
+    .brand {
+      display: inline-flex; align-items: center; gap: 0.55rem;
+      color: var(--text); font-weight: 800; font-size: 1.3rem; line-height: 1;
+      letter-spacing: -0.01em;
+    }
+    .brand:hover { text-decoration: none; }
+    .brand img { width: 32px; height: 32px; display: block; }
+    .brand .dot { color: var(--primary); }
+    .brand-wrap .tag {
+      font-size: 0.72rem; font-weight: 600; color: var(--muted);
+      letter-spacing: 0.01em; padding-left: 0.65rem;
+      border-left: 1px solid var(--border); line-height: 1.2;
+    }
+    .brand-wrap .tag:hover { color: var(--primary); text-decoration: none; }
+    .nav-links { display: flex; gap: 0.35rem 0.55rem; align-items: center; flex-wrap: wrap; }
+    .nav-links .navlink {
+      color: var(--muted); font-weight: 600; font-size: 0.92rem;
+      padding: 0.4rem 0.6rem; border-radius: 0.4rem;
+    }
+    .nav-links .navlink:hover { color: var(--text); text-decoration: none; background: var(--surface-2); }
+
+    main { width: 100%; max-width: 1000px; margin: 0 auto; padding: 2.25rem 1.25rem 4rem; flex: 1; }
+    main.narrow { max-width: 440px; padding-top: 3rem; }
+
+    .card {
+      background: var(--surface); border: 1px solid var(--border-soft);
+      border-radius: var(--radius-lg); padding: 1.6rem; margin-bottom: 1.25rem;
+    }
+    .card h2:first-child, .card h3:first-child { margin-top: 0; }
+
+    h1 { font-size: 2rem; line-height: 1.15; margin: 0.25rem 0 1rem; letter-spacing: -0.02em; font-weight: 800; }
+    h2 { font-size: 1.35rem; margin: 0 0 0.75rem; line-height: 1.25; letter-spacing: -0.01em; font-weight: 700; }
+    h3 { font-size: 1.08rem; margin: 0 0 0.5rem; font-weight: 700; }
+    p { margin: 0 0 0.85rem; }
+    p:last-child { margin-bottom: 0; }
+    p.muted, .muted { color: var(--muted); }
+    .small { font-size: 0.875rem; }
+    .lead { font-size: 1.15rem; color: var(--muted); line-height: 1.55; }
+
+    /* Marketing section rhythm */
+    .section { margin: 3.5rem 0; }
+    .section:last-child { margin-bottom: 1rem; }
+    .section-head { text-align: center; max-width: 44ch; margin: 0 auto 2rem; }
+    .section-head h2 { font-size: 1.65rem; }
+    .section-head p { color: var(--muted); margin-bottom: 0; }
+    .eyebrow {
+      display: inline-block; text-transform: uppercase; letter-spacing: 0.08em;
+      font-size: 0.72rem; font-weight: 700; color: var(--primary); margin-bottom: 0.6rem;
+    }
+
+    label { display: block; margin-bottom: 0.3rem; font-size: 0.9rem; color: var(--muted); }
+    input[type=email], input[type=password], input[type=text] {
+      width: 100%; padding: 0.6rem 0.8rem; margin-bottom: 1rem;
+      background: var(--bg); color: var(--text);
+      border: 1px solid var(--border); border-radius: 0.45rem; font-size: 1rem;
+    }
+    input:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-soft); }
+
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center; gap: 0.4rem;
+      padding: 0.6rem 1.15rem; border-radius: 0.5rem;
+      border: 1px solid transparent; font-size: 0.95rem; font-weight: 600;
+      cursor: pointer; text-decoration: none; text-align: center;
+      background: var(--primary); color: #fff;
+      transition: background 0.12s ease, transform 0.05s ease, box-shadow 0.12s ease;
+    }
+    .btn:hover { background: var(--primary-hover); text-decoration: none; box-shadow: 0 4px 14px rgba(242,0,110,0.25); }
+    .btn:active { transform: translateY(1px); box-shadow: none; }
+    .btn-lg { padding: 0.8rem 1.7rem; font-size: 1.05rem; border-radius: 0.55rem; }
+    .btn-outline { background: transparent; border-color: var(--primary); color: var(--primary); box-shadow: none; }
+    .btn-outline:hover { background: var(--primary); color: #fff; }
+    .btn-quiet { background: transparent; border-color: var(--border); color: var(--muted); font-weight: 500; box-shadow: none; }
+    .btn-quiet:hover { border-color: var(--danger); color: var(--danger); background: transparent; box-shadow: none; }
+    .btn-block { display: flex; width: 100%; }
+
+    .alert {
+      padding: 0.65rem 0.95rem; border-radius: 0.45rem; margin-bottom: 1.1rem;
+      border: 1px solid transparent; font-size: 0.95rem;
+    }
+    .alert-error { background: #2c0b0e; border-color: #842029; color: #ea868f; }
+    .alert-notice { background: #051b11; border-color: #0f5132; color: var(--success); }
+
+    .meter {
+      height: 0.75rem; border-radius: 0.5rem; background: var(--bg);
+      border: 1px solid var(--border); overflow: hidden; margin: 0.6rem 0;
+    }
+    .meter > span { display: block; height: 100%; background: var(--primary); transition: width 0.3s ease; }
+    .meter > span.full { background: var(--danger); }
+
+    ul.plain { list-style: none; margin: 0; padding: 0; }
+    ul.plain li {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 1rem; padding: 0.85rem 0; border-top: 1px solid var(--border-soft);
+    }
+    ul.plain li:first-child { border-top: none; }
+
+    .or-divider {
+      display: flex; align-items: center; gap: 0.75rem; margin: 1.15rem 0;
+      color: var(--muted); font-size: 0.85rem;
+    }
+    .or-divider::before, .or-divider::after {
+      content: ""; flex: 1; border-top: 1px solid var(--border-soft);
+    }
+
+    /* Kept off-screen and out of the tab order; not shown to people. */
+    .hp-field { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
+
+    /* Landing hero */
+    .hero { text-align: center; padding: 2rem 0 1rem; }
+    .hero .eyebrow { margin-bottom: 0.9rem; }
+    .hero h1 { font-size: 2.9rem; line-height: 1.08; max-width: 16ch; margin: 0 auto 1.15rem; }
+    .hero .lead { max-width: 54ch; margin: 0 auto 2rem; }
+    .hero-cta { display: flex; gap: 0.75rem; justify-content: center; flex-wrap: wrap; }
+    .hero-note { margin-top: 1.1rem; font-size: 0.85rem; color: var(--muted); }
+
+    .hero-mark {
+      width: 96px; height: 96px; margin: 0 auto 1.25rem; display: block;
+      filter: drop-shadow(0 8px 24px rgba(242,0,110,0.25));
+    }
+
+    /* How it works: numbered steps */
+    .steps {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 1rem; counter-reset: step;
+    }
+    .step { position: relative; padding-top: 0.5rem; }
+    .step .num {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 2.1rem; height: 2.1rem; border-radius: 50%;
+      background: var(--primary-soft); color: var(--primary);
+      font-weight: 800; font-size: 1.05rem; margin-bottom: 0.75rem;
+    }
+    .step h3 { margin-bottom: 0.35rem; }
+    .step p { color: var(--muted); font-size: 0.95rem; margin: 0; }
+
+    /* Feature grid */
+    .feature-grid {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 1rem;
+    }
+    .feature { margin-bottom: 0; }
+    .feature .ficon {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 2.5rem; height: 2.5rem; border-radius: 0.6rem;
+      background: var(--primary-soft); color: var(--primary); margin-bottom: 0.85rem;
+    }
+    .feature h3 { margin-bottom: 0.4rem; }
+    .feature p { color: var(--muted); font-size: 0.95rem; margin: 0; }
+
+    /* Pricing */
+    .pricing {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 1.1rem; margin: 0.5rem 0 1rem; align-items: stretch;
+    }
+    .pricing .plan {
+      margin-bottom: 0; display: flex; flex-direction: column; position: relative;
+    }
+    .pricing .plan.featured { border-color: var(--primary); box-shadow: 0 0 0 1px var(--primary), var(--shadow); }
+    .plan .tag-popular {
+      position: absolute; top: -0.7rem; right: 1.1rem;
+      background: var(--primary); color: #fff; font-size: 0.72rem; font-weight: 700;
+      letter-spacing: 0.03em; text-transform: uppercase;
+      padding: 0.2rem 0.6rem; border-radius: 1rem;
+    }
+    .plan h3 { font-size: 1.15rem; margin: 0 0 0.5rem; }
+    .plan .price { font-size: 2rem; font-weight: 800; margin: 0 0 0.15rem; line-height: 1; letter-spacing: -0.02em; }
+    .plan .price .per { font-size: 0.9rem; font-weight: 500; color: var(--muted); letter-spacing: 0; }
+    .plan .price-note { font-size: 0.85rem; color: var(--muted); margin: 0 0 1rem; min-height: 1.1rem; }
+    .plan ul.features { list-style: none; margin: 0 0 1.25rem; padding: 0; flex: 1; }
+    .plan ul.features li {
+      display: flex; align-items: flex-start; gap: 0.55rem;
+      padding: 0.35rem 0; font-size: 0.92rem;
+    }
+    .plan ul.features li svg { flex: 0 0 auto; margin-top: 0.18rem; color: var(--primary); }
+    .plan .btn { width: 100%; }
+    .plan-buttons { display: flex; flex-wrap: wrap; gap: 0.6rem; margin-bottom: 0.6rem; }
+
+    /* Closing CTA band */
+    .cta-band {
+      text-align: center; background: linear-gradient(160deg, var(--surface), var(--surface-2));
+      border: 1px solid var(--border-soft); border-radius: var(--radius-lg);
+      padding: 2.75rem 1.5rem;
+    }
+    .cta-band h2 { font-size: 1.7rem; margin-bottom: 0.6rem; }
+    .cta-band p { color: var(--muted); max-width: 48ch; margin: 0 auto 1.5rem; }
+
+    .dash-head { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 0.5rem; }
+    .pill {
+      display: inline-block; font-size: 0.78rem; font-weight: 600;
+      padding: 0.15rem 0.6rem; border-radius: 1rem;
+      background: var(--primary-soft); color: var(--primary);
+    }
+
+    /* Status page */
+    .status-hero { text-align: center; padding: 1.5rem 0 0.5rem; }
+    .status-dot {
+      display: inline-block; width: 0.85rem; height: 0.85rem; border-radius: 50%;
+      background: var(--success); margin-right: 0.55rem; vertical-align: middle;
+      box-shadow: 0 0 0 4px rgba(117,183,152,0.18);
+    }
+    .status-line { font-size: 1.35rem; font-weight: 700; }
+
+    footer {
+      border-top: 1px solid var(--border-soft); background: var(--surface);
+      color: var(--muted); font-size: 0.88rem; padding: 2rem 1.4rem;
+    }
+    footer .foot-inner {
+      max-width: 1000px; margin: 0 auto; display: flex;
+      align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 1.25rem;
+    }
+    footer .foot-brand { max-width: 30ch; }
+    footer .foot-brand strong { color: var(--text); }
+    footer .foot-cols { display: flex; gap: 2.5rem; flex-wrap: wrap; }
+    footer .foot-col h4 {
+      font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em;
+      color: var(--muted); margin: 0 0 0.6rem; font-weight: 700;
+    }
+    footer .foot-col a { display: block; color: var(--text); margin-bottom: 0.4rem; font-size: 0.9rem; }
+    footer .foot-col a:hover { color: var(--primary); }
+    footer .foot-legal {
+      max-width: 1000px; margin: 1.5rem auto 0; padding-top: 1.25rem;
+      border-top: 1px solid var(--border-soft); font-size: 0.82rem;
+    }
+
+    /* Settings + admin shell: a left sidebar, a landing of grouped category
+       cards, and dense labelled panels. Echoes the Pantry Raider app's
+       redesigned settings using the portal's own colors, so nothing is
+       imported from service/. Scoped under .settings-shell and its own
+       classes so the marketing pages are untouched. */
+    main.settings-page { max-width: 1120px; }
+    .settings-shell {
+      display: grid; grid-template-columns: 230px minmax(0, 1fr);
+      gap: 1.75rem; align-items: start;
+    }
+    .settings-head { margin-bottom: 1.4rem; }
+    .settings-head h1 { margin-bottom: 0.15rem; }
+    .settings-side { position: sticky; top: 5rem; }
+    .settings-nav { display: flex; flex-direction: column; gap: 0.1rem; }
+    .settings-nav .nav-head {
+      font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.06em;
+      color: var(--muted); font-weight: 700; margin: 1rem 0 0.35rem 0.55rem;
+    }
+    .settings-nav .nav-head:first-child { margin-top: 0; }
+    .settings-nav a, .settings-nav button.nav-item {
+      display: flex; align-items: center; gap: 0.6rem; text-align: left;
+      padding: 0.5rem 0.7rem; border-radius: 0.5rem; color: var(--muted);
+      font-weight: 600; font-size: 0.92rem; font-family: inherit;
+      background: transparent; border: none; cursor: pointer; width: 100%;
+    }
+    .settings-nav a svg, .settings-nav button.nav-item svg { flex: 0 0 auto; opacity: 0.85; }
+    .settings-nav a:hover, .settings-nav button.nav-item:hover {
+      background: var(--surface-2); color: var(--text); text-decoration: none;
+    }
+    .settings-nav a.active, .settings-nav button.nav-item.active {
+      background: var(--primary-soft); color: var(--primary);
+    }
+
+    /* Landing: grouped category cards. */
+    .ov-group { margin-bottom: 1.6rem; }
+    .ov-group:last-child { margin-bottom: 0; }
+    .ov-group-head {
+      font-size: 0.72rem; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.06em; color: var(--muted); margin-bottom: 0.65rem;
+    }
+    .ov-grid {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 0.8rem;
+    }
+    .ov-card {
+      display: flex; gap: 0.8rem; text-align: left; align-items: flex-start;
+      padding: 1rem; border: 1px solid var(--border-soft);
+      border-radius: var(--radius); background: var(--surface);
+      cursor: pointer; width: 100%; color: inherit; font-family: inherit;
+      transition: border-color 0.12s ease, transform 0.05s ease;
+    }
+    .ov-card:hover { border-color: var(--primary); text-decoration: none; }
+    .ov-card:active { transform: translateY(1px); }
+    .ov-card-icon {
+      flex: 0 0 auto; width: 2.4rem; height: 2.4rem; border-radius: 0.55rem;
+      display: flex; align-items: center; justify-content: center;
+      background: var(--primary-soft); color: var(--primary);
+    }
+    .ov-card-title { font-weight: 700; color: var(--text); }
+    .ov-card-desc { font-size: 0.85rem; color: var(--muted); margin-top: 0.15rem; line-height: 1.4; }
+
+    /* Dense panel rows: a labelled name/hint on the left, a control on the right. */
+    .set-row {
+      display: flex; align-items: flex-start; justify-content: space-between;
+      gap: 1.25rem; padding: 0.85rem 0; border-top: 1px solid var(--border-soft);
+    }
+    .set-row:first-of-type { border-top: none; }
+    .set-row-label { min-width: 0; }
+    .set-row-name { font-weight: 600; }
+    .set-row-hint { font-size: 0.85rem; color: var(--muted); margin-top: 0.1rem; }
+    .set-row-control { flex: 0 0 auto; display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; justify-content: flex-end; }
+    .set-pill {
+      display: inline-block; font-size: 0.78rem; font-weight: 600;
+      padding: 0.15rem 0.6rem; border-radius: 1rem;
+      background: var(--surface-2); color: var(--muted);
+    }
+    .set-pill.good { background: rgba(117,183,152,0.16); color: var(--success); }
+    .set-pill.accent { background: var(--primary-soft); color: var(--primary); }
+
+    /* Panes: only the active one shows. Without JS, the fallback keeps the
+       first pane visible so the page still works. */
+    .pane { display: none; }
+    .pane.active { display: block; }
+
+    @media (max-width: 760px) {
+      .settings-shell { grid-template-columns: 1fr; gap: 1rem; }
+      .settings-side { position: static; }
+      .settings-nav { flex-direction: row; flex-wrap: wrap; }
+      .settings-nav .nav-head { display: none; }
+      .settings-nav a, .settings-nav button.nav-item { width: auto; }
+    }
+
+    @media (max-width: 640px) {
+      .hero h1 { font-size: 2.1rem; }
+      .section { margin: 2.5rem 0; }
+    }
+    @media (max-width: 560px) {
+      h1 { font-size: 1.6rem; }
+      main { padding: 1.75rem 1.1rem 3rem; }
+      .card { padding: 1.25rem; }
+      footer .foot-cols { gap: 1.75rem; }
+    }
+  </style>
+</head>
+<body>
+  <header class="nav">
+    <div class="brand-wrap">
+      <a class="brand" href="/">
+        <img src="/static/mark.svg" alt="" width="32" height="32">
+        <span class="name">Forager<span class="dot">.</span></span>
+      </a>
+      <a class="tag" href="https://pantryraider.app">by Pantry&nbsp;Raider</a>
+    </div>
+    <nav class="nav-links">
+      <a class="navlink" href="/features">Features</a>
+      <a class="navlink" href="/pricing">Pricing</a>
+      {% if signed_in %}
+        {% if is_admin %}<a class="btn btn-outline" href="/admin">Admin</a>{% endif %}
+        <a class="btn btn-outline" href="/account">My account</a>
+        <form method="post" action="/logout" style="margin:0">
+          <button class="btn btn-quiet" type="submit">Sign out</button>
+        </form>
+      {% else %}
+        <a class="btn btn-outline" href="/login">Log in</a>
+        <a class="btn" href="/signup">Start free trial</a>
+      {% endif %}
+    </nav>
+  </header>
+  <main class="{% block main_class %}{% endblock %}">
+    {% block content %}{% endblock %}
+  </main>
+  <footer>
+    <div class="foot-inner">
+      <div class="foot-brand">
+        <strong>Forager</strong> is the optional cloud companion for Pantry
+        Raider, the food tracker that is free and open source.
+      </div>
+      <div class="foot-cols">
+        <div class="foot-col">
+          <h4>Forager</h4>
+          <a href="/features">Features</a>
+          <a href="/pricing">Pricing</a>
+          <a href="/status">Status</a>
+          <a href="/login">Log in</a>
+        </div>
+        <div class="foot-col">
+          <h4>Pantry Raider</h4>
+          <a href="https://pantryraider.app">pantryraider.app</a>
+          <a href="https://github.com/Syracuse3DPrintingOrg/PantryRaider">GitHub</a>
+          <a href="https://pantryraider.app/docs">Docs</a>
+        </div>
+        <div class="foot-col">
+          <h4>Help</h4>
+          <a href="mailto:support@pantryraider.app">Contact support</a>
+        </div>
+      </div>
+    </div>
+    <div class="foot-legal">
+      Pantry Raider is free and open source. Forager just makes it easier.
+    </div>
+  </footer>
+</body>
+</html>
