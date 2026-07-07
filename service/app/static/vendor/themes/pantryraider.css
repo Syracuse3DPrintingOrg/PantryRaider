@@ -1,0 +1,318 @@
+/*
+ * Pantry Raider brand theme.
+ * Loaded as an overlay on top of Bootstrap 5 dark mode.
+ * Matches the pantryraider.app look: a calm graphite dark surface set with the
+ * raccoon-pink brand accent (#F2006E) used sparingly for actions, links, and
+ * focus. Authored locally (no Bootswatch, no CDN).
+ */
+
+/* Core palette */
+:root,
+[data-bs-theme=dark] {
+  /* Backgrounds */
+  --bs-body-bg:           #1b1e22;
+  --bs-body-bg-rgb:       27, 30, 34;
+  --bs-secondary-bg:      #23272c;
+  --bs-secondary-bg-rgb:  35, 39, 44;
+  --bs-tertiary-bg:       #282d33;
+  --bs-tertiary-bg-rgb:   40, 45, 51;
+
+  /* Text */
+  --bs-body-color:        #e7eaed;
+  --bs-body-color-rgb:    231, 234, 237;
+  --bs-secondary-color:   #949ca4;
+  --bs-secondary-color-rgb: 148, 156, 164;
+  --bs-tertiary-color:    rgba(148, 156, 164, 0.65);
+  --bs-emphasis-color:    #ffffff;
+
+  /* Brand accents */
+  --pr-pink:      #F2006E;
+  --pr-pink-soft: #ff4d97;
+  --pr-green:     #37c98a;
+  --pr-amber:     #f5b93a;
+  --pr-red:       #f26a6a;
+  --pr-blue:      #5aa9e6;
+
+  /* Bootstrap semantic overrides. Pink is the single brand accent (primary);
+     the other semantic colours stay conventional so success/warning/danger
+     still read as themselves. */
+  --bs-primary:           #F2006E;
+  --bs-primary-rgb:       242, 0, 110;
+  --bs-secondary:         #949ca4;
+  --bs-secondary-rgb:     148, 156, 164;
+  --bs-success:           #37c98a;
+  --bs-success-rgb:       55, 201, 138;
+  --bs-info:              #5aa9e6;
+  --bs-info-rgb:          90, 169, 230;
+  --bs-warning:           #f5b93a;
+  --bs-warning-rgb:       245, 185, 58;
+  --bs-danger:            #f26a6a;
+  --bs-danger-rgb:        242, 106, 106;
+  --bs-light:             #282d33;
+  --bs-light-rgb:         40, 45, 51;
+  --bs-dark:              #1b1e22;
+  --bs-dark-rgb:          27, 30, 34;
+
+  /* Text-emphasis colours (for text-bg-* utilities) */
+  --bs-primary-text-emphasis:   #ff7db0;
+  --bs-secondary-text-emphasis: #c3cad1;
+  --bs-success-text-emphasis:   #7fe0b7;
+  --bs-info-text-emphasis:      #a5cef1;
+  --bs-warning-text-emphasis:   #f8d488;
+  --bs-danger-text-emphasis:    #f7a5a5;
+
+  /* Borders */
+  --bs-border-color:        #333a42;
+  --bs-border-color-translucent: rgba(242, 0, 110, 0.20);
+
+  /* Links */
+  --bs-link-color:        #ff4d97;
+  --bs-link-color-rgb:    255, 77, 151;
+  --bs-link-hover-color:  #ff7db0;
+
+  /* Cards / components */
+  --bs-card-bg:           #23272c;
+  --bs-card-border-color: #333a42;
+  --bs-modal-bg:          #23272c;
+  --bs-dropdown-bg:       #23272c;
+  --bs-dropdown-border-color: #333a42;
+  --bs-input-bg:          #282d33;
+  --bs-input-border-color: #333a42;
+  --bs-input-color:       #e7eaed;
+  --bs-list-group-bg:     #23272c;
+  --bs-list-group-border-color: #333a42;
+
+  /* Buttons / focus tokens */
+  --bs-btn-focus-box-shadow:  0 0 0 0.25rem rgba(242, 0, 110, 0.30);
+
+  /* Navbar */
+  --bs-navbar-color:       rgba(231, 234, 237, 0.82);
+  --bs-navbar-hover-color: #ff4d97;
+  --bs-navbar-active-color: #ff4d97;
+
+  /* Table */
+  --bs-table-bg:          transparent;
+  --bs-table-striped-bg:  rgba(242, 0, 110, 0.05);
+  --bs-table-hover-bg:    rgba(242, 0, 110, 0.08);
+  --bs-table-border-color: #333a42;
+
+  color-scheme: dark;
+}
+
+/* Body & page chrome */
+body {
+  background-color: var(--bs-body-bg);
+  color: var(--bs-body-color);
+}
+
+/* Global focus ring in the brand pink */
+:focus-visible {
+  outline-color: var(--pr-pink);
+}
+
+/* Navbar */
+.navbar {
+  background: #16181c !important;
+  border-bottom: 1px solid #333a42 !important;
+}
+.navbar-brand {
+  color: var(--pr-pink) !important;
+  letter-spacing: 0.3px;
+}
+.nav-link {
+  color: rgba(231, 234, 237, 0.80) !important;
+}
+.nav-link:hover,
+.nav-link.active {
+  color: var(--pr-pink-soft) !important;
+}
+
+/* Cards */
+.card {
+  background-color: #23272c;
+  border-color: #333a42;
+}
+.card-header {
+  background-color: #282d33;
+  border-bottom-color: #333a42;
+  color: #e7eaed;
+}
+
+/* Buttons */
+.btn-primary {
+  background-color: var(--pr-pink);
+  border-color: var(--pr-pink);
+  color: #ffffff;
+}
+.btn-primary:hover,
+.btn-primary:focus {
+  background-color: #d80062;
+  border-color: #d80062;
+  color: #ffffff;
+}
+.btn-primary:focus,
+.btn-primary:active {
+  box-shadow: 0 0 0 0.25rem rgba(242, 0, 110, 0.35);
+}
+.btn-success {
+  background-color: var(--pr-green);
+  border-color: var(--pr-green);
+  color: #06110b;
+}
+.btn-success:hover {
+  background-color: #4bd89b;
+  border-color: #4bd89b;
+  color: #06110b;
+}
+.btn-outline-primary {
+  border-color: var(--pr-pink);
+  color: var(--pr-pink-soft);
+}
+.btn-outline-primary:hover {
+  background-color: var(--pr-pink);
+  color: #ffffff;
+}
+.btn-outline-danger {
+  border-color: var(--pr-red);
+  color: var(--pr-red);
+}
+.btn-outline-danger:hover {
+  background-color: rgba(242, 106, 106, 0.15);
+  color: var(--pr-red);
+}
+
+/* Forms */
+.form-control,
+.form-select {
+  background-color: #282d33;
+  border-color: #333a42;
+  color: #e7eaed;
+}
+.form-control:focus,
+.form-select:focus {
+  background-color: #282d33;
+  border-color: var(--pr-pink);
+  color: #e7eaed;
+  box-shadow: 0 0 0 0.25rem rgba(242, 0, 110, 0.25);
+}
+.form-control::placeholder { color: rgba(231, 234, 237, 0.42); }
+.form-check-input:checked {
+  background-color: var(--pr-pink);
+  border-color: var(--pr-pink);
+}
+.form-check-input:focus {
+  border-color: var(--pr-pink);
+  box-shadow: 0 0 0 0.25rem rgba(242, 0, 110, 0.25);
+}
+.input-group-text {
+  background-color: #282d33;
+  border-color: #333a42;
+  color: #949ca4;
+}
+
+/* Tables */
+.table {
+  color: var(--bs-body-color);
+  border-color: #333a42;
+}
+.table > thead {
+  border-bottom: 2px solid var(--pr-pink);
+  color: #e7eaed;
+}
+
+/* Badges */
+.text-bg-primary   { background-color: var(--pr-pink)   !important; color: #ffffff !important; }
+.text-bg-secondary { background-color: #949ca4          !important; color: #16181c !important; }
+.text-bg-success   { background-color: var(--pr-green)  !important; color: #06110b !important; }
+.text-bg-info      { background-color: var(--pr-blue)   !important; color: #06121c !important; }
+.text-bg-warning   { background-color: var(--pr-amber)  !important; color: #1c1503 !important; }
+.text-bg-danger    { background-color: var(--pr-red)    !important; color: #1c0606 !important; }
+
+/* Alerts */
+.alert-success {
+  background-color: rgba(55, 201, 138, 0.12);
+  border-color: var(--pr-green);
+  color: #7fe0b7;
+}
+.alert-danger {
+  background-color: rgba(242, 106, 106, 0.12);
+  border-color: var(--pr-red);
+  color: #f7a5a5;
+}
+.alert-warning {
+  background-color: rgba(245, 185, 58, 0.10);
+  border-color: var(--pr-amber);
+  color: #f8d488;
+}
+.alert-info {
+  background-color: rgba(90, 169, 230, 0.12);
+  border-color: var(--pr-blue);
+  color: #a5cef1;
+}
+.alert-primary {
+  background-color: rgba(242, 0, 110, 0.12);
+  border-color: var(--pr-pink);
+  color: #ff7db0;
+}
+
+/* Dropdowns & modals */
+.dropdown-menu {
+  background-color: #23272c;
+  border-color: #333a42;
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.55);
+}
+.dropdown-item { color: #e7eaed; }
+.dropdown-item:hover {
+  background-color: rgba(242, 0, 110, 0.14);
+  color: var(--pr-pink-soft);
+}
+.modal-content {
+  background-color: #23272c;
+  border-color: #333a42;
+}
+.modal-header { border-bottom-color: #333a42; }
+.modal-footer { border-top-color: #333a42; }
+
+/* List groups */
+.list-group-item {
+  background-color: #23272c;
+  border-color: #333a42;
+  color: #e7eaed;
+}
+.list-group-item-action:hover {
+  background-color: rgba(242, 0, 110, 0.12);
+  color: var(--pr-pink-soft);
+}
+
+/* Nav tabs & pills */
+.nav-tabs { border-bottom-color: #333a42; }
+.nav-tabs .nav-link { color: rgba(231, 234, 237, 0.72) !important; }
+.nav-tabs .nav-link.active {
+  background-color: #282d33;
+  border-color: #333a42 #333a42 #282d33;
+  color: var(--pr-pink-soft) !important;
+}
+.nav-pills .nav-link.active {
+  background-color: var(--pr-pink);
+  color: #ffffff !important;
+}
+
+/* Links */
+a { color: var(--bs-link-color); }
+a:hover { color: var(--bs-link-hover-color); }
+
+/* Urgency colours (override base.html) */
+.urgency-expired { color: #f26a6a; }
+.urgency-today   { color: #f5934a; }
+.urgency-3d      { color: var(--pr-amber); }
+.urgency-ok      { color: var(--pr-green); }
+
+/* Scrollbar (Webkit) */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: #16181c; }
+::-webkit-scrollbar-thumb { background: #333a42; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--pr-pink); }
+
+/* Progress bars */
+.progress { background-color: #282d33; }
+.progress-bar { background-color: var(--pr-pink); }
