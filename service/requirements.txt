@@ -24,7 +24,7 @@ google-generativeai==0.8.3  # Gemini vision/enrichment provider
 # pip never resolves the legacy 1.0beta5prerelease2 wheel, whose non-normalized
 # version pip 25.3 hard-errors on (pypa/pip#12938).
 google-api-python-client==2.197.0
-anthropic>=0.45.0            # Anthropic Claude vision/enrichment provider
+anthropic>=0.116.0            # Anthropic Claude vision/enrichment provider
 # OpenAI is accessed via httpx directly - no SDK needed
 
 # Image resizing before sending to AI providers (required for photo analysis)
