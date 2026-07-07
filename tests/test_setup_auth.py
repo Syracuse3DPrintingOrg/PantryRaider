@@ -1,0 +1,82 @@
+"""The setup surface must not bypass auth once the instance is configured
+(rules audit, Jul 2026): before this guard, any LAN client could POST
+/setup/save on a password-protected install and overwrite auth_password."""
+import os
+import sys
+from pathlib import Path
+
+import pytest
+
+SERVICE = Path(__file__).resolve().parents[1] / "service"
+sys.path.insert(0, str(SERVICE))
+
+from app.config import settings  # noqa: E402
+from app.passwords import hash_secret  # noqa: E402
+
+
+@pytest.fixture
+def client(monkeypatch, tmp_path):
+    cwd = os.getcwd()
+    os.chdir(SERVICE)
+    monkeypatch.setattr(settings, "data_dir", str(tmp_path), raising=False)
+    from fastapi.testclient import TestClient
+    from app.main import app
+    try:
+        # client_host defaults to "testclient", NOT loopback, so the loopback
+        # trust path does not mask the middleware behavior under test.
+        yield TestClient(app)
+    finally:
+        os.chdir(cwd)
+
+
+def _configured(monkeypatch, password=""):
+    monkeypatch.setattr(settings, "deployment_mode", "server", raising=False)
+    monkeypatch.setattr(settings, "grocy_base_url", "http://grocy.test", raising=False)
+    monkeypatch.setattr(settings, "grocy_api_key", "k", raising=False)
+    monkeypatch.setattr(settings, "auth_required", bool(password), raising=False)
+    monkeypatch.setattr(settings, "auth_password",
+                        hash_secret(password) if password else "", raising=False)
+
+
+def test_configured_instance_rejects_unauthenticated_setup_save(client, monkeypatch):
+    _configured(monkeypatch, password="hunter2")
+    r = client.post("/setup/save", json={"grocy_base_url": "http://evil"},
+                    follow_redirects=False)
+    assert r.status_code in (302, 303, 307, 401, 403)
+    assert settings.grocy_base_url == "http://grocy.test"
+
+
+def test_configured_instance_rejects_unauthenticated_setup_page(client, monkeypatch):
+    _configured(monkeypatch, password="hunter2")
+    r = client.get("/setup", follow_redirects=False)
+    assert r.status_code in (302, 303, 307, 401, 403)
+
+
+def test_unconfigured_instance_serves_the_wizard(client, monkeypatch):
+    monkeypatch.setattr(settings, "deployment_mode", "server", raising=False)
+    monkeypatch.setattr(settings, "grocy_base_url", "", raising=False)
+    monkeypatch.setattr(settings, "grocy_api_key", "", raising=False)
+    monkeypatch.setattr(settings, "auth_required", False, raising=False)
+    monkeypatch.setattr(settings, "auth_password", "", raising=False)
+    r = client.get("/setup")
+    assert r.status_code == 200
+
+
+def test_api_key_still_reaches_setup_endpoints(client, monkeypatch):
+    _configured(monkeypatch, password="hunter2")
+    monkeypatch.setattr(settings, "api_key", "sesame", raising=False)
+    r = client.post("/setup/test/grocy", json={},
+                    headers={"X-API-Key": "sesame"}, follow_redirects=False)
+    # Authenticated: the handler runs (whatever it returns), no auth redirect.
+    assert r.status_code not in (302, 303, 307, 401, 403)
+
+
+def test_health_and_login_stay_public(client, monkeypatch):
+    _configured(monkeypatch, password="hunter2")
+    assert client.get("/health").status_code == 200
+    # The login page must never bounce to itself (that would be an auth
+    # redirect loop). Not following redirects keeps this robust against
+    # settings state leaked by earlier test modules.
+    r = client.get("/ui/login", follow_redirects=False)
+    assert r.status_code in (200, 303, 307)
+    assert "/ui/login" not in r.headers.get("location", "")

@@ -1,0 +1,4020 @@
+#!/usr/bin/env python3
+"""FoodAssistant host bridge.
+
+Runs on the Pi host (not inside Docker) at 127.0.0.1:9299. The main app
+container can reach it via localhost because docker-compose.appliance.yml
+uses network_mode: host.
+
+Exposes a minimal HTTP API for operations that need host-level access, such
+as Wi-Fi, hostname, display KMS rotation, and service restarts.
+
+Authentication: at startup the bridge writes a shared token to
+INSTALL_DIR/data/bridge-token and requires it back as the X-Bridge-Token
+header on every route except the read-only status GETs in TOKEN_EXEMPT_GET.
+Tokenless requests are logged and allowed while GRACE_MODE is on (one
+release, so mixed-version fleets keep a working update path).
+
+Endpoints
+---------
+GET  /wifi/status          current Wi-Fi state + SSID (from nmcli)
+GET  /wifi/scan            list visible networks {ssid, signal, security}
+POST /wifi/connect         connect to a network  {ssid, password?}
+GET  /hostname             current hostname
+POST /hostname             change hostname       {hostname}
+GET  /display/rotation     current KMS rotation (from /boot/firmware/config.txt)
+POST /display/rotation     set KMS rotation      {degrees, reboot?}
+POST /touch/calibrate      apply touch matrix    {matrix: "a b c d e f"}
+POST /touch/provision      apply SPI+ads7846 overlay for the chosen display type
+POST /system/timezone      set the host timezone {tz: "Area/City"}
+POST /system/scheduled-reboot  install/remove a reboot timer {time: "HH:MM"|"", frequency?: "nightly"|"weekly"|"off", day?: 0-6}
+POST /streamdeck/restart   restart Stream Deck service
+GET  /streamdeck/actions     list assignable deck actions (for the web editor)
+POST /kiosk/restart        restart the kiosk browser (apply scale/rotation)
+GET  /mealie/status        Mealie state: not-installed / starting / running
+POST /mealie/start         start Mealie in the background (docker compose --profile with-mealie up -d)
+GET  /logs/<name>          tail of an install/start log (name in mealie/kiosk/streamdeck/grocy)
+GET  /hardware/status      display/Stream Deck presence + service/install state
+GET  /system/health        power/thermal/disk warnings (vcgencmd get_throttled, temp, df)
+GET  /system/warnings      cached warnings from the 60s monitor loop (power, heat, disk)
+GET  /support-bundle       host facts for the app's support zip (units, journal, probes)
+POST /kiosk/install        provision the kiosk service (display attached later)
+POST /streamdeck/install   provision the Stream Deck service (attached later)
+GET  /ap/status            whether the fallback AP is active {active: bool}
+POST /ap/disable           stop hostapd+dnsmasq and remove the AP flag file
+GET  /stack/status         local backend stack presence + per-container run state
+POST /stack/standdown      stop the local backend containers (grocy/mealie/ollama); data kept
+POST /stack/standup        start the parked local backend containers again
+POST /update               git pull + redeploy app and Stream Deck + restart (Pi Remote OTA)
+POST /update/channel       persist the update channel the OTA helper follows  {channel: stable|main}
+POST /reboot               reboot the host (systemctl reboot, or reboot as fallback)
+POST /restore              full-stack snapshot restore (stop stack, swap data, restart)  {source}
+GET  /activity             shared activity/display state (polled by the deck)
+POST /activity             report user activity; wakes the display  {source?}
+POST /display/blank        blank the kiosk display now
+POST /display/wake         wake the kiosk display now
+POST /display/idle         set+persist the display idle timeout and motion wake  {minutes, wake_on_motion?}
+GET  /usb/status           attached USB flash drive: mounted? free space? last backup?
+POST /usb/backup           snapshot the data dirs into pantryraider-backups/ on the drive
+GET  /usb/photos           list image files in the drive's pictures/ or photos/ folder
+GET  /usb/photo?path=name  serve one image from that folder (read-only, size-capped)
+POST /tunnel/keygen        generate a WireGuard keypair; return the public key only
+POST /tunnel/up            write+bring up the Forager interface  {address, server_public_key, endpoint, allowed_ips, dns?}
+POST /tunnel/down          take the Forager interface down (best effort)
+GET  /tunnel/status        Forager interface up? + latest handshake age
+"""
+import hmac
+import http.server
+import json
+import os
+from pathlib import Path
+import re
+import secrets
+import shutil
+import subprocess
+import sys
+import tempfile
+import threading
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+
+LISTEN_HOST = "127.0.0.1"
+LISTEN_PORT = 9299
+INSTALL_DIR = "/opt/foodassistant"
+# Mealie serves on this host port (mapped from the container's 9000 in the
+# appliance compose file). Used for the readiness probe below.
+MEALIE_PORT = 9285
+# Flag file written by the AP watchdog service when the fallback hotspot is
+# active. Checked by GET /ap/status and removed by POST /ap/disable.
+_AP_FLAG = "/run/foodassistant-ap-active"
+
+# --- Shared-token handshake (FoodAssistant-pxcm) ---------------------------
+# The bridge runs as root and used to trust anything on localhost, which put
+# reboot, restore, and udev writes one curl away from any local process. At
+# startup it now writes a random token where the app can read it and requires
+# that token back (header X-Bridge-Token) on every state-changing route.
+#
+# Token location: INSTALL_DIR/data/bridge-token. That directory is the app
+# container's /app/data bind mount on a pi_hosted appliance, and the venv
+# app's DATA_DIR on a pi_remote, so one well-known path serves both shapes.
+# The Stream Deck controller reads the same path.
+TOKEN_PATH = os.path.join(INSTALL_DIR, "data", "bridge-token")
+
+# Grace mode: a request with NO token is logged and allowed, so a fleet where
+# the app or deck predates the handshake cannot lock itself out of its own
+# update path. A request with a WRONG token is always denied (the client
+# re-reads the token file and recovers on its next call).
+# TODO(FoodAssistant-pxcm): flip to False one release after every fleet
+# component (app, Stream Deck controller, satellite sync) ships the
+# X-Bridge-Token header, so a device that updates the bridge first keeps a
+# working OTA path in the meantime. Enforcing in the same release as the
+# clients would brick mixed-version fleets mid-update.
+GRACE_MODE = True
+
+# GET routes that stay open without a token. Deliberately a short list of
+# harmless read-only status probes: no secrets, no file contents, nothing a
+# local process could not already learn, and some are polled by callers that
+# may predate the token (the app's hostname probe, the deck's activity poll).
+# Everything else, including every POST, requires the token.
+TOKEN_EXEMPT_GET = frozenset({
+    "/hostname",
+    "/activity",
+    "/system/health",
+    "/system/warnings",
+    "/hardware/status",
+    "/ap/status",
+    "/mealie/status",
+    "/stack/status",
+    "/display/rotation",
+})
+
+# Loaded (or created) once at startup by _load_or_create_token(). Empty only
+# if the token file could not be written, in which case every check falls
+# back to the grace path so the bridge keeps working.
+_EXPECTED_TOKEN = ""
+
+
+def _load_or_create_token(path=TOKEN_PATH):
+    """Return the shared token, creating the file when missing.
+
+    Reuses an existing token so app and deck caches stay valid across bridge
+    restarts. The data dir is created defensively: on first boot this service
+    can start before firstboot.sh (or docker) has made INSTALL_DIR/data.
+
+    The file is mode 644, not 600: the directory is the real boundary. The
+    bridge runs as root but its callers do not all run as root (the venv app
+    and the Stream Deck controller run as the primary user), and on a hosted
+    appliance the data dir stays root-owned, so a 600 root:root file would be
+    unreadable to them. Tradeoff: any local account can read the token, which
+    is acceptable on a single-user appliance and still a large step up from
+    trusting every localhost request outright.
+    """
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        try:
+            existing = Path(path).read_text().strip()
+        except OSError:
+            existing = ""
+        if existing:
+            os.chmod(path, 0o644)
+            return existing
+        token = secrets.token_hex(32)
+        Path(path).write_text(token + "\n")
+        os.chmod(path, 0o644)
+        return token
+    except OSError as e:
+        print(f"bridge token: could not write {path}: {e}", flush=True)
+        return ""
+
+
+def _token_gate(method, path, provided, expected, grace):
+    """Pure auth decision for one request: 'ok', 'grace', or 'deny'.
+
+    Exempt read-only GETs are always 'ok'. A matching token is 'ok'. A
+    missing token is 'grace' while GRACE_MODE holds, else 'deny'. A present
+    but wrong token is always 'deny' (the client re-reads the file and
+    recovers). When the bridge has no token of its own to compare against
+    the check degrades to 'grace' so it never locks everyone out.
+    """
+    clean = (path or "").split("?", 1)[0]
+    if method == "GET" and clean in TOKEN_EXEMPT_GET:
+        return "ok"
+    if not expected:
+        return "grace"
+    provided = (provided or "").strip()
+    if provided:
+        return "ok" if hmac.compare_digest(provided, expected) else "deny"
+    return "grace" if grace else "deny"
+
+# Interface name prefixes that never count as wired LAN connectivity: Wi-Fi
+# (handled separately), Docker bridges, veth pairs, tunnels, and libvirt.
+# Mirrors the skip list in the foodassistant-ap-watchdog script.
+_NON_WIRED_PREFIXES = ("wlan", "docker", "br-", "veth", "tun", "tap", "vir")
+
+
+def _is_wired_iface(name):
+    """Whether an interface name looks like a real wired NIC (eth0, end0, ...)."""
+    if name == "lo":
+        return False
+    return not name.startswith(_NON_WIRED_PREFIXES)
+
+
+def _connectivity_from(default_route, wired_ifaces):
+    """Pure decision: does this network state amount to real connectivity?
+
+    default_route: `ip route show default` output (any non-blank line means a
+    gateway exists). wired_ifaces: iterable of (name, carrier_up, has_ipv4)
+    tuples for the machine's interfaces. The fallback hotspot assigns wlan0 a
+    static address but never a default route, so a genuinely stranded device
+    fails both checks and this stays False while the AP is legitimately up.
+    """
+    if (default_route or "").strip():
+        return True
+    for name, carrier_up, has_ipv4 in wired_ifaces:
+        if _is_wired_iface(name) and carrier_up and has_ipv4:
+            return True
+    return False
+
+
+def _has_lan_connectivity():
+    """Whether the device already has a usable network (default route, or a
+    wired interface up with an IPv4 address). Same checks as the AP watchdog,
+    re-evaluated live so a cable plugged in after boot is seen."""
+    try:
+        route = subprocess.run(
+            ["ip", "route", "show", "default"],
+            capture_output=True, text=True, timeout=5,
+        ).stdout
+    except Exception:
+        route = ""
+    ifaces = []
+    try:
+        for dev in Path("/sys/class/net").iterdir():
+            name = dev.name
+            if not _is_wired_iface(name):
+                continue
+            try:
+                carrier_up = (dev / "carrier").read_text().strip() == "1"
+            except Exception:
+                carrier_up = False
+            has_ipv4 = False
+            if carrier_up:
+                try:
+                    out = subprocess.run(
+                        ["ip", "-4", "addr", "show", "dev", name],
+                        capture_output=True, text=True, timeout=5,
+                    ).stdout
+                    has_ipv4 = "inet " in out
+                except Exception:
+                    has_ipv4 = False
+            ifaces.append((name, carrier_up, has_ipv4))
+    except Exception:
+        pass
+    return _connectivity_from(route, ifaces)
+
+
+def _ap_stand_down():
+    """Stop the fallback hotspot and clear its flag file (best effort)."""
+    subprocess.run(["systemctl", "stop", "hostapd"], timeout=10)
+    subprocess.run(["systemctl", "stop", "dnsmasq"], timeout=10)
+    try:
+        subprocess.run(
+            ["ip", "addr", "del", "192.168.99.1/24", "dev", "wlan0"],
+            timeout=5
+        )
+    except Exception:
+        pass
+    try:
+        Path(_AP_FLAG).unlink(missing_ok=True)
+    except TypeError:
+        # missing_ok added in Python 3.8; fall back for older versions.
+        if Path(_AP_FLAG).exists():
+            Path(_AP_FLAG).unlink()
+
+# Candidate locations for the provisioner script (curl-installer clone first,
+# then a baked-image asset dir, then the legacy home-dir clone).
+_FIRSTBOOT_CANDIDATES = [
+    "/boot/firmware/firstboot.sh",
+    "/home/foodassistant/FoodAssistant/scripts/image-build/firstboot.sh",
+    "/opt/foodassistant-src/scripts/image-build/firstboot.sh",
+]
+# Helper scripts the bridge shells out to live in /usr/local/bin, installed by
+# firstboot and refreshed by foodassistant-update. A device imaged before a
+# helper existed (and not yet updated) is missing it, so before reporting a
+# failure the bridge self-heals: the git checkout that feeds updates carries
+# every helper under scripts/image-build, and the bridge runs as root, so it
+# can install the missing script on the fly and proceed
+# (FoodAssistant-jppi/9la0).
+_HELPER_BIN_DIR = "/usr/local/bin"
+
+
+def _helper_source_dirs():
+    """Candidate directories holding the checkout copies of the helper
+    scripts, best first. Mirrors the update helper's REPO_CANDIDATES."""
+    dirs = []
+    repo = os.environ.get("REPO_DIR", "").strip()
+    if repo:
+        dirs.append(os.path.join(repo, "scripts", "image-build"))
+    dirs.append("/opt/foodassistant-src/scripts/image-build")
+    dirs.append("/home/foodassistant/FoodAssistant/scripts/image-build")
+    return dirs
+
+
+def _find_helper_source(name, src_dirs=None):
+    """Path to the checkout copy of helper `name`, or None. Pure lookup (the
+    candidate dirs are injectable) so it is unit-testable."""
+    for d in (src_dirs if src_dirs is not None else _helper_source_dirs()):
+        path = os.path.join(d, name)
+        if os.path.isfile(path):
+            return path
+    return None
+
+
+def _ensure_helper(name, bin_dir=_HELPER_BIN_DIR):
+    """Return the installed path of helper `name`, installing it from the git
+    checkout when it is missing under bin_dir. Returns None when the helper is
+    nowhere to be found (no checkout copy either)."""
+    dst = os.path.join(bin_dir, name)
+    if os.path.exists(dst):
+        return dst
+    src = _find_helper_source(name)
+    if not src:
+        return None
+    try:
+        shutil.copyfile(src, dst)
+        os.chmod(dst, 0o755)
+    except OSError:
+        return None
+    return dst
+
+
+# Shown when every display power method failed (helper missing and not
+# recoverable, no vcgencmd/xset). Update refreshes the device helpers.
+_DISPLAY_POWER_ERROR = (
+    "Could not switch the display power: no working method was found on "
+    "this device. Press Update under Backup & Updates to refresh the "
+    "device helpers, then try again."
+)
+
+# Background long-running processes, keyed by step name
+# ("kiosk"/"streamdeck" installs, "mealie" start). Each value is a Popen whose
+# poll() tells us whether the work is still in flight.
+_INSTALL_PROCS = {}
+
+# Log files the background steps stream their stdout/stderr into. The setup UI
+# tails these (via GET /logs/<name>) to show live install/start output. The
+# Mealie start writes the first path; the kiosk/streamdeck installs use the
+# foodassistant-<name>-install.log pattern that _provision() opens. "grocy" is
+# the firstboot provisioner log: the Grocy/stack install runs inside firstboot
+# (deploy_stack), so tailing its log is what shows the operator that install's
+# progress while the setup wizard waits for Grocy to come up
+# (FoodAssistant-n5ky).
+_LOG_PATHS = {
+    "mealie": "/var/log/foodassistant-mealie-start.log",
+    "kiosk": "/var/log/foodassistant-kiosk-install.log",
+    "streamdeck": "/var/log/foodassistant-streamdeck-install.log",
+    "grocy": "/var/log/foodassistant-firstboot.log",
+}
+
+# Cap the bytes we read off the tail of a log so a long-running install cannot
+# return a multi-megabyte body to the polling UI.
+_LOG_TAIL_BYTES = 8192
+
+# --- Display + activity coordination (FoodAssistant-otiy) -----------------
+# The bridge is the one process both the kiosk browser and the Stream Deck
+# controller can reach, so it brokers "user activity" between them and owns the
+# physical display power. The kiosk display and the Stream Deck keep SEPARATE
+# idle timeouts (the deck times itself out locally), but activity on either
+# surface is reported here and wakes both: this loop wakes the display, and the
+# deck polls GET /activity to wake itself.
+#
+# The display idle timeout (minutes, 0 = off) is pushed by the app on settings
+# save and persisted here so it survives a bridge restart.
+_DISPLAY_IDLE_FILE = "/etc/foodassistant/display-idle"
+
+# Wake on motion (FoodAssistant-fr5). When an LSM6DSOX accelerometer is fitted
+# (the same part the boot rotation helper reads), physically moving or bumping
+# the device counts as user activity and wakes a blanked display. The mode is
+# pushed by the app on settings save and persisted here: "auto" turns it on
+# exactly when the sensor is present, "on" and "off" force it. On hardware
+# without the sensor every mode is a safe no-op.
+_WAKE_ON_MOTION_FILE = "/etc/foodassistant/wake-on-motion"
+_WAKE_ON_MOTION_MODES = ("auto", "on", "off")
+
+# Update channel (FoodAssistant-wkwx). The app pushes it on settings save (and
+# again just before each update), and the foodassistant-update helper reads the
+# file to decide what to install: "main" follows the branch tip, "stable" checks
+# out the newest release tag. Absent file means "main" (the historical behavior).
+_UPDATE_CHANNEL_FILE = "/etc/foodassistant/update-channel"
+_UPDATE_CHANNELS = ("stable", "main")
+
+
+def _write_update_channel(channel, path=None):
+    """Persist the update channel for the OTA helper. Returns (ok, error)."""
+    if channel not in _UPDATE_CHANNELS:
+        return False, "channel must be 'stable' or 'main'"
+    p = Path(path or _UPDATE_CHANNEL_FILE)
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(channel + "\n")
+        return True, ""
+    except OSError as e:
+        return False, str(e)
+
+# Minimum change of the acceleration vector between samples, in g, that counts
+# as motion. At rest the sensor reports a steady ~1 g gravity vector with noise
+# well under 0.02 g, so 0.08 g means a real nudge, tilt, or lift.
+_MOTION_THRESHOLD_G = 0.08
+
+_activity_lock = threading.Lock()
+_activity_state = {
+    "last_activity": time.time(),
+    "display_blanked": False,
+    "idle_minutes": 0,
+    "wake_on_motion": "auto",
+    # True once the motion loop has actually read a sample, so the app can see
+    # whether "auto" resolved to on for this device.
+    "motion_sensor": False,
+}
+
+
+def _read_persisted_idle_minutes(path=_DISPLAY_IDLE_FILE):
+    """Read the persisted display idle timeout in minutes (0 if unset/bad)."""
+    try:
+        with open(path) as f:
+            return max(0, int((f.read().strip() or "0")))
+    except (OSError, ValueError):
+        return 0
+
+
+def _write_persisted_idle_minutes(minutes, path=_DISPLAY_IDLE_FILE):
+    """Persist the display idle timeout so a bridge restart keeps it."""
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as f:
+            f.write(str(int(minutes)))
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+def _display_power_commands(on, which=shutil.which, helper_path=""):
+    """Ordered candidate command vectors to switch the display on/off.
+
+    The caller tries each until one succeeds. Kept pure (the tool probe and
+    the self-healed helper path are injected) so the selection is
+    unit-testable.
+
+    The compositor-aware helper is preferred (FoodAssistant-8khi): on a cage
+    kiosk, vcgencmd cuts the panel below the compositor, dropping it to the
+    console with no clean recovery until reboot. foodassistant-display-power
+    toggles the output through wlr-randr so cage stays in control. vcgencmd and
+    xset remain as fallbacks for setups without the compositor helper (e.g. a
+    bare X11 display or when the kiosk is not running). `helper_path` is the
+    freshly self-healed install of the helper, used when PATH does not see it
+    yet (FoodAssistant-9la0).
+    """
+    cmds = []
+    if which("foodassistant-display-power"):
+        cmds.append(["foodassistant-display-power", "on" if on else "off"])
+    elif helper_path:
+        cmds.append([helper_path, "on" if on else "off"])
+    if which("vcgencmd"):
+        cmds.append(["vcgencmd", "display_power", "1" if on else "0"])
+    if which("xset"):
+        cmds.append(["xset", "dpms", "force", "on" if on else "off"])
+    return cmds
+
+
+# systemd day-of-week names indexed by the app's scheduled_reboot_day
+# (0=Sunday .. 6=Saturday).
+_REBOOT_WEEKDAYS = ("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat")
+
+
+def _reboot_calendar(t, frequency="", day=0):
+    """The OnCalendar expression for the scheduled reboot timer.
+
+    Nightly fires every day at HH:MM; weekly fires once a week on the given
+    day (0=Sunday .. 6=Saturday). An unknown or empty frequency falls back to
+    nightly, matching the original behaviour where a set time alone meant a
+    nightly reboot, so an older app pushing just a time keeps working. Kept
+    pure so it is unit-testable (FoodAssistant-8x4u).
+    """
+    try:
+        day = int(day)
+    except (TypeError, ValueError):
+        day = 0
+    if not 0 <= day <= 6:
+        day = 0
+    if frequency == "weekly":
+        return "%s *-*-* %s:00" % (_REBOOT_WEEKDAYS[day], t)
+    return "*-*-* %s:00" % t
+
+
+def _reboot_command(which=shutil.which):
+    """The command vector used to reboot the host.
+
+    Prefers `systemctl reboot`; falls back to a bare `reboot` when systemctl is
+    not on PATH. Kept pure (the tool probe is injected) so it is unit-testable
+    without actually rebooting, mirroring _display_power_commands.
+    """
+    if which("systemctl"):
+        return ["systemctl", "reboot"]
+    return ["reboot"]
+
+
+def _kiosk_restart_cmd(delay_seconds=2, token="0", which=shutil.which):
+    """The command that schedules a detached, delayed kiosk restart.
+
+    Returns ("transient", argv) when systemd-run is available: the restart
+    runs as its own transient unit a moment out, decoupled from the HTTP
+    request that asked for it. Falls back to ("shell", argv), a sleep+restart
+    to be spawned detached. Pure (the tool probe is injected) so the selection
+    is unit-testable, mirroring _display_power_commands.
+    """
+    delay = int(delay_seconds)
+    if which("systemd-run"):
+        return ("transient", [
+            "systemd-run", "--collect", "--on-active=%ds" % delay,
+            "--unit=fa-kiosk-restart-%s" % token,
+            "systemctl", "restart", "foodassistant-kiosk.service",
+        ])
+    return ("shell", [
+        "/bin/sh", "-c",
+        "sleep %d; systemctl restart foodassistant-kiosk.service" % delay,
+    ])
+
+
+def _schedule_kiosk_restart(delay_seconds=2):
+    """Schedule a kiosk restart without blocking the HTTP response.
+
+    Restarting foodassistant-kiosk.service kills cage and with it the very
+    browser page that made the request (the on-screen calibration flow, or a
+    settings page opened on the kiosk itself). A synchronous systemctl restart
+    tore that page down before the response landed, and on a Pi 3 the
+    half-torn-down compositor could strand the display on the console
+    (FoodAssistant-9ext). Detach and delay instead: the response is written
+    first, the restart fires on its own a couple of seconds later. Returns
+    True when the restart was scheduled.
+    """
+    kind, cmd = _kiosk_restart_cmd(
+        delay_seconds, token=str(int(time.time() * 1000)), which=shutil.which)
+    if kind == "transient":
+        try:
+            r = subprocess.run(cmd, capture_output=True, timeout=10)
+            if r.returncode == 0:
+                return True
+        except Exception:
+            pass
+        # systemd-run refused (e.g. a leftover transient unit); fall back to
+        # the detached shell form.
+        _, cmd = _kiosk_restart_cmd(delay_seconds, which=lambda name: None)
+    try:
+        subprocess.Popen(cmd, start_new_session=True)
+        return True
+    except Exception:
+        return False
+
+
+def _read_persisted_wake_on_motion(path=_WAKE_ON_MOTION_FILE):
+    """Read the persisted wake-on-motion mode ("auto" if unset or bad)."""
+    try:
+        with open(path) as f:
+            mode = f.read().strip().lower()
+        return mode if mode in _WAKE_ON_MOTION_MODES else "auto"
+    except OSError:
+        return "auto"
+
+
+def _write_persisted_wake_on_motion(mode, path=_WAKE_ON_MOTION_FILE):
+    """Persist the wake-on-motion mode so a bridge restart keeps it."""
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as f:
+            f.write(str(mode))
+        return True
+    except OSError:
+        return False
+
+
+def _motion_wake_enabled(mode, sensor_present):
+    """Whether motion should count as wake-worthy activity.
+
+    Pure helper: "off" always disables; "auto" and "on" both need the sensor
+    to actually be readable, so a device without one never wakes on phantom
+    motion regardless of the setting.
+    """
+    if mode == "off":
+        return False
+    return bool(sensor_present)
+
+
+def _motion_exceeds(prev, cur, threshold=_MOTION_THRESHOLD_G):
+    """True when the acceleration vector moved more than ``threshold`` g
+    between two samples.
+
+    Pure helper: compares the magnitude of the vector delta, so a tilt, lift,
+    or knock all register while a device at rest (a steady gravity vector)
+    does not. A missing or malformed sample never counts as motion.
+    """
+    if not prev or not cur:
+        return False
+    try:
+        dx = float(cur[0]) - float(prev[0])
+        dy = float(cur[1]) - float(prev[1])
+        dz = float(cur[2]) - float(prev[2])
+    except (TypeError, ValueError, IndexError):
+        return False
+    return (dx * dx + dy * dy + dz * dz) ** 0.5 >= threshold
+
+
+def _accel_iio_device(iio_root="/sys/bus/iio/devices"):
+    """Sysfs directory of an LSM6-family IIO accelerometer, or "".
+
+    Empty is the usual case: the rotation helper talks raw I2C because no
+    kernel driver is bound on these devices, but if an overlay ever binds
+    lsm6dsx the IIO path is preferred (no bus contention with other readers).
+    """
+    try:
+        import glob
+        for name_path in sorted(glob.glob(os.path.join(iio_root, "iio:device*", "name"))):
+            if "lsm6" in _read_sysfs(name_path).lower():
+                return os.path.dirname(name_path)
+    except Exception:
+        pass
+    return ""
+
+
+def _read_iio_accel(device_dir):
+    """One (x, y, z) sample in g from an IIO accelerometer dir, or None."""
+    try:
+        scale = float(_read_sysfs(os.path.join(device_dir, "in_accel_scale")))
+        out = []
+        for axis in ("x", "y", "z"):
+            raw = _read_sysfs(os.path.join(device_dir, "in_accel_%s_raw" % axis))
+            # IIO reports raw * scale in m/s^2; convert to g so both read
+            # paths and the threshold share one unit.
+            out.append(int(raw) * scale / 9.80665)
+        return tuple(out)
+    except (TypeError, ValueError, OSError):
+        return None
+
+
+# LSM6DSOX I2C addresses: 0x6A with SDO low (the Adafruit default), 0x6B high.
+_LSM6DSOX_ADDRS = (0x6A, 0x6B)
+
+
+def _read_i2c_accel(bus_num=1):
+    """One (x, y, z) sample in g straight from the LSM6DSOX over I2C, or None.
+
+    Mirrors foodassistant-accel-rotation: no kernel driver is bound on these
+    devices, so the bridge reads the registers itself. smbus2 is installed by
+    firstboot when the sensor is detected at provision time; without it (or
+    without the sensor) this returns None and motion wake stays off.
+    """
+    try:
+        import smbus2  # type: ignore[import]
+    except ImportError:
+        return None
+    CTRL1_XL = 0x10
+    OUTX_L_XL = 0x28
+    for addr in _LSM6DSOX_ADDRS:
+        try:
+            with smbus2.SMBus(bus_num) as bus:
+                # 104 Hz output rate, +/-2 g range (idempotent re-arm).
+                bus.write_byte_data(addr, CTRL1_XL, 0x40)
+                time.sleep(0.02)
+                raw = bus.read_i2c_block_data(addr, OUTX_L_XL, 6)
+        except (OSError, ValueError):
+            continue
+
+        def _s16(lo, hi):
+            v = (hi << 8) | lo
+            return v - 65536 if v >= 32768 else v
+
+        sens = 0.061 / 1000  # g per LSB at +/-2 g
+        return (
+            _s16(raw[0], raw[1]) * sens,
+            _s16(raw[2], raw[3]) * sens,
+            _s16(raw[4], raw[5]) * sens,
+        )
+    return None
+
+
+def _read_accel_sample():
+    """One accelerometer sample in g, IIO first then raw I2C. None when no
+    sensor is readable, which is what gates motion wake on plain hardware."""
+    device_dir = _accel_iio_device()
+    if device_dir:
+        sample = _read_iio_accel(device_dir)
+        if sample is not None:
+            return sample
+    return _read_i2c_accel()
+
+
+def _motion_wake_loop():
+    """Background tick: treat real device motion as user activity.
+
+    Polls the accelerometer about once a second while wake-on-motion is
+    enabled and wakes the display through the normal activity path when the
+    reading jumps. Cheap and safe everywhere else: with the mode off or no
+    readable sensor the loop just sleeps on a long back-off, so hardware
+    without the part never pays for the probe.
+    """
+    prev = None
+    delay = 1.0
+    while True:
+        try:
+            with _activity_lock:
+                mode = _activity_state["wake_on_motion"]
+            if mode == "off":
+                prev = None
+                delay = 30.0
+            else:
+                sample = _read_accel_sample()
+                present = sample is not None
+                with _activity_lock:
+                    _activity_state["motion_sensor"] = present
+                if not present:
+                    # No sensor (or a wedged bus): back off up to five minutes
+                    # so a sensorless device is not probed every second, while
+                    # a hot-fixed sensor is still picked up eventually.
+                    prev = None
+                    delay = min(300.0, max(30.0, delay * 2))
+                else:
+                    if (_motion_wake_enabled(mode, present)
+                            and _motion_exceeds(prev, sample)):
+                        _record_activity()
+                    prev = sample
+                    delay = 1.0
+        except Exception:
+            delay = 30.0
+        time.sleep(delay)
+
+
+def _should_blank(now, last_activity, idle_minutes, already_blanked):
+    """True when the display has been idle long enough to blank.
+
+    Pure helper for the idle loop and its tests.
+    """
+    if idle_minutes <= 0 or already_blanked:
+        return False
+    return (now - last_activity) >= idle_minutes * 60
+
+
+def _set_display_power(on):
+    """Try each candidate command to power the display on/off. Returns True on
+    the first success, False if none worked (or none are available). A missing
+    foodassistant-display-power is reinstalled from the source checkout first
+    (devices imaged before the helper existed, FoodAssistant-9la0)."""
+    helper = ""
+    if not shutil.which("foodassistant-display-power"):
+        helper = _ensure_helper("foodassistant-display-power") or ""
+    for cmd in _display_power_commands(on, helper_path=helper):
+        try:
+            subprocess.run(cmd, check=True, capture_output=True, timeout=10)
+            return True
+        except (OSError, subprocess.SubprocessError):
+            continue
+    return False
+
+
+def _record_activity():
+    """Note user activity from either surface and wake the display if it was
+    blanked. Returns whether the display was woken."""
+    with _activity_lock:
+        was_blanked = _activity_state["display_blanked"]
+        _activity_state["last_activity"] = time.time()
+    if was_blanked:
+        _set_display_power(True)
+        with _activity_lock:
+            _activity_state["display_blanked"] = False
+    return was_blanked
+
+
+def _display_idle_loop():
+    """Background tick: blank the display once it has been idle long enough."""
+    while True:
+        try:
+            with _activity_lock:
+                idle = _activity_state["idle_minutes"]
+                last = _activity_state["last_activity"]
+                blanked = _activity_state["display_blanked"]
+            if _should_blank(time.time(), last, idle, blanked):
+                if _set_display_power(False):
+                    with _activity_lock:
+                        _activity_state["display_blanked"] = True
+        except Exception:
+            pass
+        time.sleep(10)
+
+
+def _tail_log(name, max_bytes=_LOG_TAIL_BYTES):
+    """Return the last max_bytes of the named log as a list of lines.
+
+    Safe by design: an unknown name, a missing file, or any read error yields
+    an empty list rather than raising, so the polling endpoint never 500s just
+    because a step has not created its log yet.
+    """
+    path = _LOG_PATHS.get(name)
+    if not path:
+        return []
+    try:
+        with open(path, "rb") as f:
+            try:
+                f.seek(0, os.SEEK_END)
+                size = f.tell()
+                f.seek(max(0, size - max_bytes))
+            except OSError:
+                # Not seekable for some reason; fall back to a plain read.
+                f.seek(0)
+            data = f.read()
+        text = data.decode("utf-8", "replace")
+        # Drop a leading partial line when we seeked into the middle of one.
+        if len(data) >= max_bytes and "\n" in text:
+            text = text.split("\n", 1)[1]
+        return [ln for ln in text.splitlines() if ln.strip()]
+    except OSError:
+        return []
+    except Exception:
+        return []
+
+
+def _http_serving(url, timeout=3):
+    """True when a GET to url gets any HTTP response (server is up).
+
+    A redirect or even a 4xx still means the web server answered, so anything
+    short of a connection failure or a 5xx counts as serving. Used to tell a
+    container that is merely created apart from one that is actually ready.
+    """
+    try:
+        req = urllib.request.Request(url, method="GET")
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return resp.status < 500
+    except urllib.error.HTTPError:
+        # The server answered with an error status; it is up.
+        return True
+    except Exception:
+        return False
+
+
+def _find_firstboot():
+    """Return (script_path, repo_dir) for the provisioner, or (None, None)."""
+    for path in _FIRSTBOOT_CANDIDATES:
+        if os.path.isfile(path):
+            # firstboot.sh lives at <repo>/scripts/image-build/firstboot.sh;
+            # derive the repo root so it can find the streamdeck package etc.
+            repo_dir = ""
+            if path.endswith("/scripts/image-build/firstboot.sh"):
+                repo_dir = path[: -len("/scripts/image-build/firstboot.sh")]
+            return path, repo_dir
+    return None, None
+
+
+def _compose_env():
+    """Environment for `docker compose` runs from INSTALL_DIR.
+
+    The appliance compose file resolves the service build context from
+    ${REPO_DIR}; firstboot.sh exports it before every compose call. The bridge
+    process does not inherit that export, so derive it the same way (from the
+    provisioner location, falling back to the compose file's own default) to
+    keep the build context valid if compose ever needs to build `service`.
+    """
+    env = dict(os.environ)
+    if not env.get("REPO_DIR"):
+        _, repo_dir = _find_firstboot()
+        env["REPO_DIR"] = repo_dir or "/home/foodassistant/FoodAssistant"
+    return env
+
+
+# --- Mealie install persistence + resume (FoodAssistant-nqpb) --------------
+# The first Mealie start pulls a large image, and the pull used to live only
+# in this process's memory (_INSTALL_PROCS): a bridge restart or reboot mid
+# pull lost the intent and left the install half done with nothing to finish
+# it. The intent is therefore persisted as a COMPOSE_PROFILES entry in the
+# stack's .env (which also makes every later plain `docker compose` command
+# from INSTALL_DIR include Mealie), and the bridge re-runs an interrupted
+# install on startup. `docker compose up -d` itself is idempotent: the pull
+# resumes from cached layers and an existing container is reused, so re-running
+# it converges rather than duplicating anything.
+
+_ENV_FILE = f"{INSTALL_DIR}/.env"
+
+
+def _env_profiles(env_text):
+    """Parse COMPOSE_PROFILES from compose .env text into a list of names."""
+    for line in (env_text or "").splitlines():
+        s = line.strip()
+        if s.startswith("COMPOSE_PROFILES="):
+            val = s.split("=", 1)[1].strip().strip('"').strip("'")
+            return [p.strip() for p in val.split(",") if p.strip()]
+    return []
+
+
+def _add_env_profile(env_text, profile):
+    """Return env_text with `profile` listed in COMPOSE_PROFILES.
+
+    Pure: appends to an existing COMPOSE_PROFILES line, or adds the line when
+    missing. Returns the text unchanged when the profile is already listed.
+    """
+    text = env_text or ""
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        if line.strip().startswith("COMPOSE_PROFILES="):
+            existing = _env_profiles(line)
+            if profile in existing:
+                return env_text
+            existing.append(profile)
+            lines[i] = "COMPOSE_PROFILES=" + ",".join(existing)
+            return "\n".join(lines) + ("\n" if text.endswith("\n") else "")
+    lines.append(f"COMPOSE_PROFILES={profile}")
+    return "\n".join(lines) + "\n"
+
+
+def _persist_compose_profile(profile, path=_ENV_FILE):
+    """Best-effort: record `profile` in the stack's .env.
+
+    Survives bridge restarts and reboots, so the startup resume knows Mealie
+    was requested, and future compose commands include it without --profile.
+    """
+    try:
+        text = ""
+        if os.path.exists(path):
+            with open(path) as f:
+                text = f.read()
+        new = _add_env_profile(text, profile)
+        if new != text:
+            with open(path, "w") as f:
+                f.write(new)
+        return True
+    except OSError:
+        return False
+
+
+def _should_resume_mealie(profiles, container_up, installing):
+    """True when a previously requested Mealie install should be re-run.
+
+    Pure decision helper for the startup resume: resume only when the .env
+    profiles record the intent, the container never came up (the install was
+    interrupted mid-pull), and no install is currently in flight.
+    """
+    return "with-mealie" in profiles and not container_up and not installing
+
+
+def _mealie_container_exists():
+    """True when the Mealie container exists (compose service 'mealie')."""
+    try:
+        r = subprocess.run(
+            ["docker", "compose", "ps", "--format=json", "mealie"],
+            cwd=INSTALL_DIR,
+            capture_output=True, text=True, timeout=10
+        )
+        return bool(r.stdout.strip()) and r.returncode == 0
+    except Exception:
+        return False
+
+
+def _launch_mealie_install():
+    """Start `docker compose --profile with-mealie up -d` in the background,
+    streaming output into the mealie log, and track it in _INSTALL_PROCS."""
+    log = open(_LOG_PATHS["mealie"], "ab")
+    p = subprocess.Popen(
+        ["docker", "compose", "--profile", "with-mealie", "up", "-d"],
+        cwd=INSTALL_DIR,
+        env=_compose_env(),
+        stdout=log, stderr=subprocess.STDOUT,
+    )
+    _INSTALL_PROCS["mealie"] = p
+    return p
+
+
+def _resume_mealie_install(retries=30, delay=10, sleep=time.sleep):
+    """Finish an interrupted Mealie install after a bridge restart or reboot.
+
+    Runs once in a background thread at startup: waits for the docker daemon
+    (the bridge can start before docker at boot), then re-runs the compose up
+    when the stack's .env says Mealie belongs but its container never came up.
+    Returns True when a resume was launched.
+    """
+    for _ in range(retries):
+        try:
+            r = subprocess.run(["docker", "info"], capture_output=True, timeout=15)
+            if r.returncode == 0:
+                break
+        except Exception:
+            pass
+        sleep(delay)
+    else:
+        return False
+    try:
+        with open(_ENV_FILE) as f:
+            profiles = _env_profiles(f.read())
+    except OSError:
+        return False
+    if not _should_resume_mealie(
+        profiles, _mealie_container_exists(), _installing("mealie")
+    ):
+        return False
+    _launch_mealie_install()
+    return True
+
+
+# --- One-image mode switch: park / resume the local stack (FoodAssistant-dzx9)
+# A pi_hosted appliance can be switched to satellite duty from Settings: the
+# app flips its own deployment_mode and asks the bridge to stop the local
+# backend containers. Stopping (never removing) is deliberate: the Grocy and
+# Mealie data directories stay on the SD card, and because the appliance
+# compose file uses restart: unless-stopped, a manually stopped container
+# stays stopped across reboots with no unit changes. Switching back is a plain
+# `docker compose up -d` (the persisted COMPOSE_PROFILES in the stack's .env
+# brings back exactly the services that were enabled before).
+#
+# The app container itself is never touched here: it keeps serving the kiosk
+# and, in satellite mode, pulls its config from the main server.
+
+# Backend services the switch parks. The app's own `service` container is
+# excluded on purpose: it must keep running in both modes.
+_STACK_BACKEND_SERVICES = ("grocy", "mealie", "ollama")
+
+
+def _compose_backend_services(compose_text):
+    """Backend service names defined in a compose file's services block.
+
+    Matches the two-space-indented `grocy:` / `mealie:` / `ollama:` service
+    keys of the appliance compose file. The Pi Remote compose defines none of
+    them, so an empty result means this device never hosted a local stack and
+    the stand-down/stand-up endpoints must refuse to act. Pure, for tests.
+    """
+    found = []
+    for name in _STACK_BACKEND_SERVICES:
+        if re.search(r"^  %s:" % name, compose_text or "", re.M):
+            found.append(name)
+    return found
+
+
+def _stack_stop_cmd(services):
+    """The docker compose argv that stops the given backend services.
+
+    Every optional profile is enabled explicitly so compose recognizes the
+    profile-gated services (mealie/ollama) even when the profile is not in the
+    stack's .env; stopping a service whose container was never created is a
+    no-op. Pure, for tests.
+    """
+    return ["docker", "compose", "--profile", "with-mealie",
+            "--profile", "with-ollama", "stop"] + list(services)
+
+
+def _stack_up_cmd():
+    """The docker compose argv that resumes the parked stack.
+
+    A plain `up -d`: the COMPOSE_PROFILES persisted in the stack's .env decides
+    which optional services come back, so an appliance that ran Mealie gets
+    Mealie again and one that never enabled it does not. Pure, for tests.
+    """
+    return ["docker", "compose", "up", "-d"]
+
+
+def _read_stack_compose(path=None):
+    """The deployed compose file's text, or "" when it does not exist."""
+    p = path or os.path.join(INSTALL_DIR, "docker-compose.yml")
+    try:
+        with open(p) as f:
+            return f.read()
+    except OSError:
+        return ""
+
+
+def _container_running(name):
+    """True when the named container exists and is running."""
+    try:
+        r = subprocess.run(
+            ["docker", "inspect", "-f", "{{.State.Running}}", name],
+            capture_output=True, text=True, timeout=10,
+        )
+        return r.returncode == 0 and r.stdout.strip() == "true"
+    except Exception:
+        return False
+
+
+# --- Full-stack restore source handling (FoodAssistant-h18b) --------------
+# The restore helper (/usr/local/bin/foodassistant-restore) accepts a snapshot
+# that is either already on the device (an absolute path) or pulled first from
+# the configured rclone remote (an "rclone:" prefixed source). These pure
+# helpers classify the source string and build the rclone pull command so they
+# can be unit-tested without root or docker.
+
+# rclone.conf lives in the install data dir, the same path the app container
+# uses for RCLONE_CONFIG (admin.py writes it there).
+_RCLONE_CONFIG = f"{INSTALL_DIR}/data/rclone.conf"
+
+
+def _classify_restore_source(source):
+    """Classify a restore source string.
+
+    Returns a (kind, value) tuple:
+      ("path", "/abs/path.tar.gz")  an absolute path on the device
+      ("rclone", "remote:bucket/x") an object to pull from the rclone remote
+      ("invalid", reason)           anything else (empty, relative, bad rclone)
+    """
+    s = (source or "").strip()
+    if not s:
+        return ("invalid", "Source is required.")
+    if s.startswith("rclone:"):
+        remote = s[len("rclone:"):].strip()
+        if not remote:
+            return ("invalid", "rclone source has no remote path.")
+        return ("rclone", remote)
+    if s.startswith("/"):
+        return ("path", s)
+    return ("invalid", "Source must be an absolute path or an rclone:remote path.")
+
+
+def _rclone_pull_cmd(remote, dest, rclone="rclone"):
+    """Build the rclone command (argv list) that copies a remote object to a
+    local destination file. The caller sets RCLONE_CONFIG in the environment."""
+    return [rclone, "copyto", remote, dest]
+
+
+def _service_active(unit):
+    """True when the given systemd unit is active."""
+    try:
+        return subprocess.run(
+            ["systemctl", "is-active", "--quiet", unit], timeout=5
+        ).returncode == 0
+    except Exception:
+        return False
+
+
+def _unit_installed(unit, root="/etc/systemd/system"):
+    """True when the unit file exists, i.e. the service was provisioned on
+    this device (whether or not it is currently running). firstboot writes
+    all appliance units under /etc/systemd/system."""
+    return os.path.exists(os.path.join(root, unit))
+
+
+# --- Forager remote-access WireGuard tunnel (FoodAssistant-uczr) -----------
+# The app drives remote access from Settings, but the WireGuard endpoint lives
+# on the host, not in the container: only root can create the interface and
+# write /etc/wireguard. The bridge generates the device keypair, keeps the
+# PRIVATE key on the device (never returned to the caller, never logged), and
+# brings a split-tunnel interface up that routes ONLY the server's /32 (a hub
+# route, not a full VPN, so normal traffic is untouched). The cloud side hands
+# back the server public key, endpoint, and this device's tunnel address.
+_WG_INTERFACE = "fa-forager"
+_WG_CONFIG_PATH = "/etc/wireguard/%s.conf" % _WG_INTERFACE
+_WG_PRIVATE_KEY_PATH = "/etc/wireguard/%s.key" % _WG_INTERFACE
+
+
+def _render_wg_config(private_key, address, server_public_key, endpoint,
+                      allowed_ips, dns="", keepalive=25):
+    """Render the wg-quick config text for the Forager interface. Pure.
+
+    AllowedIPs is the server's /32 only (the cloud passes it), so this is a
+    hub route to reach the kitchen through Forager, not a full tunnel that
+    would capture all of the device's traffic. DNS is written only when the
+    cloud provides a resolver, so wg-quick never fails on a device without
+    resolvconf. Kept pure and off the log path so the private key stays put.
+    """
+    addr = str(address or "").strip()
+    if addr and "/" not in addr:
+        addr = addr + "/32"
+    try:
+        keep = int(keepalive)
+    except (TypeError, ValueError):
+        keep = 25
+    lines = [
+        "[Interface]",
+        "PrivateKey = %s" % (private_key or "").strip(),
+        "Address = %s" % addr,
+    ]
+    dns = (dns or "").strip()
+    if dns:
+        lines.append("DNS = %s" % dns)
+    lines += [
+        "",
+        "[Peer]",
+        "PublicKey = %s" % (server_public_key or "").strip(),
+        "Endpoint = %s" % (endpoint or "").strip(),
+        "AllowedIPs = %s" % (allowed_ips or "").strip(),
+        "PersistentKeepalive = %d" % keep,
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def _parse_wg_handshakes(text):
+    r"""Latest handshake epoch (int) from `wg show <iface> latest-handshakes`.
+
+    That command prints one `<pubkey>\t<epoch-seconds>` line per peer; a peer
+    that has never completed a handshake reports 0. Returns the largest epoch
+    seen, or 0 when there is none. Pure, so the status parse is unit-testable
+    against stubbed command output.
+    """
+    best = 0
+    for line in (text or "").splitlines():
+        parts = line.split()
+        if len(parts) < 2:
+            continue
+        try:
+            epoch = int(parts[-1])
+        except ValueError:
+            continue
+        if epoch > best:
+            best = epoch
+    return best
+
+
+def _wg_tools_present(which=shutil.which):
+    """True when both `wg` and `wg-quick` are on PATH. Pure (probe injected)."""
+    return bool(which("wg")) and bool(which("wg-quick"))
+
+
+# Stream Deck / display detection from sysfs
+# ------------------------------------------
+# These read sysfs directly (no lsusb, no extra packages) so the appliance can
+# report attached hardware on a minimal image. They take the sysfs root as an
+# argument so they are testable against a faked layout under tmp_path.
+
+# Elgato (Stream Deck maker) USB vendor id.
+_STREAMDECK_VENDOR = "0fd9"
+
+
+def _read_sysfs(path):
+    """Return the stripped contents of a sysfs file, or "" on any error."""
+    try:
+        with open(path) as fh:
+            return fh.read().strip()
+    except OSError:
+        return ""
+    except Exception:
+        return ""
+
+
+def _drm_connected(root="/sys/class/drm"):
+    """Return the list of connected DRM connector names under root.
+
+    Scans <root>/*/status; a connector counts as connected when its status
+    file reads "connected" (the kernel also emits "disconnected", which must
+    not match). A missing root yields an empty list rather than raising.
+    """
+    import glob
+    names = []
+    for status_path in sorted(glob.glob(os.path.join(root, "*", "status"))):
+        if _read_sysfs(status_path) == "connected":
+            names.append(os.path.basename(os.path.dirname(status_path)))
+    return names
+
+
+def _streamdeck_config_toml(cfg):
+    """Serialize the posted Stream Deck config dict to the controller's TOML.
+
+    Scalars and flat lists are written as inline keys; a list of dicts (e.g.
+    key_overrides) becomes an array of tables so the controller's TOML loader
+    reads it back as configured slots. A list INSIDE a table entry (a macro
+    key's "actions") is written as an inline TOML array; it used to be
+    stringified, which turned the macro's action names into one unusable
+    string after a round trip. Nested dicts are dropped (nothing produces
+    them). Pure, so the round trip is unit-testable with tomllib.
+    """
+    def _scalar(v):
+        if isinstance(v, bool):
+            return "true" if v else "false"
+        if isinstance(v, int):
+            return str(v)
+        if isinstance(v, float):
+            return repr(v)
+        # Strings (and anything else) are emitted as escaped strings.
+        s = str(v).replace("\\", "\\\\").replace('"', '\\"')
+        return '"%s"' % s
+
+    def _value(v):
+        if isinstance(v, list):
+            return "[%s]" % ", ".join(_scalar(x) for x in v)
+        return _scalar(v)
+
+    lines = []
+    table_blocks = []
+    for k, v in cfg.items():
+        if isinstance(v, list) and any(isinstance(x, dict) for x in v):
+            for entry in v:
+                if not isinstance(entry, dict):
+                    continue
+                table_blocks.append("[[%s]]" % k)
+                for ek, ev in entry.items():
+                    if isinstance(ev, dict):
+                        continue
+                    table_blocks.append("%s = %s" % (ek, _value(ev)))
+                table_blocks.append("")
+        elif isinstance(v, list):
+            lines.append("%s = %s" % (k, _value(v)))
+        elif isinstance(v, (bool, int, float, str)):
+            lines.append("%s = %s" % (k, _scalar(v)))
+    return "\n".join(lines + [""] + table_blocks).rstrip("\n") + "\n"
+
+
+def _streamdeck_info(usb_root="/sys/bus/usb/devices"):
+    """Return (present, model) for an attached Stream Deck under usb_root.
+
+    Scans <usb_root>/*/idVendor for the Elgato vendor id; on a match reads the
+    sibling product file for the model string. Returns (False, "") when none is
+    found or the tree is absent.
+    """
+    import glob
+    for vendor_path in sorted(glob.glob(os.path.join(usb_root, "*", "idVendor"))):
+        if _read_sysfs(vendor_path).lower() == _STREAMDECK_VENDOR:
+            product = _read_sysfs(os.path.join(os.path.dirname(vendor_path), "product"))
+            return True, product
+    return False, ""
+
+
+def _hardware_status():
+    """Display + Stream Deck presence read straight from sysfs.
+
+    Returned as the body of GET /hardware/status. Always succeeds: a missing
+    sysfs tree degrades to present=false rather than raising.
+    """
+    connectors = _drm_connected()
+    sd_present, sd_model = _streamdeck_info()
+    # key_count lets the wizard/editor pre-select the right deck size instead of
+    # defaulting to 15 (FoodAssistant). None when the model is unknown, in which
+    # case the app keeps its current selection.
+    return {
+        "ok": True,
+        "display": {"present": bool(connectors), "connectors": connectors},
+        "streamdeck": {"present": sd_present, "model": sd_model,
+                       "key_count": _streamdeck_keycount()},
+    }
+
+
+# USB flash drive backups (FoodAssistant-ch6d)
+# ---------------------------------------------
+# The app container cannot see the host's /media, so backing up to an attached
+# flash drive is a bridge job. Detection relies on the drive already being
+# mounted (udisks/automount or fstab); the bridge never mounts, never formats,
+# and only ever writes inside a pantryraider-backups/ directory on the drive.
+# The parsing and rotation helpers are pure so they are unit-testable.
+
+_USB_BACKUP_DIRNAME = "pantryraider-backups"
+_USB_BACKUP_KEEP = 14
+_USB_BACKUP_NAME = re.compile(r"^foodassistant-usb-\d{8}-\d{6}\.(tar\.gz|zip)$")
+
+
+def _usb_removable_disks(sys_block="/sys/block"):
+    """Disk names whose removable flag in sysfs is 1 (USB sticks, card readers)."""
+    names = []
+    try:
+        entries = sorted(os.listdir(sys_block))
+    except OSError:
+        return []
+    for name in entries:
+        if _read_sysfs(os.path.join(sys_block, name, "removable")) == "1":
+            names.append(name)
+    return names
+
+
+def _usb_parse_mounts(text):
+    """Pure: parse /proc/mounts text into (device, mountpoint, fstype, options)
+    tuples, decoding the octal escapes mountpoints with spaces arrive with."""
+    out = []
+    for line in text.splitlines():
+        parts = line.split()
+        if len(parts) < 4:
+            continue
+        dev, mnt, fstype, opts = parts[:4]
+        mnt = re.sub(r"\\([0-7]{3})", lambda m: chr(int(m.group(1), 8)), mnt)
+        out.append((dev, mnt, fstype, opts))
+    return out
+
+
+def _usb_disk_for(partition, disks):
+    """Pure: the removable disk a partition belongs to (sda1 -> sda), or None.
+    The remainder must be a partition suffix so sdab1 never matches sda."""
+    for d in sorted(disks, key=len, reverse=True):
+        if partition == d:
+            return d
+        if partition.startswith(d) and re.fullmatch(r"p?\d+", partition[len(d):]):
+            return d
+    return None
+
+
+def _usb_mount_candidates(removable, mounts):
+    """Pure: mounted, writable filesystems that live on a removable disk.
+
+    Skips non-device mounts, read-only mounts, and (safety) the root and boot
+    filesystems, so a Pi booted from a removable USB SSD never has its system
+    disk offered as a backup target. Returns (device, mountpoint) pairs.
+    """
+    out = []
+    for dev, mnt, _fstype, opts in mounts:
+        if not dev.startswith("/dev/"):
+            continue
+        if _usb_disk_for(os.path.basename(dev), removable) is None:
+            continue
+        if mnt == "/" or mnt == "/boot" or mnt.startswith("/boot/"):
+            continue
+        if "ro" in opts.split(","):
+            continue
+        out.append((dev, mnt))
+    return out
+
+
+def _usb_pick_mount(candidates):
+    """Pure: choose the backup target, preferring normal automount locations."""
+    for prefix in ("/media/", "/run/media/", "/mnt/"):
+        for dev, mnt in candidates:
+            if mnt.startswith(prefix) or mnt == prefix.rstrip("/"):
+                return (dev, mnt)
+    return candidates[0] if candidates else None
+
+
+def _usb_rotation_victims(names, keep=_USB_BACKUP_KEEP):
+    """Pure: which backup files to delete so only the newest `keep` remain.
+    Only our own timestamped names are considered; anything else on the drive
+    is never touched."""
+    ours = sorted(n for n in names if _USB_BACKUP_NAME.match(n))
+    if keep <= 0:
+        return ours
+    return ours[:-keep] if len(ours) > keep else []
+
+
+def _usb_data_dirs(root=None):
+    """The data dirs to snapshot, relative to the install dir.
+
+    An appliance's compose files bind-mount ./data (the app), ./grocy and
+    ./mealie (Pi Hosted only). Whatever exists is included, so a Pi Remote
+    naturally gets a config-only backup. A repo-style checkout layout is the
+    fallback so the helper also works on a plain server install.
+    """
+    root = root or INSTALL_DIR
+    dirs = []
+    for options in (("data", "service/data"), ("grocy",), ("mealie",)):
+        for d in options:
+            if os.path.isdir(os.path.join(root, d)):
+                dirs.append(d)
+                break
+    return dirs
+
+
+def _usb_drive_status():
+    """Status body for GET /usb/status. Always answers, never raises."""
+    try:
+        removable = _usb_removable_disks()
+        with open("/proc/mounts") as f:
+            mounts = _usb_parse_mounts(f.read())
+        pick = _usb_pick_mount(_usb_mount_candidates(removable, mounts))
+        if not pick:
+            return {"ok": True, "detected": False}
+        dev, mnt = pick
+        st = os.statvfs(mnt)
+        bdir = os.path.join(mnt, _USB_BACKUP_DIRNAME)
+        backups = []
+        if os.path.isdir(bdir):
+            backups = sorted(n for n in os.listdir(bdir) if _USB_BACKUP_NAME.match(n))
+        last = backups[-1] if backups else ""
+        last_time = 0.0
+        if last:
+            try:
+                last_time = os.stat(os.path.join(bdir, last)).st_mtime
+            except OSError:
+                last_time = 0.0
+        return {
+            "ok": True, "detected": True, "device": dev, "mountpoint": mnt,
+            "free_bytes": st.f_bavail * st.f_frsize,
+            "total_bytes": st.f_blocks * st.f_frsize,
+            "backups_dir": bdir, "backups": len(backups),
+            "last_backup": last, "last_backup_time": last_time,
+        }
+    except Exception as e:
+        return {"ok": False, "detected": False, "error": str(e)}
+
+
+# Screensaver photo slideshow (FoodAssistant-5w4m)
+# -------------------------------------------------
+# The kiosk screensaver can play photos from the attached flash drive. The
+# bridge only ever READS, and only from a pictures/ or photos/ directory at
+# the drive root (case-insensitive name match); nothing else on the drive is
+# looked at. Oversized files are skipped so a stray raw dump cannot stall the
+# kiosk, and every requested path is resolved and re-checked against the
+# photos directory so a crafted name can never escape it.
+
+_USB_PHOTO_DIRNAMES = ("pictures", "photos")
+# HEIC/HEIF is the iPhone default. Browsers cannot render it natively, so the
+# serve path transcodes it to JPEG (heif-convert) before returning bytes; it is
+# still listed here so the slideshow picks it up.
+_USB_HEIC_EXTS = (".heic", ".heif")
+_USB_PHOTO_EXTS = (".jpg", ".jpeg", ".png", ".webp", ".gif") + _USB_HEIC_EXTS
+_USB_PHOTO_MAX_BYTES = 20 * 1024 * 1024
+_USB_PHOTO_TYPES = {
+    ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
+    ".webp": "image/webp", ".gif": "image/gif",
+    # HEIC/HEIF are served transcoded, so their content type is JPEG.
+    ".heic": "image/jpeg", ".heif": "image/jpeg",
+}
+
+# Transcoded HEIC frames are cached under a runtime tmp dir keyed by source
+# path + mtime, so a slideshow that loops the same photos does not re-run
+# heif-convert every cycle. The cache lives in tmp (not data_dir) to spare the
+# SD card, and is capped so a big drive cannot fill it.
+_HEIC_CACHE_DIR = os.path.join(tempfile.gettempdir(), "foodassistant-heic-cache")
+_HEIC_CACHE_MAX = 60
+
+
+def _usb_photos_dir(mountpoint):
+    """The pictures/ or photos/ directory at the drive root, or None.
+
+    Case-insensitive on the name (FAT drives show whatever case the other OS
+    wrote), first match in sorted order wins so the pick is stable."""
+    try:
+        entries = sorted(os.listdir(mountpoint))
+    except OSError:
+        return None
+    for name in entries:
+        if name.lower() in _USB_PHOTO_DIRNAMES:
+            path = os.path.join(mountpoint, name)
+            if os.path.isdir(path):
+                return path
+    return None
+
+
+def _usb_photo_names(pdir, max_bytes=_USB_PHOTO_MAX_BYTES):
+    """Image filenames directly inside pdir: image extensions only, hidden
+    files skipped, files over max_bytes skipped. Sorted for a stable list."""
+    try:
+        entries = sorted(os.listdir(pdir))
+    except OSError:
+        return []
+    names = []
+    for name in entries:
+        if name.startswith("."):
+            continue
+        if os.path.splitext(name)[1].lower() not in _USB_PHOTO_EXTS:
+            continue
+        full = os.path.join(pdir, name)
+        try:
+            if not os.path.isfile(full) or os.path.getsize(full) > max_bytes:
+                continue
+        except OSError:
+            continue
+        names.append(name)
+    return names
+
+
+def _usb_photo_safe_path(pdir, name):
+    """Resolve a requested photo name to a real path, or None if unsafe.
+
+    Rejects anything with a path separator or leading dot outright, then
+    resolves symlinks and verifies the result is a regular file whose parent
+    is exactly the photos directory, so ../, absolute paths, and symlinks
+    pointing elsewhere all fail closed. Extension is re-checked so this
+    endpoint can only ever serve image files."""
+    if not name or name.startswith(".") or "/" in name or "\\" in name:
+        return None
+    if os.path.splitext(name)[1].lower() not in _USB_PHOTO_EXTS:
+        return None
+    full = os.path.realpath(os.path.join(pdir, name))
+    if os.path.dirname(full) != os.path.realpath(pdir):
+        return None
+    if not os.path.isfile(full):
+        return None
+    return full
+
+
+def _usb_photo_is_heic(name):
+    """True when the file is a HEIC/HEIF photo that must be transcoded to JPEG
+    before a browser can render it. Pure: extension only."""
+    return os.path.splitext(name)[1].lower() in _USB_HEIC_EXTS
+
+
+def _heif_convert_cmd(src, dst):
+    """The heif-convert argument vector to transcode src (.heic/.heif) into dst
+    (.jpg). Plain args, no shell, so a filename can never be read as an option
+    or a second command."""
+    return ["heif-convert", src, dst]
+
+
+def _heic_cache_key(src, mtime):
+    """Flat cache filename for a transcoded HEIC, keyed by source path and
+    mtime so an edited-in-place photo re-transcodes. Hashed so the key is a
+    safe single path segment regardless of the source name. Pure."""
+    import hashlib
+    digest = hashlib.sha256(
+        ("%s\0%s" % (src, mtime)).encode("utf-8")).hexdigest()
+    return "heic-" + digest + ".jpg"
+
+
+def _heic_cache_prune(cache_dir, keep=_HEIC_CACHE_MAX):
+    """Keep the newest `keep` cached JPEGs, delete the rest. Best-effort."""
+    try:
+        entries = [os.path.join(cache_dir, n) for n in os.listdir(cache_dir)]
+    except OSError:
+        return
+    files = []
+    for path in entries:
+        try:
+            files.append((os.path.getmtime(path), path))
+        except OSError:
+            continue
+    files.sort(reverse=True)
+    for _mtime, path in files[keep:]:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+
+
+def _heic_transcode(src, runner=None, cache_dir=_HEIC_CACHE_DIR):
+    """Return JPEG bytes for a HEIC/HEIF source, or None if it cannot be made.
+
+    Serves from a per-source cache (keyed by path + mtime) when present,
+    otherwise runs heif-convert into a tempfile and caches the result. Returns
+    None (never raises) when heif-convert is missing or fails, so the serve
+    path can answer 415 instead of 500. `runner` is injectable for tests."""
+    if runner is None:
+        runner = subprocess.run
+    try:
+        mtime = os.path.getmtime(src)
+    except OSError:
+        return None
+    cached = os.path.join(cache_dir, _heic_cache_key(src, mtime))
+    try:
+        with open(cached, "rb") as f:
+            return f.read()
+    except OSError:
+        pass
+    tmp = None
+    try:
+        os.makedirs(cache_dir, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(suffix=".jpg", dir=cache_dir)
+        os.close(fd)
+        r = runner(_heif_convert_cmd(src, tmp),
+                   capture_output=True, timeout=120)
+        if getattr(r, "returncode", 1) != 0:
+            return None
+        with open(tmp, "rb") as f:
+            body = f.read()
+        if not body:
+            return None
+        # Publish atomically so a torn write is never read as a good frame.
+        os.replace(tmp, cached)
+        tmp = None
+        _heic_cache_prune(cache_dir)
+        return body
+    except (OSError, FileNotFoundError, subprocess.SubprocessError):
+        # FileNotFoundError covers heif-convert not being installed.
+        return None
+    finally:
+        if tmp is not None:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+
+
+# Photos are read-only, so unlike backups they can use a drive mounted
+# read-only (many automounters, and every headless mount below, mount FAT and
+# exFAT sticks that way). This mirrors _usb_mount_candidates but keeps the ro
+# mounts the backup target must skip.
+def _usb_photo_mount_candidates(removable, mounts):
+    """Pure: mounted removable filesystems, read-only ones included."""
+    out = []
+    for dev, mnt, _fstype, opts in mounts:
+        if not dev.startswith("/dev/"):
+            continue
+        if _usb_disk_for(os.path.basename(dev), removable) is None:
+            continue
+        if mnt == "/" or mnt == "/boot" or mnt.startswith("/boot/"):
+            continue
+        out.append((dev, mnt))
+    return out
+
+
+def _usb_partitions_for(disk, sys_block="/sys/block"):
+    """Pure: partition device paths on a removable disk (sda -> [/dev/sda1..]).
+    A disk with no partition table (whole-disk filesystem) yields the disk."""
+    try:
+        entries = sorted(os.listdir(os.path.join(sys_block, disk)))
+    except OSError:
+        return []
+    parts = [os.path.join("/dev", e) for e in entries
+             if e.startswith(disk) and re.fullmatch(r"p?\d+", e[len(disk):])]
+    return parts or [os.path.join("/dev", disk)]
+
+
+def _usb_unmounted_partitions(removable, mounts, sys_block="/sys/block"):
+    """Pure: removable partitions with no entry in the mount table. These are
+    the ones a headless Pi never automounts, so the bridge mounts one itself."""
+    mounted = {dev for dev, _mnt, _fs, _opts in mounts}
+    out = []
+    for disk in removable:
+        for part in _usb_partitions_for(disk, sys_block):
+            if part not in mounted:
+                out.append(part)
+    return out
+
+
+# Where the bridge mounts a drive that nothing else did. Read-only, so a photo
+# slideshow never risks a write or an fsck on the user's stick.
+_USB_PHOTO_MOUNT = "/run/foodassistant-usb"
+
+
+def _usb_try_mount_ro(device, mountpoint=_USB_PHOTO_MOUNT):
+    """Mount a removable partition read-only for reading photos. Best-effort:
+    returns the mountpoint on success, None otherwise. Read-only with the
+    hardening flags means the worst a bad stick can do is fail to mount."""
+    try:
+        os.makedirs(mountpoint, exist_ok=True)
+        subprocess.run(
+            ["mount", "-o", "ro,noatime,nosuid,nodev,noexec", device, mountpoint],
+            check=True, capture_output=True, timeout=20)
+        return mountpoint
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def _usb_photos_status():
+    """The drive's photos directory, or (None, reason). Uses an already-mounted
+    removable drive (read-only included); if none is mounted, mounts an
+    unmounted removable partition read-only and looks there, so the feature
+    works on a headless Pi that has no automounter (FoodAssistant-l3op)."""
+    removable = _usb_removable_disks()
+    with open("/proc/mounts") as f:
+        mounts = _usb_parse_mounts(f.read())
+    # Already mounted (by an automounter or a previous call): read it in place.
+    pick = _usb_pick_mount(_usb_photo_mount_candidates(removable, mounts))
+    if pick:
+        pdir = _usb_photos_dir(pick[1])
+        return (pdir, "") if pdir else (None, "no photos folder")
+    # Nothing mounted the drive. Mount an unmounted removable partition
+    # read-only ourselves and look for the photos folder.
+    for device in _usb_unmounted_partitions(removable, mounts):
+        mnt = _usb_try_mount_ro(device)
+        if not mnt:
+            continue
+        pdir = _usb_photos_dir(mnt)
+        if pdir:
+            return pdir, ""
+        # Wrong partition (no photos folder): unmount and try the next.
+        subprocess.run(["umount", mnt], capture_output=True, timeout=20)
+    return None, "no drive"
+
+
+# Meaning of each bit in the "throttled" word reported by `vcgencmd
+# get_throttled`. The low four bits are live (happening right now); the high
+# four are sticky (happened at some point since boot). See
+# https://www.raspberrypi.com/documentation/computers/os.html#get_throttled
+_THROTTLE_BITS = {
+    0: ("undervoltage", "Under-voltage detected", True),
+    1: ("freq_capped", "Arm frequency capped", True),
+    2: ("throttled", "Currently throttled", True),
+    3: ("temp_limit", "Soft temperature limit active", True),
+    16: ("undervoltage", "Under-voltage has occurred since boot", False),
+    17: ("freq_capped", "Arm frequency capping has occurred since boot", False),
+    18: ("throttled", "Throttling has occurred since boot", False),
+    19: ("temp_limit", "Soft temperature limit has occurred since boot", False),
+}
+
+
+def _parse_throttled(word):
+    """Decode a `vcgencmd get_throttled` value into a list of warnings.
+
+    `word` is the integer throttle bitmask (the 0x... value vcgencmd prints).
+    Returns a list of {key, message, live} dicts, live=True for conditions
+    happening right now and live=False for sticky "since boot" flags. An
+    all-clear bitmask returns an empty list.
+    """
+    out = []
+    for bit, (key, message, live) in _THROTTLE_BITS.items():
+        if word & (1 << bit):
+            out.append({"key": key, "message": message, "live": live})
+    return out
+
+
+def _read_throttled_word():
+    """Return the integer from `vcgencmd get_throttled`, or None if unavailable.
+
+    Output looks like "throttled=0x50005"; anything else (vcgencmd missing, a
+    non-Pi host) yields None so the caller can report "unknown" rather than a
+    false all-clear.
+    """
+    try:
+        out = subprocess.run(
+            ["vcgencmd", "get_throttled"], capture_output=True, text=True, timeout=5
+        ).stdout.strip()
+    except Exception:
+        return None
+    m = re.search(r"throttled=(0x[0-9a-fA-F]+|\d+)", out)
+    if not m:
+        return None
+    try:
+        return int(m.group(1), 0)
+    except ValueError:
+        return None
+
+
+def _read_cpu_temp(path="/sys/class/thermal/thermal_zone0/temp"):
+    """CPU temperature in Celsius (float), or None if it can't be read.
+
+    The sysfs file holds millidegrees, e.g. "48312" -> 48.3.
+    """
+    raw = _read_sysfs(path)
+    if not raw:
+        return None
+    try:
+        return round(int(raw) / 1000.0, 1)
+    except ValueError:
+        return None
+
+
+def _disk_usage(path="/"):
+    """Return (percent_used, free_gb) for the filesystem holding path.
+
+    Returns (None, None) if it can't be determined.
+    """
+    try:
+        import shutil
+        total, used, free = shutil.disk_usage(path)
+        percent = round(used / total * 100) if total else None
+        return percent, round(free / (1024 ** 3), 1)
+    except Exception:
+        return None, None
+
+
+# Surface a warning when the CPU crosses this temperature or the disk crosses
+# this fill level. The Pi soft-throttles around 80C and hard-throttles at 85C,
+# so 80 is the right point to start nudging the user.
+_TEMP_WARN_C = 80.0
+_DISK_WARN_PCT = 90
+
+
+def _system_health():
+    """Pi system health for GET /system/health: power, thermal, and disk.
+
+    Always succeeds. Each probe degrades to None/empty rather than raising, so
+    a partial read (e.g. vcgencmd present but no thermal zone) still returns a
+    usable shape. The "warnings" list is what the UI badge keys off; an empty
+    list means all clear.
+    """
+    word = _read_throttled_word()
+    throttle_flags = _parse_throttled(word) if word is not None else []
+    temp_c = _read_cpu_temp()
+    disk_pct, disk_free_gb = _disk_usage()
+
+    warnings = list(throttle_flags)
+    if temp_c is not None and temp_c >= _TEMP_WARN_C:
+        warnings.append({
+            "key": "temperature",
+            "message": f"CPU temperature high ({temp_c:.0f}C)",
+            "live": True,
+        })
+    if disk_pct is not None and disk_pct >= _DISK_WARN_PCT:
+        warnings.append({
+            "key": "disk",
+            "message": f"Disk almost full ({disk_pct}% used)",
+            "live": True,
+        })
+
+    return {
+        "ok": True,
+        "throttled": word,
+        "temp_c": temp_c,
+        "disk_percent": disk_pct,
+        "disk_free_gb": disk_free_gb,
+        "warnings": warnings,
+    }
+
+
+# --- Continuous system monitoring (FoodAssistant-y06w) ----------------------
+# A 60-second loop keeps a cached snapshot of the same power/thermal/disk
+# probes _system_health runs on demand, so GET /system/warnings answers
+# instantly (no vcgencmd round-trip per request) and the app can poll it
+# cheaply, raise action items while a condition holds, and retire them when it
+# clears. The disk probe watches the app data mount (where Grocy/Mealie and the
+# photos live), not just /, so a filling SD card is caught where it hurts.
+
+_DATA_MOUNT = os.path.join(INSTALL_DIR, "data")
+
+
+def _collapse_throttle_flags(flags):
+    """One warning per throttle key, preferring the live bit over the sticky.
+
+    _parse_throttled reports the live (low) and since-boot (high) bits as
+    separate entries with the same key. For the warnings feed we want each
+    condition once: "happening now" when the live bit is set, else the sticky
+    "has occurred since boot" wording. Order is preserved by key first-seen.
+    """
+    by_key = {}
+    order = []
+    for f in flags or []:
+        k = f.get("key")
+        if k not in by_key:
+            by_key[k] = f
+            order.append(k)
+        elif f.get("live") and not by_key[k].get("live"):
+            by_key[k] = f
+    return [by_key[k] for k in order]
+
+
+def _warnings_snapshot(word, temp_c, disk_pct, disk_free_gb, checked_epoch=None):
+    """Build the /system/warnings payload from raw probe values. Pure.
+
+    Mirrors _system_health's thresholds (temp >= 80C, disk >= 90%) but
+    collapses the live/sticky throttle pairs to one warning per condition,
+    which is what the app dedupes action items on.
+    """
+    flags = _collapse_throttle_flags(_parse_throttled(word) if word is not None else [])
+    warnings = list(flags)
+    if temp_c is not None and temp_c >= _TEMP_WARN_C:
+        warnings.append({
+            "key": "temperature",
+            "message": f"CPU temperature high ({temp_c:.0f}C)",
+            "live": True,
+        })
+    if disk_pct is not None and disk_pct >= _DISK_WARN_PCT:
+        warnings.append({
+            "key": "disk",
+            "message": f"Storage almost full ({disk_pct}% used)",
+            "live": True,
+        })
+    return {
+        "ok": True,
+        "throttled": word,
+        "temp_c": temp_c,
+        "disk_percent": disk_pct,
+        "disk_free_gb": disk_free_gb,
+        "warnings": warnings,
+        "checked_epoch": checked_epoch if checked_epoch is not None else time.time(),
+    }
+
+
+_warnings_lock = threading.Lock()
+_warnings_cache = None  # last snapshot from the loop; None until the first run
+
+
+def _refresh_system_warnings():
+    """Run the probes once and store the snapshot for GET /system/warnings."""
+    global _warnings_cache
+    disk_path = _DATA_MOUNT if os.path.isdir(_DATA_MOUNT) else "/"
+    disk_pct, disk_free_gb = _disk_usage(disk_path)
+    snap = _warnings_snapshot(
+        _read_throttled_word(), _read_cpu_temp(), disk_pct, disk_free_gb)
+    with _warnings_lock:
+        _warnings_cache = snap
+    return snap
+
+
+def _system_warnings():
+    """Cached snapshot for GET /system/warnings (probing now if none yet)."""
+    with _warnings_lock:
+        snap = _warnings_cache
+    return snap if snap is not None else _refresh_system_warnings()
+
+
+def _system_warnings_loop(interval=60):
+    """Refresh the warnings snapshot every minute, forever. Never raises."""
+    while True:
+        try:
+            _refresh_system_warnings()
+        except Exception as e:
+            print(f"system warnings probe failed: {e}", flush=True)
+        time.sleep(interval)
+
+
+# --- Support bundle (FoodAssistant-w7mb) -----------------------------------
+# GET /support-bundle returns a JSON report of host-level facts the app folds
+# into its downloadable support zip: systemd unit states, drop-in contents,
+# helper hashes, journal and log tails, display and input probes. Every probe
+# is best-effort: a missing command or file yields a "note: ..." line in its
+# section, never an error, so a partial device still produces a full bundle.
+
+_SUPPORT_UPDATE_LOG = "/var/log/foodassistant-update.log"
+_SUPPORT_TAIL_BYTES = 32768
+
+
+def _run_capture(cmd, timeout=15):
+    """Run a command and return its stdout as text, degrading to a note.
+
+    A nonzero exit with output still returns the output (df and systemctl
+    exit nonzero for benign reasons); anything unrunnable becomes a one-line
+    note so support bundle sections never raise.
+    """
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        out = (r.stdout or "").strip()
+        if out:
+            return out
+        err = (r.stderr or "").strip()
+        if r.returncode != 0:
+            return "note: %s exited %d: %s" % (cmd[0], r.returncode, err or "no output")
+        return err or ("note: %s produced no output" % cmd[0])
+    except FileNotFoundError:
+        return "note: %s is not installed on this device" % cmd[0]
+    except subprocess.TimeoutExpired:
+        return "note: %s timed out" % cmd[0]
+    except Exception as e:
+        return "note: %s failed: %s" % (cmd[0], e)
+
+
+def _read_file_or_note(path, max_bytes=_SUPPORT_TAIL_BYTES):
+    """Tail of a text file, or a note when it is missing or unreadable."""
+    try:
+        with open(path, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            size = f.tell()
+            f.seek(max(0, size - max_bytes))
+            data = f.read()
+        text = data.decode("utf-8", "replace")
+        if size > max_bytes:
+            text = "note: showing the last %d bytes of %d\n%s" % (max_bytes, size, text)
+        return text if text.strip() else "note: %s is empty" % path
+    except FileNotFoundError:
+        return "note: %s does not exist" % path
+    except OSError as e:
+        return "note: could not read %s: %s" % (path, e)
+
+
+def _support_unit_names(run=_run_capture):
+    """Names of every foodassistant-* systemd unit file on the device."""
+    out = run(["systemctl", "list-unit-files", "foodassistant-*",
+               "--no-legend", "--no-pager"])
+    names = []
+    for line in out.splitlines():
+        first = line.split()[0] if line.split() else ""
+        if first.startswith("foodassistant-"):
+            names.append(first)
+    return names
+
+
+def _support_units(run=_run_capture):
+    """One line per foodassistant-* unit: name, enabled state, active state."""
+    names = _support_unit_names(run)
+    if not names:
+        return "note: no foodassistant-* systemd units found"
+    lines = []
+    for name in names:
+        enabled = run(["systemctl", "is-enabled", name]).splitlines()
+        active = run(["systemctl", "is-active", name]).splitlines()
+        lines.append("%s: enabled=%s active=%s" % (
+            name,
+            enabled[0] if enabled else "?",
+            active[0] if active else "?",
+        ))
+    return "\n".join(lines)
+
+
+def _support_dropins(root="/etc/systemd/system"):
+    """Contents of every foodassistant-* unit file and drop-in under root."""
+    import glob
+    paths = sorted(
+        glob.glob(os.path.join(root, "foodassistant-*"))
+        + glob.glob(os.path.join(root, "foodassistant-*.d", "*"))
+    )
+    parts = []
+    for p in paths:
+        if os.path.isfile(p):
+            parts.append("===== %s =====\n%s" % (p, _read_file_or_note(p)))
+    return "\n\n".join(parts) or "note: no foodassistant-* unit files under %s" % root
+
+
+def _support_helper_hashes(bin_dir=_HELPER_BIN_DIR):
+    """sha1 of each installed foodassistant-* helper, so version skew between
+    devices (or against the repo) is visible at a glance."""
+    import glob
+    import hashlib
+    lines = []
+    for p in sorted(glob.glob(os.path.join(bin_dir, "foodassistant-*"))):
+        if not os.path.isfile(p):
+            continue
+        try:
+            with open(p, "rb") as f:
+                digest = hashlib.sha1(f.read()).hexdigest()
+            lines.append("%s  %s" % (digest, p))
+        except OSError as e:
+            lines.append("note: could not hash %s: %s" % (p, e))
+    return "\n".join(lines) or "note: no foodassistant-* helpers under %s" % bin_dir
+
+
+def _support_boot_cmdline():
+    for path in ("/boot/firmware/cmdline.txt", "/boot/cmdline.txt"):
+        if os.path.exists(path):
+            return "%s:\n%s" % (path, _read_file_or_note(path))
+    return "note: no boot cmdline file found"
+
+
+def _support_drm(root="/sys/class/drm"):
+    """Every DRM connector's status, connected or not, one per line."""
+    import glob
+    lines = []
+    for status_path in sorted(glob.glob(os.path.join(root, "*", "status"))):
+        name = os.path.basename(os.path.dirname(status_path))
+        lines.append("%s: %s" % (name, _read_sysfs(status_path) or "unreadable"))
+    return "\n".join(lines) or "note: no DRM connectors under %s" % root
+
+
+def _support_bundle(run=_run_capture):
+    """Assemble the host-side support report: {section name: text}.
+
+    Section names become file names inside the app's support zip (host/<name>
+    .txt). Everything is text and everything degrades to a note.
+    """
+    sections = {
+        "systemd-units": _support_units(run),
+        "systemd-unit-files": _support_dropins(),
+        "boot-cmdline": _support_boot_cmdline(),
+        "helper-sha1": _support_helper_hashes(),
+        "bridge-journal": run(["journalctl", "-u", "foodassistant-host-bridge",
+                               "-n", "200", "--no-pager"]),
+        "input-devices": _read_file_or_note("/proc/bus/input/devices"),
+        "drm-connectors": _support_drm(),
+        "disk-usage": run(["df", "-h", INSTALL_DIR])
+                      if os.path.isdir(INSTALL_DIR) else run(["df", "-h", "/"]),
+        "throttled": run(["vcgencmd", "get_throttled"]),
+        "update-log": _read_file_or_note(_SUPPORT_UPDATE_LOG),
+    }
+    return {"ok": True, "sections": sections}
+
+
+def _streamdeck_present():
+    try:
+        out = subprocess.run(["lsusb"], capture_output=True, text=True, timeout=5).stdout
+        if "0fd9:" in out.lower():
+            return True
+    except Exception:
+        pass
+    # Fallback: scan sysfs idVendor files.
+    try:
+        import glob
+        for f in glob.glob("/sys/bus/usb/devices/*/idVendor"):
+            try:
+                with open(f) as fh:
+                    if fh.read().strip().lower() == "0fd9":
+                        return True
+            except OSError:
+                continue
+    except Exception:
+        pass
+    return False
+
+
+# Elgato USB product IDs mapped to their key counts. Lets the web editor size
+# its grid to the deck that is actually attached instead of guessing.
+_SD_PRODUCT_KEYS = {
+    "0060": 15, "006d": 15, "0080": 15,   # Original / v2 / MK.2
+    "0063": 6, "0090": 6,                 # Mini / Mini MK.2
+    "006c": 32, "008f": 32,               # XL / XL v2
+}
+
+
+# Touch-controller name hints (lowercased) for finding the panel in the kernel
+# input list when applying a calibration matrix. Mirrors the app's detection.
+_TOUCH_NAME_HINTS = (
+    "touch", "ads7846", "goodix", "ft5x", "ft6", "edt-ft5", "ilitek", "ili2",
+    "silead", "eeti", "egalax", "hynitron", "st1633", "gslx680", "stmpe",
+    "raspberrypi-ts", "waveshare", "hosyond", "chipone", "cst", "zforce",
+)
+
+
+def _touch_device_name(path="/proc/bus/input/devices"):
+    """Name of the first touchscreen in the input device list, or '' if none.
+
+    Matches a known controller name, or a kernel-flagged direct absolute pointer
+    (INPUT_PROP_DIRECT plus absolute axes), the same signals the app uses."""
+    try:
+        blocks = open(path).read().split("\n\n")
+    except OSError:
+        return ""
+    for b in blocks:
+        nm = re.search(r'^N: Name="(.*)"', b, re.M)
+        if not nm:
+            continue
+        low = b.lower()
+        if any(h in low for h in _TOUCH_NAME_HINTS):
+            return nm.group(1)
+        prop = re.search(r"^B: PROP=([0-9a-fA-F]+)", b, re.M)
+        has_abs = re.search(r"^B: ABS=[0-9a-fA-F]", b, re.M) is not None
+        if prop and (int(prop.group(1), 16) & 0x2) and has_abs:
+            return nm.group(1)
+    return ""
+
+
+# Where the base calibration is remembered so it can follow a display rotation
+# (FoodAssistant-9ohp): the matrix the user fit, plus the rotation it was fit
+# at. The compositor does not transform touch, so a matrix taken at one rotation
+# is wrong at another; we recompose it by the rotation delta instead of making
+# the user recalibrate.
+_CALIB_STORE = "/etc/foodassistant/touch-calibration.json"
+
+# Rotation of normalized coordinates as a 2x3 affine [a b c d e f] mapping
+# (x,y) -> (a*x+b*y+c, d*x+e*y+f). The 90/270 pair is the clockwise/counter
+# convention; if a rotated display ends up mirrored the wrong way, swap them.
+_ROT_AFFINE = {
+    0:   [1, 0, 0, 0, 1, 0],
+    90:  [0, -1, 1, 1, 0, 0],    # (x,y) -> (1-y, x)
+    180: [-1, 0, 1, 0, -1, 1],   # (x,y) -> (1-x, 1-y)
+    270: [0, 1, 0, -1, 0, 1],    # (x,y) -> (y, 1-x)
+}
+
+
+def _compose_affine(t, m):
+    """Affine for t(m(x,y)); both are 2x3 [a b c d e f]."""
+    a, b, c, d, e, f = m
+    t0, t1, t2, t3, t4, t5 = t
+    return [t0 * a + t1 * d, t0 * b + t1 * e, t0 * c + t1 * f + t2,
+            t3 * a + t4 * d, t3 * b + t4 * e, t3 * c + t4 * f + t5]
+
+
+def _read_kiosk_rotation():
+    """Current kiosk rotation in degrees (0 when unset/normal)."""
+    try:
+        val = open("/etc/foodassistant/kiosk-rotation").read().strip()
+    except OSError:
+        return 0
+    return {"90": 90, "180": 180, "270": 270}.get(val, 0)
+
+
+def _store_base_calibration(matrix, rotation):
+    """Remember the fit matrix and the rotation it was taken at."""
+    try:
+        os.makedirs("/etc/foodassistant", exist_ok=True)
+        with open(_CALIB_STORE, "w") as f:
+            json.dump({"matrix": matrix, "rotation": int(rotation)}, f)
+    except OSError:
+        pass
+
+
+def _matrix_for_rotation(target_deg):
+    """The touch matrix for target_deg, or None when no rule is needed.
+
+    Composes the rotation delta onto the stored fit: M = Rot(target - base) .
+    M_base. A panel that was never calibrated (e.g. the 7-inch DSI screen,
+    accurate out of the box) has no store; it is treated as an identity fit at
+    rotation 0, so rotating the display still writes the pure rotation matrix.
+    Without that, touch stayed in panel-native orientation on rotated
+    never-calibrated panels (FoodAssistant-mox4): the compositor rotates only
+    the output, never touch. Returns None when the composed matrix is the
+    identity, meaning any existing rule should be removed rather than written.
+    """
+    base = None
+    try:
+        with open(_CALIB_STORE) as f:
+            base = json.load(f)
+    except (OSError, ValueError):
+        pass
+    m, base_rot = [1.0, 0, 0, 0, 1.0, 0], 0
+    if isinstance(base, dict):
+        parts = (base.get("matrix") or "").split()
+        if len(parts) == 6:
+            m = [float(p) for p in parts]
+            base_rot = int(base.get("rotation", 0))
+    delta = (int(target_deg) - base_rot) % 360
+    composed = _compose_affine(_ROT_AFFINE.get(delta, _ROT_AFFINE[0]), m)
+    if all(abs(v - i) < 1e-9 for v, i in zip(composed, [1, 0, 0, 0, 1, 0])):
+        return None
+    return " ".join("%.6g" % v for v in composed)
+
+
+def _remove_calibration_rule():
+    """Delete the touch udev rule (if any) and reload udev. Used when the
+    composed matrix is the identity, so the panel default applies again."""
+    rule = "/etc/udev/rules.d/99-foodassistant-touch.rules"
+    if not os.path.exists(rule):
+        return False
+    os.remove(rule)
+    subprocess.run(["udevadm", "control", "--reload-rules"], timeout=10)
+    subprocess.run(["udevadm", "trigger", "--subsystem-match=input"], timeout=10)
+    return True
+
+
+def _write_calibration_rule(matrix):
+    """Write the LIBINPUT_CALIBRATION_MATRIX udev rule and reload udev.
+
+    Matches the detected panel by name (or any udev-tagged touchscreen as a
+    fallback), so cage/libinput applies the matrix when the device is next
+    opened. Returns the device match used, for the log."""
+    name = _touch_device_name()
+    match = 'ATTRS{name}=="%s"' % name if name else 'ENV{ID_INPUT_TOUCHSCREEN}=="1"'
+    rule = (
+        "# FoodAssistant touchscreen calibration (applied from the web UI).\n"
+        'SUBSYSTEM=="input", KERNEL=="event*", %s, '
+        'ENV{LIBINPUT_CALIBRATION_MATRIX}="%s"\n' % (match, matrix)
+    )
+    os.makedirs("/etc/udev/rules.d", exist_ok=True)
+    with open("/etc/udev/rules.d/99-foodassistant-touch.rules", "w") as f:
+        f.write(rule)
+    subprocess.run(["udevadm", "control", "--reload-rules"], timeout=10)
+    subprocess.run(["udevadm", "trigger", "--subsystem-match=input"], timeout=10)
+    return name or "ID_INPUT_TOUCHSCREEN"
+
+
+# Boot config path: /boot/firmware/config.txt on Bookworm+, /boot/config.txt on
+# older releases. Mirrors firstboot.sh's _pi_config_txt. Empty when neither
+# exists (not a Pi, or an unusual image).
+def _pi_config_txt():
+    for p in ("/boot/firmware/config.txt", "/boot/config.txt"):
+        if os.path.exists(p):
+            return p
+    return ""
+
+
+# The ADS7846 SPI resistive-touch overlay for Waveshare 3.5-4in HDMI LCDs and
+# similar small Pi HATs. Kept in step with firstboot.sh configure_touch's
+# ads7846 branch: penirq_pull=2 pulls up the active-low PENIRQ line, swapxy=1
+# matches the panel's landscape mount, and the x/y bounds are the measured
+# Waveshare defaults.
+_ADS7846_OVERLAY = (
+    "dtoverlay=ads7846,cs=1,penirq=25,penirq_pull=2,speed=50000,keep_vcc,"
+    "swapxy=1,pmax=255,xohms=150,xmin=200,xmax=3900,ymin=200,ymax=3900"
+)
+
+
+def _config_has_active(text, needle):
+    """True when a non-comment line of the boot config contains needle."""
+    return any(needle in ln and not ln.lstrip().startswith("#")
+               for ln in text.splitlines())
+
+
+def _provision_touch(driver, cfg_path=None):
+    """Apply, on a running Pi, the boot config a touch panel needs.
+
+    This is the missing counterpart to firstboot.sh configure_touch: the display
+    type chosen in the setup wizard AFTER first boot never re-ran provisioning,
+    so an ADS7846 panel stayed invisible (no SPI, no overlay). Called from the
+    web UI, this writes what firstboot would have.
+
+    driver 'ads7846' enables SPI and adds the ADS7846 overlay (a reboot loads
+    it). Other drivers need no boot-config overlay here. Idempotent: re-running
+    is a no-op once the lines are present. Returns (changed, needs_reboot).
+    Raises OSError when the boot config cannot be found or written."""
+    if driver != "ads7846":
+        return (False, False)
+    cfg = cfg_path or _pi_config_txt()
+    if not cfg:
+        raise OSError("no Pi boot config.txt found")
+    text = open(cfg).read()
+    lines = []
+    if not _config_has_active(text, "dtparam=spi=on"):
+        lines.append("dtparam=spi=on")
+    if not _config_has_active(text, "dtoverlay=ads7846"):
+        lines.append(_ADS7846_OVERLAY)
+    if not lines:
+        return (False, False)
+    # Emit under an explicit [all] header so the overlay applies regardless of
+    # whatever board-specific section the file happened to end in.
+    block = ("\n[all]\n# FoodAssistant: ADS7846 SPI resistive touch "
+             "(Waveshare 3.5-4in HDMI)\n" + "\n".join(lines) + "\n")
+    with open(cfg, "a") as f:
+        if not text.endswith("\n"):
+            f.write("\n")
+        f.write(block)
+    return (True, True)
+
+
+def _streamdeck_keycount(usb_root="/sys/bus/usb/devices"):
+    """Best-effort key count for the attached deck, or None if unknown."""
+    try:
+        import re
+        out = subprocess.run(["lsusb"], capture_output=True, text=True, timeout=5).stdout
+        m = re.search(r"0fd9:([0-9a-fA-F]{4})", out)
+        if m:
+            return _SD_PRODUCT_KEYS.get(m.group(1).lower())
+    except Exception:
+        pass
+    # Fallback when lsusb is unavailable: read the Elgato device's idProduct from
+    # sysfs and map it, mirroring how _streamdeck_info finds the vendor there.
+    try:
+        import glob
+        for vendor_path in sorted(glob.glob(os.path.join(usb_root, "*", "idVendor"))):
+            if _read_sysfs(vendor_path).lower() == _STREAMDECK_VENDOR:
+                pid = _read_sysfs(os.path.join(os.path.dirname(vendor_path), "idProduct")).lower()
+                if pid:
+                    return _SD_PRODUCT_KEYS.get(pid)
+    except Exception:
+        pass
+    return None
+
+
+def _installing(step):
+    p = _INSTALL_PROCS.get(step)
+    return bool(p and p.poll() is None)
+
+
+def _start_provision(step):
+    """Launch the provisioner for one step (firstboot with STEPS=<step>) in
+    the background, streaming output to the step's install log. Returns
+    (ok, started, error). Re-entry while the same step is still running is a
+    no-op (ok=True, started=False), and firstboot's steps are themselves
+    idempotent, so re-running an already-provisioned step changes nothing.
+    """
+    if _installing(step):
+        return True, False, ""
+    script, repo_dir = _find_firstboot()
+    if not script:
+        return False, False, "Provisioner not found on this device."
+    try:
+        env = dict(os.environ, STEPS=step)
+        if repo_dir:
+            env["REPO_DIR"] = repo_dir
+        log = open(f"/var/log/foodassistant-{step}-install.log", "ab")
+        p = subprocess.Popen(
+            ["bash", script], env=env, stdout=log, stderr=subprocess.STDOUT
+        )
+        _INSTALL_PROCS[step] = p
+        return True, True, ""
+    except Exception as e:
+        return False, False, str(e)
+
+
+# Kiosk auto-enable (FoodAssistant-92e.3)
+# ---------------------------------------
+# A Pi provisioned without a display skips the kiosk (the display gate in
+# firstboot). When a display is connected later the appliance should just
+# light up: this watcher notices the connector coming up and provisions or
+# starts the kiosk on its own, no reflash or SSH needed. An explicit
+# ENABLE_KIOSK=false in the appliance config opts out.
+
+# Same config file search order firstboot uses (it sources the first hit).
+_CONFIG_ENV_CANDIDATES = [
+    "/boot/firmware/foodassistant.config.env",
+    "/boot/foodassistant.config.env",
+    "/etc/foodassistant/config.env",
+]
+
+_KIOSK_UNIT = "foodassistant-kiosk.service"
+
+
+def _config_env_value(key, paths=None):
+    """Return KEY's value from the first appliance config file that exists.
+
+    Mirrors how firstboot consumes the file (it sources the first candidate,
+    so a later assignment in the same file wins, and other candidates are
+    never read). Comment lines, blank lines, and an optional `export ` prefix
+    are handled; surrounding quotes are stripped. Returns "" when the key is
+    unset or no config file exists.
+    """
+    for path in (paths if paths is not None else _CONFIG_ENV_CANDIDATES):
+        try:
+            with open(path) as fh:
+                lines = fh.read().splitlines()
+        except OSError:
+            continue
+        value = ""
+        for line in lines:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if line.startswith("export "):
+                line = line[len("export "):].lstrip()
+            if "=" not in line:
+                continue
+            k, v = line.split("=", 1)
+            if k.strip() == key:
+                value = v.strip().strip('"').strip("'")
+        return value
+    return ""
+
+
+def _kiosk_autoenable_action(display_connected, installed, installing, active,
+                             enable_flag, attempted_install, attempted_start):
+    """Decide what the kiosk auto-enable watcher should do this tick.
+
+    Returns "install", "start", or None. Pure so it is unit-testable; the
+    loop supplies live state. Rules:
+      - No display connected, or an install already in flight: do nothing.
+      - ENABLE_KIOSK explicitly false: the owner opted out, never auto-act.
+      - Kiosk never provisioned: install, once per bridge run (a failing
+        install must not loop).
+      - Provisioned but not running: start it, once per display connection
+        (covers a kiosk installed while headless whose service exited).
+      - Installed and running: nothing to do.
+    """
+    if not display_connected or installing:
+        return None
+    if str(enable_flag).strip().lower() in ("false", "0", "no", "off"):
+        return None
+    if not installed:
+        return None if attempted_install else "install"
+    if not active:
+        return None if attempted_start else "start"
+    return None
+
+
+def _kiosk_autoenable_loop(interval=30):
+    """Background watcher that turns a newly attached display into a running
+    kiosk. Runs for the life of the bridge; every tick reads live state and
+    lets _kiosk_autoenable_action decide. Attempt latches keep a failure
+    from looping: one install per bridge run, one start per connection (a
+    replug resets the start latch)."""
+    attempted_install = False
+    attempted_start = False
+    while True:
+        try:
+            connected = bool(_drm_connected())
+            if not connected:
+                attempted_start = False
+            action = _kiosk_autoenable_action(
+                connected,
+                _unit_installed(_KIOSK_UNIT),
+                _installing("kiosk"),
+                _service_active(_KIOSK_UNIT),
+                _config_env_value("ENABLE_KIOSK"),
+                attempted_install,
+                attempted_start,
+            )
+            if action == "install":
+                attempted_install = True
+                ok, started, err = _start_provision("kiosk")
+                if started:
+                    print("kiosk auto-enable: display detected, provisioning the kiosk", flush=True)
+                elif not ok:
+                    print(f"kiosk auto-enable: install failed to start: {err}", flush=True)
+            elif action == "start":
+                attempted_start = True
+                print("kiosk auto-enable: display detected, starting the installed kiosk", flush=True)
+                subprocess.run(["systemctl", "start", _KIOSK_UNIT], timeout=30)
+        except Exception:
+            pass
+        time.sleep(interval)
+
+
+# Wi-Fi helpers
+# -------------
+# nmcli is always invoked in terse mode (-t -f) so the output is colon-separated
+# and stable across versions. nmcli escapes literal colons in field values as
+# "\:", so splitting must unescape them rather than a naive str.split(":").
+
+def _nmcli_split(line):
+    """Split one terse nmcli line into fields, honoring backslash escapes.
+
+    nmcli escapes ':' and '\\' in values as '\\:' and '\\\\'. A naive split on
+    ':' would break SSIDs that contain a colon, so walk the string instead.
+    """
+    fields = []
+    cur = []
+    i = 0
+    while i < len(line):
+        ch = line[i]
+        if ch == "\\" and i + 1 < len(line):
+            cur.append(line[i + 1])
+            i += 2
+            continue
+        if ch == ":":
+            fields.append("".join(cur))
+            cur = []
+            i += 1
+            continue
+        cur.append(ch)
+        i += 1
+    fields.append("".join(cur))
+    return fields
+
+
+def _parse_wifi_device(out):
+    """Pick the wifi device from `nmcli -t -f DEVICE,TYPE,STATE device` output.
+
+    Returns (device, state) for the first wifi device, or (None, None) when no
+    wifi hardware is present. state is the raw nmcli state string, for example
+    "connected", "disconnected", or "unmanaged".
+    """
+    for line in out.splitlines():
+        if not line.strip():
+            continue
+        parts = _nmcli_split(line)
+        if len(parts) < 3:
+            continue
+        device, dtype, state = parts[0], parts[1], parts[2]
+        if dtype == "wifi":
+            return device, state
+    return None, None
+
+
+def _parse_active_ssid(out):
+    """Connected SSID from `nmcli -t -f ACTIVE,SSID dev wifi`, or "" if none."""
+    for line in out.splitlines():
+        if not line.strip():
+            continue
+        parts = _nmcli_split(line)
+        if len(parts) >= 2 and parts[0] == "yes":
+            return parts[1]
+    return ""
+
+
+def _parse_wifi_scan(out):
+    """Parse `nmcli -t -f SSID,SIGNAL,SECURITY dev wifi list` output.
+
+    Returns a list of {ssid, signal, security} dicts, hidden/blank SSIDs
+    dropped, deduped by SSID (keeping the strongest signal), sorted by signal
+    descending.
+    """
+    best = {}
+    for line in out.splitlines():
+        if not line.strip():
+            continue
+        parts = _nmcli_split(line)
+        if len(parts) < 1:
+            continue
+        ssid = parts[0]
+        if not ssid:
+            continue
+        try:
+            signal = int(parts[1]) if len(parts) > 1 and parts[1] else 0
+        except ValueError:
+            signal = 0
+        security = parts[2] if len(parts) > 2 else ""
+        prev = best.get(ssid)
+        if prev is None or signal > prev["signal"]:
+            best[ssid] = {"ssid": ssid, "signal": signal, "security": security}
+    return sorted(best.values(), key=lambda n: n["signal"], reverse=True)
+
+
+def _ethernet_status():
+    """Best-effort wired status: {connected, device, ip}. Never raises.
+
+    A Pi on Ethernet should not look offline just because Wi-Fi is idle
+    (FoodAssistant-7r5), so the Wi-Fi status carries the wired state too. A
+    physical interface counts as connected when its carrier is up and it holds
+    an IPv4 address; virtual interfaces (docker, veth, bridges) are skipped.
+    """
+    try:
+        for name in sorted(os.listdir("/sys/class/net")):
+            if name == "lo" or name.startswith(("wlan", "ap", "docker", "veth", "br-", "tun", "tap", "vir")):
+                continue
+            try:
+                carrier = Path(f"/sys/class/net/{name}/carrier").read_text().strip()
+            except Exception:
+                carrier = "0"
+            if carrier != "1":
+                continue
+            ip = ""
+            try:
+                out = subprocess.run(
+                    ["ip", "-4", "-o", "addr", "show", "dev", name],
+                    capture_output=True, text=True, timeout=4
+                ).stdout
+                for tok in out.split():
+                    if "/" in tok and tok[0].isdigit():
+                        ip = tok.split("/")[0]
+                        break
+            except Exception:
+                pass
+            if ip:
+                return {"connected": True, "device": name, "ip": ip}
+        return {"connected": False, "device": "", "ip": ""}
+    except Exception:
+        return {"connected": False, "device": "", "ip": ""}
+
+
+def _default_route_out():
+    """Raw `ip route show default` output, or "" on any failure. Never raises.
+
+    Sent back with the Wi-Fi status so the app can classify which link carries
+    the network (FoodAssistant-1idf); the branching lives in the app so it can
+    be unit tested without this root-only script.
+    """
+    try:
+        return subprocess.run(
+            ["ip", "route", "show", "default"],
+            capture_output=True, text=True, timeout=4
+        ).stdout
+    except Exception:
+        return ""
+
+
+def _nm_running():
+    """True when NetworkManager (nmcli) is reachable."""
+    try:
+        r = subprocess.run(
+            ["nmcli", "-t", "-f", "RUNNING", "general"],
+            capture_output=True, text=True, timeout=5
+        )
+        return r.returncode == 0 and "running" in r.stdout.lower()
+    except Exception:
+        return False
+
+
+class _Handler(http.server.BaseHTTPRequestHandler):
+    def _send(self, code, data):
+        body = json.dumps(data).encode()
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _body(self):
+        n = int(self.headers.get("Content-Length", 0))
+        return json.loads(self.rfile.read(n)) if n else {}
+
+    def _authorized(self):
+        """Token gate for this request; sends the 401 itself when denied."""
+        verdict = _token_gate(
+            self.command, self.path,
+            self.headers.get("X-Bridge-Token", ""),
+            _EXPECTED_TOKEN, GRACE_MODE,
+        )
+        if verdict == "deny":
+            self._send(401, {"ok": False, "error": "missing or invalid X-Bridge-Token"})
+            return False
+        if verdict == "grace":
+            print(
+                f"bridge auth: allowing tokenless {self.command} {self.path} "
+                "(grace mode; this will be denied in a future release)",
+                flush=True,
+            )
+        return True
+
+    # --- Display + activity coordination (FoodAssistant-otiy) -------------
+
+    def _activity_get(self):
+        """Current activity/display state, polled by the Stream Deck controller
+        so a kiosk touch wakes the deck (shared activity, separate timeouts)."""
+        with _activity_lock:
+            self._send(200, {
+                "ok": True,
+                "last_activity": _activity_state["last_activity"],
+                "display_blanked": _activity_state["display_blanked"],
+                "idle_minutes": _activity_state["idle_minutes"],
+                "wake_on_motion": _activity_state["wake_on_motion"],
+                "motion_sensor": _activity_state["motion_sensor"],
+            })
+
+    def _activity_post(self):
+        """Report user activity from either surface; wakes the display."""
+        woke = _record_activity()
+        with _activity_lock:
+            last = _activity_state["last_activity"]
+        self._send(200, {"ok": True, "woke": woke, "last_activity": last})
+
+    def _display_blank(self):
+        ok = _set_display_power(False)
+        with _activity_lock:
+            _activity_state["display_blanked"] = ok
+        # A 500 on failure matters: the Stream Deck's screen-off key reads the
+        # status code, so a 200 with ok=false made it show success while the
+        # display stayed on (FoodAssistant-9la0).
+        if ok:
+            self._send(200, {"ok": True})
+        else:
+            self._send(500, {"ok": False, "error": _DISPLAY_POWER_ERROR})
+
+    def _display_wake(self):
+        ok = _set_display_power(True)
+        with _activity_lock:
+            _activity_state["display_blanked"] = False
+            _activity_state["last_activity"] = time.time()
+        if ok:
+            self._send(200, {"ok": True})
+        else:
+            self._send(500, {"ok": False, "error": _DISPLAY_POWER_ERROR})
+
+    def _display_idle_set(self):
+        """Set (and persist) the display idle timeout, and optionally the
+        wake-on-motion mode pushed alongside it."""
+        body = self._body()
+        try:
+            minutes = max(0, int(body.get("minutes", 0)))
+        except (TypeError, ValueError):
+            self._send(400, {"ok": False, "error": "minutes must be an integer"})
+            return
+        mode = body.get("wake_on_motion")
+        if mode is not None:
+            mode = str(mode).strip().lower()
+            if mode not in _WAKE_ON_MOTION_MODES:
+                self._send(400, {
+                    "ok": False,
+                    "error": "wake_on_motion must be auto, on, or off",
+                })
+                return
+        with _activity_lock:
+            _activity_state["idle_minutes"] = minutes
+            if mode is not None:
+                _activity_state["wake_on_motion"] = mode
+        persisted = _write_persisted_idle_minutes(minutes)
+        if mode is not None:
+            persisted = _write_persisted_wake_on_motion(mode) and persisted
+        resp = {"ok": True, "minutes": minutes, "persisted": persisted}
+        if mode is not None:
+            resp["wake_on_motion"] = mode
+        self._send(200, resp)
+
+    # --- Forager remote-access tunnel (FoodAssistant-uczr) ----------------
+
+    def _tunnel_keygen(self):
+        """Generate a WireGuard keypair; keep the private key on the device.
+
+        Returns only the public key to the caller. The private key is written
+        to a root-only file for the up step and never logged or returned.
+        """
+        if not _wg_tools_present():
+            self._send(500, {"ok": False, "error":
+                "WireGuard is not installed on this device."})
+            return
+        try:
+            priv = subprocess.run(
+                ["wg", "genkey"], capture_output=True, text=True, timeout=10,
+            ).stdout.strip()
+            if not priv:
+                self._send(500, {"ok": False, "error": "Could not generate a key."})
+                return
+            pub = subprocess.run(
+                ["wg", "pubkey"], input=priv,
+                capture_output=True, text=True, timeout=10,
+            ).stdout.strip()
+            if not pub:
+                self._send(500, {"ok": False, "error": "Could not derive the public key."})
+                return
+            os.makedirs(os.path.dirname(_WG_PRIVATE_KEY_PATH), exist_ok=True)
+            with open(_WG_PRIVATE_KEY_PATH, "w") as f:
+                f.write(priv + "\n")
+            os.chmod(_WG_PRIVATE_KEY_PATH, 0o600)
+            self._send(200, {"ok": True, "public_key": pub})
+        except Exception as e:
+            # Never echo the key material; report only the class of failure.
+            self._send(500, {"ok": False, "error":
+                "Key generation failed: %s" % e.__class__.__name__})
+
+    def _tunnel_up(self):
+        """Write the interface config and bring it up (idempotent).
+
+        Uses the private key from the request when given, otherwise the one
+        stored by the last keygen. Persists the interface with systemd so it
+        survives a reboot. The config text (which holds the private key) is
+        never logged.
+        """
+        if not _wg_tools_present():
+            self._send(500, {"ok": False, "error":
+                "WireGuard is not installed on this device."})
+            return
+        body = self._body()
+        private_key = (body.get("private_key") or "").strip()
+        if not private_key:
+            try:
+                private_key = Path(_WG_PRIVATE_KEY_PATH).read_text().strip()
+            except OSError:
+                private_key = ""
+        address = (body.get("address") or body.get("tunnel_ip") or "").strip()
+        server_public_key = (body.get("server_public_key") or "").strip()
+        endpoint = (body.get("endpoint") or "").strip()
+        allowed_ips = (body.get("allowed_ips") or "").strip()
+        dns = (body.get("dns") or "").strip()
+        keepalive = body.get("keepalive", 25)
+        missing = [name for name, val in (
+            ("private_key", private_key), ("address", address),
+            ("server_public_key", server_public_key), ("endpoint", endpoint),
+            ("allowed_ips", allowed_ips),
+        ) if not val]
+        if missing:
+            self._send(400, {"ok": False, "error":
+                "Missing tunnel parameters: %s" % ", ".join(missing)})
+            return
+        try:
+            config = _render_wg_config(
+                private_key, address, server_public_key, endpoint,
+                allowed_ips, dns=dns, keepalive=keepalive,
+            )
+            os.makedirs(os.path.dirname(_WG_CONFIG_PATH), exist_ok=True)
+            # Idempotent: tear down any existing interface before re-applying,
+            # so a re-enable with new parameters converges instead of erroring.
+            subprocess.run(
+                ["wg-quick", "down", _WG_INTERFACE],
+                capture_output=True, text=True, timeout=30,
+            )
+            with open(_WG_CONFIG_PATH, "w") as f:
+                f.write(config)
+            os.chmod(_WG_CONFIG_PATH, 0o600)
+            r = subprocess.run(
+                ["wg-quick", "up", _WG_INTERFACE],
+                capture_output=True, text=True, timeout=30,
+            )
+            if r.returncode != 0:
+                self._send(500, {"ok": False, "error":
+                    (r.stderr or r.stdout or "wg-quick up failed").strip()})
+                return
+            # Survive a reboot. Best effort: the interface is already up.
+            subprocess.run(
+                ["systemctl", "enable", "wg-quick@%s" % _WG_INTERFACE],
+                capture_output=True, text=True, timeout=15,
+            )
+            self._send(200, {"ok": True, "interface": _WG_INTERFACE})
+        except Exception as e:
+            self._send(500, {"ok": False, "error":
+                "Bringing the tunnel up failed: %s" % e.__class__.__name__})
+
+    def _tunnel_down(self):
+        """Take the interface down and stop persisting it (best effort)."""
+        subprocess.run(
+            ["wg-quick", "down", _WG_INTERFACE],
+            capture_output=True, text=True, timeout=30,
+        )
+        subprocess.run(
+            ["systemctl", "disable", "wg-quick@%s" % _WG_INTERFACE],
+            capture_output=True, text=True, timeout=15,
+        )
+        self._send(200, {"ok": True})
+
+    def _tunnel_status(self):
+        """Whether the interface is up and its latest handshake age."""
+        if not _wg_tools_present():
+            self._send(200, {"ok": True, "up": False, "last_handshake_seconds": None})
+            return
+        try:
+            r = subprocess.run(
+                ["wg", "show", _WG_INTERFACE, "latest-handshakes"],
+                capture_output=True, text=True, timeout=10,
+            )
+        except Exception:
+            self._send(200, {"ok": True, "up": False, "last_handshake_seconds": None})
+            return
+        if r.returncode != 0:
+            self._send(200, {"ok": True, "up": False, "last_handshake_seconds": None})
+            return
+        epoch = _parse_wg_handshakes(r.stdout)
+        seconds = int(time.time() - epoch) if epoch > 0 else None
+        self._send(200, {"ok": True, "up": True, "last_handshake_seconds": seconds})
+
+    def do_GET(self):
+        if not self._authorized():
+            return
+        if self.path == "/wifi/status":
+            self._wifi_status()
+        elif self.path == "/wifi/scan":
+            self._wifi_scan()
+        elif self.path == "/hostname":
+            self._get_hostname()
+        elif self.path == "/display/rotation":
+            self._get_rotation()
+        elif self.path == "/mealie/status":
+            self._mealie_status()
+        elif self.path.startswith("/logs/"):
+            self._logs(self.path[len("/logs/"):])
+        elif self.path == "/hardware/status":
+            self._hardware_status()
+        elif self.path == "/system/health":
+            self._system_health()
+        elif self.path == "/system/warnings":
+            self._system_warnings()
+        elif self.path == "/support-bundle":
+            self._support_bundle_get()
+        elif self.path == "/streamdeck/config":
+            self._streamdeck_get_config()
+        elif self.path == "/streamdeck/actions":
+            self._streamdeck_actions()
+        elif self.path == "/ap/status":
+            self._ap_status()
+        elif self.path == "/activity":
+            self._activity_get()
+        elif self.path == "/usb/status":
+            self._usb_status()
+        elif self.path == "/usb/photos":
+            self._usb_photos_list()
+        elif self.path.split("?", 1)[0] == "/usb/photo":
+            self._usb_photo_serve()
+        elif self.path == "/stack/status":
+            self._stack_status()
+        elif self.path == "/tunnel/status":
+            self._tunnel_status()
+        else:
+            self._send(404, {"error": "not found"})
+
+    def do_POST(self):
+        if not self._authorized():
+            return
+        if self.path == "/wifi/connect":
+            self._wifi_connect()
+        elif self.path == "/hostname":
+            self._set_hostname()
+        elif self.path == "/display/rotation":
+            self._set_rotation()
+        elif self.path == "/touch/calibrate":
+            self._touch_calibrate()
+        elif self.path == "/touch/calibrate/reset":
+            self._touch_calibrate_reset()
+        elif self.path == "/touch/provision":
+            self._touch_provision()
+        elif self.path == "/system/timezone":
+            self._system_timezone_set()
+        elif self.path == "/system/scheduled-reboot":
+            self._scheduled_reboot_set()
+        elif self.path == "/streamdeck/restart":
+            self._streamdeck_restart()
+        elif self.path == "/kiosk/restart":
+            self._kiosk_restart()
+        elif self.path == "/mealie/start":
+            self._mealie_start()
+        elif self.path == "/kiosk/install":
+            self._provision("kiosk", "foodassistant-kiosk.service")
+        elif self.path == "/streamdeck/install":
+            self._provision("streamdeck", "foodassistant-streamdeck.service")
+        elif self.path == "/streamdeck/config":
+            self._streamdeck_set_config()
+        elif self.path == "/ap/disable":
+            self._ap_disable()
+        elif self.path == "/update":
+            self._update()
+        elif self.path == "/update/channel":
+            self._update_channel_set()
+        elif self.path == "/reboot":
+            self._reboot()
+        elif self.path == "/usb/backup":
+            self._usb_backup()
+        elif self.path == "/restore":
+            self._restore()
+        elif self.path == "/stack/standdown":
+            self._stack_standdown()
+        elif self.path == "/stack/standup":
+            self._stack_standup()
+        elif self.path == "/activity":
+            self._activity_post()
+        elif self.path == "/display/blank":
+            self._display_blank()
+        elif self.path == "/display/wake":
+            self._display_wake()
+        elif self.path == "/display/idle":
+            self._display_idle_set()
+        elif self.path == "/tunnel/keygen":
+            self._tunnel_keygen()
+        elif self.path == "/tunnel/up":
+            self._tunnel_up()
+        elif self.path == "/tunnel/down":
+            self._tunnel_down()
+        else:
+            self._send(404, {"error": "not found"})
+
+    def _wifi_status(self):
+        # Report a structured state the UI can show instead of a bare blank:
+        #   no-networkmanager -> nmcli/NetworkManager is not running
+        #   no-adapter        -> no wifi hardware on this device
+        #   unmanaged         -> wifi device exists but NM does not manage it
+        #   disconnected      -> wifi adapter present, no active connection
+        #   connected         -> joined a network (ssid is set)
+        # The raw default route travels back as "default_route" so the app can
+        # classify which link actually carries the network (wired vs wifi) and
+        # show a Pi on Ethernet as connected, not as if Wi-Fi has failed
+        # (FoodAssistant-1idf). Keeping the classification in the app keeps this
+        # bridge helper thin and unit-testable there.
+        eth = _ethernet_status()
+        route = _default_route_out()
+        try:
+            if not _nm_running():
+                self._send(200, {
+                    "ok": True, "state": "no-networkmanager", "ssid": "",
+                    "detail": "NetworkManager is not running.", "ethernet": eth,
+                    "default_route": route,
+                })
+                return
+            dev_out = subprocess.run(
+                ["nmcli", "-t", "-f", "DEVICE,TYPE,STATE", "device"],
+                capture_output=True, text=True, timeout=5
+            ).stdout
+            device, dev_state = _parse_wifi_device(dev_out)
+            if not device:
+                self._send(200, {
+                    "ok": True, "state": "no-adapter", "ssid": "",
+                    "detail": "No Wi-Fi adapter found.", "ethernet": eth,
+                    "default_route": route,
+                })
+                return
+            if dev_state == "unmanaged":
+                self._send(200, {
+                    "ok": True, "state": "unmanaged", "ssid": "", "device": device,
+                    "detail": "Wi-Fi device is not managed by NetworkManager.",
+                    "ethernet": eth, "default_route": route,
+                })
+                return
+            ssid_out = subprocess.run(
+                ["nmcli", "-t", "-f", "ACTIVE,SSID", "dev", "wifi"],
+                capture_output=True, text=True, timeout=5
+            ).stdout
+            ssid = _parse_active_ssid(ssid_out)
+            self._send(200, {
+                "ok": True,
+                "state": "connected" if ssid else "disconnected",
+                "ssid": ssid,
+                "device": device,
+                "ethernet": eth,
+                "default_route": route,
+            })
+        except Exception as e:
+            self._send(500, {"ok": False, "error": str(e), "ethernet": eth,
+                             "default_route": route})
+
+    def _wifi_scan(self):
+        try:
+            if not _nm_running():
+                self._send(200, {
+                    "ok": True, "state": "no-networkmanager", "networks": [],
+                    "detail": "NetworkManager is not running.",
+                })
+                return
+            dev_out = subprocess.run(
+                ["nmcli", "-t", "-f", "DEVICE,TYPE,STATE", "device"],
+                capture_output=True, text=True, timeout=5
+            ).stdout
+            device, _ = _parse_wifi_device(dev_out)
+            if not device:
+                self._send(200, {
+                    "ok": True, "state": "no-adapter", "networks": [],
+                    "detail": "No Wi-Fi adapter found.",
+                })
+                return
+            r = subprocess.run(
+                ["nmcli", "-t", "-f", "SSID,SIGNAL,SECURITY", "dev", "wifi", "list"],
+                capture_output=True, text=True, timeout=20
+            )
+            if r.returncode != 0:
+                self._send(500, {"ok": False, "error": (r.stderr or r.stdout).strip()})
+                return
+            self._send(200, {
+                "ok": True, "state": "ok",
+                "networks": _parse_wifi_scan(r.stdout),
+            })
+        except Exception as e:
+            self._send(500, {"ok": False, "error": str(e)})
+
+    def _wifi_connect(self):
+        body = self._body()
+        ssid = body.get("ssid", "").strip()
+        password = body.get("password", "").strip()
+        if not ssid:
+            self._send(400, {"ok": False, "error": "ssid is required"})
+            return
+        try:
+            cmd = ["nmcli", "device", "wifi", "connect", ssid]
+            if password:
+                cmd += ["password", password]
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            if r.returncode == 0:
+                self._send(200, {"ok": True})
+            else:
+                self._send(500, {"ok": False, "error": (r.stderr or r.stdout).strip()})
+        except Exception as e:
+            self._send(500, {"ok": False, "error": str(e)})
+
+    def _get_hostname(self):
+        try:
+            hn = subprocess.run(
+                ["hostname"], capture_output=True, text=True
+            ).stdout.strip()
+            self._send(200, {"ok": True, "hostname": hn})
+        except Exception as e:
+            self._send(500, {"ok": False, "error": str(e)})
+
+    def _set_hostname(self):
+        body = self._body()
+        name = body.get("hostname", "").strip().lower()
+        if not name or not re.fullmatch(r"[a-z0-9]([a-z0-9\-]{0,61}[a-z0-9])?", name):
+            self._send(400, {"ok": False, "error": "Invalid hostname. Use lowercase letters, digits, and hyphens."})
+            return
+        try:
+            subprocess.run(["hostnamectl", "set-hostname", name], check=True, timeout=10)
+            r = subprocess.run(["grep", "-q", r"^127\.0\.1\.1", "/etc/hosts"])
+            if r.returncode == 0:
+                subprocess.run(
+                    ["sed", "-i", rf"s/^127\.0\.1\.1.*/127.0.1.1\t{name}/", "/etc/hosts"],
+                    check=True
+                )
+            else:
+                with open("/etc/hosts", "a") as f:
+                    f.write(f"127.0.1.1\t{name}\n")
+            self._send(200, {"ok": True})
+        except Exception as e:
+            self._send(500, {"ok": False, "error": str(e)})
+
+    def _get_rotation(self):
+        rotation = 0
+        try:
+            with open("/etc/foodassistant/kiosk-env") as f:
+                for line in f:
+                    m = re.match(r"^\s*WLR_OUTPUT_TRANSFORM\s*=\s*(\S+)", line)
+                    if m:
+                        val = m.group(1).strip()
+                        rotation = int(val) if val.isdigit() else 0
+        except OSError:
+            pass
+        self._send(200, {"ok": True, "rotation": rotation})
+
+    def _set_rotation(self):
+        body = self._body()
+        try:
+            degrees = int(body.get("degrees", 0))
+        except (TypeError, ValueError):
+            self._send(400, {"ok": False, "error": "degrees must be 0, 90, 180, or 270"})
+            return
+        if degrees not in (0, 90, 180, 270):
+            self._send(400, {"ok": False, "error": "degrees must be 0, 90, 180, or 270"})
+            return
+        reboot = bool(body.get("reboot", False))
+        # Self-heal a device imaged before the rotation helpers existed: they
+        # are reinstalled from the source checkout when missing. apply-rotation
+        # is best effort (set-rotation falls back to a kiosk restart without
+        # it), but set-rotation itself is required.
+        _ensure_helper("foodassistant-apply-rotation")
+        helper = _ensure_helper("foodassistant-set-rotation")
+        if not helper:
+            self._send(500, {"ok": False, "error":
+                "The rotation helper is missing on this device. Press Update "
+                "under Backup & Updates to install it, then try again."})
+            return
+        cmd = [helper, str(degrees)]
+        if reboot:
+            cmd.append("--reboot")
+        try:
+            # Follow the rotation with the touch matrix (9ohp/mox4): recompose
+            # the stored fit for the new rotation, or the pure rotation matrix
+            # when the panel was never calibrated, so touch stays aligned with
+            # the rotated image (the compositor rotates only the output, never
+            # touch). The udev rule is written BEFORE set-rotation runs: it is
+            # persistent and picked up on boot, and on the --reboot path the
+            # device starts going down inside the command, so writing it after
+            # would race the shutdown.
+            recomposed = False
+            try:
+                matrix = _matrix_for_rotation(degrees)
+                if matrix:
+                    _write_calibration_rule(matrix)
+                    recomposed = True
+                else:
+                    _remove_calibration_rule()
+            except Exception:
+                pass
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+            if r.returncode != 0:
+                # The display rotation did not change; put the touch rule back
+                # in step with the still-current rotation.
+                try:
+                    prev = _matrix_for_rotation(_read_kiosk_rotation())
+                    if prev:
+                        _write_calibration_rule(prev)
+                    else:
+                        _remove_calibration_rule()
+                except Exception:
+                    pass
+                self._send(500, {"ok": False, "error": (r.stderr or r.stdout).strip()})
+                return
+            # The compositor only reads the matrix when the touch device is
+            # (re)opened, so restart the live kiosk (detached, so a page shown
+            # on the kiosk itself gets this response before cage goes down);
+            # skipped when a reboot is coming anyway.
+            if not reboot and _service_active("foodassistant-kiosk.service"):
+                _schedule_kiosk_restart()
+            self._send(200, {"ok": True, "calibration_recomposed": recomposed})
+        except Exception as e:
+            self._send(500, {"ok": False, "error": str(e)})
+
+    def _touch_calibrate(self):
+        # Apply a LIBINPUT_CALIBRATION_MATRIX by delegating to the calibrate
+        # helper's non-interactive mode. The bridge runs as root, so it can
+        # write the udev rule and reload udev without sudo (the app service
+        # cannot: its unit caps privileges to CAP_NET_BIND_SERVICE).
+        body = self._body()
+        matrix = (body.get("matrix") or "").strip()
+        parts = matrix.split()
+        if len(parts) != 6:
+            self._send(400, {"ok": False, "error": "matrix must be exactly 6 floats"})
+            return
+        try:
+            [float(p) for p in parts]
+        except ValueError:
+            self._send(400, {"ok": False, "error": "matrix has a non-numeric value"})
+            return
+        try:
+            # Write the calibration udev rule directly (the bridge runs as root),
+            # rather than shelling out to a separately installed helper, so this
+            # works even on a device whose touch was configured by hand.
+            target = _write_calibration_rule(" ".join(parts))
+            # Remember the fit and the rotation it was taken at, so the matrix
+            # can follow a later rotation change without recalibrating (9ohp).
+            _store_base_calibration(" ".join(parts), _read_kiosk_rotation())
+            # The compositor (cage/wlroots) holds the touch device open and only
+            # reads LIBINPUT_CALIBRATION_MATRIX when the device is added, so a
+            # udevadm trigger alone does not change the live mapping. Restart the
+            # kiosk so cage reopens the device and picks up the new matrix. The
+            # restart is scheduled detached: the calibration page that posted
+            # this request lives inside the kiosk browser, so a synchronous
+            # restart killed it before this response could land
+            # (FoodAssistant-9ext).
+            restarted = False
+            if _service_active("foodassistant-kiosk.service"):
+                restarted = _schedule_kiosk_restart()
+            self._send(200, {
+                "ok": True,
+                "message": "Calibration applied to %s." % target,
+                "kiosk_restarted": restarted,
+            })
+        except Exception as e:
+            self._send(500, {"ok": False, "error": str(e)})
+
+    def _touch_calibrate_reset(self):
+        # Remove the calibration fit so touch reverts to the panel/overlay
+        # default. Used when a calibration came out wrong; the bridge runs as
+        # root and can delete the udev rule and reload udev. On a rotated
+        # display the panel default is still unrotated, so the pure rotation
+        # matrix is re-applied for the current rotation (identity fit).
+        try:
+            rule = "/etc/udev/rules.d/99-foodassistant-touch.rules"
+            existed = os.path.exists(rule)
+            if existed:
+                os.remove(rule)
+            # Forget the stored base so a later rotation does not re-apply it.
+            try:
+                os.remove(_CALIB_STORE)
+            except OSError:
+                pass
+            matrix = _matrix_for_rotation(_read_kiosk_rotation())
+            if matrix:
+                _write_calibration_rule(matrix)
+            subprocess.run(["udevadm", "control", "--reload-rules"], timeout=10)
+            subprocess.run(["udevadm", "trigger", "--subsystem-match=input"], timeout=10)
+            restarted = False
+            if _service_active("foodassistant-kiosk.service"):
+                restarted = _schedule_kiosk_restart()
+            self._send(200, {"ok": True, "removed": existed, "kiosk_restarted": restarted})
+        except Exception as e:
+            self._send(500, {"ok": False, "error": str(e)})
+
+    def _touch_provision(self):
+        # Apply the boot config an ADS7846 SPI touch panel needs when the display
+        # type was chosen in the wizard after first boot (firstboot never re-runs).
+        # Only ads7846 needs a config.txt change; usb/generic/none are a no-op.
+        body = self._body()
+        driver = (body.get("driver") or "").strip()
+        if driver not in ("ads7846", "usb", "generic", "none", ""):
+            self._send(400, {"ok": False, "error": "unknown touch driver: %s" % driver})
+            return
+        reboot = bool(body.get("reboot", False))
+        try:
+            changed, needs_reboot = _provision_touch(driver)
+        except OSError as e:
+            self._send(500, {"ok": False, "error": str(e)})
+            return
+        if reboot and needs_reboot:
+            try:
+                subprocess.Popen(_reboot_command())
+            except Exception:
+                pass
+        self._send(200, {"ok": True, "changed": changed, "needs_reboot": needs_reboot})
+
+    def _system_timezone_set(self):
+        # Set the host timezone via timedatectl so the system clock, logs, and the
+        # kiosk browser all read in the chosen zone. The clock stays NTP-synced;
+        # only the zone changes. The name is validated against the IANA charset so
+        # nothing shell-unfriendly reaches timedatectl.
+        body = self._body()
+        tz = (body.get("tz") or "").strip()
+        if not tz or not re.match(r"^[A-Za-z0-9_+./-]+$", tz):
+            self._send(400, {"ok": False, "error": "a valid IANA timezone is required"})
+            return
+        try:
+            r = subprocess.run(["timedatectl", "set-timezone", tz],
+                               capture_output=True, text=True, timeout=10)
+            if r.returncode != 0:
+                self._send(500, {"ok": False, "error": (r.stderr or r.stdout).strip()})
+                return
+            self._send(200, {"ok": True, "timezone": tz})
+        except Exception as e:
+            self._send(500, {"ok": False, "error": str(e)})
+
+    def _scheduled_reboot_set(self):
+        # Install (or remove) a systemd timer that reboots the appliance at a
+        # fixed local time, nightly or weekly, handy for a kiosk that should
+        # refresh itself. An empty time (or frequency "off") removes the timer.
+        # HH:MM is validated so OnCalendar is safe.
+        body = self._body()
+        t = (body.get("time") or "").strip()
+        frequency = (body.get("frequency") or "").strip().lower()
+        day = body.get("day", 0)
+        base = "foodassistant-scheduled-reboot"
+        svc = "/etc/systemd/system/%s.service" % base
+        tmr = "/etc/systemd/system/%s.timer" % base
+        try:
+            if not t or frequency == "off":
+                subprocess.run(["systemctl", "disable", "--now", "%s.timer" % base],
+                               capture_output=True, text=True, timeout=15)
+                for f in (svc, tmr):
+                    try:
+                        os.remove(f)
+                    except OSError:
+                        pass
+                subprocess.run(["systemctl", "daemon-reload"], timeout=15)
+                self._send(200, {"ok": True, "scheduled": False})
+                return
+            if not re.match(r"^([01]\d|2[0-3]):[0-5]\d$", t):
+                self._send(400, {"ok": False, "error": "time must be HH:MM (24h)"})
+                return
+            calendar = _reboot_calendar(t, frequency, day)
+            with open(svc, "w") as f:
+                f.write("[Unit]\nDescription=FoodAssistant scheduled reboot\n\n"
+                        "[Service]\nType=oneshot\nExecStart=/sbin/reboot\n")
+            with open(tmr, "w") as f:
+                f.write("[Unit]\nDescription=FoodAssistant scheduled reboot timer\n\n"
+                        "[Timer]\nOnCalendar=%s\nPersistent=false\n\n"
+                        "[Install]\nWantedBy=timers.target\n" % calendar)
+            subprocess.run(["systemctl", "daemon-reload"], timeout=15)
+            r = subprocess.run(["systemctl", "enable", "--now", "%s.timer" % base],
+                               capture_output=True, text=True, timeout=15)
+            if r.returncode != 0:
+                self._send(500, {"ok": False, "error": (r.stderr or r.stdout).strip()})
+                return
+            self._send(200, {"ok": True, "scheduled": True, "time": t,
+                             "calendar": calendar})
+        except Exception as e:
+            self._send(500, {"ok": False, "error": str(e)})
+
+    def _streamdeck_get_config(self):
+        try:
+            import tomllib
+            path = "/opt/foodassistant/config.toml"
+            data = {}
+            if os.path.exists(path):
+                with open(path, "rb") as f:
+                    data = tomllib.load(f)
+            # Replace the raw on-disk keys with the RESOLVED layout the controller
+            # actually uses (defaults to the full DEFAULT_ORDER, drops invalid
+            # names), so the web editor mirrors the deck instead of showing a
+            # missing or stale key list (FoodAssistant-3y5p). Best-effort: a
+            # failure here just leaves the raw keys in place.
+            try:
+                r = subprocess.run(
+                    ["/opt/foodassistant/venv/bin/python", "-m",
+                     "foodassistant_streamdeck", "--dump-config", "--config", path],
+                    cwd="/opt/foodassistant", capture_output=True, text=True, timeout=10)
+                if r.returncode == 0 and r.stdout.strip():
+                    resolved = json.loads(r.stdout)
+                    if isinstance(resolved.get("keys"), list):
+                        data["keys"] = resolved["keys"]
+            except Exception:
+                pass
+            self._send(200, {"ok": True, "config": data})
+        except Exception as e:
+            self._send(500, {"ok": False, "error": str(e)})
+
+    def _streamdeck_set_config(self):
+        try:
+            body = self._body()
+            cfg = body.get("config", {})
+            toml_str = _streamdeck_config_toml(cfg)
+
+            path = "/opt/foodassistant/config.toml"
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w") as f:
+                f.write(toml_str)
+            self._send(200, {"ok": True})
+        except Exception as e:
+            self._send(500, {"ok": False, "error": str(e)})
+
+    def _streamdeck_actions(self):
+        try:
+            r = subprocess.run(
+                ["/opt/foodassistant/venv/bin/python", "-m", "foodassistant_streamdeck", "--dump-actions"],
+                cwd="/opt/foodassistant", capture_output=True, text=True, timeout=10
+            )
+            if r.returncode == 0 and r.stdout.strip():
+                self._send(200, {"ok": True, "actions": json.loads(r.stdout)})
+            else:
+                self._send(500, {"ok": False, "error": (r.stderr or "no output").strip()})
+        except Exception as e:
+            self._send(500, {"ok": False, "error": str(e)})
+
+    def _streamdeck_restart(self):
+        try:
+            subprocess.run(
+                ["systemctl", "restart", "foodassistant-streamdeck"],
+                check=True, timeout=15
+            )
+            self._send(200, {"ok": True})
+        except subprocess.CalledProcessError as e:
+            self._send(500, {"ok": False, "error": str(e)})
+        except Exception as e:
+            self._send(500, {"ok": False, "error": str(e)})
+
+    def _kiosk_restart(self):
+        # Scheduled detached rather than run inline: this endpoint can be hit
+        # from a settings page shown on the kiosk display itself, and a
+        # synchronous restart kills that page before the response lands.
+        if _schedule_kiosk_restart():
+            self._send(200, {"ok": True, "scheduled": True})
+        else:
+            self._send(500, {"ok": False, "error": "could not schedule kiosk restart"})
+
+    def _mealie_container_up(self):
+        """True when the Mealie container exists (compose service 'mealie')."""
+        return _mealie_container_exists()
+
+    def _mealie_serving(self):
+        """True when Mealie actually answers HTTP on its port.
+
+        The container can sit in 'health: starting' for a minute after it is
+        created, during which docker compose ps already lists it but the web
+        server refuses connections. Probing the port is what tells us the link
+        the user is about to click will actually work.
+        """
+        return _http_serving(f"http://127.0.0.1:{MEALIE_PORT}/")
+
+    def _mealie_running(self):
+        """Backwards-compatible alias: True when Mealie is up and serving."""
+        return self._mealie_container_up() and self._mealie_serving()
+
+    def _mealie_status(self):
+        # Report a single phase the web UI can poll on. We only call Mealie
+        # 'running' once it actually answers HTTP, so the user never gets a
+        # link that refuses the connection:
+        #   running        -> the container is up AND serving HTTP
+        #   starting       -> the pull/up is in flight, OR the container exists
+        #                     but is not serving yet (health: starting)
+        #   not-installed  -> neither (idle, image not pulled / not started)
+        try:
+            container_up = self._mealie_container_up()
+            serving = container_up and self._mealie_serving()
+            starting = _installing("mealie")
+            if serving:
+                state = "running"
+            elif starting or container_up:
+                state = "starting"
+            else:
+                state = "not-installed"
+            self._send(200, {
+                "ok": True,
+                "state": state,
+                "running": serving,
+                "starting": state == "starting",
+            })
+        except Exception as e:
+            self._send(500, {"ok": False, "error": str(e)})
+
+    def _mealie_start(self):
+        # Pulling the Mealie image on first run can take several minutes on a
+        # Pi, far longer than any reasonable HTTP timeout. Run the pull/up in
+        # the background (mirroring the install provisioner) and return
+        # immediately; the web UI polls /mealie/status for progress. Calling
+        # this again while a start is in flight (or after Mealie is up) is a
+        # no-op, so the UI can safely re-attach after a page reload.
+        if self._mealie_running():
+            self._send(200, {"ok": True, "started": False, "state": "running"})
+            return
+        if _installing("mealie"):
+            self._send(200, {"ok": True, "started": False, "state": "starting"})
+            return
+        try:
+            # Persist the intent first: if this install is interrupted (bridge
+            # restart, reboot mid-pull), the startup resume finishes it.
+            _persist_compose_profile("with-mealie")
+            _launch_mealie_install()
+            self._send(200, {"ok": True, "started": True, "state": "starting"})
+        except Exception as e:
+            self._send(500, {"ok": False, "error": str(e)})
+
+    def _logs(self, name):
+        # Tail of an install/start log so the setup UI can show live output.
+        # Strip any trailing slash/query and never raise: an unknown name or a
+        # log that does not exist yet just returns an empty line list.
+        name = name.split("?", 1)[0].strip("/")
+        if name not in _LOG_PATHS:
+            self._send(404, {"ok": False, "error": "unknown log name"})
+            return
+        try:
+            lines = _tail_log(name)
+            self._send(200, {
+                "ok": True,
+                "name": name,
+                "running": _installing(name),
+                "lines": lines,
+            })
+        except Exception as e:
+            # Defensive: _tail_log already swallows errors, but keep the
+            # endpoint from ever bubbling an exception to the client.
+            self._send(200, {"ok": True, "name": name, "running": False, "lines": [], "error": str(e)})
+
+    def _hardware_status(self):
+        # Live attached-hardware detection (display connectors + Stream Deck
+        # model) read straight from sysfs, merged with the kiosk/streamdeck
+        # service-install state the setup UI already polls for. The detection
+        # block lives under "display" and the deck "model"/sysfs presence is
+        # folded into the existing "streamdeck" object.
+        hw = _hardware_status()
+        sd_present, sd_model = hw["streamdeck"]["present"], hw["streamdeck"]["model"]
+        self._send(200, {
+            "ok": True,
+            "display": hw["display"],
+            "kiosk": {
+                # "present" means a display is actually connected (DRM
+                # connector state), not merely that a KMS card exists: the
+                # card node is there even on a headless Pi, which used to
+                # make the UI offer a kiosk install with nothing attached.
+                "present": hw["display"]["present"],
+                "installed": _unit_installed("foodassistant-kiosk.service"),
+                "active": _service_active("foodassistant-kiosk.service"),
+                "installing": _installing("kiosk"),
+            },
+            "streamdeck": {
+                "present": _streamdeck_present() or sd_present,
+                "model": sd_model,
+                "installed": _unit_installed("foodassistant-streamdeck.service"),
+                "active": _service_active("foodassistant-streamdeck.service"),
+                "installing": _installing("streamdeck"),
+                "key_count": _streamdeck_keycount(),
+            },
+        })
+
+    def _system_health(self):
+        """Power / thermal / disk health for the non-obtrusive UI indicator."""
+        try:
+            self._send(200, _system_health())
+        except Exception as e:
+            self._send(500, {"ok": False, "error": str(e)})
+
+    def _system_warnings(self):
+        """Cached power/thermal/disk warnings from the 60s monitor loop."""
+        try:
+            self._send(200, _system_warnings())
+        except Exception as e:
+            self._send(500, {"ok": False, "error": str(e), "warnings": []})
+
+    def _support_bundle_get(self):
+        """Host facts for the app's downloadable support zip (FoodAssistant-w7mb)."""
+        try:
+            self._send(200, _support_bundle())
+        except Exception as e:
+            self._send(500, {"ok": False, "error": str(e)})
+
+    def _provision(self, step, unit):
+        if _installing(step):
+            self._send(200, {"ok": True, "started": False, "message": "Already installing."})
+            return
+        ok, _started, err = _start_provision(step)
+        if ok:
+            self._send(200, {"ok": True, "started": True})
+        else:
+            self._send(500, {"ok": False, "error": err})
+
+    def _ap_status(self):
+        """Return whether the fallback AP is active.
+
+        The flag file alone is not trusted: a device that has real network
+        connectivity (a wired link, or any default route) does not need the
+        setup hotspot, even if an earlier watchdog run raised it. In that case
+        the AP is stood down here and reported inactive, so the settings page
+        never shows the Wi-Fi setup banner on an ethernet-connected device
+        (FoodAssistant-xt9b).
+        """
+        try:
+            active = Path(_AP_FLAG).exists()
+            if active and _has_lan_connectivity():
+                try:
+                    _ap_stand_down()
+                except Exception:
+                    pass
+                active = False
+            self._send(200, {"ok": True, "active": active})
+        except Exception as e:
+            self._send(500, {"ok": False, "error": str(e)})
+
+    def _ap_disable(self):
+        """Stop the fallback AP and remove the flag file."""
+        try:
+            _ap_stand_down()
+            self._send(200, {"ok": True})
+        except Exception as e:
+            self._send(500, {"ok": False, "error": str(e)})
+
+    def _update_channel_set(self):
+        # Persist the update channel where the foodassistant-update helper reads
+        # it (FoodAssistant-wkwx). The app cannot write /etc from its container,
+        # so it lands the value here on settings save and before each update.
+        body = self._body()
+        channel = (body.get("channel") or "").strip()
+        ok, err = _write_update_channel(channel)
+        if not ok:
+            self._send(400 if "channel must be" in err else 500,
+                       {"ok": False, "error": err})
+            return
+        self._send(200, {"ok": True, "channel": channel})
+
+    def _update(self):
+        # Pull the latest source and redeploy by delegating to the
+        # foodassistant-update helper. The bridge runs as root, so it can write
+        # under /opt and restart the units (the app service cannot: its caps are
+        # bound to CAP_NET_BIND_SERVICE).
+        #
+        # The helper redeploys both the web app and the Stream Deck package,
+        # reinstalls venv deps only when requirements changed, and restarts
+        # whichever services it refreshed. It is idempotent and safe to re-run
+        # after a manual pull. It prints a human log to stdout and ends with a
+        # single JSON line {ok, error, before, after, restarted, service_synced,
+        # streamdeck_synced, deps_installed}. We parse that last line and pass
+        # the full text back as "log" so the setup UI can show it. A pull that
+        # fails to fast-forward leaves the checkout untouched (the helper still
+        # redeploys the current HEAD); we never restart from here directly.
+        helper = _ensure_helper("foodassistant-update")
+        if not helper:
+            self._send(500, {"ok": False, "error":
+                "The update helper is missing on this device and there is no "
+                "source checkout to restore it from. Re-run the installer "
+                "(install.sh) on this device."})
+            return
+        try:
+            # An update can pull, run pip, and restart, which on a Pi may take a
+            # couple of minutes when requirements change. Keep the timeout
+            # generous so a slow pip install does not look like a failure.
+            r = subprocess.run(
+                [helper], capture_output=True, text=True, timeout=600
+            )
+            out = (r.stdout or "").strip()
+            result = {}
+            if out:
+                # The JSON summary is the last non-empty stdout line.
+                last = out.splitlines()[-1].strip()
+                try:
+                    result = json.loads(last)
+                except ValueError:
+                    result = {}
+            if not result:
+                # The helper did not emit its summary line (it should always);
+                # fall back to the return code and whatever it printed.
+                self._send(500, {
+                    "ok": False,
+                    "error": (r.stderr or out or "update helper produced no output").strip(),
+                    "log": out,
+                })
+                return
+            result["log"] = out
+            # Keep the latest update transcript on disk so the support bundle
+            # can show what the last OTA did (best-effort, overwrite in place).
+            try:
+                with open(_SUPPORT_UPDATE_LOG, "w") as lf:
+                    lf.write("=== foodassistant-update at %s ===\n%s\n"
+                             % (time.strftime("%Y-%m-%d %H:%M:%S"), out))
+            except OSError:
+                pass
+            self._send(200 if result.get("ok") else 500, result)
+        except subprocess.TimeoutExpired:
+            self._send(500, {"ok": False, "error": "update timed out"})
+        except Exception as e:
+            self._send(500, {"ok": False, "error": str(e)})
+
+    def _reboot(self):
+        # Reboot the host. The bridge runs as root, so it can call systemctl
+        # directly (the app service cannot: its caps are bound to
+        # CAP_NET_BIND_SERVICE). We answer before the reboot takes effect; the
+        # caller treats a dropped connection as success.
+        cmd = _reboot_command()
+        try:
+            subprocess.Popen(cmd)
+            self._send(200, {"ok": True, "rebooting": True})
+        except Exception as e:
+            self._send(500, {"ok": False, "error": str(e)})
+
+    # --- One-image mode switch (FoodAssistant-dzx9) ------------------------
+
+    def _stack_status(self):
+        """Whether this device carries a local backend stack, and its state.
+
+        hosted_stack is True when the deployed compose file defines the backend
+        services (the appliance layout). A device flashed as a Pi Remote has no
+        such compose file (or the remote one, which defines none), so the switch
+        endpoints below can never act on it.
+        """
+        try:
+            services = _compose_backend_services(_read_stack_compose())
+            self._send(200, {
+                "ok": True,
+                "hosted_stack": bool(services),
+                "services": {
+                    name: _container_running("foodassistant-%s" % name)
+                    for name in services
+                },
+            })
+        except Exception as e:
+            self._send(500, {"ok": False, "error": str(e)})
+
+    def _stack_standdown(self):
+        """Stop the local backend containers so the device can act as a
+        satellite. Containers and data directories are kept, never removed, so
+        the stack can be resumed later exactly as it was. Idempotent: stopping
+        an already-stopped (or never-created) service is a no-op.
+        """
+        services = _compose_backend_services(_read_stack_compose())
+        if not services:
+            self._send(400, {"ok": False, "error":
+                "This device has no local inventory stack to stand down."})
+            return
+        try:
+            r = subprocess.run(
+                _stack_stop_cmd(services), cwd=INSTALL_DIR, env=_compose_env(),
+                capture_output=True, text=True, timeout=300,
+            )
+            if r.returncode != 0:
+                self._send(500, {"ok": False, "error": (r.stderr or r.stdout).strip()})
+                return
+            self._send(200, {"ok": True, "stopped": services})
+        except subprocess.TimeoutExpired:
+            self._send(500, {"ok": False, "error": "stopping the local stack timed out"})
+        except Exception as e:
+            self._send(500, {"ok": False, "error": str(e)})
+
+    def _stack_standup(self):
+        """Start the parked local backend stack again (the switch back).
+
+        A plain compose up from the install dir: the persisted COMPOSE_PROFILES
+        restores exactly the optional services (Mealie/Ollama) that were enabled
+        before the stand-down. Idempotent: running services are left alone.
+        """
+        services = _compose_backend_services(_read_stack_compose())
+        if not services:
+            self._send(400, {"ok": False, "error":
+                "This device has no parked local stack to start."})
+            return
+        try:
+            r = subprocess.run(
+                _stack_up_cmd(), cwd=INSTALL_DIR, env=_compose_env(),
+                capture_output=True, text=True, timeout=600,
+            )
+            if r.returncode != 0:
+                self._send(500, {"ok": False, "error": (r.stderr or r.stdout).strip()})
+                return
+            self._send(200, {"ok": True, "started": services})
+        except subprocess.TimeoutExpired:
+            self._send(500, {"ok": False, "error": "starting the local stack timed out"})
+        except Exception as e:
+            self._send(500, {"ok": False, "error": str(e)})
+
+    def _usb_photos_list(self):
+        """GET /usb/photos: image names in the drive's photos folder. Always
+        answers; no drive or no folder is just an empty list, never an error,
+        so the screensaver can quietly fall back to the bouncing logo."""
+        try:
+            pdir, _reason = _usb_photos_status()
+            if not pdir:
+                self._send(200, {"ok": True, "photos": []})
+                return
+            self._send(200, {"ok": True, "photos": _usb_photo_names(pdir)})
+        except Exception as e:
+            self._send(200, {"ok": False, "photos": [], "error": str(e)})
+
+    def _usb_photo_serve(self):
+        """GET /usb/photo?path=name: serve one image from the photos folder.
+        Read-only; the name must resolve to a regular image file directly
+        inside that folder and stay under the size cap. HEIC/HEIF sources are
+        transcoded to JPEG on the way out so a browser can display them; the
+        size cap is checked on the source file either way."""
+        try:
+            query = urllib.parse.urlsplit(self.path).query
+            name = (urllib.parse.parse_qs(query).get("path") or [""])[0]
+            pdir, _reason = _usb_photos_status()
+            full = _usb_photo_safe_path(pdir, name) if pdir else None
+            if not full or os.path.getsize(full) > _USB_PHOTO_MAX_BYTES:
+                self._send(404, {"error": "photo not found"})
+                return
+            if _usb_photo_is_heic(full):
+                body = _heic_transcode(full)
+                if body is None:
+                    # heif-convert missing or failed: skip this frame cleanly
+                    # rather than 500 so the slideshow moves on.
+                    self._send(415, {"error": "cannot transcode HEIC photo"})
+                    return
+            else:
+                with open(full, "rb") as f:
+                    body = f.read()
+        except Exception as e:
+            self._send(500, {"error": str(e)})
+            return
+        ctype = _USB_PHOTO_TYPES.get(
+            os.path.splitext(full)[1].lower(), "application/octet-stream")
+        self.send_response(200)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _usb_status(self):
+        """Attached USB flash drive status for the app's Backup pane."""
+        self._send(200, _usb_drive_status())
+
+    def _usb_backup(self):
+        """Snapshot the data dirs into pantryraider-backups/ on the drive.
+
+        Same content as scripts/backup.sh: a tar of the bind-mounted data dirs
+        that exist under the install dir (app data always; Grocy and Mealie on
+        a Pi Hosted box), so the file restores with foodassistant-restore. The
+        archive is written to a temp name and renamed, so a yanked drive never
+        leaves a half-written file looking like a good backup, and the newest
+        14 backups are kept.
+        """
+        status = _usb_drive_status()
+        if not status.get("detected"):
+            self._send(400, {"ok": False, "error": status.get(
+                "error",
+                "No USB drive found. Plug in a drive that is already formatted "
+                "and mounted, then try again.")})
+            return
+        dirs = _usb_data_dirs()
+        if not dirs:
+            self._send(400, {"ok": False, "error":
+                "No data directories found under %s; nothing to back up." % INSTALL_DIR})
+            return
+        bdir = os.path.join(status["mountpoint"], _USB_BACKUP_DIRNAME)
+        name = "foodassistant-usb-%s.tar.gz" % time.strftime("%Y%m%d-%H%M%S")
+        final = os.path.join(bdir, name)
+        tmp = os.path.join(bdir, "." + name + ".part")
+        try:
+            os.makedirs(bdir, exist_ok=True)
+            r = subprocess.run(
+                ["tar", "-czf", tmp, "-C", INSTALL_DIR] + dirs,
+                capture_output=True, text=True, timeout=600,
+            )
+            if r.returncode != 0:
+                try:
+                    os.unlink(tmp)
+                except OSError:
+                    pass
+                self._send(500, {"ok": False, "error":
+                    (r.stderr or "tar failed").strip()[:400]})
+                return
+            os.replace(tmp, final)
+        except subprocess.TimeoutExpired:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            self._send(500, {"ok": False, "error": "The backup timed out; the drive may be too slow or full."})
+            return
+        except OSError as e:
+            self._send(500, {"ok": False, "error": "Could not write to the drive: %s" % e})
+            return
+        deleted = []
+        for victim in _usb_rotation_victims(os.listdir(bdir)):
+            try:
+                os.unlink(os.path.join(bdir, victim))
+                deleted.append(victim)
+            except OSError:
+                pass
+        try:
+            size = os.stat(final).st_size
+        except OSError:
+            size = 0
+        self._send(200, {"ok": True, "file": final, "bytes": size,
+                         "dirs": dirs, "deleted": deleted})
+
+    def _restore(self):
+        # Restore the FULL stack snapshot (Grocy + Mealie + app data) by
+        # delegating to the foodassistant-restore helper. The bridge runs as
+        # root, so it can stop/start the docker stack and swap the data dirs;
+        # the app container cannot. This mirrors _update: we validate the body,
+        # run the helper synchronously, parse its LAST stdout line as JSON, and
+        # relay it with the full text as "log".
+        #
+        # Design (the bead's open question): we do NOT accept a browser upload
+        # of the large snapshot. The body's {source} is either an absolute path
+        # to a .tar.gz already on the device, or "rclone:<remote-path>" to pull
+        # from the configured rclone remote first. The helper itself also
+        # resolves rclone sources, but we validate the shape here so a bad
+        # source fails fast with a clear error and never reaches the stack.
+        helper = _ensure_helper("foodassistant-restore")
+        if not helper:
+            self._send(500, {"ok": False, "error":
+                "The restore helper is missing on this device. Press Update "
+                "under Backup & Updates to install it, then try again."})
+            return
+        body = self._body()
+        kind, value = _classify_restore_source(body.get("source", ""))
+        if kind == "invalid":
+            self._send(400, {"ok": False, "error": value})
+            return
+        try:
+            env = dict(os.environ)
+            env.setdefault("INSTALL_DIR", INSTALL_DIR)
+            env.setdefault("RCLONE_CONFIG", _RCLONE_CONFIG)
+            # Stopping the stack, pulling a possibly-large snapshot, unpacking,
+            # and restarting can take a while on a Pi, so keep the timeout
+            # generous (the proxy's timeout is matched to this).
+            r = subprocess.run(
+                [helper, body.get("source", "").strip()],
+                capture_output=True, text=True, timeout=900, env=env,
+            )
+            out = (r.stdout or "").strip()
+            result = {}
+            if out:
+                last = out.splitlines()[-1].strip()
+                try:
+                    result = json.loads(last)
+                except ValueError:
+                    result = {}
+            if not result:
+                self._send(500, {
+                    "ok": False,
+                    "error": (r.stderr or out or "restore helper produced no output").strip(),
+                    "log": out,
+                })
+                return
+            result["log"] = out
+            self._send(200 if result.get("ok") else 500, result)
+        except subprocess.TimeoutExpired:
+            self._send(500, {"ok": False, "error": "restore timed out"})
+        except Exception as e:
+            self._send(500, {"ok": False, "error": str(e)})
+
+    def log_message(self, *_):
+        pass
+
+
+if __name__ == "__main__":
+    # Write (or reuse) the shared token before serving, so the app and deck
+    # can pick it up as soon as they start (FoodAssistant-pxcm).
+    _EXPECTED_TOKEN = _load_or_create_token()
+    # Restore the persisted display idle timeout and start the blanking loop.
+    _activity_state["idle_minutes"] = _read_persisted_idle_minutes()
+    threading.Thread(target=_display_idle_loop, daemon=True).start()
+    # Wake on motion: restore the persisted mode and start the accelerometer
+    # poll. A no-op on hardware without the sensor (FoodAssistant-fr5).
+    _activity_state["wake_on_motion"] = _read_persisted_wake_on_motion()
+    threading.Thread(target=_motion_wake_loop, daemon=True).start()
+    # Finish an interrupted Mealie install, if the stack's .env recorded one.
+    threading.Thread(target=_resume_mealie_install, daemon=True).start()
+    # Light up the kiosk when a display is attached after provisioning.
+    threading.Thread(target=_kiosk_autoenable_loop, daemon=True).start()
+    # Continuous power/thermal/disk monitoring for GET /system/warnings.
+    threading.Thread(target=_system_warnings_loop, daemon=True).start()
+    server = http.server.HTTPServer((LISTEN_HOST, LISTEN_PORT), _Handler)
+    print(f"FoodAssistant host bridge listening on {LISTEN_HOST}:{LISTEN_PORT}", flush=True)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        sys.exit(0)
