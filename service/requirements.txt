@@ -1,29 +1,29 @@
 # Web framework and server (required)
-fastapi==0.115.0
-uvicorn[standard]==0.30.6
+fastapi==0.139.0
+uvicorn[standard]==0.50.2
 
 # Database ORM for SQLite inventory (required)
-sqlalchemy==2.0.35
+sqlalchemy==2.0.51
 
 # Data validation and settings management (required)
-pydantic==2.9.2
-pydantic-settings==2.5.2
+pydantic==2.13.4
+pydantic-settings==2.14.2
 
 # Async HTTP client - used for Grocy, Mealie, and cloud provider APIs (required)
-httpx==0.27.2
+httpx==0.28.1
 
 # Form and file upload parsing for photo analysis endpoints (required)
-python-multipart==0.0.12
+python-multipart==0.0.32
 
 # HTML templating engine for the web UI (required)
-jinja2==3.1.4
+jinja2==3.1.6
 
 # AI vision providers (optional - install whichever providers you use)
-google-generativeai==0.8.3  # Gemini vision/enrichment provider
+google-generativeai==0.8.6  # Gemini vision/enrichment provider
 # Transitive dep of google-generativeai. Pin to a current normalized release so
 # pip never resolves the legacy 1.0beta5prerelease2 wheel, whose non-normalized
 # version pip 25.3 hard-errors on (pypa/pip#12938).
-google-api-python-client==2.197.0
+google-api-python-client==2.198.0
 anthropic>=0.45.0            # Anthropic Claude vision/enrichment provider
 # OpenAI is accessed via httpx directly - no SDK needed
 
