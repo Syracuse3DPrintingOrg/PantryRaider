@@ -1,0 +1,93 @@
+{% from "setup/_macros.html" import info, secret_input, panel, srow, pill, toggle with context %}
+<!-- Inventory & Storage (FoodAssistant-jcnh): dense panel/row pattern.
+             The Grocy backend and the custom storage categories are the two
+             panels. Field ids (grocy_base_url, grocy_api_key, grocy_public_url)
+             and the storage-cat-editor container + its classes are unchanged so
+             the save path and category editor JS keep working. -->
+        <div class="tab-pane fade" id="pane-inventory">
+          <p class="pane-intro">Where your stock lives: the Grocy backend and the storage buckets it's grouped into.</p>
+
+          {% call panel('Grocy inventory backend',
+                        'Grocy stores your stock, locations, and consumption history. Pantry Raider reads and updates it through its API.',
+                        pill_text=('Set' if s.grocy_api_key else 'Not set'),
+                        pill_kind=('good' if s.grocy_api_key else 'neutral')) %}
+            {% call srow('Server address', 'Full URL, no trailing slash.',
+                         'Where Grocy runs on your network.' ~ (' On this appliance Grocy runs alongside the app, so the pre-filled default works as is.' if (is_pi and not features.satellite) else ' Connect to a Grocy instance running on your network or server.')) %}
+              <input type="url" class="form-control" id="grocy_base_url"
+                     placeholder="http://192.168.1.10:9383" style="max-width:420px"
+                     value="{{ s.grocy_base_url if (s.grocy_base_url and s.grocy_base_url != 'http://grocy:80') else suggested_grocy_url }}">
+              {% if suggested_grocy_url and not s.grocy_base_url %}
+              <div class="form-text text-success"><i class="bi bi-check-circle me-1"></i>Grocy detected locally, address pre-filled.</div>
+              {% endif %}
+            {% endcall %}
+            {% call srow('API key', 'From Grocy.',
+                         'In Grocy, open Settings then Manage API keys and add one. Paste it here so Pantry Raider can read and update your stock.') %}
+              <div style="max-width:420px">{{ secret_input('grocy_api_key', 'Grocy → Manage API Keys') }}</div>
+            {% endcall %}
+            {% call srow('Public address', 'Optional, for browser links.',
+                         'External address used when the UI links you to Grocy through a reverse proxy. Leave empty to use the internal address above.') %}
+              <input type="url" class="form-control" id="grocy_public_url" name="grocy_public_url"
+                     placeholder="https://grocy.yourdomain.com" style="max-width:420px"
+                     value="{{ s.grocy_public_url }}">
+            {% endcall %}
+            {% call srow('Connection', 'Check the address and key work.') %}
+              <div class="set-row-actions">
+                <button class="btn btn-outline-info btn-sm" onclick="testGrocy()">
+                  <i class="bi bi-plug me-1"></i>Test Grocy
+                </button>
+              </div>
+              <div class="test-result mt-1" id="grocy-result"></div>
+            {% endcall %}
+          {% endcall %}
+
+          <button type="button" class="btn btn-outline-info btn-sm" onclick="savePaneGrocy(this)">
+            <i class="bi bi-check-lg me-1"></i>Save Grocy
+          </button>
+          <div class="test-result mt-2 mb-3" id="grocy-save-result"></div>
+
+          {# Custom Storage Categories share the pane with the Grocy backend:
+             both describe where stock lives. A satellite pulls categories from
+             the main server, so the panel is gated out for it. #}
+          {% if not features.satellite %}
+          {% call panel('Custom storage categories',
+                        'Add storage buckets beyond the four built-ins (Refrigerated, Frozen, Room Temp, Pantry).') %}
+            <p class="text-secondary small mt-2 mb-2">Each maps to a Grocy location; assign items to it from the <strong>Move</strong> button on the Inventory page. Saved separately with the button below.</p>
+            <div class="vstack gap-2" id="storage-cat-editor">
+              {% for c in custom_categories %}
+              <div class="cat-row border rounded p-2">
+                <div class="row g-2 align-items-end">
+                  <div class="col-6 col-md-3">
+                    <label class="form-label small mb-1">Name</label>
+                    <input class="form-control form-control-sm cat-label" value="{{ c.label }}" placeholder="Wine Cellar">
+                  </div>
+                  <div class="col-6 col-md-2">
+                    <label class="form-label small mb-1">Icon <a href="https://icons.getbootstrap.com/" target="_blank" class="text-secondary" title="Browse icons"><i class="bi bi-box-arrow-up-right"></i></a></label>
+                    <input class="form-control form-control-sm cat-icon" value="{{ c.icon }}" placeholder="bi-database">
+                  </div>
+                  <div class="col-4 col-md-1">
+                    <label class="form-label small mb-1">Color</label>
+                    <input type="color" class="form-control form-control-sm form-control-color cat-color" value="{{ c.color }}">
+                  </div>
+                  <div class="col-8 col-md-3">
+                    <label class="form-label small mb-1">Grocy location</label>
+                    <input class="form-control form-control-sm cat-location" value="{{ c.location }}" placeholder="Wine Cellar">
+                  </div>
+                  <div class="col-9 col-md-2">
+                    <label class="form-label small mb-1">Match <span class="text-secondary">keywords</span></label>
+                    <input class="form-control form-control-sm cat-match" value="{{ c.match | join(', ') }}" placeholder="wine, cellar">
+                  </div>
+                  <div class="col-3 col-md-1 d-grid">
+                    <button class="btn btn-outline-danger btn-sm" onclick="this.closest('.cat-row').remove()" title="Remove"><i class="bi bi-trash"></i></button>
+                  </div>
+                </div>
+              </div>
+              {% endfor %}
+            </div>
+            <div class="d-flex flex-wrap gap-2 mt-2 align-items-center">
+              <button class="btn btn-outline-secondary btn-sm" onclick="addCatRow()"><i class="bi bi-plus-lg me-1"></i>Add category</button>
+              <button class="btn btn-primary btn-sm" onclick="saveStorageCategories()" id="catSaveBtn"><i class="bi bi-check2 me-1"></i>Save categories</button>
+              <span id="catSaveResult" class="small"></span>
+            </div>
+          {% endcall %}
+          {% endif %}
+        </div>
