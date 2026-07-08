@@ -1,0 +1,106 @@
+{% from "setup/_macros.html" import info, panel, srow, pill, toggle with context %}
+<!-- Printing (FoodAssistant-fb8x): a device-local feature, so it renders in
+     every mode (a printer is attached to whatever device you are at). The
+     master toggle gates the whole feature; the queue dropdowns are filled from
+     /printing/queues on open. Field ids match the saved settings so the save
+     path picks them up. -->
+        <div class="tab-pane fade" id="pane-printing">
+          <p class="pane-intro">Print food and spice labels, and full recipes, on a printer attached to this device.</p>
+
+          {% if not printing_available %}
+          <div class="alert alert-secondary d-flex align-items-start gap-2" role="alert">
+            <i class="bi bi-info-circle fs-5"></i>
+            <div>
+              This device does not have a printer set up yet. Printing has to be
+              turned on for the device before it can send anything. Once a printer
+              is connected and set up, your printers show up in the lists below.
+              <div class="mt-2">
+                <button type="button" class="btn btn-outline-info btn-sm" onclick="installPrintStack(this)">
+                  <i class="bi bi-download me-1"></i>Install now
+                </button>
+                <div class="test-result mt-2" id="print-install-result"></div>
+              </div>
+            </div>
+          </div>
+          {% endif %}
+
+          {% call panel('Printing',
+                        'Turn printing on to show a Print label button on your items and a Print button on recipes.',
+                        pill_text=('On' if s.printing_enabled else 'Off'),
+                        pill_kind=('good' if s.printing_enabled else 'neutral')) %}
+            {% call srow('Enable printing', 'The master switch for labels and recipe printouts.') %}
+              {{ toggle('printing_enabled', checked=s.printing_enabled) }}
+            {% endcall %}
+            {% call srow('Label printer', 'Where food and spice labels go.',
+                         'Pick the printer loaded with your label stock. The list is read from this device.') %}
+              <select class="form-select" id="label_printer_queue" style="max-width:420px">
+                <option value="">(none chosen)</option>
+                {% if s.label_printer_queue %}
+                <option value="{{ s.label_printer_queue }}" selected>{{ s.label_printer_queue }}</option>
+                {% endif %}
+              </select>
+            {% endcall %}
+            {% call srow('Document printer', 'Where full-page recipes go.',
+                         'Pick your regular paper printer for recipe printouts.') %}
+              <select class="form-select" id="document_printer_queue" style="max-width:420px">
+                <option value="">(none chosen)</option>
+                {% if s.document_printer_queue %}
+                <option value="{{ s.document_printer_queue }}" selected>{{ s.document_printer_queue }}</option>
+                {% endif %}
+              </select>
+            {% endcall %}
+            {% call srow('Refresh printers', 'Look for printers on this device again.') %}
+              <button type="button" class="btn btn-outline-secondary btn-sm" onclick="loadPrintQueues(true)">
+                <i class="bi bi-arrow-repeat me-1"></i>Refresh list
+              </button>
+              <div class="test-result mt-1" id="print-queues-result"></div>
+            {% endcall %}
+          {% endcall %}
+
+          {% call panel('Label size',
+                        'The size of your label stock, in inches, plus its print resolution. The preview updates as you change these.') %}
+            {% call srow('Width', 'Inches.') %}
+              <input type="number" class="form-control" id="label_width_in" min="0.5" max="8" step="0.1"
+                     style="max-width:140px" value="{{ s.label_width_in }}" oninput="refreshLabelPreview()">
+            {% endcall %}
+            {% call srow('Height', 'Inches.') %}
+              <input type="number" class="form-control" id="label_height_in" min="0.5" max="8" step="0.1"
+                     style="max-width:140px" value="{{ s.label_height_in }}" oninput="refreshLabelPreview()">
+            {% endcall %}
+            {% call srow('Resolution', 'Dots per inch. 203 suits most thermal label printers.') %}
+              <input type="number" class="form-control" id="label_dpi" min="72" max="600" step="1"
+                     style="max-width:140px" value="{{ s.label_dpi }}" oninput="refreshLabelPreview()">
+            {% endcall %}
+            {% call srow('Preview', 'A sample label at the size above.') %}
+              <div class="border rounded d-inline-block p-2 bg-body-tertiary">
+                <img id="label-preview-img" alt="Label preview"
+                     style="max-width:100%;image-rendering:pixelated;background:#fff">
+              </div>
+            {% endcall %}
+          {% endcall %}
+
+          {% call panel('Decorative labels',
+                        'Make a plain name label for a spice jar, canister, or storage bin. No dates, just the text.') %}
+            {% call srow('Label text', 'What the label should say.') %}
+              <input type="text" class="form-control" id="decorative-text" style="max-width:420px"
+                     placeholder="Smoked Paprika" oninput="refreshDecorativePreview()">
+            {% endcall %}
+            {% call srow('Preview', 'A sample of the decorative label.') %}
+              <div class="border rounded d-inline-block p-2 bg-body-tertiary">
+                <img id="decorative-preview-img" alt="Decorative label preview"
+                     style="max-width:100%;image-rendering:pixelated;background:#fff">
+              </div>
+            {% endcall %}
+            {% call srow('Print', 'Send the decorative label to the label printer.') %}
+              <button type="button" class="btn btn-outline-info btn-sm" onclick="printDecorative(this)">
+                <i class="bi bi-printer me-1"></i>Print label
+              </button>
+              <div class="test-result mt-1" id="decorative-print-result"></div>
+            {% endcall %}
+          {% endcall %}
+
+          <button type="button" class="btn btn-outline-info btn-sm" onclick="savePanePrinting(this)">
+            <i class="bi bi-check-lg me-1"></i>Save Printing
+          </button>
+          <div class="test-result mt-2 mb-3" id="printing-save-result"></div>
+        </div>

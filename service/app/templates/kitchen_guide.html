@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+{% block title %}Kitchen Guide: Pantry Raider{% endblock %}
+
+{% block content %}
+<div class="mt-3 mb-3">
+  <h4><i class="bi bi-book me-2"></i>Kitchen Guide</h4>
+  <p class="text-secondary mb-0">Quick reference for safe cooking, doneness, substitutions, and technique.</p>
+</div>
+
+<div class="row g-3">
+  <!-- Safe minimum internal temperatures -->
+  <div class="col-12 col-xl-6">
+    <div class="card h-100">
+      <div class="card-header"><i class="bi bi-thermometer-half me-2"></i>Safe internal temperatures</div>
+      <div class="card-body p-0">
+        <table class="table table-sm table-dark mb-0 align-middle">
+          <thead>
+            <tr><th>Food</th><th class="text-end">Minimum</th><th>Notes</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Poultry (chicken, turkey, whole or ground)</td><td class="text-end fw-semibold">165&deg;F / 74&deg;C</td><td class="small text-secondary">No rest needed</td></tr>
+            <tr><td>Ground beef, pork, lamb</td><td class="text-end fw-semibold">160&deg;F / 71&deg;C</td><td class="small text-secondary"></td></tr>
+            <tr><td>Beef, pork, lamb, veal (steaks, chops, roasts)</td><td class="text-end fw-semibold">145&deg;F / 63&deg;C</td><td class="small text-secondary">Rest 3 minutes</td></tr>
+            <tr><td>Fish and shellfish</td><td class="text-end fw-semibold">145&deg;F / 63&deg;C</td><td class="small text-secondary">Flesh opaque, flakes</td></tr>
+            <tr><td>Ham (fresh or smoked, raw)</td><td class="text-end fw-semibold">145&deg;F / 63&deg;C</td><td class="small text-secondary">Rest 3 minutes</td></tr>
+            <tr><td>Egg dishes</td><td class="text-end fw-semibold">160&deg;F / 71&deg;C</td><td class="small text-secondary">Cook eggs until firm</td></tr>
+            <tr><td>Leftovers and casseroles</td><td class="text-end fw-semibold">165&deg;F / 74&deg;C</td><td class="small text-secondary">Reheat thoroughly</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="card-footer small text-secondary">
+        Follows USDA safe minimum cooking temperatures. Always measure at the thickest part, away from bone.
+      </div>
+    </div>
+  </div>
+
+  <!-- Red-meat doneness -->
+  <div class="col-12 col-xl-6">
+    <div class="card h-100">
+      <div class="card-header"><i class="bi bi-fire me-2"></i>Red-meat doneness</div>
+      <div class="card-body p-0">
+        <table class="table table-sm table-dark mb-0 align-middle">
+          <thead>
+            <tr><th>Doneness</th><th class="text-end">Pull temp</th><th>Look</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Rare</td><td class="text-end">120&ndash;125&deg;F / 49&deg;C</td><td class="small text-secondary">Cool red center</td></tr>
+            <tr><td>Medium rare</td><td class="text-end">130&ndash;135&deg;F / 57&deg;C</td><td class="small text-secondary">Warm red center</td></tr>
+            <tr><td>Medium</td><td class="text-end">135&ndash;145&deg;F / 60&deg;C</td><td class="small text-secondary">Warm pink center</td></tr>
+            <tr><td>Medium well</td><td class="text-end">145&ndash;155&deg;F / 66&deg;C</td><td class="small text-secondary">Slightly pink</td></tr>
+            <tr><td>Well done</td><td class="text-end">155&deg;F+ / 68&deg;C+</td><td class="small text-secondary">Little or no pink</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="card-footer small text-secondary">
+        Temperature climbs 3&ndash;5&deg;F while resting, so pull a touch early. USDA recommends a 145&deg;F minimum for whole cuts.
+      </div>
+    </div>
+  </div>
+
+  <!-- Common substitutions -->
+  <div class="col-12 col-xl-6">
+    <div class="card h-100">
+      <div class="card-header"><i class="bi bi-arrow-left-right me-2"></i>Common substitutions</div>
+      <div class="card-body p-0">
+        <table class="table table-sm table-dark mb-0 align-middle">
+          <thead>
+            <tr><th>Need</th><th>Use instead</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>1 cup buttermilk</td><td>1 tbsp lemon juice or vinegar + milk to 1 cup, rest 5 min</td></tr>
+            <tr><td>1 egg (binding)</td><td>1 tbsp ground flax + 3 tbsp water, rest 5 min</td></tr>
+            <tr><td>1 cup self-rising flour</td><td>1 cup flour + 1.5 tsp baking powder + 0.25 tsp salt</td></tr>
+            <tr><td>1 tsp baking powder</td><td>0.25 tsp baking soda + 0.5 tsp cream of tartar</td></tr>
+            <tr><td>1 cup sour cream</td><td>1 cup plain Greek yogurt</td></tr>
+            <tr><td>1 cup heavy cream (cooking)</td><td>0.75 cup milk + 0.25 cup melted butter</td></tr>
+            <tr><td>1 clove garlic</td><td>0.125 tsp garlic powder</td></tr>
+            <tr><td>1 tbsp fresh herbs</td><td>1 tsp dried herbs</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Technique tips -->
+  <div class="col-12 col-xl-6">
+    <div class="card h-100">
+      <div class="card-header"><i class="bi bi-lightbulb me-2"></i>Technique tips</div>
+      <div class="card-body">
+        <ul class="mb-0 small">
+          <li><strong>Rest your meat.</strong> Let roasts and steaks rest 5&ndash;10 minutes so juices redistribute instead of running onto the board.</li>
+          <li><strong>Dry for browning.</strong> Pat proteins dry and avoid crowding the pan; moisture steams instead of searing.</li>
+          <li><strong>Salt early.</strong> Salting 40+ minutes ahead (or the night before) seasons throughout and improves texture.</li>
+          <li><strong>Taste as you go.</strong> Adjust salt and acid (lemon, vinegar) at the end to brighten a finished dish.</li>
+          <li><strong>Mise en place.</strong> Prep and measure everything before the heat goes on, especially for quick stir-fries.</li>
+          <li><strong>Cool before the fridge.</strong> Get hot leftovers into the fridge within 2 hours; divide into shallow containers to cool fast.</li>
+          <li><strong>Calibrate your thermometer.</strong> Ice water should read 32&deg;F / 0&deg;C; boiling water about 212&deg;F / 100&deg;C at sea level.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- Oven quick reference -->
+  <div class="col-12 col-xl-6">
+    <div class="card h-100">
+      <div class="card-header"><i class="bi bi-thermometer-sun me-2"></i>Oven quick reference</div>
+      <div class="card-body p-0">
+        <table class="table table-sm table-dark mb-0 align-middle">
+          <thead>
+            <tr><th>Description</th><th class="text-end">Fahrenheit</th><th class="text-end">Celsius</th><th class="text-end">Gas mark</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Low / slow</td><td class="text-end">275&deg;F</td><td class="text-end">135&deg;C</td><td class="text-end">1</td></tr>
+            <tr><td>Moderate</td><td class="text-end">350&deg;F</td><td class="text-end">175&deg;C</td><td class="text-end">4</td></tr>
+            <tr><td>Hot (roast/bake)</td><td class="text-end">400&deg;F</td><td class="text-end">200&deg;C</td><td class="text-end">6</td></tr>
+            <tr><td>Very hot</td><td class="text-end">450&deg;F</td><td class="text-end">230&deg;C</td><td class="text-end">8</td></tr>
+            <tr><td>Pizza / max</td><td class="text-end">500&deg;F</td><td class="text-end">260&deg;C</td><td class="text-end">10</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="card-footer small text-secondary">
+        Convection (fan) ovens run hotter: drop the temperature about 25&deg;F / 15&deg;C or shorten the time.
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
