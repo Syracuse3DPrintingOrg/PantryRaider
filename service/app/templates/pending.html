@@ -1,0 +1,348 @@
+{% extends "base.html" %}
+{% block title %}Pending: Pantry Raider{% endblock %}
+{% block content %}
+<style>
+  .pending-card.failed { border-color: #4d2a0a !important; }
+  .field-saved { box-shadow: 0 0 0 2px rgba(105,219,124,0.5) !important; transition: box-shadow 0.2s; }
+  .meta-text { font-size: 0.75rem; color: var(--bs-secondary-color); }
+</style>
+
+<!-- Action items / notifications (FoodAssistant-iut3). Sits above the pending
+     scans and collapses entirely when there is nothing to action. -->
+<section id="action-items-section" class="my-3 d-none">
+  <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
+    <h4 class="mb-0">
+      <i class="bi bi-bell me-2"></i>Action Items
+      <span class="badge text-bg-danger ms-1" id="action-items-count">0</span>
+    </h4>
+    <div class="d-flex gap-2">
+      <button class="btn btn-outline-secondary btn-sm" onclick="archiveAllActionItems()" title="Archive every action item">
+        <i class="bi bi-archive me-1"></i>Archive all
+      </button>
+      <button class="btn btn-outline-secondary btn-sm" onclick="loadActionItems()" title="Refresh">
+        <i class="bi bi-arrow-clockwise"></i>
+      </button>
+    </div>
+  </div>
+  <div id="action-items-list" class="d-flex flex-column gap-2"></div>
+</section>
+
+<div class="d-flex justify-content-between align-items-center my-3 flex-wrap gap-2">
+  <h4 class="mb-0">
+    <i class="bi bi-hourglass-split me-2"></i>Pending Scans
+    <span class="badge text-bg-warning ms-1" id="pending-count">0</span>
+  </h4>
+  <div class="d-flex gap-2">
+    <button class="btn btn-outline-secondary btn-sm" onclick="loadPending()" title="Refresh">
+      <i class="bi bi-arrow-clockwise"></i>
+    </button>
+    <button class="btn btn-success" onclick="commitAll()" id="commitAllBtn">
+      <i class="bi bi-cloud-upload me-1"></i>Commit All to Grocy
+    </button>
+  </div>
+</div>
+
+<p class="text-secondary small">
+  Items scanned by a headless barcode scanner land here with defaults applied.
+  Edit anything inline (changes save automatically), then commit.
+  <i class="bi bi-exclamation-triangle text-warning"></i> = barcode lookup failed, fix the name before committing.
+</p>
+
+<div id="pending-list"></div>
+<div id="pending-empty" class="text-center text-secondary py-5 d-none">
+  <i class="bi bi-check2-circle fs-1 d-block mb-2 text-success"></i>
+  No pending scans, all caught up.
+</div>
+<div id="commit-status" class="mt-2"></div>
+
+<!-- Toast -->
+<div class="position-fixed bottom-0 end-0 p-3" style="z-index:9999">
+  <div id="pToast" class="toast align-items-center text-bg-success border-0" role="alert">
+    <div class="d-flex">
+      <div class="toast-body" id="pToastMsg"></div>
+      <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const CATEGORIES = ['Poultry','Meat','Seafood','Dairy','Produce','Grains','Condiments','Beverages','Snacks','Frozen','Canned','Other'];
+const STORAGES = {refrigerated:'Refrigerated', frozen:'Frozen', room_temp:'Room Temp', dry:'Dry'};
+
+function esc(s) {
+  return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
+}
+
+function options(list, selected) {
+  if (Array.isArray(list)) {
+    return list.map(v => `<option value="${v}" ${v===selected?'selected':''}>${v}</option>`).join('');
+  }
+  return Object.entries(list).map(([v,label]) =>
+    `<option value="${v}" ${v===selected?'selected':''}>${label}</option>`).join('');
+}
+
+async function loadPending() {
+  const r = await fetch('pending/');
+  const data = await r.json();
+  if (!r.ok) {
+    // A satellite whose main server is unreachable gets an honest JSON
+    // detail; show that instead of pretending the queue is empty
+    // (FoodAssistant-2cmm).
+    document.getElementById('pending-empty').classList.add('d-none');
+    document.getElementById('pending-list').innerHTML =
+      `<div class="alert alert-warning"><i class="bi bi-plug me-2"></i>${esc(data.detail || 'The pending list did not load.')}</div>`;
+    document.getElementById('commitAllBtn').disabled = true;
+    return;
+  }
+  const items = data.items || [];
+  document.getElementById('pending-count').textContent = items.length;
+  document.getElementById('pending-empty').classList.toggle('d-none', items.length > 0);
+  document.getElementById('commitAllBtn').disabled = items.length === 0;
+
+  document.getElementById('pending-list').innerHTML = items.map(item => `
+    <div class="card mb-2 pending-card ${item.lookup_failed ? 'failed' : ''}" id="pending-${item.id}">
+      <div class="card-body py-2">
+        <div class="row g-2 align-items-center">
+          <div class="col-md-3">
+            <input class="form-control form-control-sm ${item.lookup_failed ? 'border-warning' : ''}"
+                   value="${esc(item.name)}" placeholder="Name"
+                   onchange="patchItem(${item.id}, 'name', this.value, this)">
+          </div>
+          <div class="col-4 col-md-1">
+            <input class="form-control form-control-sm" type="number" value="${item.quantity}"
+                   min="0.01" step="0.01"
+                   onchange="patchItem(${item.id}, 'quantity', parseFloat(this.value), this)">
+          </div>
+          <div class="col-4 col-md-1">
+            <input class="form-control form-control-sm" value="${esc(item.unit || 'item')}"
+                   onchange="patchItem(${item.id}, 'unit', this.value, this)">
+          </div>
+          <div class="col-4 col-md-2">
+            <select class="form-select form-select-sm" onchange="patchItem(${item.id}, 'category', this.value, this)">
+              ${options(CATEGORIES, item.category)}
+            </select>
+          </div>
+          <div class="col-6 col-md-2">
+            <select class="form-select form-select-sm" onchange="patchItem(${item.id}, 'storage_type', this.value, this)">
+              ${options(STORAGES, item.storage_type)}
+            </select>
+          </div>
+          <div class="col-6 col-md-2">
+            <input class="form-control form-control-sm" type="date" value="${item.best_by_date || ''}"
+                   onchange="patchItem(${item.id}, 'best_by_date', this.value, this)">
+          </div>
+          <div class="col-md-1 text-end d-flex gap-1 justify-content-end">
+            <button class="btn btn-sm btn-outline-success btn-icon" title="Commit this item"
+                    onclick="commitOne(${item.id})">
+              <i class="bi bi-cloud-upload"></i>
+            </button>
+            <button class="btn btn-sm btn-outline-danger btn-icon" title="Discard"
+                    onclick="discardItem(${item.id})">
+              <i class="bi bi-x-lg"></i>
+            </button>
+          </div>
+        </div>
+        ${item.duplicate ? `
+        <div class="mt-1 ms-1">
+          <span class="badge text-bg-info" title="This product already has stock in Grocy. You can still add it; scanned on a different day it lands as a separate entry so each keeps its own expiration.">
+            <i class="bi bi-info-circle me-1"></i>Already in inventory (duplicate)
+          </span>
+        </div>` : ''}
+        <div class="meta-text mt-1 ms-1">
+          ${item.lookup_failed ? '<i class="bi bi-exclamation-triangle text-warning me-1"></i>lookup failed: ' : ''}
+          ${item.barcode ? `barcode ${esc(item.barcode)} · ` : ''}
+          ${item.brand ? `${esc(item.brand)} · ` : ''}
+          scanned ${item.created_at ? item.created_at.replace('T',' ').slice(0,16) : '?'}
+          ${item.source ? ` via ${esc(item.source)}` : ''}
+        </div>
+      </div>
+    </div>
+  `).join('');
+}
+
+async function patchItem(id, field, value, el) {
+  try {
+    const r = await fetch(`pending/${id}`, {
+      method: 'PATCH',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ [field]: value }),
+    });
+    if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
+    if (el) {
+      el.classList.add('field-saved');
+      setTimeout(() => el.classList.remove('field-saved'), 800);
+    }
+  } catch(e) {
+    showToast(`Save failed: ${e.message}`, true);
+  }
+}
+
+async function commitOne(id) {
+  await doCommit([id]);
+}
+
+async function commitAll() {
+  await doCommit(null);
+}
+
+async function doCommit(ids) {
+  document.getElementById('commit-status').innerHTML =
+    '<div class="alert alert-info py-1 px-2 small"><span class="spinner-border spinner-border-sm me-1"></span>Committing…</div>';
+  try {
+    const r = await fetch('pending/commit', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ ids }),
+    });
+    const d = await r.json();
+    const errs = (d.results || []).filter(x => x.status === 'error');
+    if (errs.length === 0) {
+      document.getElementById('commit-status').innerHTML = '';
+      showToast(`✓ Imported ${d.imported} item(s) to Grocy`);
+    } else {
+      document.getElementById('commit-status').innerHTML =
+        `<div class="alert alert-warning py-1 px-2 small">${d.imported} imported, ${errs.length} failed: ${errs.map(x => esc(x.error)).join('; ')}</div>`;
+    }
+    await loadPending();
+  } catch(e) {
+    document.getElementById('commit-status').innerHTML =
+      `<div class="alert alert-danger py-1 px-2 small">Commit failed: ${esc(e.message)}</div>`;
+  }
+}
+
+async function discardItem(id) {
+  try {
+    await fetch(`pending/${id}`, { method: 'DELETE' });
+    document.getElementById(`pending-${id}`)?.remove();
+    const cnt = document.getElementById('pending-count');
+    cnt.textContent = Math.max(0, parseInt(cnt.textContent) - 1);
+    if (cnt.textContent === '0') loadPending();
+  } catch(e) {
+    showToast(`Delete failed: ${e.message}`, true);
+  }
+}
+
+function showToast(msg, isError = false) {
+  const toast = document.getElementById('pToast');
+  toast.className = `toast align-items-center border-0 text-bg-${isError ? 'danger' : 'success'}`;
+  document.getElementById('pToastMsg').textContent = msg;
+  new bootstrap.Toast(toast, { delay: 3000 }).show();
+}
+
+// --- Action items / notifications (FoodAssistant-iut3) -------------------
+function actionItemCard(it) {
+  const wrap = document.createElement('div');
+  const level = ['info', 'success', 'warning', 'error'].includes(it.level) ? it.level : 'info';
+  const accent = { info: 'info', success: 'success', warning: 'warning', error: 'danger' }[level];
+  wrap.className = 'card border-' + accent;
+  const body = document.createElement('div');
+  body.className = 'card-body py-2 px-3 d-flex justify-content-between align-items-center flex-wrap gap-2';
+  const text = document.createElement('div');
+  const title = document.createElement('div');
+  title.className = 'fw-semibold';
+  title.textContent = it.title || '';
+  const sub = document.createElement('div');
+  sub.className = 'meta-text';
+  sub.textContent = it.body || '';
+  text.appendChild(title);
+  if (it.body) text.appendChild(sub);
+  // A system warning can carry a guide link in its payload (the power and
+  // cabling doc for undervoltage); render it as a small trailing link.
+  const url = it.payload && typeof it.payload.url === 'string' ? it.payload.url : '';
+  if (url && (url.startsWith('https://') || url.startsWith('http://'))) {
+    const a = document.createElement('a');
+    a.className = 'meta-text';
+    a.href = url;
+    a.target = '_blank';
+    a.rel = 'noopener';
+    a.textContent = 'Open the guide';
+    text.appendChild(a);
+  }
+  const btns = document.createElement('div');
+  btns.className = 'd-flex gap-1';
+  // A leftover prompt offers a primary "Save to leftovers"; every item can be
+  // snoozed or archived. The save action is wired by the leftovers feature.
+  if (it.kind === 'leftover_prompt') {
+    btns.appendChild(actionBtn('Save to leftovers', 'success', () => saveLeftover(it)));
+  }
+  btns.appendChild(actionBtn('Snooze 24h', 'outline-secondary', () => actionItemAct(it.id, 'snooze')));
+  btns.appendChild(actionBtn('Archive', 'outline-secondary', () => actionItemAct(it.id, 'archive')));
+  body.appendChild(text);
+  body.appendChild(btns);
+  wrap.appendChild(body);
+  return wrap;
+}
+
+function actionBtn(label, variant, onclick) {
+  const b = document.createElement('button');
+  b.className = 'btn btn-sm btn-' + variant;
+  b.textContent = label;
+  b.onclick = onclick;
+  return b;
+}
+
+async function loadActionItems() {
+  let data = { items: [] };
+  try {
+    const r = await fetch('action-items', { cache: 'no-store' });
+    if (r.ok) data = await r.json();
+  } catch (e) { /* offline: leave the section as-is */ return; }
+  const section = document.getElementById('action-items-section');
+  const list = document.getElementById('action-items-list');
+  const count = document.getElementById('action-items-count');
+  const items = data.items || [];
+  count.textContent = items.length;
+  list.innerHTML = '';
+  if (!items.length) { section.classList.add('d-none'); return; }
+  section.classList.remove('d-none');
+  items.forEach(it => list.appendChild(actionItemCard(it)));
+}
+
+async function archiveAllActionItems() {
+  const n = document.getElementById('action-items-count').textContent;
+  if (n !== '0' && !confirm('Archive all ' + n + ' action items?')) return;
+  try {
+    await fetch('action-items/archive-all', { method: 'POST',
+      headers: { 'Content-Type': 'application/json' }, body: '{}' });
+  } catch (e) { showToast('Could not archive', true); return; }
+  loadActionItems();
+}
+
+async function actionItemAct(id, action) {
+  try {
+    await fetch('action-items/' + id + '/' + action, { method: 'POST',
+      headers: { 'Content-Type': 'application/json' }, body: '{}' });
+  } catch (e) { showToast('Could not update the item', true); return; }
+  loadActionItems();
+}
+
+// Save a cooked meal to Grocy as a short-expiry leftover (FoodAssistant-fu1u),
+// then the originating action item resolves itself server-side.
+async function saveLeftover(it) {
+  const p = it.payload || {};
+  try {
+    const r = await fetch('current-recipe/leftover', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: p.title || '', servings: p.servings || 1,
+                             days: p.days || 4, action_item_id: it.id }),
+    });
+    if (!r.ok) throw new Error('save failed');
+    showToast('Saved to leftovers');
+  } catch (e) { showToast('Could not save the leftover', true); return; }
+  loadActionItems();
+}
+
+loadActionItems();
+setInterval(() => { if (!document.hidden) loadActionItems(); }, 30000);
+
+loadPending();
+// Headless scanners add items while this page is open, so keep it fresh. A
+// hidden tab skips the refresh and catches up as soon as it is shown again.
+setInterval(() => { if (!document.hidden) loadPending(); }, 15000);
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) { loadPending(); loadActionItems(); }
+});
+</script>
+{% endblock %}
