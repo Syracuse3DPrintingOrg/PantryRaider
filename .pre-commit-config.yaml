@@ -1,0 +1,17 @@
+# Pre-commit hooks for Pantry Raider.
+#
+# This complements, and does not replace, the version-bump git hook installed
+# by scripts/install-git-hooks.sh. That hook auto-bumps APP_VERSION on commit.
+# Keep both: pre-commit handles lint and format, the install-git-hooks.sh hook
+# handles versioning.
+#
+# Ruff settings (line length, selected rules, ignores, per-file ignores) are
+# read from the existing pyproject.toml, so this config stays in sync with CI.
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.9
+    hooks:
+      - id: ruff
+        name: ruff (lint)
+      - id: ruff-format
+        name: ruff (format)

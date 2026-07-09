@@ -1,0 +1,247 @@
+{% extends "base.html" %}
+{% block title %}Weather: Pantry Raider{% endblock %}
+
+{% block content %}
+<div class="mt-3 mb-3 d-flex align-items-center justify-content-between flex-wrap gap-2">
+  <h4 class="mb-0"><i class="bi bi-cloud-sun me-2"></i>Weather{% if weather_location %} <span class="text-secondary fs-6">{{ weather_location }}</span>{% endif %}</h4>
+  <div class="d-flex gap-2">
+    <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-toggle="collapse" data-bs-target="#wxSettings" title="Location and units">
+      <i class="bi bi-gear"></i>
+    </button>
+    <button type="button" class="btn btn-outline-info btn-sm" onclick="reloadWeather()">
+      <i class="bi bi-arrow-clockwise me-1"></i>Refresh
+    </button>
+  </div>
+</div>
+
+{# The weather location and units are set right here on the Weather page (no
+   separate settings section). They are shared with the Stream Deck weather key. #}
+<div class="collapse mb-3" id="wxSettings">
+  <div class="card card-body">
+    <div class="row g-2 align-items-end">
+      <div class="col-12 col-md-5">
+        <label class="form-label small mb-1" for="wxLocation">Location</label>
+        <input type="text" class="form-control form-control-sm" id="wxLocation"
+               placeholder="City, ZIP, or lat,lon (empty = auto-detect)" value="{{ weather_location }}">
+      </div>
+      <div class="col-6 col-md-3">
+        <label class="form-label small mb-1" for="wxUnits">Units</label>
+        <select class="form-select form-select-sm" id="wxUnits">
+          <option value="f" {{ 'selected' if weather_units != 'c' else '' }}>Fahrenheit (°F)</option>
+          <option value="c" {{ 'selected' if weather_units == 'c' else '' }}>Celsius (°C)</option>
+        </select>
+      </div>
+      <div class="col-6 col-md-4">
+        <button type="button" class="btn btn-info btn-sm" onclick="saveWeatherSettings(this)">
+          <i class="bi bi-check-lg me-1"></i>Save
+        </button>
+        <span class="small ms-1" id="wxSaveResult"></span>
+      </div>
+      <div class="col-12">
+        <a class="small text-decoration-none" data-bs-toggle="collapse" href="#wxAdvanced" role="button"><i class="bi bi-sliders me-1"></i>Advanced</a>
+        <div class="collapse mt-2" id="wxAdvanced">
+          <label class="form-label small mb-1" for="wxServer">Weather server</label>
+          <input type="text" class="form-control form-control-sm" id="wxServer" style="max-width:420px"
+                 placeholder="https://api.open-meteo.com" value="{{ weather_api_base }}">
+          <div class="form-text">The Open-Meteo API base URL. Default is the public service; point it at a self-hosted Open-Meteo if you run one. Falls back to wttr.in if unreachable.</div>
+        </div>
+      </div>
+    </div>
+    <div class="form-text mt-1">Used by this page and any Stream Deck weather keys.</div>
+  </div>
+</div>
+
+<div id="weatherLoading" class="text-secondary py-5 text-center">
+  <span class="spinner-border spinner-border-sm me-2"></span>Loading the forecast…
+</div>
+
+<style>
+  .wx-hero { background: linear-gradient(135deg, #1e3a5f 0%, #2c5282 50%, #1a365d 100%); border: 0; }
+  .wx-hero, .wx-hero .text-secondary { color: #e8eef5 !important; }
+  .wx-hero-icon { font-size: 3rem; line-height: 1; }
+  .wx-temp { font-size: 2.8rem; font-weight: 600; line-height: 1; }
+  .wx-stat { background: rgba(255,255,255,0.10); border-radius: .5rem; padding: .3rem .6rem; }
+  .wx-day-icon { font-size: 1.3rem; }
+  /* Keep all forecast days on one row at wider widths (fits a 7in 1024x600 landscape). */
+  .wx-days { display: flex; flex-wrap: nowrap; gap: .5rem; overflow-x: auto; }
+  .wx-days > .wx-day { flex: 1 1 0; min-width: 0; }
+  @media (max-width: 575.98px) { .wx-days { flex-wrap: wrap; } .wx-days > .wx-day { flex: 1 1 30%; } }
+  .wx-day .card { cursor: pointer; transition: border-color .15s ease; }
+  .wx-day .card:hover, .wx-day .card.wx-open { border-color: #4a90d9; }
+  .wx-detail .wx-hours { display: flex; flex-wrap: nowrap; gap: .4rem; overflow-x: auto; padding-bottom: .25rem; }
+  .wx-hour { flex: 0 0 auto; text-align: center; min-width: 3rem; }
+  .wx-detail .wx-stat { background: rgba(255,255,255,0.06); border-radius: .4rem; padding: .25rem .5rem; }
+</style>
+
+<div id="weatherBody" class="d-none">
+  <!-- Current conditions hero -->
+  <div class="card wx-hero mb-2 shadow-sm">
+    <div class="card-body d-flex align-items-center flex-wrap gap-3 py-2">
+      <i class="bi wx-hero-icon" id="wxIcon"></i>
+      <div>
+        <div class="wx-temp" id="wxTemp">--</div>
+        <div class="fs-6" id="wxDesc"></div>
+      </div>
+      <div class="row row-cols-3 g-2 ms-auto text-center" style="min-width:260px;max-width:340px;">
+        <div class="col"><div class="wx-stat"><div class="small text-secondary">Feels</div><div class="fs-6 fw-semibold" id="wxFeels">--</div></div></div>
+        <div class="col"><div class="wx-stat"><div class="small text-secondary">Humidity</div><div class="fs-6 fw-semibold" id="wxHumidity">--</div></div></div>
+        <div class="col"><div class="wx-stat"><div class="small text-secondary">Wind</div><div class="fs-6 fw-semibold" id="wxWind">--</div></div></div>
+      </div>
+    </div>
+  </div>
+  <!-- Multi-day forecast -->
+  <div class="wx-days" id="wxDays"></div>
+  <!-- Inline detail for the selected day (collapsible, hidden by default so the
+       compact row still fits a 7in 1024x600 landscape screen without scrolling). -->
+  <div id="wxDetail" class="wx-detail d-none mt-2"></div>
+</div>
+
+<div id="weatherError" class="d-none text-center text-secondary p-4">
+  <i class="bi bi-cloud-slash fs-1 d-block mb-2"></i>
+  <div>Forecast unavailable{% if not weather_location %}. Set a weather location with the gear button above{% endif %}.</div>
+  <div class="small mt-2" id="weatherErrorDetail"></div>
+  <div class="small text-secondary mt-1">The forecast is fetched by the server running Pantry Raider; that machine needs internet access to the weather service.</div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  // The server fetches wttr.in's JSON API (the same reliable source the Stream
+  // Deck weather widget uses) and we render it here, so the page no longer
+  // depends on the flaky panel PNG or the kiosk's own internet (afqd).
+  const loadingEl = document.getElementById('weatherLoading');
+  const bodyEl = document.getElementById('weatherBody');
+  const errEl = document.getElementById('weatherError');
+
+  function esc(s) { const d = document.createElement('div'); d.textContent = s == null ? '' : s; return d.innerHTML; }
+
+  let wxDaysData = [];   // kept so a click can look up the day's detail
+  let wxOpenIdx = -1;    // index of the expanded day, or -1 when collapsed
+
+  function statBlock(label, value) {
+    if (value == null || value === '') return '';
+    return `<div class="col"><div class="wx-stat text-center"><div class="small text-secondary">${esc(label)}</div><div class="fw-semibold">${value}</div></div></div>`;
+  }
+
+  function renderHourStrip(hours, unit) {
+    if (!hours || !hours.length) return '';
+    const cells = hours.map(h => `
+      <div class="wx-hour">
+        <div class="small text-secondary">${esc(h.time)}</div>
+        <i class="bi bi-${esc(h.icon || 'cloud')} text-info"></i>
+        <div class="small fw-semibold">${esc(h.temp)}&deg;</div>
+        ${h.precip != null ? `<div class="small text-info">${esc(h.precip)}%</div>` : ''}
+      </div>`).join('');
+    return `<div class="wx-hours mt-2">${cells}</div>`;
+  }
+
+  function renderDetail(idx) {
+    const detailEl = document.getElementById('wxDetail');
+    const d = wxDaysData[idx];
+    if (!d) { detailEl.classList.add('d-none'); detailEl.innerHTML = ''; return; }
+    const stats = [
+      statBlock('High', `${esc(d.hi)}&deg;${esc(d.unit)}`),
+      statBlock('Low', `${esc(d.lo)}&deg;${esc(d.unit)}`),
+      d.precip != null ? statBlock('Rain', `${esc(d.precip)}%`) : '',
+      d.wind != null ? statBlock('Wind', `${esc(d.wind)} ${esc(d.wind_unit || '')}`) : '',
+      d.sunrise ? statBlock('Sunrise', esc(d.sunrise)) : '',
+      d.sunset ? statBlock('Sunset', esc(d.sunset)) : '',
+    ].join('');
+    detailEl.innerHTML = `
+      <div class="card">
+        <div class="card-body p-2">
+          <div class="d-flex align-items-center justify-content-between mb-2">
+            <div class="fw-semibold"><i class="bi bi-${esc(d.icon || 'cloud')} text-info me-1"></i>${esc(d.label)} <span class="text-secondary small">${esc(d.desc)}</span></div>
+            <button type="button" class="btn-close btn-close-white" aria-label="Close" onclick="closeDetail()"></button>
+          </div>
+          <div class="row row-cols-3 row-cols-md-6 g-2">${stats}</div>
+          ${renderHourStrip(d.hourly, d.unit)}
+        </div>
+      </div>`;
+    detailEl.classList.remove('d-none');
+  }
+
+  function closeDetail() {
+    wxOpenIdx = -1;
+    renderDetail(-1);
+    document.querySelectorAll('#wxDays .card').forEach(c => c.classList.remove('wx-open'));
+  }
+
+  function toggleDay(idx) {
+    if (wxOpenIdx === idx) { closeDetail(); return; }
+    wxOpenIdx = idx;
+    renderDetail(idx);
+    document.querySelectorAll('#wxDays .card').forEach((c, i) => c.classList.toggle('wx-open', i === idx));
+  }
+
+  function render(fc) {
+    const c = fc.current || {};
+    document.getElementById('wxIcon').className = 'bi wx-hero-icon bi-' + (c.icon || 'cloud');
+    document.getElementById('wxTemp').innerHTML = `${esc(c.temp)}&deg;${esc(c.unit)}`;
+    document.getElementById('wxDesc').textContent = c.desc || '';
+    document.getElementById('wxFeels').innerHTML = `${esc(c.feels)}&deg;`;
+    document.getElementById('wxHumidity').textContent = `${c.humidity}%`;
+    document.getElementById('wxWind').textContent = `${c.wind} ${c.wind_unit}`;
+    const days = fc.days || [];
+    wxDaysData = days;
+    closeDetail();
+    document.getElementById('wxDays').innerHTML = days.map((d, i) => `
+      <div class="wx-day">
+        <div class="card h-100 text-center" role="button" tabindex="0" onclick="toggleDay(${i})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleDay(${i});}">
+          <div class="card-body p-2">
+            <div class="fw-semibold small mb-1">${esc(d.label)}</div>
+            <i class="bi bi-${esc(d.icon || 'cloud')} wx-day-icon text-info d-block mb-1"></i>
+            <div class="small text-secondary text-truncate mb-1">${esc(d.desc)}</div>
+            <div class="fs-6 fw-semibold">${esc(d.hi)}&deg;<span class="text-secondary"> / ${esc(d.lo)}&deg;${esc(d.unit)}</span></div>
+            ${d.precip != null ? `<div class="small text-info"><i class="bi bi-droplet"></i> ${esc(d.precip)}%</div>` : ''}
+          </div>
+        </div>
+      </div>`).join('');
+  }
+
+  async function reloadWeather() {
+    loadingEl.classList.remove('d-none');
+    bodyEl.classList.add('d-none');
+    errEl.classList.add('d-none');
+    try {
+      const r = await fetch('ui/weather/data', { cache: 'no-store' });
+      const d = await r.json();
+      if (!d.ok || !d.forecast) throw new Error(d.error || 'unavailable');
+      render(d.forecast);
+      loadingEl.classList.add('d-none');
+      bodyEl.classList.remove('d-none');
+    } catch (e) {
+      loadingEl.classList.add('d-none');
+      const detail = document.getElementById('weatherErrorDetail');
+      if (detail) detail.textContent = e.message && e.message !== 'unavailable' ? 'Reason: ' + e.message : '';
+      errEl.classList.remove('d-none');
+    }
+  }
+
+  async function saveWeatherSettings(btn) {
+    const out = document.getElementById('wxSaveResult');
+    const location = document.getElementById('wxLocation')?.value || '';
+    const units = document.getElementById('wxUnits')?.value || 'f';
+    const server = document.getElementById('wxServer')?.value.trim() || '';
+    const orig = btn.innerHTML; btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+    if (out) out.textContent = '';
+    try {
+      const r = await fetch('setup/save', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ streamdeck_weather_location: location,
+                               streamdeck_weather_units: units, weather_api_base: server }),
+      });
+      const d = await r.json();
+      if (!d.ok) throw new Error(d.detail || 'Save failed');
+      if (out) out.innerHTML = '<span class="text-success"><i class="bi bi-check-circle"></i></span>';
+      reloadWeather();
+    } catch (e) {
+      if (out) out.innerHTML = '<span class="text-danger">' + e.message + '</span>';
+    } finally { btn.disabled = false; btn.innerHTML = orig; }
+  }
+
+  reloadWeather();
+  setInterval(reloadWeather, 10 * 60 * 1000);
+</script>
+{% endblock %}
