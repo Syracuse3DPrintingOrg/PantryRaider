@@ -1,0 +1,402 @@
+{% extends "base.html" %}
+{% block title %}Conversions: Pantry Raider{% endblock %}
+
+{% block content %}
+<div class="mt-3 mb-3">
+  <h4><i class="bi bi-rulers me-2"></i>Kitchen Conversions</h4>
+  <p class="text-secondary mb-0">A quick reference for common cooking measurements.</p>
+</div>
+
+<style>
+  /* On-screen keypad for the custom conversion tool. Large targets for touch. */
+  #convertKeypad { display: grid; grid-template-columns: repeat(3, 1fr); gap: .6rem; }
+  #convertKeypad .btn { font-size: 1.6rem; min-height: 64px; padding: .6rem 0; }
+  #convResult { font-variant-numeric: tabular-nums; }
+</style>
+
+<div class="card mb-3">
+  <div class="card-header"><i class="bi bi-calculator me-2"></i>Custom conversion</div>
+  <div class="card-body">
+    <div class="row g-3 align-items-end">
+      <div class="col-12 col-md-3">
+        <label class="form-label" for="convValue">Value</label>
+        <input type="text" inputmode="none" readonly id="convValue"
+               class="form-control form-control-lg fs-4 text-end" value="1"
+               data-bs-toggle="modal" data-bs-target="#convKeypadModal"
+               aria-label="Value to convert (tap to open keypad)">
+      </div>
+      <div class="col-6 col-md-3">
+        <label class="form-label" for="convFrom">From</label>
+        <select id="convFrom" class="form-select form-select-lg"></select>
+      </div>
+      <div class="col-6 col-md-3">
+        <label class="form-label" for="convTo">To</label>
+        <select id="convTo" class="form-select form-select-lg"></select>
+      </div>
+      <div class="col-12 col-md-3">
+        <label class="form-label d-block">Result</label>
+        <div id="convResult" class="fs-3 fw-semibold text-end">&mdash;</div>
+      </div>
+    </div>
+    <p id="convNote" class="text-secondary small mb-0 mt-2"></p>
+  </div>
+</div>
+
+<div class="modal fade" id="convKeypadModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered" style="max-width: 360px;">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-keyboard me-2"></i>Enter value</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <div id="convPadDisplay" class="fs-2 text-end font-monospace mb-3 border rounded px-3 py-2">0</div>
+        <div id="convertKeypad">
+          {% for d in [1,2,3,4,5,6,7,8,9] %}
+          <button type="button" class="btn btn-outline-secondary" data-key="{{ d }}">{{ d }}</button>
+          {% endfor %}
+          <button type="button" class="btn btn-outline-secondary" data-key=".">.</button>
+          <button type="button" class="btn btn-outline-secondary" data-key="0">0</button>
+          <button type="button" class="btn btn-outline-secondary" data-key="back" title="Delete">
+            <i class="bi bi-backspace"></i>
+          </button>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" id="convPadClear">
+          <i class="bi bi-x-lg me-1"></i>Clear
+        </button>
+        <button type="button" class="btn btn-primary" data-bs-dismiss="modal">
+          <i class="bi bi-check-lg me-1"></i>Done
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="row g-3">
+
+  <div class="col-12 col-lg-6">
+    <div class="card h-100">
+      <div class="card-header"><i class="bi bi-cup-straw me-2"></i>Volume</div>
+      <div class="card-body">
+        <table class="table table-sm table-borderless align-middle mb-0 fs-5">
+          <tbody>
+            <tr><td>1 teaspoon (tsp)</td><td class="text-end">5 ml</td></tr>
+            <tr><td>1 tablespoon (tbsp)</td><td class="text-end">15 ml</td></tr>
+            <tr><td>1 fluid ounce (fl oz)</td><td class="text-end">30 ml</td></tr>
+            <tr><td>1/4 cup</td><td class="text-end">60 ml</td></tr>
+            <tr><td>1/3 cup</td><td class="text-end">80 ml</td></tr>
+            <tr><td>1/2 cup</td><td class="text-end">120 ml</td></tr>
+            <tr><td>1 cup</td><td class="text-end">240 ml</td></tr>
+            <tr><td>1 pint (2 cups)</td><td class="text-end">475 ml</td></tr>
+            <tr><td>1 quart (4 cups)</td><td class="text-end">950 ml</td></tr>
+            <tr><td>1 gallon (4 quarts)</td><td class="text-end">3.8 L</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-12 col-lg-6">
+    <div class="card h-100">
+      <div class="card-header"><i class="bi bi-box-seam me-2"></i>Weight</div>
+      <div class="card-body">
+        <table class="table table-sm table-borderless align-middle mb-0 fs-5">
+          <tbody>
+            <tr><td>1 ounce (oz)</td><td class="text-end">28 g</td></tr>
+            <tr><td>2 ounces</td><td class="text-end">57 g</td></tr>
+            <tr><td>4 ounces (1/4 lb)</td><td class="text-end">113 g</td></tr>
+            <tr><td>8 ounces (1/2 lb)</td><td class="text-end">227 g</td></tr>
+            <tr><td>1 pound (lb)</td><td class="text-end">454 g</td></tr>
+            <tr><td>2 pounds</td><td class="text-end">907 g</td></tr>
+            <tr><td>1 kilogram (kg)</td><td class="text-end">2.2 lb</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-12 col-lg-6">
+    <div class="card h-100">
+      <div class="card-header"><i class="bi bi-thermometer-half me-2"></i>Oven Temperature</div>
+      <div class="card-body">
+        <table class="table table-sm align-middle mb-3 fs-5">
+          <thead>
+            <tr><th>Fahrenheit</th><th class="text-end">Celsius</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>325 &deg;F</td><td class="text-end">163 &deg;C</td></tr>
+            <tr><td>350 &deg;F</td><td class="text-end">177 &deg;C</td></tr>
+            <tr><td>375 &deg;F</td><td class="text-end">191 &deg;C</td></tr>
+            <tr><td>400 &deg;F</td><td class="text-end">204 &deg;C</td></tr>
+            <tr><td>425 &deg;F</td><td class="text-end">218 &deg;C</td></tr>
+            <tr><td>450 &deg;F</td><td class="text-end">232 &deg;C</td></tr>
+          </tbody>
+        </table>
+        <p class="text-secondary mb-0">Formula: C = (F &minus; 32) &times; 5/9, and F = (C &times; 9/5) + 32.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-12 col-lg-6">
+    <div class="card h-100">
+      <div class="card-header"><i class="bi bi-list-check me-2"></i>Handy Equivalents</div>
+      <div class="card-body">
+        <table class="table table-sm table-borderless align-middle mb-0 fs-5">
+          <tbody>
+            <tr><td>1 cup</td><td class="text-end">16 tbsp = 48 tsp</td></tr>
+            <tr><td>1 tablespoon</td><td class="text-end">3 tsp</td></tr>
+            <tr><td>1 stick of butter</td><td class="text-end">8 tbsp = 113 g</td></tr>
+            <tr><td>1 cup of butter</td><td class="text-end">2 sticks = 227 g</td></tr>
+            <tr><td>1 cup flour (all-purpose)</td><td class="text-end">125 g</td></tr>
+            <tr><td>1 cup granulated sugar</td><td class="text-end">200 g</td></tr>
+            <tr><td>1 large egg</td><td class="text-end">about 50 g</td></tr>
+            <tr><td>1 pinch</td><td class="text-end">about 1/8 tsp</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="card mt-3">
+    <div class="card-header d-flex justify-content-between align-items-center">
+      <span><i class="bi bi-stars me-2"></i>My conversions</span>
+      <button class="btn btn-outline-secondary btn-sm" type="button" onclick="toggleConvEdit(this)">
+        <i class="bi bi-pencil me-1"></i>Customize
+      </button>
+    </div>
+    <div class="card-body">
+      {% if convert_custom_rows %}
+      <table class="table table-sm table-borderless align-middle mb-0 fs-5">
+        <tbody>
+        {% for r in convert_custom_rows %}
+          <tr><td>{{ r.label }}</td><td class="text-end">{{ r.value }}</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <p class="text-secondary mb-0">No custom conversions yet. Tap <strong>Customize</strong> to add your own quick references (they stay on this device).</p>
+      {% endif %}
+
+      <div id="convEdit" class="d-none mt-3">
+        <div id="convEditRows" class="d-flex flex-column gap-2 mb-2">
+        {% for r in convert_custom_rows %}
+          <div class="row g-2 conv-edit-row">
+            <div class="col"><input class="form-control form-control-sm conv-label" placeholder="Label (e.g. 1 stick butter)" value="{{ r.label }}"></div>
+            <div class="col"><input class="form-control form-control-sm conv-value" placeholder="Value (e.g. 113 g / 8 tbsp)" value="{{ r.value }}"></div>
+            <div class="col-auto"><button class="btn btn-outline-danger btn-sm" type="button" onclick="this.closest('.conv-edit-row').remove()"><i class="bi bi-trash"></i></button></div>
+          </div>
+        {% endfor %}
+        </div>
+        <div class="d-flex gap-2">
+          <button class="btn btn-outline-secondary btn-sm" type="button" onclick="addConvRow()"><i class="bi bi-plus-lg me-1"></i>Add row</button>
+          <button class="btn btn-outline-info btn-sm" type="button" onclick="saveConvRows(this)"><i class="bi bi-check-lg me-1"></i>Save</button>
+        </div>
+        <div class="test-result mt-2" id="convSaveResult"></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  // Conversion units grouped by category. Mass and volume use a linear factor
+  // (value in the category base unit). Temperature is affine, so it carries
+  // toBase/fromBase functions instead of a factor. Factors match the reference
+  // tables shown on this page (1 oz = 28.35 g, 1 cup = 240 ml, and so on).
+  var UNITS = [
+    // Volume, base unit milliliter (ml)
+    { id: "ml",    label: "Milliliter (ml)",   cat: "volume", factor: 1 },
+    { id: "l",     label: "Liter (L)",         cat: "volume", factor: 1000 },
+    { id: "tsp",   label: "Teaspoon (tsp)",    cat: "volume", factor: 5 },
+    { id: "tbsp",  label: "Tablespoon (tbsp)", cat: "volume", factor: 15 },
+    { id: "floz",  label: "Fluid ounce (fl oz)", cat: "volume", factor: 29.5735 },
+    { id: "cup",   label: "Cup",               cat: "volume", factor: 240 },
+    { id: "pint",  label: "Pint",              cat: "volume", factor: 473.176 },
+    { id: "quart", label: "Quart",             cat: "volume", factor: 946.353 },
+    { id: "gallon",label: "Gallon",            cat: "volume", factor: 3785.41 },
+    // Weight, base unit gram (g)
+    { id: "g",     label: "Gram (g)",          cat: "weight", factor: 1 },
+    { id: "kg",    label: "Kilogram (kg)",     cat: "weight", factor: 1000 },
+    { id: "oz",    label: "Ounce (oz)",        cat: "weight", factor: 28.3495 },
+    { id: "lb",    label: "Pound (lb)",        cat: "weight", factor: 453.592 },
+    // Temperature, affine
+    { id: "c", label: "Celsius (°C)",    cat: "temp",
+      toBase: function (c) { return c; },
+      fromBase: function (c) { return c; } },
+    { id: "f", label: "Fahrenheit (°F)", cat: "temp",
+      toBase: function (f) { return (f - 32) * 5 / 9; },
+      fromBase: function (c) { return c * 9 / 5 + 32; } },
+    { id: "k", label: "Kelvin (K)",           cat: "temp",
+      toBase: function (k) { return k - 273.15; },
+      fromBase: function (c) { return c + 273.15; } }
+  ];
+
+  var CAT_LABEL = { volume: "Volume", weight: "Weight", temp: "Temperature" };
+
+  function byId(id) { for (var i = 0; i < UNITS.length; i++) { if (UNITS[i].id === id) return UNITS[i]; } return null; }
+
+  // Convert within a single category. Returns null across categories.
+  function convert(value, from, to) {
+    if (!from || !to || from.cat !== to.cat) return null;
+    if (from.cat === "temp") {
+      return to.fromBase(from.toBase(value));
+    }
+    return value * from.factor / to.factor;
+  }
+
+  function formatResult(n) {
+    if (n === null || !isFinite(n)) return "—";
+    // Trim to a sensible precision without trailing zeros.
+    var rounded = Math.abs(n) >= 1000 ? n.toFixed(1) : n.toFixed(4);
+    return parseFloat(rounded).toString();
+  }
+
+  var valueEl = document.getElementById("convValue");
+  var fromEl = document.getElementById("convFrom");
+  var toEl = document.getElementById("convTo");
+  var resultEl = document.getElementById("convResult");
+  var noteEl = document.getElementById("convNote");
+
+  // Build grouped <option> lists for both selects.
+  function buildOptions(sel) {
+    var lastCat = null;
+    var group = null;
+    UNITS.forEach(function (u) {
+      if (u.cat !== lastCat) {
+        group = document.createElement("optgroup");
+        group.label = CAT_LABEL[u.cat];
+        sel.appendChild(group);
+        lastCat = u.cat;
+      }
+      var opt = document.createElement("option");
+      opt.value = u.id;
+      opt.textContent = u.label;
+      group.appendChild(opt);
+    });
+  }
+  buildOptions(fromEl);
+  buildOptions(toEl);
+  fromEl.value = "cup";
+  toEl.value = "ml";
+
+  function recompute() {
+    var from = byId(fromEl.value);
+    var to = byId(toEl.value);
+    var value = parseFloat(valueEl.value);
+    if (isNaN(value)) {
+      resultEl.textContent = "—";
+      noteEl.textContent = "Enter a value to convert.";
+      return;
+    }
+    if (from && to && from.cat !== to.cat) {
+      resultEl.textContent = "—";
+      noteEl.textContent = "Pick two units in the same category (" +
+        CAT_LABEL[from.cat] + " vs " + CAT_LABEL[to.cat] + ").";
+      return;
+    }
+    var out = convert(value, from, to);
+    resultEl.textContent = formatResult(out) + " " + (to ? to.id : "");
+    noteEl.textContent = formatResult(value) + " " + (from ? from.label : "") +
+      " = " + formatResult(out) + " " + (to ? to.label : "");
+  }
+
+  fromEl.addEventListener("change", recompute);
+  toEl.addEventListener("change", recompute);
+
+  // On-screen numeric keypad. Edits a buffer, mirrored into the value field.
+  var padDisplay = document.getElementById("convPadDisplay");
+  var buffer = valueEl.value || "0";
+
+  function renderPad() {
+    padDisplay.textContent = buffer.length ? buffer : "0";
+  }
+  function commitBuffer() {
+    valueEl.value = (buffer.length && buffer !== ".") ? buffer : "0";
+    recompute();
+  }
+  function padPress(key) {
+    if (key === "back") {
+      buffer = buffer.slice(0, -1);
+    } else if (key === ".") {
+      if (buffer.indexOf(".") === -1) buffer += (buffer.length ? "." : "0.");
+    } else {
+      // Avoid a leading zero like "01".
+      if (buffer === "0") buffer = key; else buffer += key;
+    }
+    renderPad();
+    commitBuffer();
+  }
+
+  document.getElementById("convertKeypad").addEventListener("click", function (e) {
+    var btn = e.target.closest("[data-key]");
+    if (!btn) return;
+    padPress(btn.getAttribute("data-key"));
+  });
+  document.getElementById("convPadClear").addEventListener("click", function () {
+    buffer = "0";
+    renderPad();
+    commitBuffer();
+  });
+
+  // Sync the pad buffer from the field each time the keypad opens.
+  var modalEl = document.getElementById("convKeypadModal");
+  modalEl.addEventListener("show.bs.modal", function () {
+    buffer = valueEl.value || "0";
+    renderPad();
+  });
+
+  // Physical keyboard support when one is attached.
+  modalEl.addEventListener("keydown", function (e) {
+    if (e.key >= "0" && e.key <= "9") padPress(e.key);
+    else if (e.key === ".") padPress(".");
+    else if (e.key === "Backspace") padPress("back");
+  });
+
+  renderPad();
+  recompute();
+})();
+
+// --- My conversions editor (device-local custom reference rows) -------------
+function toggleConvEdit() {
+  document.getElementById('convEdit').classList.toggle('d-none');
+}
+function addConvRow(label, value) {
+  const wrap = document.getElementById('convEditRows');
+  const div = document.createElement('div');
+  div.className = 'row g-2 conv-edit-row';
+  div.innerHTML =
+    '<div class="col"><input class="form-control form-control-sm conv-label" placeholder="Label (e.g. 1 stick butter)"></div>' +
+    '<div class="col"><input class="form-control form-control-sm conv-value" placeholder="Value (e.g. 113 g / 8 tbsp)"></div>' +
+    '<div class="col-auto"><button class="btn btn-outline-danger btn-sm" type="button" onclick="this.closest(\'.conv-edit-row\').remove()"><i class="bi bi-trash"></i></button></div>';
+  div.querySelector('.conv-label').value = label || '';
+  div.querySelector('.conv-value').value = value || '';
+  wrap.appendChild(div);
+}
+async function saveConvRows(btn) {
+  const rows = [];
+  document.querySelectorAll('#convEditRows .conv-edit-row').forEach(r => {
+    const label = r.querySelector('.conv-label')?.value.trim() || '';
+    const value = r.querySelector('.conv-value')?.value.trim() || '';
+    if (label || value) rows.push({label, value});
+  });
+  const el = document.getElementById('convSaveResult');
+  if (btn) btn.disabled = true;
+  try {
+    await fetch('setup/save', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({convert_custom_rows: rows}),
+    });
+    if (el) el.innerHTML = '<span class="text-success">Saved. Reloading...</span>';
+    setTimeout(() => location.reload(), 600);
+  } catch (e) {
+    if (el) el.innerHTML = '<span class="text-danger">' + e + '</span>';
+    if (btn) btn.disabled = false;
+  }
+}
+</script>
+{% endblock %}
