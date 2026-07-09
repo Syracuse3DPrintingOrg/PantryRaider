@@ -1,0 +1,26 @@
+# Keep the Docker build context lean and prevent secrets or runtime data from
+# ever landing in an image layer (defense in depth: the Dockerfile copies only
+# requirements.txt and app/, but this guards against a future COPY change too).
+
+# Runtime data and any secrets that live beside the app
+data/
+*.env
+.env
+*.conf
+rclone.conf
+settings.json
+*.key
+*.pem
+*.pfx
+
+# Python build noise
+**/__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local virtualenvs
+.venv/
+venv/
