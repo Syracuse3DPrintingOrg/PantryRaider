@@ -1,0 +1,16 @@
+{% from "setup/_macros.html" import info, panel, srow, pill, toggle, recipe_connection_cards with context %}
+<!-- Recipes (FoodAssistant-jcnh, split in FoodAssistant-ysj1): the KEY
+             recipe-connection settings only. The Mealie manager and the external
+             recipe sources come from recipe_connection_cards (defined in
+             _macros.html), each with its own Save button. The personal taste
+             tuning moved to its own pane (_pane_personalization_tuning.html,
+             id pane-recipe-tuning) so adjusting tastes can never re-post or
+             overwrite the Mealie base URL, API key, or recipe source. -->
+        <div class="tab-pane fade" id="pane-personalization-recipes">
+          <p class="pane-intro">Your recipe connections: the Mealie recipe manager and where "What can I cook?" looks for extra ideas. How suggestions get ranked against your tastes and kitchen lives under Recipe suggestions.</p>
+
+          {# Mealie and the external recipe sources render here so the recipe
+             connection settings live in one place under Kitchen; the personal
+             taste tuning is a separate pane (Recipe suggestions). #}
+          {{ recipe_connection_cards() }}
+        </div>
