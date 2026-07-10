@@ -1,0 +1,128 @@
+# Pantry Raider: Home Assistant Integration
+#
+# Add the contents of this file to your HA configuration.yaml
+# Replace 192.168.1.170:9284 with your Unraid IP if different.
+
+# ─── REST Sensors ─────────────────────────────────────────────────────────────
+# Use the LOCAL address here, not the public reverse-proxy URL: HA polls these
+# endpoints headlessly, and an auth-enforcing proxy (Pangolin, Authelia, etc.)
+# will intercept the request and return its login page instead of JSON,
+# leaving every sensor "Unknown". The public URL is only for the Lovelace
+# buttons, which open in a browser where you have a proxy session.
+#
+# If you set API_KEY in Pantry Raider, add it to HA's secrets.yaml as
+#   foodassistant_api_key: "your_key_here"
+# and uncomment the headers blocks below.
+rest:
+  - resource: http://192.168.1.170:9284/expiring/summary
+    scan_interval: 300  # refresh every 5 minutes
+    # headers:
+    #   X-API-Key: !secret foodassistant_api_key
+    sensor:
+      - name: "Food Expired"
+        unique_id: food_expired
+        value_template: "{{ value_json.expired }}"
+        unit_of_measurement: "items"
+        icon: mdi:food-off
+
+      - name: "Food Expiring Today"
+        unique_id: food_expiring_today
+        value_template: "{{ value_json.today }}"
+        unit_of_measurement: "items"
+        icon: mdi:food-variant-off
+
+      - name: "Food Expiring 3 Days"
+        unique_id: food_expiring_3d
+        value_template: "{{ value_json.within_3_days }}"
+        unit_of_measurement: "items"
+        icon: mdi:food-drumstick
+
+      - name: "Food Expiring 7 Days"
+        unique_id: food_expiring_7d
+        value_template: "{{ value_json.within_7_days }}"
+        unit_of_measurement: "items"
+        icon: mdi:food-apple
+
+  # Full inventory grouped by storage location: item lists land in the
+  # sensor's attributes so the Lovelace markdown cards can render them.
+  - resource: http://192.168.1.170:9284/inventory/dashboard?sort=expiry_asc
+    scan_interval: 300
+    # headers:
+    #   X-API-Key: !secret foodassistant_api_key
+    sensor:
+      - name: "Food Inventory"
+        unique_id: food_inventory
+        value_template: >-
+          {{ (value_json.refrigerated | length) + (value_json.frozen | length)
+           + (value_json.room_temp | length) + (value_json.pantry | length) }}
+        unit_of_measurement: "items"
+        icon: mdi:fridge-outline
+        json_attributes:
+          - refrigerated
+          - frozen
+          - room_temp
+          - pantry
+
+  # Shopping list: unchecked item names land in the sensor's attributes so
+  # the Lovelace card can render them. The app answers from whichever store
+  # holds the list (Grocy by default, Mealie where one is still in use) and
+  # returns 0/empty when the list is unavailable.
+  - resource: http://192.168.1.170:9284/mealie/shopping/summary
+    scan_interval: 300
+    # headers:
+    #   X-API-Key: !secret foodassistant_api_key
+    sensor:
+      - name: "Shopping List Items"
+        unique_id: food_shopping_items
+        value_template: "{{ value_json.count }}"
+        unit_of_measurement: "items"
+        icon: mdi:cart-outline
+        json_attributes:
+          - items
+          - list_name
+
+  # Meal plan: today's count as state, today/tomorrow entry lists in
+  # attributes for the Lovelace card. The app answers from its own meal plan
+  # (or Mealie's, where one is still in use) and returns 0/empty when the
+  # plan is unavailable.
+  - resource: http://192.168.1.170:9284/mealie/mealplan/summary
+    scan_interval: 900
+    # headers:
+    #   X-API-Key: !secret foodassistant_api_key
+    sensor:
+      - name: "Meal Plan Today"
+        unique_id: food_mealplan_today
+        value_template: "{{ value_json.count }}"
+        unit_of_measurement: "meals"
+        icon: mdi:silverware-fork-knife
+        json_attributes:
+          - today
+          - tomorrow
+
+  # Pending scans waiting for review on the /ui/pending page
+  - resource: http://192.168.1.170:9284/pending/count
+    scan_interval: 60
+    # headers:
+    #   X-API-Key: !secret foodassistant_api_key
+    sensor:
+      - name: "Food Pending Scans"
+        unique_id: food_pending_scans
+        value_template: "{{ value_json.count }}"
+        unit_of_measurement: "items"
+        icon: mdi:barcode-scan
+
+# ─── Barcode Scanner → Pending Queue ─────────────────────────────────────────
+# Sends a scanned barcode to Pantry Raider's pending queue. Call this from an
+# automation (see homeassistant/barcode-scanner.md for full setup).
+rest_command:
+  foodassistant_scan:
+    url: http://192.168.1.170:9284/pending/scan
+    method: POST
+    content_type: "application/json"
+    # Uncomment if Pantry Raider has API_KEY set: without the header the
+    # POST is rejected with 401 and HA only logs a warning (the automation
+    # trace still looks successful).
+    # headers:
+    #   X-API-Key: !secret foodassistant_api_key
+    payload: '{"barcode": "{{ barcode }}", "source": "ha"}'
+

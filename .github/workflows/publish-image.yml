@@ -1,0 +1,88 @@
+name: Publish container image
+
+# Builds the Pantry Raider service image and publishes it to the GitHub
+# Container Registry (GHCR) so users can run the app without building locally.
+# Tag a release (e.g. v1.0.0) to publish a versioned image; pushes to main
+# refresh the :main tag. Run manually from the Actions tab via workflow_dispatch.
+#
+# IMPORTANT: package visibility
+# After this workflow pushes the image for the first time, the package defaults
+# to private. Appliance devices cannot pull it without auth until it is made
+# public. To fix: go to the repo on GitHub -> Packages -> foodassistant ->
+# Package settings -> Change visibility -> Public. This is a one-time UI click
+# that cannot be automated here. The firstboot.sh provisioner will fall back to
+# building from local source if the pull fails, but making the package public is
+# the recommended path for zero-friction appliance deploys.
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  release:
+    types: [published]
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  # Pinned EXPLICITLY, never derived from github.repository: a GHCR package
+  # does not follow repo renames or transfers, and deriving the name once
+  # silently published to a package the fleet never pulls, so devices stopped
+  # updating. The canonical image is the org-owned
+  # ghcr.io/syracuse3dprintingorg/pantryraider. Deployed devices that still
+  # reference the legacy personal-account image
+  # (ghcr.io/syracuse3dprinting/foodassistant) are migrated by
+  # foodassistant-update, which rewrites the image line in their compose file
+  # on the next update.
+  #
+  # NOTE 1: after the FIRST publish to a new package, set its visibility to
+  # Public (org -> Packages -> pantryraider -> Package settings), or appliance
+  # devices cannot pull it.
+  # NOTE 2: pushes made by other workflows with GITHUB_TOKEN (e.g. Brand sync)
+  # do not trigger this workflow. After such a push, run it manually from the
+  # Actions tab (workflow_dispatch) if the image needs the change.
+  IMAGE_NAME: syracuse3dprintingorg/pantryraider
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130  # v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f  # v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9  # v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Derive image metadata
+        id: meta
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051  # v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=ref,event=branch
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8  # v6
+        with:
+          context: ./service
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
