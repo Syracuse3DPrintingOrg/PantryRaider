@@ -1,0 +1,296 @@
+/*
+ * Solarized Light theme for Pantry Raider.
+ * Loaded as an overlay on top of Bootstrap 5 light mode.
+ * Overrides CSS custom properties for the warm, low-contrast Solarized palette
+ * (Ethan Schoonover), authored locally (no Bootswatch, no CDN).
+ */
+
+/* Core palette */
+:root,
+[data-bs-theme=light] {
+  /* Backgrounds (base3 / base2 family) */
+  --bs-body-bg:           #fdf6e3;
+  --bs-body-bg-rgb:       253, 246, 227;
+  --bs-secondary-bg:      #eee8d5;
+  --bs-secondary-bg-rgb:  238, 232, 213;
+  --bs-tertiary-bg:       #e7e0c8;
+  --bs-tertiary-bg-rgb:   231, 224, 200;
+
+  /* Text (base00 / base01). Solarized is a deliberately low-contrast palette,
+     so the muted text tiers use solid darker greys (not faded body colour) to
+     clear WCAG AA on the warm #fdf6e3 background. */
+  --bs-body-color:        #586e75;
+  --bs-body-color-rgb:    88, 110, 117;
+  --bs-secondary-color:   #4a5d63;
+  --bs-tertiary-color:    #586e75;
+  --bs-emphasis-color:    #073642;
+
+  /* Solarized accents */
+  --sol-blue:    #268bd2;
+  --sol-cyan:    #2aa198;
+  --sol-green:   #859900;
+  --sol-yellow:  #b58900;
+  --sol-orange:  #cb4b16;
+  --sol-red:     #dc322f;
+  --sol-magenta: #d33682;
+  --sol-violet:  #6c71c4;
+
+  /* Bootstrap semantic overrides */
+  --bs-primary:           #268bd2;
+  --bs-primary-rgb:       38, 139, 210;
+  --bs-secondary:         #2aa198;
+  --bs-secondary-rgb:     42, 161, 152;
+  --bs-success:           #859900;
+  --bs-success-rgb:       133, 153, 0;
+  --bs-info:              #6c71c4;
+  --bs-info-rgb:          108, 113, 196;
+  --bs-warning:           #b58900;
+  --bs-warning-rgb:       181, 137, 0;
+  --bs-danger:            #dc322f;
+  --bs-danger-rgb:        220, 50, 47;
+  --bs-light:             #fdf6e3;
+  --bs-light-rgb:         253, 246, 227;
+  --bs-dark:              #073642;
+  --bs-dark-rgb:          7, 54, 66;
+
+  /* Text-emphasis colours (for text-bg-* utilities) */
+  --bs-primary-text-emphasis:   #1a5e90;
+  --bs-secondary-text-emphasis: #1c6f68;
+  --bs-success-text-emphasis:   #5b6b00;
+  --bs-info-text-emphasis:      #4b4f89;
+  --bs-warning-text-emphasis:   #7e5f00;
+  --bs-danger-text-emphasis:    #9a2421;
+
+  /* Borders */
+  --bs-border-color:        #ded8c3;
+  --bs-border-color-translucent: rgba(88, 110, 117, 0.18);
+
+  /* Links (darkened from the #268bd2 accent so link text clears AA on the
+     light parchment background; the brighter accent stays on buttons/borders) */
+  --bs-link-color:        #0f5a8a;
+  --bs-link-color-rgb:    15, 90, 138;
+  --bs-link-hover-color:  #0a4060;
+
+  /* Cards / components */
+  --bs-card-bg:           #fdf6e3;
+  --bs-card-border-color: #ded8c3;
+  --bs-modal-bg:          #fdf6e3;
+  --bs-dropdown-bg:       #fdf6e3;
+  --bs-dropdown-border-color: #ded8c3;
+  --bs-input-bg:          #ffffff;
+  --bs-input-border-color: #ded8c3;
+  --bs-input-color:       #586e75;
+  --bs-list-group-bg:     #fdf6e3;
+  --bs-list-group-border-color: #ded8c3;
+
+  /* Navbar */
+  --bs-navbar-color:       rgba(88, 110, 117, 0.85);
+  --bs-navbar-hover-color: #268bd2;
+  --bs-navbar-active-color: #268bd2;
+
+  /* Table */
+  --bs-table-bg:          transparent;
+  --bs-table-striped-bg:  rgba(38, 139, 210, 0.05);
+  --bs-table-hover-bg:    rgba(42, 161, 152, 0.07);
+  --bs-table-border-color: #ded8c3;
+
+  color-scheme: light;
+}
+
+/* Body & page chrome */
+body {
+  background-color: var(--bs-body-bg);
+  color: var(--bs-body-color);
+}
+
+/* Navbar */
+.navbar {
+  background: #eee8d5 !important;
+  border-bottom: 1px solid #ded8c3 !important;
+}
+.navbar-brand {
+  color: var(--sol-cyan) !important;
+  letter-spacing: 0.3px;
+}
+.nav-link {
+  color: rgba(88, 110, 117, 0.85) !important;
+}
+.nav-link:hover,
+.nav-link.active {
+  color: var(--sol-blue) !important;
+}
+
+/* Cards */
+.card {
+  background-color: #fdf6e3;
+  border-color: #ded8c3;
+  box-shadow: 0 1px 3px rgba(88, 110, 117, 0.10);
+}
+.card-header {
+  background-color: #eee8d5;
+  border-bottom-color: #ded8c3;
+  color: #073642;
+}
+
+/* Buttons */
+.btn-primary {
+  background-color: var(--sol-blue);
+  border-color: var(--sol-blue);
+  color: #fdf6e3;
+}
+.btn-primary:hover {
+  background-color: #1a5e90;
+  border-color: #1a5e90;
+}
+.btn-secondary {
+  background-color: var(--sol-cyan);
+  border-color: var(--sol-cyan);
+  color: #fdf6e3;
+}
+.btn-secondary:hover {
+  background-color: #1c6f68;
+  border-color: #1c6f68;
+}
+.btn-success {
+  background-color: var(--sol-green);
+  border-color: var(--sol-green);
+  color: #fdf6e3;
+}
+.btn-success:hover {
+  background-color: #6f8000;
+  border-color: #6f8000;
+}
+.btn-outline-primary {
+  border-color: var(--sol-blue);
+  color: var(--sol-blue);
+}
+.btn-outline-primary:hover {
+  background-color: var(--sol-blue);
+  color: #fdf6e3;
+}
+.btn-outline-danger {
+  border-color: var(--sol-red);
+  color: var(--sol-red);
+}
+.btn-outline-danger:hover {
+  background-color: var(--sol-red);
+  color: #fdf6e3;
+}
+
+/* Forms */
+.form-control,
+.form-select {
+  background-color: #ffffff;
+  border-color: #ded8c3;
+  color: #586e75;
+}
+.form-control:focus,
+.form-select:focus {
+  background-color: #ffffff;
+  border-color: var(--sol-blue);
+  color: #586e75;
+  box-shadow: 0 0 0 0.25rem rgba(38, 139, 210, 0.20);
+}
+.form-control::placeholder { color: rgba(88, 110, 117, 0.5); }
+.form-check-input:checked {
+  background-color: var(--sol-blue);
+  border-color: var(--sol-blue);
+}
+.input-group-text {
+  background-color: #eee8d5;
+  border-color: #ded8c3;
+  color: var(--sol-cyan);
+}
+
+/* Tables */
+.table {
+  color: var(--bs-body-color);
+  border-color: #ded8c3;
+}
+.table > thead {
+  border-bottom: 2px solid var(--sol-blue);
+  color: #073642;
+}
+
+/* Badges. The Solarized accents are mid-tone, so white text on the raw accent
+   fails AA at badge sizes; the badge backgrounds are darkened a step (the
+   brighter accents stay on buttons/borders) so white text clears AA. */
+.text-bg-primary   { background-color: #1a6ba8 !important; color: #fdf6e3 !important; }
+.text-bg-secondary { background-color: #17726b !important; color: #fdf6e3 !important; }
+.text-bg-success   { background-color: #647300 !important; color: #fdf6e3 !important; }
+.text-bg-info      { background-color: #5b60b0 !important; color: #fdf6e3 !important; }
+.text-bg-warning   { background-color: #806100 !important; color: #fdf6e3 !important; }
+.text-bg-danger    { background-color: #c92420 !important; color: #fdf6e3 !important; }
+
+/* Alerts */
+.alert-success {
+  background-color: rgba(133, 153, 0, 0.12);
+  border-color: var(--sol-green);
+  color: #5b6b00;
+}
+.alert-danger {
+  background-color: rgba(220, 50, 47, 0.10);
+  border-color: var(--sol-red);
+  color: #9a2421;
+}
+.alert-warning {
+  background-color: rgba(181, 137, 0, 0.12);
+  border-color: var(--sol-yellow);
+  color: #7e5f00;
+}
+.alert-info {
+  background-color: rgba(108, 113, 196, 0.12);
+  border-color: var(--sol-violet);
+  color: #4b4f89;
+}
+
+/* Dropdowns & modals */
+.dropdown-menu {
+  background-color: #fdf6e3;
+  border-color: #ded8c3;
+  box-shadow: 0 4px 14px rgba(88, 110, 117, 0.18);
+}
+.dropdown-item { color: #586e75; }
+.dropdown-item:hover {
+  background-color: rgba(38, 139, 210, 0.10);
+  color: var(--sol-blue);
+}
+.modal-content {
+  background-color: #fdf6e3;
+  border-color: #ded8c3;
+}
+.modal-header { border-bottom-color: #ded8c3; color: #073642; }
+.modal-footer { border-top-color: #ded8c3; }
+
+/* List groups */
+.list-group-item {
+  background-color: #fdf6e3;
+  border-color: #ded8c3;
+  color: #586e75;
+}
+.list-group-item-action:hover {
+  background-color: rgba(38, 139, 210, 0.08);
+  color: var(--sol-blue);
+}
+
+/* Nav tabs */
+.nav-tabs { border-bottom-color: #ded8c3; }
+.nav-tabs .nav-link { color: rgba(88, 110, 117, 0.75) !important; }
+.nav-tabs .nav-link.active {
+  background-color: #fdf6e3;
+  border-color: #ded8c3 #ded8c3 #fdf6e3;
+  color: var(--sol-blue) !important;
+}
+
+/* Urgency colours (override base.html) */
+.urgency-expired { color: #dc322f; }
+.urgency-today   { color: #cb4b16; }
+.urgency-3d      { color: #b58900; }
+.urgency-ok      { color: #859900; }
+
+/* Progress bars */
+.progress { background-color: #eee8d5; }
+.progress-bar { background-color: var(--sol-blue); }
+
+/* contrast: dark badge text (FoodAssistant-tjlm) */
+.badge.bg-secondary, .badge.bg-info { color: #000 !important; }

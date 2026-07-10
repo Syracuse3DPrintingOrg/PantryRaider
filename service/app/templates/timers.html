@@ -1,0 +1,485 @@
+{% extends "base.html" %}
+{% block title %}Timers &amp; Temps: Pantry Raider{% endblock %}
+
+{% block content %}
+<div class="mt-3 mb-3 d-flex align-items-center justify-content-between">
+  <h4 class="mb-0"><i class="bi bi-stopwatch me-2"></i>Timers</h4>
+  {# Only shown when the screensaver script is on this page: mid-cook you can
+     set the timers going, then send the display straight to the saver where
+     they float. Works even with the idle timeout set to off. #}
+  <button type="button" id="startScreensaver" class="btn btn-outline-secondary btn-sm d-none">
+    <i class="bi bi-moon-stars me-1"></i>Screensaver
+  </button>
+</div>
+
+<div class="card mb-3">
+  <div class="card-body">
+    <div class="d-flex flex-wrap align-items-center gap-2">
+      <span class="text-secondary">Start a timer:</span>
+      <button type="button" class="btn btn-outline-light timer-preset" data-minutes="1">1 min</button>
+      <button type="button" class="btn btn-outline-light timer-preset" data-minutes="5">5 min</button>
+      <button type="button" class="btn btn-outline-light timer-preset" data-minutes="10">10 min</button>
+      <button type="button" class="btn btn-outline-light timer-preset" data-minutes="15">15 min</button>
+      <button type="button" class="btn btn-outline-light timer-preset" data-minutes="30">30 min</button>
+      <button type="button" class="btn btn-outline-light timer-preset" data-minutes="60">60 min</button>
+      {# Hidden until at least one timer exists; the confirm names the count so
+         a stray tap mid-cook cannot silently wipe the kitchen. #}
+      <button type="button" id="timersClearAll" class="btn btn-outline-danger timer-clear-all d-none">
+        <i class="bi bi-x-lg me-1"></i>Clear all
+      </button>
+      <form id="timerCustomForm" class="d-flex flex-wrap align-items-center gap-2 ms-md-auto">
+        <input type="text" id="timerCustomLabel" class="form-control" style="max-width: 11rem;"
+               maxlength="40" placeholder="Name (optional)" autocomplete="off">
+        <input type="number" id="timerCustomMinutes" class="form-control" style="max-width: 8rem;"
+               min="1" max="1440" step="1" placeholder="Minutes" required>
+        <button type="submit" class="btn btn-primary"><i class="bi bi-play-fill me-1"></i>Start</button>
+      </form>
+    </div>
+  </div>
+</div>
+
+<div id="timersEmpty" class="text-center text-secondary py-5">
+  <div style="font-size:3rem;"><i class="bi bi-stopwatch"></i></div>
+  <p class="fs-3 mb-0">No timers running</p>
+  <p class="mb-0">Timers started here also show on the Stream Deck and every other screen.</p>
+</div>
+
+<div id="timersGrid" class="row g-3 d-none"></div>
+
+{# Bluetooth thermometer probes. Hidden until the host-side reader has
+   reported something: an install without thermometers never sees this. #}
+<div id="probesSection" class="d-none mt-4 pt-3 border-top">
+  <h4 class="mb-3"><i class="bi bi-thermometer-half me-2"></i>Temperatures</h4>
+  <div id="probesGrid" class="row g-3"></div>
+  <div id="probesDiscovered" class="d-none mt-3">
+    <div class="text-secondary mb-2">Thermometers in range, ready to add:</div>
+    <div id="probesDiscoveredList" class="d-flex flex-wrap gap-2"></div>
+  </div>
+</div>
+
+<style>
+  .timer-card .timer-label {
+    font-size: 1.6rem;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .timer-card .timer-count {
+    font-size: 5.5rem;
+    font-weight: 700;
+    line-height: 1.05;
+    font-variant-numeric: tabular-nums;
+  }
+  .timer-card.timer-expired {
+    border-color: var(--bs-danger);
+    background-color: rgba(var(--bs-danger-rgb), 0.15);
+  }
+  .timer-card.timer-expired .timer-count { color: var(--bs-danger); }
+  .probe-card .probe-temp {
+    font-size: 4rem;
+    font-weight: 700;
+    line-height: 1.05;
+    font-variant-numeric: tabular-nums;
+  }
+  .probe-card .probe-temp.probe-reached { color: var(--bs-danger); }
+  .probe-card .probe-empty { font-size: 2rem; }
+  .probe-card.probe-stale { opacity: 0.55; }
+</style>
+
+<script>
+(function () {
+  "use strict";
+
+  var grid = document.getElementById("timersGrid");
+  var empty = document.getElementById("timersEmpty");
+  var customForm = document.getElementById("timerCustomForm");
+  var customLabel = document.getElementById("timerCustomLabel");
+  var customMinutes = document.getElementById("timerCustomMinutes");
+  var clearAllBtn = document.getElementById("timersClearAll");
+  var saverBtn = document.getElementById("startScreensaver");
+
+  // Latest snapshot from the server. Each entry carries deadline_epoch so we can
+  // tick locally between polls (the timers API publishes an absolute wall-clock
+  // deadline for exactly this cross-surface use).
+  var timers = [];
+
+  function pad(n) { return n < 10 ? "0" + n : String(n); }
+
+  function fmt(totalSeconds) {
+    var s = Math.max(0, Math.floor(totalSeconds));
+    var m = Math.floor(s / 60);
+    var sec = s % 60;
+    if (m >= 60) {
+      var h = Math.floor(m / 60);
+      m = m % 60;
+      return h + ":" + pad(m) + ":" + pad(sec);
+    }
+    return pad(m) + ":" + pad(sec);
+  }
+
+  function render() {
+    // Clear all only makes sense once something is running (or done).
+    if (clearAllBtn) clearAllBtn.classList.toggle("d-none", !timers.length);
+    if (!timers.length) {
+      grid.classList.add("d-none");
+      grid.innerHTML = "";
+      empty.classList.remove("d-none");
+      return;
+    }
+    empty.classList.add("d-none");
+    grid.classList.remove("d-none");
+
+    var nowEpoch = Date.now() / 1000;
+    var html = "";
+    for (var i = 0; i < timers.length; i++) {
+      var t = timers[i];
+      // Prefer the shared epoch deadline; fall back to the server remaining.
+      var remaining;
+      if (typeof t.deadline_epoch === "number") {
+        remaining = t.deadline_epoch - nowEpoch;
+      } else {
+        remaining = t.remaining_seconds;
+      }
+      var expired = remaining <= 0;
+      var label = (t.label || "Timer").toString();
+      // Escape the label for safe insertion as text.
+      var safe = label.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      var cls = expired ? "timer-card timer-expired" : "timer-card";
+      var badge = expired
+        ? '<span class="badge bg-danger fs-5">Done</span>'
+        : '<span class="badge bg-success fs-5">Running</span>';
+      var cancel = '<button type="button" class="btn btn-outline-danger timer-cancel" data-id="' +
+        t.id + '">' + (expired ? "Dismiss" : "Cancel") + '</button>';
+      // A running timer offers a one-tap nudge; a finished one has nothing to
+      // extend (the server refuses too), so the button disappears with it.
+      var extend = expired ? '' :
+        '<button type="button" class="btn btn-outline-light timer-extend me-2" data-id="' +
+        t.id + '"><i class="bi bi-plus-lg me-1"></i>1 min</button>';
+      html += '<div class="col-12 col-md-6 col-xl-4">' +
+        '<div class="card h-100 ' + cls + '">' +
+        '<div class="card-body text-center">' +
+        '<div class="d-flex align-items-center justify-content-between mb-2">' +
+        '<span class="timer-label">' + safe + '</span>' + badge +
+        '</div>' +
+        '<div class="timer-count">' + fmt(remaining) + '</div>' +
+        '<div class="mt-2">' + extend + cancel + '</div>' +
+        '</div></div></div>';
+    }
+    grid.innerHTML = html;
+  }
+
+  async function poll() {
+    // A hidden tab (or a browser window behind others) skips the network
+    // trip; the local render tick keeps the countdown correct from
+    // deadline_epoch, and the next visible poll resyncs the list.
+    if (document.hidden) return;
+    try {
+      var resp = await fetch("timers", { headers: { "Accept": "application/json" } });
+      if (resp.ok) {
+        var data = await resp.json();
+        timers = (data && data.timers) || [];
+      }
+    } catch (e) {
+      // Network hiccup or /timers unreachable: keep the last snapshot and let
+      // the local tick keep counting down. Never surface an error on the kiosk.
+    }
+    render();
+  }
+
+  async function startTimer(label, minutes) {
+    var m = parseFloat(minutes);
+    if (!isFinite(m) || m <= 0) return;
+    try {
+      await fetch("timers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ label: label || "", seconds: Math.round(m * 60) })
+      });
+    } catch (e) {
+      // Unreachable: the next poll shows whatever the server actually has.
+    }
+    await poll();
+  }
+
+  async function cancelTimer(id) {
+    try {
+      await fetch("timers/" + encodeURIComponent(id), { method: "DELETE" });
+    } catch (e) { }
+    await poll();
+  }
+
+  async function extendTimer(id, seconds) {
+    try {
+      await fetch("timers/" + encodeURIComponent(id) + "/extend", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ seconds: seconds })
+      });
+    } catch (e) { }
+    await poll();
+  }
+
+  // Preset buttons start unnamed timers (the server numbers them). The custom
+  // form takes an optional name and a minute count.
+  document.querySelectorAll(".timer-preset").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      startTimer("", btn.getAttribute("data-minutes"));
+    });
+  });
+
+  // Clear all stops every timer at once, finished ones included. The confirm
+  // names the count so the tap is deliberate.
+  clearAllBtn.addEventListener("click", async function () {
+    var n = timers.length;
+    if (!n) return;
+    var msg = n === 1 ? "Stop and clear the timer?"
+                      : "Stop and clear all " + n + " timers?";
+    if (!window.confirm(msg)) return;
+    try {
+      await fetch("timers", { method: "DELETE" });
+    } catch (e) { }
+    await poll();
+  });
+
+  // Start the screensaver right away: nice mid-cook, with the timers floating
+  // across the dimmed screen. The button only appears when the screensaver
+  // script is on this page; its hook works even with the idle timeout off.
+  if (saverBtn && typeof window.__screensaverTest === "function") {
+    saverBtn.classList.remove("d-none");
+    saverBtn.addEventListener("click", function () {
+      window.__screensaverTest();
+    });
+  }
+
+  customForm.addEventListener("submit", function (ev) {
+    ev.preventDefault();
+    startTimer(customLabel.value.trim(), customMinutes.value);
+    customLabel.value = "";
+    customMinutes.value = "";
+  });
+
+  // The per-timer buttons are re-rendered every tick, so delegate the clicks.
+  grid.addEventListener("click", function (ev) {
+    var btn = ev.target.closest ? ev.target.closest(".timer-cancel") : null;
+    if (btn && btn.getAttribute("data-id")) {
+      cancelTimer(btn.getAttribute("data-id"));
+      return;
+    }
+    var ext = ev.target.closest ? ev.target.closest(".timer-extend") : null;
+    if (ext && ext.getAttribute("data-id")) extendTimer(ext.getAttribute("data-id"), 60);
+  });
+
+  // Tick locally every second for a smooth countdown (each timer carries
+  // deadline_epoch, so no network is needed between polls). The server
+  // snapshot refreshes every few seconds to pick up timers started or
+  // cancelled elsewhere; local button presses call poll() directly, so their
+  // feedback is immediate either way. On a satellite each poll is a round
+  // trip to the main server, which is why this is not once a second.
+  poll();
+  setInterval(poll, 3000);
+  setInterval(render, 1000);
+  // Coming back to the tab resyncs right away instead of waiting a cycle.
+  document.addEventListener("visibilitychange", function () {
+    if (!document.hidden) poll();
+  });
+})();
+
+(function () {
+  "use strict";
+  // Bluetooth thermometer probes (FoodAssistant-6ivl). Polls gadgets/state
+  // alongside the timers poll. The whole section stays hidden until the
+  // host-side reader has reported a configured or discoverable thermometer,
+  // so kitchens without one see nothing here.
+
+  var section = document.getElementById("probesSection");
+  var grid = document.getElementById("probesGrid");
+  var discoverWrap = document.getElementById("probesDiscovered");
+  var discoverList = document.getElementById("probesDiscoveredList");
+  if (!section) return;
+
+  var state = { enabled: false, unit: "f", devices: [], discovered: [] };
+  // Device id + probe index of the target editor currently open, or null.
+  var editing = null;
+
+  function esc(s) {
+    return String(s == null ? "" : s)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  function toDisplay(c) {
+    return state.unit === "c" ? c : c * 9 / 5 + 32;
+  }
+
+  function toCelsius(d) {
+    return state.unit === "c" ? d : (d - 32) * 5 / 9;
+  }
+
+  function fmt(c) {
+    if (c == null || !isFinite(c)) return "";
+    return Math.round(toDisplay(c)) + "°" + state.unit.toUpperCase();
+  }
+
+  function batteryIcon(pct) {
+    if (pct == null) return "";
+    var icon = pct <= 15 ? "bi-battery" : (pct >= 85 ? "bi-battery-full" : "bi-battery-half");
+    var cls = pct <= 15 ? "text-danger" : "text-secondary";
+    return '<span class="' + cls + ' ms-2 text-nowrap"><i class="bi ' + icon + ' me-1"></i>' + pct + '%</span>';
+  }
+
+  function probeHtml(dev, p) {
+    var reached = p.target_c != null && p.temp_c != null &&
+      (p.direction === "below" ? p.temp_c <= p.target_c : p.temp_c >= p.target_c);
+    var temp = p.temp_c == null
+      ? '<div class="probe-empty text-secondary">--</div>'
+      : '<div class="probe-temp' + (reached ? " probe-reached" : "") + '">' + fmt(p.temp_c) + '</div>';
+    var targetLabel = p.target_c == null
+      ? '<i class="bi bi-bullseye me-1"></i>Target'
+      : '<i class="bi bi-bullseye me-1"></i>' + (p.direction === "below" ? "≤ " : "≥ ") + fmt(p.target_c);
+    var roleTag = p.role_label ? ' · ' + esc(p.role_label) : '';
+    var body = '<div class="text-secondary">Probe ' + p.index + roleTag + '</div>' + temp;
+    // When the user set no target of their own, show the setpoint the device
+    // itself broadcasts (a Govee grill's on-device alarm).
+    if (p.target_c == null && p.device_target_c != null) {
+      body += '<div class="text-secondary small">device target ' + fmt(p.device_target_c) + '</div>';
+    }
+    if (editing && editing.id === dev.id && editing.probe === p.index) {
+      var val = p.target_c != null ? Math.round(toDisplay(p.target_c)) : "";
+      body += '<div class="d-flex flex-wrap justify-content-center gap-2 mt-2">' +
+        '<input type="number" class="form-control probe-target-input" style="max-width:6.5rem;" ' +
+        'value="' + val + '" min="-40" max="999" step="1" aria-label="Target temperature">' +
+        '<select class="form-select probe-target-dir" style="max-width:7rem;" aria-label="Alert direction">' +
+        '<option value="above"' + (p.direction !== "below" ? " selected" : "") + '>Above</option>' +
+        '<option value="below"' + (p.direction === "below" ? " selected" : "") + '>Below</option></select>' +
+        '<button type="button" class="btn btn-primary probe-target-set" data-id="' + esc(dev.id) +
+        '" data-probe="' + p.index + '">Set</button>' +
+        (p.target_c != null
+          ? '<button type="button" class="btn btn-outline-danger probe-target-clear" data-id="' + esc(dev.id) +
+            '" data-probe="' + p.index + '">Clear</button>'
+          : '') +
+        '<button type="button" class="btn btn-outline-secondary probe-target-cancel">Back</button>' +
+        '</div>';
+    } else {
+      body += '<div class="mt-2"><button type="button" class="btn btn-sm btn-outline-light probe-target-edit" ' +
+        'data-id="' + esc(dev.id) + '" data-probe="' + p.index + '">' + targetLabel + '</button></div>';
+    }
+    return '<div class="col-6 col-md-4 col-xl-3"><div class="card h-100 probe-card' +
+      (dev.stale ? " probe-stale" : "") + '"><div class="card-body text-center">' + body + '</div></div></div>';
+  }
+
+  function render() {
+    var hasDevices = state.devices.length > 0;
+    var hasDiscovered = state.discovered.length > 0;
+    section.classList.toggle("d-none", !hasDevices && !hasDiscovered);
+    if (!hasDevices && !hasDiscovered) return;
+
+    var html = "";
+    state.devices.forEach(function (dev) {
+      var title = esc(dev.name || dev.id);
+      var status = dev.stale
+        ? '<span class="badge bg-secondary ms-2">No signal</span>'
+        : batteryIcon(dev.battery);
+      html += '<div class="col-12"><div class="d-flex align-items-center">' +
+        '<span class="fs-5 fw-semibold">' + title + '</span>' + status +
+        '<button type="button" class="btn btn-sm btn-outline-danger ms-auto probe-device-remove" ' +
+        'data-id="' + esc(dev.id) + '" title="Remove this thermometer"><i class="bi bi-x-lg"></i></button>' +
+        '</div></div>';
+      dev.probes.forEach(function (p) { html += probeHtml(dev, p); });
+      if (!dev.probes.length) {
+        html += '<div class="col-12 text-secondary">Waiting for a reading…</div>';
+      }
+    });
+    grid.innerHTML = html;
+
+    discoverWrap.classList.toggle("d-none", !hasDiscovered);
+    discoverList.innerHTML = state.discovered.map(function (d) {
+      return '<button type="button" class="btn btn-outline-success probe-device-add" ' +
+        'data-id="' + esc(d.id) + '" data-name="' + esc(d.name) + '" data-protocol="' + esc(d.protocol) + '">' +
+        '<i class="bi bi-plus-lg me-1"></i>' + esc(d.name || d.id) + '</button>';
+    }).join("");
+  }
+
+  async function poll() {
+    if (document.hidden) return;
+    try {
+      var resp = await fetch("gadgets/state", { headers: { "Accept": "application/json" } });
+      if (resp.ok) {
+        var data = await resp.json();
+        state.enabled = !!data.enabled;
+        state.unit = data.unit === "c" ? "c" : "f";
+        state.devices = data.devices || [];
+        state.discovered = data.discovered || [];
+      }
+    } catch (e) {
+      // Reader or app unreachable: keep the last snapshot; never surface an
+      // error on the kiosk.
+    }
+    // An open target editor is left alone: re-rendering mid-typing would
+    // steal focus and drop the digits already entered.
+    if (!editing) render();
+  }
+
+  async function post(path, body) {
+    try {
+      await fetch(path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      });
+    } catch (e) { }
+    await poll();
+  }
+
+  section.addEventListener("click", async function (ev) {
+    var t = function (sel) { return ev.target.closest ? ev.target.closest(sel) : null; };
+    var btn;
+    if ((btn = t(".probe-device-add"))) {
+      post("gadgets/devices", {
+        id: btn.getAttribute("data-id"),
+        name: btn.getAttribute("data-name") || "",
+        protocol: btn.getAttribute("data-protocol") || ""
+      });
+    } else if ((btn = t(".probe-device-remove"))) {
+      if (!window.confirm("Remove this thermometer?")) return;
+      try {
+        await fetch("gadgets/devices/" + encodeURIComponent(btn.getAttribute("data-id")), { method: "DELETE" });
+      } catch (e) { }
+      await poll();
+    } else if ((btn = t(".probe-target-edit"))) {
+      editing = { id: btn.getAttribute("data-id"), probe: parseInt(btn.getAttribute("data-probe"), 10) };
+      render();
+    } else if ((btn = t(".probe-target-cancel"))) {
+      editing = null;
+      render();
+    } else if ((btn = t(".probe-target-set"))) {
+      var card = btn.closest(".probe-card");
+      var input = card && card.querySelector(".probe-target-input");
+      var dir = card && card.querySelector(".probe-target-dir");
+      var val = input ? parseFloat(input.value) : NaN;
+      if (!isFinite(val)) return;
+      editing = null;
+      post("gadgets/target", {
+        device_id: btn.getAttribute("data-id"),
+        probe: parseInt(btn.getAttribute("data-probe"), 10),
+        temp_c: Math.round(toCelsius(val) * 10) / 10,
+        direction: dir ? dir.value : "above"
+      });
+    } else if ((btn = t(".probe-target-clear"))) {
+      editing = null;
+      post("gadgets/target", {
+        device_id: btn.getAttribute("data-id"),
+        probe: parseInt(btn.getAttribute("data-probe"), 10),
+        temp_c: null
+      });
+    }
+  });
+
+  poll();
+  setInterval(poll, 5000);
+  document.addEventListener("visibilitychange", function () {
+    if (!document.hidden) poll();
+  });
+})();
+</script>
+{% endblock %}

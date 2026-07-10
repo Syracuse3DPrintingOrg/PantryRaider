@@ -1,0 +1,300 @@
+{% from "setup/_macros.html" import info, panel, srow, pill, toggle with context %}
+<!-- Printing (FoodAssistant-fb8x): a device-local feature, so it renders in
+     every mode (a printer is attached to whatever device you are at). The
+     master toggle gates the whole feature; the queue dropdowns are filled from
+     /printing/queues on open. Field ids match the saved settings so the save
+     path picks them up. -->
+        <div class="tab-pane fade" id="pane-printing">
+          <p class="pane-intro">Print food and spice labels, and full recipes, on any printer shared on your network. A printer attached to one device is usable from every device.</p>
+
+          {% if not printing_available %}
+          <div class="alert alert-secondary d-flex align-items-start gap-2" role="alert">
+            <i class="bi bi-info-circle fs-5"></i>
+            <div>
+              This device does not have a printer set up yet. Printing has to be
+              turned on for the device before it can send anything. Once a printer
+              is connected and set up, your printers show up in the lists below.
+              <div class="mt-2">
+                <button type="button" class="btn btn-outline-info btn-sm" onclick="installPrintStack(this)">
+                  <i class="bi bi-download me-1"></i>Install now
+                </button>
+                <div class="test-result mt-2" id="print-install-result"></div>
+              </div>
+            </div>
+          </div>
+          {% endif %}
+
+          {% call panel('Printing',
+                        'Turn printing on to show a Print label button on your items and a Print button on recipes.',
+                        pill_text=('On' if s.printing_enabled else 'Off'),
+                        pill_kind=('good' if s.printing_enabled else 'neutral'),
+                        pill_id='printing-pill') %}
+            {% call srow('Enable printing', 'The master switch for labels and recipe printouts.') %}
+              {{ toggle('printing_enabled', checked=s.printing_enabled, onchange='ldSyncGate()') }}
+            {% endcall %}
+            {% if is_satellite %}
+            <!-- Pi Remote: the main server sets the fleet default printer, shown
+                 here for reference. This device uses it unless you pick your own
+                 printer below, which then wins for this device only. -->
+            {% call srow('Label printer', 'Where food and spice labels go.',
+                         'This device uses your own choice when set, otherwise the fleet default from the main server. The list can include any printer shared on your network.') %}
+              <div class="small text-secondary mb-1">
+                Fleet default: <strong>{{ s.fleet_label_printer_queue or 'none set on the main server' }}</strong>
+              </div>
+              <select class="form-select" id="label_printer_queue" style="max-width:420px">
+                <option value="">Use the fleet default</option>
+                {% if s.label_printer_queue %}
+                <option value="{{ s.label_printer_queue }}" selected>{{ s.label_printer_queue }}</option>
+                {% endif %}
+              </select>
+            {% endcall %}
+            {% call srow('Document printer', 'Where full-page recipes go.',
+                         'This device uses your own choice when set, otherwise the fleet default from the main server.') %}
+              <div class="small text-secondary mb-1">
+                Fleet default: <strong>{{ s.fleet_document_printer_queue or 'none set on the main server' }}</strong>
+              </div>
+              <select class="form-select" id="document_printer_queue" style="max-width:420px">
+                <option value="">Use the fleet default</option>
+                {% if s.document_printer_queue %}
+                <option value="{{ s.document_printer_queue }}" selected>{{ s.document_printer_queue }}</option>
+                {% endif %}
+              </select>
+            {% endcall %}
+            {% else %}
+            <!-- Server / Pi Hosted: the printer chosen here is the fleet default
+                 every other device inherits (and it is also what this device
+                 prints to). Any printer shared on your network appears in the
+                 list, so a printer attached to one device is usable from all. -->
+            {% call srow('Label printer', 'Where food and spice labels go, on this and any device without its own choice.',
+                         'Pick the printer loaded with your label stock. It becomes the fleet default for every device. The list includes any printer shared on your network.') %}
+              <select class="form-select" id="fleet_label_printer_queue" style="max-width:420px">
+                <option value="">(none chosen)</option>
+                {% if s.fleet_label_printer_queue %}
+                <option value="{{ s.fleet_label_printer_queue }}" selected>{{ s.fleet_label_printer_queue }}</option>
+                {% endif %}
+              </select>
+            {% endcall %}
+            {% call srow('Document printer', 'Where full-page recipes go, on this and any device without its own choice.',
+                         'Pick your regular paper printer for recipe printouts. It becomes the fleet default for every device.') %}
+              <select class="form-select" id="fleet_document_printer_queue" style="max-width:420px">
+                <option value="">(none chosen)</option>
+                {% if s.fleet_document_printer_queue %}
+                <option value="{{ s.fleet_document_printer_queue }}" selected>{{ s.fleet_document_printer_queue }}</option>
+                {% endif %}
+              </select>
+            {% endcall %}
+            {% endif %}
+            {% call srow('Refresh printers', 'Look for printers on your network again, including any shared by another device.') %}
+              <button type="button" class="btn btn-outline-secondary btn-sm" onclick="loadPrintQueues(true)">
+                <i class="bi bi-arrow-repeat me-1"></i>Refresh list
+              </button>
+              <div class="test-result mt-1" id="print-queues-result"></div>
+            {% endcall %}
+          {% endcall %}
+
+          {% if not is_satellite %}
+          <!-- Discover + add (FoodAssistant-r9a4). Adding a printer belongs on a
+               device with its own printer service (server or Pi Hosted). A Pi
+               Remote prints through the printers shared by the main server, so it
+               has nothing to add here; the whole panel is hidden on a satellite. -->
+          {% if printing_available %}
+          {% call panel('Add a printer',
+                        'Find a printer on your network and add it, or add one by its address. Once added it appears in the printer lists above.') %}
+            {% call srow('Find printers', 'Look for printers on your network you can add.') %}
+              <button type="button" class="btn btn-outline-info btn-sm" onclick="findPrinters(this)">
+                <i class="bi bi-search me-1"></i>Find printers
+              </button>
+              <div class="test-result mt-2" id="printer-discover-result"></div>
+              <div class="mt-2" id="printer-discover-list"></div>
+            {% endcall %}
+            {% call srow('Add by address', 'Enter a printer by its host name or IP address when it does not show up in the search.') %}
+              <div class="d-flex flex-column gap-2" style="max-width:420px">
+                <input type="text" class="form-control" id="add-printer-name" placeholder="A name for this printer (e.g. KitchenLaser)">
+                <input type="text" class="form-control" id="add-printer-host" placeholder="Host name or IP (e.g. 192.168.1.50)">
+                <select class="form-select" id="add-printer-type" onchange="onAddPrinterTypeChange()">
+                  <option value="driverless" selected>Driverless (IPP) — recommended</option>
+                  <option value="ipp">Network (IPP)</option>
+                  <option value="zebra">Zebra label printer (ZPL)</option>
+                  <option value="socket">Raw socket — advanced</option>
+                </select>
+                <div id="add-printer-port-row" style="display:none">
+                  <label class="form-label small text-secondary mb-1">Port</label>
+                  <input type="number" class="form-control" id="add-printer-port" value="9100" min="1" max="65535">
+                  <div class="small text-secondary mt-1">
+                    A raw socket queue sends data straight to the printer with no driver. It is for advanced setups (for example a label printer that speaks its own language). Most printers work best with Driverless (IPP).
+                  </div>
+                </div>
+                <div>
+                  <button type="button" class="btn btn-outline-info btn-sm" onclick="addPrinterByAddress(this)">
+                    <i class="bi bi-plus-lg me-1"></i>Add printer
+                  </button>
+                </div>
+              </div>
+              <div class="test-result mt-2" id="add-printer-result"></div>
+            {% endcall %}
+          {% endcall %}
+          {% endif %}
+          {% endif %}
+
+          <!-- Bluetooth label printer (FoodAssistant-h2j6): a Supvan T50M
+               family printer connects over Bluetooth, not the network, so it
+               cannot show up in Find printers until a small on-device bridge
+               turns it into an ordinary network printer. Set up here once,
+               then it behaves exactly like any other printer above. Pi
+               appliance only (pi_hosted or pi_remote); a plain server has no
+               on-device helper to build or run the bridge. -->
+          {% call panel('Bluetooth label printer',
+                        'Connect a Supvan T50M-family label printer over Bluetooth. Once it is set up it shows up as a normal network printer, right alongside the others above.',
+                        pill_text=('' if not is_pi_appliance else 'Not set up'),
+                        pill_kind='neutral',
+                        pill_id=(is_pi_appliance and 'bt-print-pill' or '')) %}
+            {% if is_pi_appliance %}
+            {% call srow('Set up', 'Prepares the printer software on this device. The first time can take several minutes.') %}
+              <button type="button" class="btn btn-outline-info btn-sm" id="bt-print-setup-btn" onclick="bluetoothPrintSetup(this)">
+                <i class="bi bi-bluetooth me-1"></i>Set up
+              </button>
+              <div class="test-result mt-2" id="bt-print-setup-result"></div>
+              <div class="form-text mt-1">Once it says Ready, turn the printer on, then use Find printers above; it shows up as a network printer.</div>
+            {% endcall %}
+            {% else %}
+            <p class="mb-0 text-secondary small">
+              Bluetooth label printer setup is available on a Pantry Raider appliance today. On this server, connect a label printer over the network instead, using Find printers or Add by address above.
+            </p>
+            {% endif %}
+          {% endcall %}
+
+          {% call panel('Label size',
+                        'The size of your label stock, in inches, plus its print resolution. The preview updates as you change these.') %}
+            {% call srow('Label format', 'Pick a common label size, or set your own below.',
+                         'Choosing a format fills in the size and resolution and gives the designer a matching starting design. Pick Custom to set the size by hand.') %}
+              <select class="form-select" id="label_format" style="max-width:420px" onchange="ldApplyPreset()">
+                <option value="">Custom size</option>
+              </select>
+            {% endcall %}
+            {% call srow('Width', 'Inches.') %}
+              <input type="number" class="form-control" id="label_width_in" min="0.5" max="8" step="0.1"
+                     style="max-width:140px" value="{{ s.label_width_in }}" oninput="refreshLabelPreview(); ldOnSizeInput()">
+            {% endcall %}
+            {% call srow('Height', 'Inches.') %}
+              <input type="number" class="form-control" id="label_height_in" min="0.5" max="8" step="0.1"
+                     style="max-width:140px" value="{{ s.label_height_in }}" oninput="refreshLabelPreview(); ldOnSizeInput()">
+            {% endcall %}
+            {% call srow('Resolution', 'Dots per inch. 203 suits most thermal label printers.') %}
+              <input type="number" class="form-control" id="label_dpi" min="72" max="600" step="1"
+                     style="max-width:140px" value="{{ s.label_dpi }}" oninput="refreshLabelPreview(); ldOnSizeInput()">
+            {% endcall %}
+            {% call srow('Preview', 'A sample label at the size above.') %}
+              <div class="border rounded d-inline-block p-2 bg-body-tertiary">
+                <img id="label-preview-img" alt="Label preview"
+                     style="max-width:100%;image-rendering:pixelated;background:#fff">
+              </div>
+            {% endcall %}
+          {% endcall %}
+
+          {% call panel('Design your label',
+                        'Place the fields on your label and see the printed result as you go. Your saved design is used for every food label; the size above sets the stock it prints on.') %}
+            <!-- The designer edits a layout of positioned fields. The schematic
+                 on the left is the editable canvas (drag to move, drag a corner
+                 to resize); the image on the right is the real rendered label
+                 from the print engine, so what you place is what prints. -->
+            <script type="application/json" id="ld-saved-layout">{{ (s.label_layout_json or '') | replace('</', '<\\/') | safe }}</script>
+            <div id="label-designer-gate-off" class="form-text mb-1" style="display:none">
+              <i class="bi bi-info-circle me-1"></i>Turn printing on above to design your label.
+            </div>
+            <div id="label-designer">
+              <div class="d-flex flex-wrap gap-3">
+                <!-- Editable schematic canvas -->
+                <div>
+                  <div class="small text-secondary mb-1">Layout (drag to move, drag a corner to resize)</div>
+                  <div id="ld-canvas" class="ld-canvas" tabindex="0" aria-label="Label layout canvas">
+                    <div id="ld-inner" class="ld-inner"></div>
+                  </div>
+                </div>
+                <!-- Live rendered preview -->
+                <div>
+                  <div class="small text-secondary mb-1">Printed result</div>
+                  <div class="border rounded d-inline-block p-2 bg-body-tertiary">
+                    <img id="ld-preview-img" alt="Live label preview"
+                         style="max-width:100%;image-rendering:pixelated;background:#fff;min-width:120px">
+                  </div>
+                  <div class="test-result mt-1" id="ld-preview-msg"></div>
+                </div>
+              </div>
+
+              <!-- Add-a-field palette -->
+              <div class="mt-3">
+                <div class="small text-secondary mb-1">Add a field</div>
+                <div id="ld-palette" class="d-flex flex-wrap gap-1"></div>
+              </div>
+
+              <!-- Selected-field inspector -->
+              <div id="ld-inspector" class="border rounded p-2 mt-3" style="max-width:520px;display:none">
+                <div class="d-flex align-items-center justify-content-between mb-2">
+                  <strong id="ld-insp-title" class="small">Field</strong>
+                  <button type="button" class="btn btn-outline-danger btn-sm" onclick="ldDeleteSelected()">
+                    <i class="bi bi-trash3 me-1"></i>Delete
+                  </button>
+                </div>
+                <div id="ld-insp-text-row" class="mb-2" style="display:none">
+                  <label class="form-label small mb-1">Text</label>
+                  <input type="text" class="form-control form-control-sm" id="ld-insp-text"
+                         oninput="ldInspTextChanged()" placeholder="Text to print">
+                </div>
+                <div class="mb-2">
+                  <label class="form-label small mb-1">Align</label>
+                  <div class="btn-group btn-group-sm d-block" role="group" aria-label="Text alignment">
+                    <button type="button" class="btn btn-outline-secondary" data-align="left" onclick="ldSetAlign('left')"><i class="bi bi-text-left"></i></button>
+                    <button type="button" class="btn btn-outline-secondary" data-align="center" onclick="ldSetAlign('center')"><i class="bi bi-text-center"></i></button>
+                    <button type="button" class="btn btn-outline-secondary" data-align="right" onclick="ldSetAlign('right')"><i class="bi bi-text-right"></i></button>
+                  </div>
+                </div>
+                <div class="mb-2">
+                  <label class="form-label small mb-1">Text size</label>
+                  <input type="range" class="form-range" id="ld-insp-size" min="0.4" max="1.5" step="0.05"
+                         oninput="ldInspSizeChanged()">
+                </div>
+                <div class="d-flex gap-3">
+                  <label class="small"><input type="checkbox" id="ld-insp-bold" class="form-check-input me-1" onchange="ldInspBoldChanged()">Bold</label>
+                  <label class="small"><input type="checkbox" id="ld-insp-upper" class="form-check-input me-1" onchange="ldInspUpperChanged()">UPPERCASE</label>
+                </div>
+              </div>
+
+              <!-- Actions -->
+              <div class="mt-3 d-flex flex-wrap gap-2 align-items-center">
+                <button type="button" class="btn btn-outline-info btn-sm" onclick="ldSaveLayout(this)">
+                  <i class="bi bi-check-lg me-1"></i>Save layout
+                </button>
+                <button type="button" class="btn btn-outline-secondary btn-sm" onclick="ldResetDefault(this)">
+                  <i class="bi bi-arrow-counterclockwise me-1"></i>Reset to default
+                </button>
+                <div class="test-result" id="ld-save-result"></div>
+              </div>
+              <div class="form-text mt-1">Your saved design applies to every printed food label.</div>
+            </div>
+          {% endcall %}
+
+          {% call panel('Decorative labels',
+                        'Make a plain name label for a spice jar, canister, or storage bin. No dates, just the text.') %}
+            {% call srow('Label text', 'What the label should say.') %}
+              <input type="text" class="form-control" id="decorative-text" style="max-width:420px"
+                     placeholder="Smoked Paprika" oninput="refreshDecorativePreview()">
+            {% endcall %}
+            {% call srow('Preview', 'A sample of the decorative label.') %}
+              <div class="border rounded d-inline-block p-2 bg-body-tertiary">
+                <img id="decorative-preview-img" alt="Decorative label preview"
+                     style="max-width:100%;image-rendering:pixelated;background:#fff">
+              </div>
+            {% endcall %}
+            {% call srow('Print', 'Send the decorative label to the label printer.') %}
+              <button type="button" class="btn btn-outline-info btn-sm" onclick="printDecorative(this)">
+                <i class="bi bi-printer me-1"></i>Print label
+              </button>
+              <div class="test-result mt-1" id="decorative-print-result"></div>
+            {% endcall %}
+          {% endcall %}
+
+          <button type="button" class="btn btn-outline-info btn-sm" onclick="savePanePrinting(this)">
+            <i class="bi bi-check-lg me-1"></i>Save Printing
+          </button>
+          <div class="test-result mt-2 mb-3" id="printing-save-result"></div>
+        </div>
