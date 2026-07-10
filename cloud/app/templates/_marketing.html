@@ -1,0 +1,161 @@
+{# Shared marketing building blocks, reused by the landing, pricing, and
+   features pages so the copy and the literal pricing strings live in one
+   place. All user-forward, no jargon (no token/instance/API). #}
+
+{% macro check() %}<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8.5l3.5 3.5L13 4"/></svg>{% endmacro %}
+
+{% macro how_it_works() %}
+<section class="section" id="how-it-works">
+  <div class="section-head">
+    <span class="eyebrow">How it works</span>
+    <h2>Up and running in three steps</h2>
+    <p>No keys to paste, no network settings to wrangle. Sign up here, then
+    sign in from the app.</p>
+  </div>
+  <div class="steps">
+    <div class="step">
+      <span class="num">1</span>
+      <h3>Sign up for Forager</h3>
+      <p>Create your account with an email and password. Your free trial
+      starts the moment you do.</p>
+    </div>
+    <div class="step">
+      <span class="num">2</span>
+      <h3>Sign in from the app</h3>
+      <p>Open Pantry Raider in your kitchen, go to Settings, and sign in with
+      the same email and password.</p>
+    </div>
+    <div class="step">
+      <span class="num">3</span>
+      <h3>Just start scanning</h3>
+      <p>Photo scanning and remote access begin working right away. That is
+      the whole setup.</p>
+    </div>
+  </div>
+</section>
+{% endmacro %}
+
+{% macro features_grid() %}
+<section class="section" id="features">
+  <div class="section-head">
+    <span class="eyebrow">What you get</span>
+    <h2>Everything the easy button turns on</h2>
+    <p>The parts that are fiddly to run yourself, handled for you.</p>
+  </div>
+  <div class="feature-grid">
+    <div class="card feature">
+      <span class="ficon" aria-hidden="true">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+      </span>
+      <h3>Photo scanning, no AI key</h3>
+      <p>Snap a photo of your groceries or a receipt and Forager reads it for
+      you. No account with an AI company, nothing to configure.</p>
+    </div>
+    <div class="card feature">
+      <span class="ficon" aria-hidden="true">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+      </span>
+      <h3>Reach your kitchen anywhere</h3>
+      <p>Get a web address for your kitchen so you can check what is in stock
+      from the grocery store or the road, not just from home.</p>
+    </div>
+    <div class="card feature">
+      <span class="ficon" aria-hidden="true">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+      </span>
+      <h3>One account, every kitchen</h3>
+      <p>Sign in once and use the same account across all your kitchens, at
+      home, at the cabin, or wherever you cook.</p>
+    </div>
+    <div class="card feature">
+      <span class="ficon" aria-hidden="true">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+      </span>
+      <h3>Private by design</h3>
+      <p>Your photos pass through in memory only long enough to be read, and
+      are never stored. Your inventory and recipes stay in your own kitchen.</p>
+    </div>
+  </div>
+</section>
+{% endmacro %}
+
+{% macro pricing_cards() %}
+<div class="pricing">
+  <div class="card plan">
+    <h3>Self-hosted</h3>
+    <p class="price">Free<span class="per"> forever</span></p>
+    <p class="price-note">Runs on your own network, no cloud required.</p>
+    <ul class="features">
+      <li>{{ check() }} Every core feature: inventory, expiry, recipes</li>
+      <li>{{ check() }} Kiosk and Stream Deck</li>
+      <li>{{ check() }} Community support on GitHub</li>
+    </ul>
+    <a class="btn btn-outline" href="https://pantryraider.app">Get the app</a>
+  </div>
+
+  <div class="card plan">
+    <h3>Forager Free</h3>
+    <p class="price">Free<span class="per"> forever</span></p>
+    <p class="price-note">A free Forager account, plus a taste of Premium.</p>
+    <ul class="features">
+      <li>{{ check() }} Community recipe access</li>
+      <li>{{ check() }} 30-day Premium trial included</li>
+      <li>{{ check() }} Everything in Self-hosted</li>
+    </ul>
+    <a class="btn btn-outline" href="/signup">Start free</a>
+  </div>
+
+  <div class="card plan featured">
+    <span class="tag-popular">Most popular</span>
+    <h3>Premium</h3>
+    <p class="price">$3<span class="per"> / month</span></p>
+    <p class="price-note">or $30 / year</p>
+    <ul class="features">
+      <li>{{ check() }} Remote access from anywhere</li>
+      <li>{{ check() }} 2,000,000 AI tokens a month</li>
+      <li>{{ check() }} Photo import, receipt scanning, barcode enrichment</li>
+      <li>{{ check() }} AI recipe generation and advanced suggestions</li>
+      <li>{{ check() }} Everything in Forager Free</li>
+    </ul>
+    <a class="btn" href="/signup">Choose Premium</a>
+  </div>
+
+  <div class="card plan">
+    <h3>Cloud Basic</h3>
+    <p class="price">$10<span class="per"> / year</span></p>
+    <p class="price-note">Best if you bring your own AI key.</p>
+    <ul class="features">
+      <li>{{ check() }} Remote access to your kitchen</li>
+      <li>{{ check() }} 100,000 AI tokens a month</li>
+      <li>{{ check() }} Everything in Forager Free</li>
+    </ul>
+    <a class="btn btn-outline" href="/signup">Choose Basic</a>
+  </div>
+</div>
+{% endmacro %}
+
+{% macro pricing_section() %}
+<section class="section" id="pricing">
+  <div class="section-head">
+    <span class="eyebrow">Pricing</span>
+    <h2>Simple pricing, cancel anytime</h2>
+    <p>Every plan keeps your kitchen reachable and your scanning credits
+    topped up. Pantry Raider itself stays free with your own AI key.</p>
+  </div>
+  {{ pricing_cards() }}
+</section>
+{% endmacro %}
+
+{% macro closing_cta() %}
+<section class="section">
+  <div class="cta-band">
+    <h2>Know your kitchen from anywhere</h2>
+    <p>Start a free 30-day trial. Sign in from the app and scanning just
+    works, with nothing to set up.</p>
+    <div class="hero-cta">
+      <a class="btn btn-lg" href="/signup">Start a free trial</a>
+      <a class="btn btn-outline btn-lg" href="https://pantryraider.app">About the app</a>
+    </div>
+  </div>
+</section>
+{% endmacro %}

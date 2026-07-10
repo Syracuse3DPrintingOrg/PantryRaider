@@ -1,0 +1,492 @@
+"""Bluetooth kitchen thermometer endpoints (FoodAssistant-6ivl).
+
+The host-side reader daemon and the Timers page meet here:
+
+  GET  /gadgets/config            what the reader should do (enabled flag +
+                                  configured device list), polled by the daemon
+  POST /gadgets/readings          probe readings + discovered devices, pushed
+                                  by the daemon every few seconds
+  GET  /gadgets/state             the UI snapshot the Timers page polls
+  POST /gadgets/devices           add a discovered thermometer (turns the
+                                  feature on if it was off)
+  DELETE /gadgets/devices/{id}    remove a thermometer
+  POST /gadgets/target            set or clear a probe's target temperature
+
+The Settings pane (FoodAssistant-mnks) adds management endpoints:
+
+  POST /gadgets/install               set the host reader up on a Pi appliance
+                                      (via the host bridge), or explain the
+                                      manual install on a server
+  GET  /gadgets/ha-entities           temperature entities from Home Assistant,
+                                      for the entity picker
+  POST /gadgets/ha-entities           read one HA entity as a thermometer
+  DELETE /gadgets/ha-entities/{id}    stop reading an HA entity
+
+Configuration lives in settings (gadgets_enabled, gadget_devices,
+gadget_ha_enabled, gadget_ha_entities), so it round-trips through the normal
+settings persistence and the daemon needs no file coupling with the app.
+"""
+from __future__ import annotations
+
+from fastapi import APIRouter
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel
+
+from ..config import settings
+from ..services import gadgets, gadgets_ha, gadgets_esp
+
+router = APIRouter(prefix="/gadgets", tags=["gadgets"])
+
+_HOST_BRIDGE = "http://127.0.0.1:9299"
+
+
+class DeviceIn(BaseModel):
+    id: str
+    name: str = ""
+    protocol: str = ""
+
+
+class TargetIn(BaseModel):
+    device_id: str
+    probe: int
+    temp_c: float | None = None   # None clears the target
+    direction: str = "above"      # above | below
+
+
+def _norm_id(value: str) -> str:
+    return str(value or "").strip().upper()
+
+
+@router.get("/config")
+async def reader_config():
+    """What the host-side reader should do. Devices are listed even while the
+    feature is off so a passive scan can keep the add list warm; the daemon
+    only connects to devices when enabled is true. A pull also counts as the
+    reader's heartbeat, so Settings can tell "reader running, nothing in
+    range" apart from "no reader installed"."""
+    gadgets.mark_reader_seen()
+    return {
+        "enabled": bool(settings.gadgets_enabled),
+        "devices": gadgets.configured_devices(),
+    }
+
+
+@router.post("/readings")
+async def post_readings(payload: dict):
+    """Ingest a reader push: live probe readings plus discovered devices."""
+    return gadgets.ingest(payload if isinstance(payload, dict) else {})
+
+
+@router.get("/state")
+async def state():
+    """The Timers page snapshot: live probes, targets, and devices to add."""
+    return gadgets.get_state()
+
+
+@router.get("/presets")
+async def doneness_presets():
+    """The curated doneness targets (name -> Celsius) the target editor offers
+    instead of typing a custom temperature (FoodAssistant-42ja). Static data, so
+    the Timers page can cache it."""
+    return {"presets": gadgets.doneness_presets(),
+            "low_battery_pct": gadgets.LOW_BATTERY_PCT}
+
+
+@router.post("/devices")
+async def add_device(payload: DeviceIn):
+    """Add a thermometer (usually one the reader discovered). Adding the
+    first device is the feature opt-in, so it also flips gadgets_enabled."""
+    dev_id = _norm_id(payload.id)
+    if not dev_id:
+        return {"ok": False, "error": "a device id is required"}
+    protocol = payload.protocol if payload.protocol in gadgets.PROTOCOLS else ""
+    devices = [dict(d) for d in gadgets.configured_devices()]
+    for dev in devices:
+        if _norm_id(dev.get("id")) == dev_id:
+            if payload.name:
+                dev["name"] = payload.name[:60]
+            if protocol:
+                dev["protocol"] = protocol
+            break
+    else:
+        devices.append({"id": dev_id, "name": payload.name[:60],
+                        "protocol": protocol, "targets": {}})
+    settings.save({"gadget_devices": devices, "gadgets_enabled": True})
+    return {"ok": True, "devices": devices}
+
+
+@router.delete("/devices/{device_id}")
+async def remove_device(device_id: str):
+    dev_id = _norm_id(device_id)
+    devices = [dict(d) for d in gadgets.configured_devices()
+               if _norm_id(d.get("id")) != dev_id]
+    settings.save({"gadget_devices": devices})
+    return {"ok": True, "devices": devices}
+
+
+@router.post("/target")
+async def set_target(payload: TargetIn):
+    """Set or clear one probe's target temperature (stored in Celsius)."""
+    dev_id = _norm_id(payload.device_id)
+    devices = [dict(d) for d in gadgets.configured_devices()]
+    for dev in devices:
+        if _norm_id(dev.get("id")) != dev_id:
+            continue
+        targets = dict(dev.get("targets") or {})
+        key = str(int(payload.probe))
+        if payload.temp_c is None:
+            targets.pop(key, None)
+        else:
+            direction = "below" if payload.direction == "below" else "above"
+            targets[key] = {"temp_c": round(float(payload.temp_c), 1),
+                            "direction": direction}
+        dev["targets"] = targets
+        settings.save({"gadget_devices": devices})
+        return {"ok": True, "devices": devices}
+    return {"ok": False, "error": "unknown device"}
+
+
+class NameIn(BaseModel):
+    device_id: str
+    name: str = ""
+
+
+class ProbeRoleIn(BaseModel):
+    device_id: str
+    probe: int
+    role: str = ""   # "" clears the override (back to auto); else internal|ambient|food
+
+
+@router.post("/name")
+async def set_name(payload: NameIn):
+    """Give a thermometer a friendly name. Auto-added devices arrive with their
+    broadcast name or bare address; this lets any of them become "Grill" or
+    "Smoker". An empty name falls back to the broadcast name in the UI."""
+    dev_id = _norm_id(payload.device_id)
+    devices = [dict(d) for d in gadgets.configured_devices()]
+    for dev in devices:
+        if _norm_id(dev.get("id")) != dev_id:
+            continue
+        dev["name"] = (payload.name or "").strip()[:60]
+        settings.save({"gadget_devices": devices})
+        return {"ok": True, "devices": devices}
+    return {"ok": False, "error": "unknown device"}
+
+
+@router.post("/probe-role")
+async def set_probe_role(payload: ProbeRoleIn):
+    """Override one probe's role (internal/ambient/food), or clear it back to
+    auto with an empty role. Auto detection labels a TempSpike's leads
+    internal + ambient; this is the escape hatch when that guess is wrong or a
+    lead is repurposed."""
+    dev_id = _norm_id(payload.device_id)
+    devices = [dict(d) for d in gadgets.configured_devices()]
+    for dev in devices:
+        if _norm_id(dev.get("id")) != dev_id:
+            continue
+        roles = dict(dev.get("roles") or {})
+        key = str(int(payload.probe))
+        if payload.role in gadgets.PROBE_ROLES:
+            roles[key] = payload.role
+        else:
+            roles.pop(key, None)
+        dev["roles"] = roles
+        settings.save({"gadget_devices": devices})
+        return {"ok": True, "devices": devices}
+    return {"ok": False, "error": "unknown device"}
+
+
+@router.post("/install")
+async def install_reader():
+    """Set the Bluetooth reader up on this device (FoodAssistant-mnks).
+
+    On a Pi appliance this asks the on-device helper to install the reader
+    service (the same helper ENABLE_GADGETS runs at install time); it is safe
+    to run more than once. On a plain server the app runs in a container and
+    cannot install a host service, so this returns the manual steps instead.
+    Mirrors POST /printing/install."""
+    if settings.is_pi_appliance():
+        from ..services.bridge import bridge_client
+        try:
+            # apt plus a pip install can take a couple of minutes on a Pi;
+            # give the bridge call room so a slow run is not cut off.
+            async with bridge_client(timeout=610.0) as client:
+                r = await client.post(f"{_HOST_BRIDGE}/gadgets-setup")
+            body = r.json()
+        except Exception as e:  # noqa: BLE001
+            return JSONResponse(
+                {"ok": False, "message":
+                 "Could not reach the device helper to set up the reader. "
+                 f"Make sure the device is fully started, then try again. ({e})"},
+                status_code=502,
+            )
+        if r.status_code == 200 and body.get("ok"):
+            return {"ok": True, "message":
+                    "The reader is set up. Turn a thermometer on nearby and "
+                    "it appears below within a minute.",
+                    "log": body.get("log", "")}
+        return JSONResponse(
+            {"ok": False, "message": body.get(
+                "error", "The device could not finish setting up the reader."),
+             "log": body.get("log", "")},
+            status_code=502,
+        )
+
+    # Server (Docker) mode: the reader runs on the server itself and needs a
+    # Bluetooth radio there; the app cannot install a host service for you.
+    return {"ok": False, "message":
+            "The reader runs on the server itself and needs a Bluetooth radio "
+            "there. To install it, run this on the server, in the folder with "
+            "your Pantry Raider checkout:\n"
+            "  sudo ./scripts/image-build/foodassistant-gadgets-setup\n"
+            "The gadgets/README.md file in that folder covers the details. No "
+            "Bluetooth radio on the server? If Home Assistant already sees "
+            "your thermometers, use the From Home Assistant section instead."}
+
+
+# -- Home Assistant source (FoodAssistant-mnks) ------------------------------
+
+class HaEntityIn(BaseModel):
+    entity_id: str
+    name: str = ""
+
+
+@router.get("/ha-entities")
+async def ha_entities():
+    """Temperature entities from Home Assistant for the Settings picker.
+    connected=False (with no entities) when the HA connection is not set, so
+    the picker degrades to a plain text field."""
+    base, token = gadgets_ha.ha_connection()
+    if not (base and token):
+        return {"ok": True, "connected": False, "entities": [],
+                "configured": gadgets_ha.configured_entities()}
+    entities = await gadgets_ha.list_temperature_entities()
+    return {"ok": True, "connected": True, "entities": entities,
+            "configured": gadgets_ha.configured_entities(),
+            "grouped": gadgets_ha.group_entities_into_devices(entities)}
+
+
+@router.post("/ha-entities")
+async def add_ha_entity(payload: HaEntityIn):
+    """Read one Home Assistant entity as a thermometer. Adds the entity to
+    the polled list and a matching virtual device to gadget_devices (so the
+    Timers page and target alerts treat it like any thermometer), and turns
+    both the feature and the HA source on: adding an entity is the opt-in."""
+    entity_id = str(payload.entity_id or "").strip().lower()
+    if not gadgets_ha.valid_entity_id(entity_id):
+        return {"ok": False,
+                "error": "enter an entity id like sensor.grill_probe_1"}
+    entities = gadgets_ha.configured_entities()
+    if entity_id not in entities:
+        entities.append(entity_id)
+    dev_id = gadgets_ha.device_id_for(entity_id)
+    name = (payload.name or entity_id)[:60]
+    devices = [dict(d) for d in gadgets.configured_devices()]
+    for dev in devices:
+        if _norm_id(dev.get("id")) == dev_id:
+            if payload.name:
+                dev["name"] = name
+            dev["protocol"] = "home_assistant"
+            break
+    else:
+        devices.append({"id": dev_id, "name": name,
+                        "protocol": "home_assistant", "targets": {}})
+    settings.save({"gadget_ha_entities": entities, "gadget_devices": devices,
+                   "gadget_ha_enabled": True, "gadgets_enabled": True})
+    return {"ok": True, "entities": entities, "devices": devices}
+
+
+class HaDeviceIn(BaseModel):
+    device_name: str = ""
+    entities: list[HaEntityIn] = []
+
+
+@router.post("/ha-devices")
+async def add_ha_device(payload: HaDeviceIn):
+    """Add every probe entity of one discovered grill/multi-probe device at
+    once, from the "Discover grills" list. Same effect as calling
+    POST /gadgets/ha-entities once per probe, but in a single settings save
+    so the Timers page sees the whole device appear together."""
+    entities = gadgets_ha.configured_entities()
+    devices = [dict(d) for d in gadgets.configured_devices()]
+    added = 0
+    for item in payload.entities:
+        entity_id = str(item.entity_id or "").strip().lower()
+        if not gadgets_ha.valid_entity_id(entity_id):
+            continue
+        if entity_id not in entities:
+            entities.append(entity_id)
+        dev_id = gadgets_ha.device_id_for(entity_id)
+        name = (item.name or entity_id)[:60]
+        for dev in devices:
+            if _norm_id(dev.get("id")) == dev_id:
+                if item.name:
+                    dev["name"] = name
+                dev["protocol"] = "home_assistant"
+                break
+        else:
+            devices.append({"id": dev_id, "name": name,
+                            "protocol": "home_assistant", "targets": {}})
+        added += 1
+    if not added:
+        return {"ok": False, "error": "no valid entities to add"}
+    settings.save({"gadget_ha_entities": entities, "gadget_devices": devices,
+                   "gadget_ha_enabled": True, "gadgets_enabled": True})
+    return {"ok": True, "added": added, "entities": entities, "devices": devices}
+
+
+@router.delete("/ha-entities/{entity_id:path}")
+async def remove_ha_entity(entity_id: str):
+    """Stop reading an HA entity: drop it from the polled list and remove its
+    virtual device (targets included)."""
+    entity_id = str(entity_id or "").strip().lower()
+    entities = [e for e in gadgets_ha.configured_entities() if e != entity_id]
+    dev_id = gadgets_ha.device_id_for(entity_id)
+    devices = [dict(d) for d in gadgets.configured_devices()
+               if _norm_id(d.get("id")) != dev_id]
+    settings.save({"gadget_ha_entities": entities, "gadget_devices": devices})
+    return {"ok": True, "entities": entities, "devices": devices}
+
+
+# --------------------------------------------------------------------------
+# ESPHome WiFi sensors as a source (FoodAssistant-0oq3)
+# --------------------------------------------------------------------------
+
+class EspDeviceIn(BaseModel):
+    host: str
+    sensor: str
+    name: str = ""
+    auth: str = ""       # optional "user:pass" for ESPHome web_server auth
+    battery: str = ""    # optional companion battery sensor object id
+
+
+@router.get("/esp-sensors")
+async def esp_sensors(host: str = ""):
+    """Temperature sensors an ESP device exposes, for the Settings picker.
+    Reads a few seconds of the device's ESPHome web_server /events stream.
+    Returns connected=False with no sensors when the host is unreachable, so
+    the picker degrades to a plain text field."""
+    host = gadgets_esp.normalize_host(host)
+    if not gadgets_esp.valid_host(host):
+        return {"ok": False, "connected": False, "sensors": [],
+                "error": "enter the ESP device address, e.g. 192.168.1.50 "
+                         "or fridge.local"}
+    sensors = await gadgets_esp.discover_sensors(host)
+    return {"ok": True, "connected": bool(sensors), "sensors": sensors,
+            "host": host}
+
+
+@router.post("/esp-devices")
+async def add_esp_device(payload: EspDeviceIn):
+    """Read one ESPHome sensor as a thermometer. Adds the device to the polled
+    list and a matching virtual device to gadget_devices (so the Timers page
+    and target alerts treat it like any thermometer), and turns both the
+    feature and the ESP source on: adding a device is the opt-in."""
+    host = gadgets_esp.normalize_host(payload.host)
+    sensor = str(payload.sensor or "").strip().lower()
+    if not gadgets_esp.valid_host(host):
+        return {"ok": False,
+                "error": "enter the ESP device address, e.g. 192.168.1.50"}
+    if not gadgets_esp.valid_sensor(sensor):
+        return {"ok": False,
+                "error": "enter a sensor id like fridge_temp"}
+    dev_id = gadgets_esp.device_id_for(host, sensor)
+    name = (payload.name or sensor)[:60]
+    esp_devices = [dict(d) for d in gadgets_esp.configured_devices()]
+    entry = {"host": host, "sensor": sensor, "name": name}
+    if payload.auth and ":" in payload.auth:
+        entry["auth"] = payload.auth
+    if payload.battery and gadgets_esp.valid_sensor(payload.battery.strip().lower()):
+        entry["battery"] = payload.battery.strip().lower()
+    for i, dev in enumerate(esp_devices):
+        if gadgets_esp.device_id_for(dev.get("host"), dev.get("sensor")) == dev_id:
+            esp_devices[i] = entry
+            break
+    else:
+        esp_devices.append(entry)
+    devices = [dict(d) for d in gadgets.configured_devices()]
+    for dev in devices:
+        if _norm_id(dev.get("id")) == dev_id:
+            if payload.name:
+                dev["name"] = name
+            dev["protocol"] = "esphome"
+            break
+    else:
+        devices.append({"id": dev_id, "name": name,
+                        "protocol": "esphome", "targets": {}})
+    settings.save({"gadget_esp_devices": esp_devices, "gadget_devices": devices,
+                   "gadget_esp_enabled": True, "gadgets_enabled": True})
+    return {"ok": True, "esp_devices": esp_devices, "devices": devices}
+
+
+@router.delete("/esp-devices/{device_id:path}")
+async def remove_esp_device(device_id: str):
+    """Stop reading an ESP sensor: drop it from the polled list and remove its
+    virtual device (targets included). device_id is the ESP:<HOST>:<SENSOR>
+    gadgets id."""
+    dev_id = _norm_id(device_id)
+    esp_devices = [dict(d) for d in gadgets_esp.configured_devices()
+                   if gadgets_esp.device_id_for(d.get("host"), d.get("sensor"))
+                   != dev_id]
+    devices = [dict(d) for d in gadgets.configured_devices()
+               if _norm_id(d.get("id")) != dev_id]
+    settings.save({"gadget_esp_devices": esp_devices, "gadget_devices": devices})
+    return {"ok": True, "esp_devices": esp_devices, "devices": devices}
+
+
+class EspActionIn(BaseModel):
+    button: str          # a Start Page / deck action token
+    long: bool = False   # long-press semantics (a timer key cancels/resets)
+
+
+@router.post("/esp-action")
+async def esp_action(payload: EspActionIn):
+    """Fire an action from an ESP device button (FoodAssistant-k4wc).
+
+    A DIY ESP (ESPHome ``http_request`` on a button press) POSTs the action
+    token that button is wired to, with the app API key in ``X-API-Key`` (the
+    global auth middleware enforces it, the same way it does for Home Assistant
+    and any other headless client). The token is the SAME vocabulary the
+    on-screen Start Page and the Stream Deck use, so nothing new to learn: a
+    timer key (``timer_1``/``timer_2``/``timer_3`` cycle through 5/10/15/30/60,
+    the ``timer_eggs``/``timer_pasta``/``timer_rice`` presets, or a custom timer
+    key id), an ``ha_1``..``ha_5`` Home Assistant slot, or a custom key id
+    (Home Assistant action, media, macro, quick shopping-add). One physical
+    button can start a kitchen timer or fire a Home Assistant action with a
+    single POST. ``long`` true is a long press: a timer key cancels/resets,
+    matching the deck. Unknown tokens are reported, never raised."""
+    from ..services import start_actions
+    token = str(payload.button or "").strip()
+    if not token:
+        return {"ok": False, "detail": "No button action was specified."}
+    return await start_actions.fire_key(token, long=payload.long)
+
+
+@router.get("/esp-screen")
+async def esp_screen(lines: int = 4):
+    """Compact status for a small ESP screen (FoodAssistant-k4wc follow-on).
+
+    Read-only, and built only from local state (running timers plus the active
+    recipe), so it is instant and never waits on Grocy or the network, which
+    matters for a screen that polls every few seconds. An ESP with an OLED or
+    e-ink display fetches this and prints ``lines`` straight through, or reads
+    the structured ``timers`` for its own layout. Auth is the same X-API-Key as
+    the other gadget endpoints."""
+    import time as _time
+    from ..services import timers as timers_svc, current_recipe
+    now = _time.time()
+    tlist = timers_svc.list_timers()
+    active = current_recipe.get_active() or {}
+    recipe_title = str(active.get("title") or "")
+    return {
+        "ok": True,
+        "generated": int(now),
+        "lines": gadgets_esp.compose_screen(tlist, recipe_title, max_lines=lines),
+        "timers": [
+            {"label": t.get("label"),
+             "remaining": int(t.get("remaining_seconds") or 0),
+             "expired": bool(t.get("expired"))}
+            for t in tlist
+        ],
+        "recipe": recipe_title,
+    }
