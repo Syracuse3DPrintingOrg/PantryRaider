@@ -1,0 +1,368 @@
+/*
+ * Synthwave theme for Pantry Raider
+ * Loaded as an overlay on top of Bootstrap 5.3.3 (CDN).
+ * Overrides CSS custom properties for a dark neon / retro-futurist look.
+ */
+
+/* ── Core palette ─────────────────────────────────────────────────────────── */
+:root,
+[data-bs-theme=dark] {
+  /* Backgrounds */
+  --bs-body-bg:           #0d0019;
+  --bs-body-bg-rgb:       13, 0, 25;
+  --bs-secondary-bg:      #1a003a;
+  --bs-secondary-bg-rgb:  26, 0, 58;
+  --bs-tertiary-bg:       #26005a;
+  --bs-tertiary-bg-rgb:   38, 0, 90;
+
+  /* Text */
+  --bs-body-color:        #e8d5ff;
+  --bs-body-color-rgb:    232, 213, 255;
+  --bs-secondary-color:   rgba(232, 213, 255, 0.70);
+  --bs-tertiary-color:    rgba(232, 213, 255, 0.45);
+  --bs-emphasis-color:    #ffffff;
+
+  /* Brand colours */
+  --sw-pink:    #ff2d78;
+  --sw-cyan:    #00f5ff;
+  --sw-purple:  #bf00ff;
+  --sw-green:   #39ff14;
+  --sw-orange:  #ff6b35;
+  --sw-yellow:  #ffe600;
+
+  /* Bootstrap semantic overrides */
+  --bs-primary:           #ff2d78;
+  --bs-primary-rgb:       255, 45, 120;
+  --bs-secondary:         #00c8d4;
+  --bs-secondary-rgb:     0, 200, 212;
+  --bs-success:           #39ff14;
+  --bs-success-rgb:       57, 255, 20;
+  --bs-info:              #bf00ff;
+  --bs-info-rgb:          191, 0, 255;
+  --bs-warning:           #ffe600;
+  --bs-warning-rgb:       255, 230, 0;
+  --bs-danger:            #ff003c;
+  --bs-danger-rgb:        255, 0, 60;
+  --bs-light:             #3d0075;
+  --bs-light-rgb:         61, 0, 117;
+  --bs-dark:              #0d0019;
+  --bs-dark-rgb:          13, 0, 25;
+
+  /* Text-emphasis colours (for text-bg-* utilities) */
+  --bs-primary-text-emphasis:   #ff8fb5;
+  --bs-secondary-text-emphasis: #7af0fa;
+  --bs-success-text-emphasis:   #8dff6a;
+  --bs-info-text-emphasis:      #df7fff;
+  --bs-warning-text-emphasis:   #fff066;
+  --bs-danger-text-emphasis:    #ff7096;
+
+  /* Borders */
+  --bs-border-color:        #5a007a;
+  --bs-border-color-translucent: rgba(255, 45, 120, 0.25);
+
+  /* Links */
+  --bs-link-color:        #00f5ff;
+  --bs-link-color-rgb:    0, 245, 255;
+  --bs-link-hover-color:  #7affff;
+
+  /* Cards / components */
+  --bs-card-bg:           #1a003a;
+  --bs-card-border-color: #5a007a;
+  --bs-modal-bg:          #1a003a;
+  --bs-dropdown-bg:       #1a003a;
+  --bs-dropdown-border-color: #5a007a;
+  --bs-input-bg:          #26005a;
+  --bs-input-border-color: #5a007a;
+  --bs-input-color:       #e8d5ff;
+  --bs-list-group-bg:     #1a003a;
+  --bs-list-group-border-color: #5a007a;
+
+  /* Navbar */
+  --bs-navbar-color:       rgba(232, 213, 255, 0.85);
+  --bs-navbar-hover-color: #ff2d78;
+  --bs-navbar-active-color: #ff2d78;
+
+  /* Table */
+  --bs-table-bg:          transparent;
+  --bs-table-striped-bg:  rgba(255, 45, 120, 0.05);
+  --bs-table-hover-bg:    rgba(0, 245, 255, 0.07);
+  --bs-table-border-color: #5a007a;
+
+  /* Code scheme */
+  color-scheme: dark;
+}
+
+/* ── Body & page chrome ───────────────────────────────────────────────────── */
+body {
+  background-color: var(--bs-body-bg);
+  color: var(--bs-body-color);
+}
+
+/* Subtle scanline texture (pure CSS, no image) */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 3px,
+    rgba(0, 0, 0, 0.08) 3px,
+    rgba(0, 0, 0, 0.08) 4px
+  );
+}
+
+/* ── Navbar ───────────────────────────────────────────────────────────────── */
+.navbar {
+  background: #0d0019 !important;
+  border-bottom: 1px solid var(--sw-pink) !important;
+  box-shadow: 0 0 18px rgba(255, 45, 120, 0.35);
+}
+
+.navbar-brand {
+  color: var(--sw-cyan) !important;
+  text-shadow: 0 0 10px var(--sw-cyan), 0 0 22px rgba(0, 245, 255, 0.5);
+  letter-spacing: 0.5px;
+}
+
+.nav-link {
+  color: rgba(232, 213, 255, 0.80) !important;
+  transition: color 0.15s, text-shadow 0.15s;
+}
+.nav-link:hover,
+.nav-link.active {
+  color: var(--sw-pink) !important;
+  text-shadow: 0 0 8px rgba(255, 45, 120, 0.7);
+}
+
+/* ── Cards ────────────────────────────────────────────────────────────────── */
+.card {
+  background-color: #1a003a;
+  border-color: #5a007a;
+  box-shadow: 0 0 8px rgba(191, 0, 255, 0.15);
+}
+
+.card-header {
+  background-color: #26005a;
+  border-bottom-color: #5a007a;
+  color: var(--sw-cyan);
+  text-shadow: 0 0 6px rgba(0, 245, 255, 0.4);
+}
+
+/* ── Buttons ──────────────────────────────────────────────────────────────── */
+.btn-primary {
+  background-color: var(--sw-pink);
+  border-color: var(--sw-pink);
+  color: #fff;
+  box-shadow: 0 0 10px rgba(255, 45, 120, 0.5);
+}
+.btn-primary:hover {
+  background-color: #ff5a95;
+  border-color: #ff5a95;
+  box-shadow: 0 0 18px rgba(255, 45, 120, 0.8);
+}
+
+.btn-secondary {
+  background-color: transparent;
+  border-color: var(--sw-cyan);
+  color: var(--sw-cyan);
+  box-shadow: 0 0 8px rgba(0, 245, 255, 0.3);
+}
+.btn-secondary:hover {
+  background-color: rgba(0, 245, 255, 0.12);
+  border-color: var(--sw-cyan);
+  color: var(--sw-cyan);
+  box-shadow: 0 0 16px rgba(0, 245, 255, 0.6);
+}
+
+.btn-success {
+  background-color: var(--sw-green);
+  border-color: var(--sw-green);
+  color: #000;
+  box-shadow: 0 0 10px rgba(57, 255, 20, 0.5);
+}
+.btn-success:hover {
+  background-color: #60ff44;
+  border-color: #60ff44;
+  box-shadow: 0 0 18px rgba(57, 255, 20, 0.75);
+}
+
+.btn-outline-primary {
+  border-color: var(--sw-pink);
+  color: var(--sw-pink);
+}
+.btn-outline-primary:hover {
+  background-color: var(--sw-pink);
+  color: #fff;
+  box-shadow: 0 0 14px rgba(255, 45, 120, 0.7);
+}
+
+.btn-outline-secondary {
+  border-color: var(--sw-cyan);
+  color: var(--sw-cyan);
+}
+.btn-outline-secondary:hover {
+  background-color: rgba(0, 245, 255, 0.12);
+  color: var(--sw-cyan);
+  box-shadow: 0 0 12px rgba(0, 245, 255, 0.5);
+}
+
+.btn-outline-danger {
+  border-color: #ff003c;
+  color: #ff003c;
+}
+.btn-outline-danger:hover {
+  background-color: rgba(255, 0, 60, 0.15);
+  color: #ff003c;
+  box-shadow: 0 0 12px rgba(255, 0, 60, 0.5);
+}
+
+/* ── Forms ────────────────────────────────────────────────────────────────── */
+.form-control,
+.form-select {
+  background-color: #1a003a;
+  border-color: #5a007a;
+  color: #e8d5ff;
+}
+.form-control:focus,
+.form-select:focus {
+  background-color: #1a003a;
+  border-color: var(--sw-cyan);
+  color: #e8d5ff;
+  box-shadow: 0 0 0 0.25rem rgba(0, 245, 255, 0.25);
+}
+.form-control::placeholder { color: rgba(232, 213, 255, 0.4); }
+.form-check-input:checked {
+  background-color: var(--sw-pink);
+  border-color: var(--sw-pink);
+  box-shadow: 0 0 6px rgba(255, 45, 120, 0.6);
+}
+.input-group-text {
+  background-color: #26005a;
+  border-color: #5a007a;
+  color: var(--sw-cyan);
+}
+
+/* ── Tables ───────────────────────────────────────────────────────────────── */
+.table {
+  color: var(--bs-body-color);
+  border-color: #5a007a;
+}
+.table > thead {
+  border-bottom: 2px solid var(--sw-pink);
+  color: var(--sw-cyan);
+}
+.table-hover > tbody > tr:hover {
+  background-color: rgba(0, 245, 255, 0.05);
+}
+
+/* ── Badges ───────────────────────────────────────────────────────────────── */
+.badge {
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.text-bg-primary   { background-color: var(--sw-pink)   !important; color: #fff    !important; text-shadow: none; }
+.text-bg-secondary { background-color: #00c8d4          !important; color: #000    !important; }
+.text-bg-success   { background-color: var(--sw-green)  !important; color: #000    !important; }
+.text-bg-info      { background-color: var(--sw-purple) !important; color: #fff    !important; }
+.text-bg-warning   { background-color: var(--sw-yellow) !important; color: #000    !important; }
+.text-bg-danger    { background-color: #ff003c          !important; color: #fff    !important; }
+
+/* ── Alerts ───────────────────────────────────────────────────────────────── */
+.alert-success {
+  background-color: rgba(57, 255, 20, 0.12);
+  border-color: var(--sw-green);
+  color: #8dff6a;
+}
+.alert-danger {
+  background-color: rgba(255, 0, 60, 0.12);
+  border-color: #ff003c;
+  color: #ff7096;
+}
+.alert-warning {
+  background-color: rgba(255, 230, 0, 0.10);
+  border-color: var(--sw-yellow);
+  color: var(--sw-yellow);
+}
+.alert-info {
+  background-color: rgba(191, 0, 255, 0.12);
+  border-color: var(--sw-purple);
+  color: #df7fff;
+}
+
+/* ── Dropdowns & modals ───────────────────────────────────────────────────── */
+.dropdown-menu {
+  background-color: #1a003a;
+  border-color: #5a007a;
+  box-shadow: 0 0 20px rgba(191, 0, 255, 0.3);
+}
+.dropdown-item { color: #e8d5ff; }
+.dropdown-item:hover {
+  background-color: rgba(255, 45, 120, 0.15);
+  color: var(--sw-pink);
+}
+
+.modal-content {
+  background-color: #1a003a;
+  border-color: #5a007a;
+  box-shadow: 0 0 30px rgba(255, 45, 120, 0.4);
+}
+.modal-header {
+  border-bottom-color: var(--sw-pink);
+  color: var(--sw-cyan);
+}
+.modal-footer { border-top-color: #5a007a; }
+
+/* ── List groups ──────────────────────────────────────────────────────────── */
+.list-group-item {
+  background-color: #1a003a;
+  border-color: #5a007a;
+  color: #e8d5ff;
+}
+.list-group-item-action:hover {
+  background-color: rgba(255, 45, 120, 0.12);
+  color: var(--sw-pink);
+}
+
+/* ── Nav tabs / pills ─────────────────────────────────────────────────────── */
+.nav-tabs {
+  border-bottom-color: #5a007a;
+}
+.nav-tabs .nav-link {
+  color: rgba(232, 213, 255, 0.7) !important;
+}
+.nav-tabs .nav-link.active {
+  background-color: #26005a;
+  border-color: var(--sw-pink) var(--sw-pink) #26005a;
+  color: var(--sw-pink) !important;
+  text-shadow: 0 0 8px rgba(255, 45, 120, 0.6);
+}
+
+/* ── Urgency colours (override base.html) ─────────────────────────────────── */
+.urgency-expired { color: #ff6080; text-shadow: 0 0 6px rgba(255, 0, 60, 0.6);  }
+.urgency-today   { color: #ff9f45; text-shadow: 0 0 6px rgba(255, 107, 53, 0.5); }
+.urgency-3d      { color: var(--sw-yellow); text-shadow: 0 0 6px rgba(255, 230, 0, 0.5); }
+.urgency-ok      { color: var(--sw-green);  text-shadow: 0 0 6px rgba(57, 255, 20, 0.4); }
+
+/* ── Scrollbar (Webkit) ───────────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: #0d0019; }
+::-webkit-scrollbar-thumb {
+  background: #5a007a;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover { background: var(--sw-pink); }
+
+/* ── Progress bars ────────────────────────────────────────────────────────── */
+.progress {
+  background-color: #26005a;
+}
+.progress-bar {
+  background-color: var(--sw-pink);
+  box-shadow: 0 0 8px rgba(255, 45, 120, 0.6);
+}
+
+/* contrast: dark badge text (FoodAssistant-tjlm) */
+.badge.bg-secondary, .badge.bg-info { color: #000 !important; }
