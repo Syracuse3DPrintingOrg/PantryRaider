@@ -1,0 +1,16 @@
+# Cloudflare Workers config for the static interactive demo.
+#
+# This lives in docs/demo (not the repo root) so the Cloudflare build runs here,
+# where there is no Python project for the build image to auto-install. Set the
+# dashboard's "Path" (root directory) to docs/demo and the Deploy command to
+# `npx wrangler deploy`; there is no build step. The demo is served as Workers
+# Static Assets, with no Worker script.
+#
+# After the first deploy the site is at
+# https://foodassistant-demo.<your-subdomain>.workers.dev (add a custom domain in
+# the dashboard later if you want a nicer URL).
+name = "foodassistant-demo"
+compatibility_date = "2025-06-01"
+
+[assets]
+directory = "."
