@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="{{ theme_mode }}"
+      data-ui-scale="{{ ui_scale_factor | default(1.0) }}"
+      data-display-rotation="{{ display_rotation | default(0) }}"
+      data-rotation-mode="{{ 'compositor' if is_pi else 'css' }}"
+      data-is-pi="{{ '1' if is_pi else '0' }}">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <base href="{{ ingress_path }}/">
+  <title>Locked: Pantry Raider</title>
+  {% if theme_css %}
+  <link href="{{ theme_css }}" rel="stylesheet">
+  {% else %}
+  <link href="static/vendor/bootstrap.min.css" rel="stylesheet">
+  {% endif %}
+  {% if theme_overlay %}
+  <link href="{{ theme_overlay }}" rel="stylesheet">
+  {% endif %}
+  <link href="static/vendor/bootstrap-icons.min.css" rel="stylesheet">
+  <link rel="icon" type="image/svg+xml" href="static/icons/favicon.svg">
+  <link rel="icon" type="image/png" sizes="32x32" href="static/icons/favicon-32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="static/icons/favicon-16.png">
+  <link rel="icon" type="image/x-icon" href="static/icons/favicon.ico">
+  <link rel="apple-touch-icon" href="static/icons/apple-touch-icon.png">
+  <script src="static/js/kiosk-display.js"></script>
+  {# Kiosk boot intro: pre-paint blackout guard + intro.js (FoodAssistant-a8xy) #}
+  {% include "_intro.html" %}
+  {# On-screen keyboard for kiosk touchscreens (FoodAssistant-wo9j) #}
+  {% include "_osk.html" %}
+  <style>
+    .pin-dots { letter-spacing: .4rem; min-height: 2rem; }
+    .keypad { display: grid; grid-template-columns: repeat(3, 1fr); gap: .6rem; }
+    .keypad button { font-size: 1.6rem; padding: .7rem 0; }
+  </style>
+</head>
+<body class="d-flex align-items-center justify-content-center" style="min-height:100vh">
+  <div class="card" style="width: 100%; max-width: 360px;">
+    <div class="card-body p-4">
+      <h5 class="card-title text-center mb-3">
+        <i class="bi bi-lock me-2"></i>Enter PIN
+      </h5>
+      {% if error %}
+      <div class="alert alert-danger py-2 text-center" id="pin-error">{{ error }}</div>
+      {% endif %}
+
+      <div class="pin-dots fs-3 text-center font-monospace mb-3" id="pin-display"
+           role="status" aria-live="polite" aria-label="PIN entry"></div>
+
+      <form method="post" action="ui/pin/verify" id="pin-form">
+        <input type="hidden" name="pin" id="pin-value">
+        <div class="keypad mb-3">
+          {% for d in [1,2,3,4,5,6,7,8,9] %}
+          <button type="button" class="btn btn-outline-secondary" onclick="pinPress('{{ d }}')">{{ d }}</button>
+          {% endfor %}
+          <button type="button" class="btn btn-outline-secondary" onclick="pinClear()" title="Clear">
+            <i class="bi bi-x-lg"></i>
+          </button>
+          <button type="button" class="btn btn-outline-secondary" onclick="pinPress('0')">0</button>
+          <button type="button" class="btn btn-outline-secondary" onclick="pinBack()" title="Delete">
+            <i class="bi bi-backspace"></i>
+          </button>
+        </div>
+        <button type="submit" class="btn btn-primary w-100">
+          <i class="bi bi-unlock me-1"></i>Unlock
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <script>
+    let pin = '';
+    const MAX = 12;
+    function render() {
+      document.getElementById('pin-display').textContent = '•'.repeat(pin.length);
+      document.getElementById('pin-value').value = pin;
+    }
+    function pinPress(d) { if (pin.length < MAX) { pin += d; render(); } }
+    function pinBack() { pin = pin.slice(0, -1); render(); }
+    function pinClear() { pin = ''; render(); }
+    // Physical keyboard support (USB numpad, etc.)
+    document.addEventListener('keydown', (e) => {
+      if (e.key >= '0' && e.key <= '9') pinPress(e.key);
+      else if (e.key === 'Backspace') pinBack();
+      else if (e.key === 'Enter') document.getElementById('pin-form').submit();
+    });
+    render();
+  </script>
+</body>
+</html>
