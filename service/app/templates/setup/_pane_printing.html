@@ -1,0 +1,387 @@
+{% from "setup/_macros.html" import info, panel, srow, pill, toggle with context %}
+<!-- Printing (FoodAssistant-fb8x): a device-local feature, so it renders in
+     every mode (a printer is attached to whatever device you are at). The
+     master toggle gates the whole feature; the queue dropdowns are filled from
+     /printing/queues on open. Field ids match the saved settings so the save
+     path picks them up. -->
+        <div class="tab-pane fade" id="pane-printing">
+          <p class="pane-intro">Print food and spice labels, and full recipes, on any printer shared on your network. A printer attached to one device is usable from every device.</p>
+
+          {% if not printing_available %}
+          <div class="alert alert-secondary d-flex align-items-start gap-2" role="alert">
+            <i class="bi bi-info-circle fs-5"></i>
+            <div>
+              This device does not have a printer set up yet. Printing has to be
+              turned on for the device before it can send anything. Once a printer
+              is connected and set up, your printers show up in the lists below.
+              <div class="mt-2">
+                <button type="button" class="btn btn-outline-info btn-sm" onclick="installPrintStack(this)">
+                  <i class="bi bi-download me-1"></i>Install now
+                </button>
+                <div class="test-result mt-2" id="print-install-result"></div>
+              </div>
+            </div>
+          </div>
+          {% endif %}
+
+          {% call panel('Printing',
+                        'Turn printing on to show a Print label button on your items and a Print button on recipes.',
+                        pill_text=('On' if s.printing_enabled else 'Off'),
+                        pill_kind=('good' if s.printing_enabled else 'neutral'),
+                        pill_id='printing-pill') %}
+            {% call srow('Enable printing', 'The master switch for labels and recipe printouts.') %}
+              {{ toggle('printing_enabled', checked=s.printing_enabled, onchange='ldSyncGate()') }}
+            {% endcall %}
+            {% if is_satellite %}
+            <!-- Pi Remote: printers are system-level. Labels and recipes print
+                 on the main server's one label and document printer; there is no
+                 per-device choice here. A printer connected to this device (the
+                 Bluetooth panel below, or one on its network) is shared up to the
+                 server and chosen there. -->
+            {% call srow('Printers', 'Labels and recipes print on your main server.') %}
+              <div class="small text-secondary">
+                <div>Label printer: <strong>{{ s.fleet_label_printer_queue or 'not set on the main server yet' }}</strong></div>
+                <div>Document printer: <strong>{{ s.fleet_document_printer_queue or 'not set on the main server yet' }}</strong></div>
+                <div class="mt-2">These are chosen on the main server, one for the whole setup. A printer you connect to this device is shared up to the server, where you can pick it.</div>
+              </div>
+            {% endcall %}
+            {% else %}
+            <!-- Server / Pi Hosted: the printer chosen here is the fleet default
+                 every other device inherits (and it is also what this device
+                 prints to). Any printer shared on your network appears in the
+                 list, so a printer attached to one device is usable from all. -->
+            {% call srow('Label printer', 'Where food and spice labels go, on this and any device without its own choice.',
+                         'Pick the printer loaded with your label stock. It becomes the fleet default for every device. The list includes any printer shared on your network.') %}
+              <select class="form-select" id="fleet_label_printer_queue" style="max-width:420px">
+                <option value="">(none chosen)</option>
+                {% if s.fleet_label_printer_queue %}
+                <option value="{{ s.fleet_label_printer_queue }}" selected>{{ s.fleet_label_printer_queue }}</option>
+                {% endif %}
+              </select>
+            {% endcall %}
+            {% call srow('Document printer', 'Where full-page recipes go, on this and any device without its own choice.',
+                         'Pick your regular paper printer for recipe printouts. It becomes the fleet default for every device.') %}
+              <select class="form-select" id="fleet_document_printer_queue" style="max-width:420px">
+                <option value="">(none chosen)</option>
+                {% if s.fleet_document_printer_queue %}
+                <option value="{{ s.fleet_document_printer_queue }}" selected>{{ s.fleet_document_printer_queue }}</option>
+                {% endif %}
+              </select>
+            {% endcall %}
+            {% if not is_satellite %}
+            {% call srow('Refresh printers', 'Look for printers on your network again, including any shared by another device.') %}
+              <button type="button" class="btn btn-outline-secondary btn-sm" onclick="loadPrintQueues(true)">
+                <i class="bi bi-arrow-repeat me-1"></i>Refresh list
+              </button>
+              <div class="test-result mt-1" id="print-queues-result"></div>
+            {% endcall %}
+            {% endif %}
+            {% endif %}
+          {% endcall %}
+
+          {% if not is_satellite %}
+          <!-- Discover + add (FoodAssistant-r9a4). Adding a printer belongs on a
+               device with its own printer service (server or Pi Hosted). A Pi
+               Remote prints through the printers shared by the main server, so it
+               has nothing to add here; the whole panel is hidden on a satellite. -->
+          {% if printing_available %}
+          <div id="add-printer-panel">
+          {% call panel('Add a printer',
+                        'Find a printer on your network and add it, or add one by its address. Once added it appears in the printer lists above.') %}
+            {% call srow('Find printers', 'Look for printers on your network you can add.') %}
+              <button type="button" class="btn btn-outline-info btn-sm" id="find-printers-btn" onclick="findPrinters(this)">
+                <i class="bi bi-search me-1"></i>Find printers
+              </button>
+              <div class="test-result mt-2" id="printer-discover-result"></div>
+              <div class="mt-2" id="printer-discover-list"></div>
+            {% endcall %}
+            {% call srow('Add by address', 'Enter a printer by its host name or IP address when it does not show up in the search.') %}
+              <div class="d-flex flex-column gap-2" style="max-width:420px">
+                <input type="text" class="form-control" id="add-printer-name" placeholder="A name for this printer (e.g. KitchenLaser)">
+                <input type="text" class="form-control" id="add-printer-host" placeholder="Host name or IP (e.g. 192.168.1.50)">
+                <select class="form-select" id="add-printer-type" onchange="onAddPrinterTypeChange()">
+                  <option value="driverless" selected>Driverless (IPP) — recommended</option>
+                  <option value="ipp">Network (IPP)</option>
+                  <option value="zebra">Zebra label printer (ZPL)</option>
+                  <option value="socket">Raw socket — advanced</option>
+                </select>
+                <div id="add-printer-port-row" style="display:none">
+                  <label class="form-label small text-secondary mb-1">Port</label>
+                  <input type="number" class="form-control" id="add-printer-port" value="9100" min="1" max="65535">
+                  <div class="small text-secondary mt-1">
+                    A raw socket queue sends data straight to the printer with no driver. It is for advanced setups (for example a label printer that speaks its own language). Most printers work best with Driverless (IPP).
+                  </div>
+                </div>
+                <div>
+                  <button type="button" class="btn btn-outline-info btn-sm" onclick="addPrinterByAddress(this)">
+                    <i class="bi bi-plus-lg me-1"></i>Add printer
+                  </button>
+                </div>
+              </div>
+              <div class="test-result mt-2" id="add-printer-result"></div>
+            {% endcall %}
+          {% endcall %}
+          </div>
+          {% endif %}
+          {% endif %}
+
+          <!-- Bluetooth label printer (FoodAssistant-h2j6): a Supvan T50M
+               family printer connects over Bluetooth, not the network, so it
+               cannot show up in Find printers until a small on-device bridge
+               turns it into an ordinary network printer. Set up here once,
+               then it behaves exactly like any other printer above. Pi
+               appliance only (pi_hosted or pi_remote); a plain server has no
+               on-device helper to build or run the bridge. -->
+          {% call panel('Bluetooth label printer',
+                        'Connect a Supvan T50M-family label printer over Bluetooth. Once it is set up it shows up as a normal network printer, right alongside the others above.',
+                        pill_text=('' if not is_pi_appliance else 'Not set up'),
+                        pill_kind='neutral',
+                        pill_id=(is_pi_appliance and 'bt-print-pill' or '')) %}
+            {% if is_pi_appliance %}
+            {% call srow('Connect', 'Set the printer software up once, then turn your printer on and find it. The first setup takes a few minutes.') %}
+              {# Status-driven body: the JS (loadBluetoothPrintStatus) fills this
+                 with the right step for where you are, so the flow reads as
+                 set up, then turn on, then find, instead of a lone button. #}
+              <div id="bt-print-body" data-satellite="{{ 'true' if is_satellite else 'false' }}">
+                <button type="button" class="btn btn-outline-info btn-sm" id="bt-print-setup-btn" onclick="bluetoothPrintSetup(this)">
+                  <i class="bi bi-bluetooth me-1"></i>Set up
+                </button>
+              </div>
+              <div class="test-result mt-2" id="bt-print-setup-result"></div>
+            {% endcall %}
+            {% else %}
+            <p class="mb-0 text-secondary small">
+              Bluetooth label printer setup is available on a Pantry Raider appliance today. On this server, connect a label printer over the network instead, using Find printers or Add by address above.
+            </p>
+            {% endif %}
+          {% endcall %}
+
+          {# Label size and design belong to the printer, so they live on the
+             main server that owns it. A satellite inherits them and prints
+             through the server, so it does not show these (FoodAssistant-eml9). #}
+          {% if not is_satellite %}
+          {% call panel('Label size',
+                        'The size of your label stock, in inches, plus its print resolution. The preview updates as you change these.') %}
+            {% call srow('Label format', 'Pick a common label size, or set your own below.',
+                         'Choosing a format fills in the size and resolution and gives the designer a matching starting design. Pick Custom to set the size by hand.') %}
+              <select class="form-select" id="label_format" style="max-width:420px" onchange="ldApplyPreset()">
+                <option value="">Custom size</option>
+              </select>
+            {% endcall %}
+            {% call srow('From your printer', 'Pull the sizes your chosen label printer says it supports, so you do not have to guess.') %}
+              <button type="button" class="btn btn-outline-secondary btn-sm" id="ld-printer-sizes-btn" onclick="ldFetchPrinterMedia()">
+                <i class="bi bi-printer me-1"></i>Use a size my printer supports
+              </button>
+              <div class="mt-2" id="ld-printer-sizes-list"></div>
+              <div class="test-result mt-1" id="ld-printer-sizes-result"></div>
+            {% endcall %}
+            {% call srow('Width', 'Inches.') %}
+              <input type="number" class="form-control" id="label_width_in" min="0.5" max="8" step="0.1"
+                     style="max-width:140px" value="{{ s.label_width_in }}" oninput="refreshLabelPreview(); ldOnSizeInput()">
+            {% endcall %}
+            {% call srow('Height', 'Inches.') %}
+              <input type="number" class="form-control" id="label_height_in" min="0.5" max="8" step="0.1"
+                     style="max-width:140px" value="{{ s.label_height_in }}" oninput="refreshLabelPreview(); ldOnSizeInput()">
+            {% endcall %}
+            {% call srow('Resolution', 'Dots per inch. 203 suits most thermal label printers.') %}
+              <input type="number" class="form-control" id="label_dpi" min="72" max="600" step="1"
+                     style="max-width:140px" value="{{ s.label_dpi }}" oninput="refreshLabelPreview(); ldOnSizeInput()">
+            {% endcall %}
+            {% call srow('Show logo', 'Print the Pantry Raider logo in the corner of every food label, in black and white.') %}
+              {{ toggle('label_show_logo', checked=s.label_show_logo, onchange='refreshLabelPreview()') }}
+            {% endcall %}
+            {% call srow('Preview', 'A sample label at the size above.') %}
+              <div class="border rounded d-inline-block p-2 bg-body-tertiary">
+                <img id="label-preview-img" alt="Label preview"
+                     style="max-width:100%;image-rendering:pixelated;background:#fff">
+              </div>
+            {% endcall %}
+          {% endcall %}
+
+          {% call panel('Document printer settings',
+                        'Advanced options for full-page recipe printouts: page size, color, and single- or double-sided.') %}
+            {% call srow('Page size', 'Leave on Printer default to use whatever page size the printer is loaded with.') %}
+              <select class="form-select" id="document_page_size" style="max-width:220px">
+                <option value="auto" {{ 'selected' if s.document_page_size == 'auto' else '' }}>Printer default</option>
+                <option value="letter" {{ 'selected' if s.document_page_size == 'letter' else '' }}>Letter</option>
+                <option value="a4" {{ 'selected' if s.document_page_size == 'a4' else '' }}>A4</option>
+                <option value="legal" {{ 'selected' if s.document_page_size == 'legal' else '' }}>Legal</option>
+              </select>
+            {% endcall %}
+            {% call srow('Color', 'Print recipes in color, or force black and white to save color ink.') %}
+              <select class="form-select" id="document_color_mode" style="max-width:220px">
+                <option value="color" {{ 'selected' if s.document_color_mode == 'color' else '' }}>Color</option>
+                <option value="monochrome" {{ 'selected' if s.document_color_mode == 'monochrome' else '' }}>Black and white</option>
+              </select>
+            {% endcall %}
+            {% call srow('Sides', 'Single-sided, or double-sided if your printer supports it.') %}
+              <select class="form-select" id="document_duplex" style="max-width:220px">
+                <option value="one-sided" {{ 'selected' if s.document_duplex == 'one-sided' else '' }}>Single-sided</option>
+                <option value="two-sided" {{ 'selected' if s.document_duplex == 'two-sided' else '' }}>Double-sided</option>
+              </select>
+            {% endcall %}
+          {% endcall %}
+
+          {% call panel('Design your label',
+                        'Place the fields on your label and see the printed result as you go. Your saved design is used for every food label; the size above sets the stock it prints on.') %}
+            <!-- The designer edits a layout of positioned fields. The schematic
+                 on the left is the editable canvas (drag to move, drag a corner
+                 to resize); the image on the right is the real rendered label
+                 from the print engine, so what you place is what prints. -->
+            <script type="application/json" id="ld-saved-layout">{{ (s.label_layout_json or '') | replace('</', '<\\/') | safe }}</script>
+            <div id="label-designer-gate-off" class="form-text mb-1" style="display:none">
+              <i class="bi bi-info-circle me-1"></i>Turn printing on above to design your label.
+            </div>
+            <div id="label-designer">
+              <div class="d-flex flex-wrap gap-3">
+                <!-- Editable schematic canvas -->
+                <div>
+                  <div class="small text-secondary mb-1">Layout (drag to move, drag a corner to resize)</div>
+                  <div id="ld-canvas" class="ld-canvas" tabindex="0" aria-label="Label layout canvas">
+                    <div id="ld-inner" class="ld-inner"></div>
+                  </div>
+                </div>
+                <!-- Live rendered preview -->
+                <div>
+                  <div class="small text-secondary mb-1">Printed result</div>
+                  <div class="border rounded d-inline-block p-2 bg-body-tertiary">
+                    <img id="ld-preview-img" alt="Live label preview"
+                         style="max-width:100%;image-rendering:pixelated;background:#fff;min-width:120px">
+                  </div>
+                  <div class="test-result mt-1" id="ld-preview-msg"></div>
+                </div>
+              </div>
+
+              <!-- Add-a-field palette -->
+              <div class="mt-3">
+                <div class="small text-secondary mb-1">Add a field</div>
+                <div id="ld-palette" class="d-flex flex-wrap gap-1"></div>
+              </div>
+
+              <!-- Selected-field inspector -->
+              <div id="ld-inspector" class="border rounded p-2 mt-3" style="max-width:520px;display:none">
+                <div class="d-flex align-items-center justify-content-between mb-2">
+                  <strong id="ld-insp-title" class="small">Field</strong>
+                  <button type="button" class="btn btn-outline-danger btn-sm" onclick="ldDeleteSelected()">
+                    <i class="bi bi-trash3 me-1"></i>Delete
+                  </button>
+                </div>
+                <div id="ld-insp-text-row" class="mb-2" style="display:none">
+                  <label class="form-label small mb-1">Text</label>
+                  <input type="text" class="form-control form-control-sm" id="ld-insp-text"
+                         oninput="ldInspTextChanged()" placeholder="Text to print">
+                </div>
+                <div class="mb-2">
+                  <label class="form-label small mb-1">Align</label>
+                  <div class="btn-group btn-group-sm d-block" role="group" aria-label="Text alignment">
+                    <button type="button" class="btn btn-outline-secondary" data-align="left" onclick="ldSetAlign('left')"><i class="bi bi-text-left"></i></button>
+                    <button type="button" class="btn btn-outline-secondary" data-align="center" onclick="ldSetAlign('center')"><i class="bi bi-text-center"></i></button>
+                    <button type="button" class="btn btn-outline-secondary" data-align="right" onclick="ldSetAlign('right')"><i class="bi bi-text-right"></i></button>
+                  </div>
+                </div>
+                <div class="mb-2">
+                  <label class="form-label small mb-1">Text size</label>
+                  <input type="range" class="form-range" id="ld-insp-size" min="0.4" max="1.5" step="0.05"
+                         oninput="ldInspSizeChanged()">
+                </div>
+                <!-- Icon field: pick a glyph from the curated set (FoodAssistant-nxr8). -->
+                <div class="mb-2" id="ld-insp-icon-row" style="display:none">
+                  <label class="form-label small mb-1">Symbol</label>
+                  <select class="form-select form-select-sm" id="ld-insp-icon" onchange="ldInspIconChanged()"></select>
+                </div>
+                <!-- QR field: what it encodes (FoodAssistant-nxr8). -->
+                <div class="mb-2" id="ld-insp-qr-kind-row" style="display:none">
+                  <label class="form-label small mb-1">QR content</label>
+                  <select class="form-select form-select-sm" id="ld-insp-qr-kind" onchange="ldInspQrKindChanged()">
+                    <option value="url">URL / text</option>
+                    <option value="text">Plain text</option>
+                    <option value="vcard">Contact card (vCard)</option>
+                  </select>
+                </div>
+                <div class="mb-2" id="ld-insp-qr-note-row" style="display:none">
+                  <label class="form-label small mb-1">Note (optional)</label>
+                  <input type="text" class="form-control form-control-sm" id="ld-insp-qr-note"
+                         oninput="ldInspQrNoteChanged()" placeholder="e.g. Return to Dan's kitchen">
+                </div>
+                <div class="d-flex gap-3 flex-wrap">
+                  <label class="small"><input type="checkbox" id="ld-insp-bold" class="form-check-input me-1" onchange="ldInspBoldChanged()">Bold</label>
+                  <label class="small"><input type="checkbox" id="ld-insp-upper" class="form-check-input me-1" onchange="ldInspUpperChanged()">UPPERCASE</label>
+                  <label class="small"><input type="checkbox" id="ld-insp-outline" class="form-check-input me-1" onchange="ldInspOutlineChanged()">Outline / border</label>
+                </div>
+              </div>
+
+              <!-- Saved designs (FoodAssistant-rhqa): a small named library of
+                   layouts, separate from the single design "Save layout" below
+                   applies to printed labels. Save the design being edited under
+                   a name, then load or delete it later. -->
+              <div class="border rounded p-2 mt-3" style="max-width:520px">
+                <div class="small text-secondary mb-2">Saved designs</div>
+                <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
+                  <select class="form-select form-select-sm" id="ld-preset-select" style="max-width:220px">
+                    <option value="">Choose a saved design…</option>
+                  </select>
+                  <button type="button" class="btn btn-outline-secondary btn-sm" onclick="ldLoadPreset()">
+                    <i class="bi bi-upload me-1"></i>Load
+                  </button>
+                  <button type="button" class="btn btn-outline-danger btn-sm" onclick="ldDeletePreset(this)">
+                    <i class="bi bi-trash3 me-1"></i>Delete
+                  </button>
+                </div>
+                <div class="d-flex flex-wrap gap-2 align-items-center">
+                  <input type="text" class="form-control form-control-sm" id="ld-preset-name" style="max-width:220px"
+                         placeholder="Name this design (e.g. Fridge label)">
+                  <button type="button" class="btn btn-outline-info btn-sm" onclick="ldSaveAsPreset(this)">
+                    <i class="bi bi-save me-1"></i>Save as…
+                  </button>
+                </div>
+                <div class="test-result mt-1" id="ld-preset-result"></div>
+              </div>
+
+              <!-- Actions -->
+              <div class="mt-3 d-flex flex-wrap gap-2 align-items-center">
+                <button type="button" class="btn btn-outline-info btn-sm" onclick="ldSaveLayout(this)">
+                  <i class="bi bi-check-lg me-1"></i>Save layout
+                </button>
+                <button type="button" class="btn btn-outline-secondary btn-sm" onclick="ldResetDefault(this)">
+                  <i class="bi bi-arrow-counterclockwise me-1"></i>Reset to default
+                </button>
+                <div class="test-result" id="ld-save-result"></div>
+              </div>
+              <div class="form-text mt-1">Your saved design applies to every printed food label.</div>
+            </div>
+          {% endcall %}
+          {% endif %}
+
+          {% call panel('Decorative labels',
+                        'Make a plain name label for a spice jar, canister, or storage bin. No dates, just the text.') %}
+            {% call srow('Label text', 'What the label should say.') %}
+              <input type="text" class="form-control" id="decorative-text" style="max-width:420px"
+                     placeholder="Smoked Paprika" oninput="refreshDecorativePreview()">
+            {% endcall %}
+            {% call srow('Symbol', 'An optional icon above the text (FoodAssistant-nxr8).') %}
+              <select class="form-select" id="decorative-icon" style="max-width:220px" onchange="refreshDecorativePreview()">
+                <option value="">No symbol</option>
+              </select>
+            {% endcall %}
+            {% call srow('Outline', 'Add a hairline border around the label.') %}
+              {{ toggle('decorative-outline', checked=False, onchange='refreshDecorativePreview()') }}
+            {% endcall %}
+            {% call srow('Preview', 'A sample of the decorative label.') %}
+              <div class="border rounded d-inline-block p-2 bg-body-tertiary">
+                <img id="decorative-preview-img" alt="Decorative label preview"
+                     style="max-width:100%;image-rendering:pixelated;background:#fff">
+              </div>
+            {% endcall %}
+            {% call srow('Print', 'Send the decorative label to the label printer.') %}
+              <button type="button" class="btn btn-outline-info btn-sm" onclick="printDecorative(this)">
+                <i class="bi bi-printer me-1"></i>Print label
+              </button>
+              <div class="test-result mt-1" id="decorative-print-result"></div>
+            {% endcall %}
+          {% endcall %}
+
+          <button type="button" class="btn btn-outline-info btn-sm" onclick="savePanePrinting(this)">
+            <i class="bi bi-check-lg me-1"></i>Save Printing
+          </button>
+          <div class="test-result mt-2 mb-3" id="printing-save-result"></div>
+        </div>
