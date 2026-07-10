@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pantry Raider - Interactive Demo</title>
+<!--
+  Self-contained, no-backend interactive demo of Pantry Raider. It uses the same
+  Bootstrap 5.3 dark theme, Bootstrap Icons, and component markup as the real app
+  (vendored under ./vendor), with sample data baked in, so it looks like the
+  product. The real app is self-hosted and backed by Grocy (plus optional Mealie,
+  a vision LLM, and Home Assistant). Source: https://github.com/Syracuse3DPrintingOrg/PantryRaider
+-->
+<link href="vendor/bootstrap.min.css" rel="stylesheet">
+<link href="vendor/bootstrap-icons.min.css" rel="stylesheet">
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<style>
+  /* Faint ghosted brand mark behind the app, same as the real UI. */
+  body::before { content:""; position:fixed; inset:0; z-index:-1;
+    background:url("logo-mark.png") center center / min(58vmin, 460px) no-repeat;
+    opacity:.06; pointer-events:none; }
+  .navbar-brand { font-weight: 700; letter-spacing: -0.5px; }
+  .brand-logo { height: 30px; width: auto; }
+  .screen { display: none; }
+  .screen.active { display: block; }
+  /* Inventory panels (from the app's inventory.html) */
+  .panel-header { font-size:.95rem; font-weight:600; letter-spacing:.02em; padding:.6rem 1rem;
+    display:flex; align-items:center; gap:.5rem; border-radius:.5rem .5rem 0 0; }
+  .panel-count { font-size:.75rem; font-weight:500; margin-left:auto; padding:.15rem .5rem;
+    border-radius:999px; background:rgba(255,255,255,.15); }
+  .panel-body { max-height:60vh; overflow-y:auto; }
+  .item-row { display:flex; align-items:center; gap:.5rem; padding:.45rem .75rem;
+    border-bottom:1px solid rgba(255,255,255,.06); font-size:.875rem; }
+  .item-row:last-child { border-bottom:none; }
+  .item-name { flex:1; min-width:0; }
+  .item-name-text { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .item-qty { font-size:.78rem; color:var(--bs-secondary-color); white-space:nowrap; }
+  .expiry-badge { font-size:.72rem; padding:.15rem .45rem; border-radius:999px; white-space:nowrap; font-weight:500; }
+  .badge-expired { background:#4d1010; color:#ff6b6b; }
+  .badge-today { background:#4d2a0a; color:#ffa94d; }
+  .badge-3d { background:#3d3000; color:#ffd43b; }
+  .badge-7d { background:#1a2e10; color:#69db7c; }
+  .badge-ok { background:#0f2010; color:#69db7c; }
+  .panel-refrigerated .panel-header { background:#0d3b5e; color:#74c0fc; }
+  .panel-frozen .panel-header { background:#1a1a4d; color:#a5b4fc; }
+  .panel-room_temp .panel-header { background:#3b2100; color:#ffa94d; }
+  .panel-pantry .panel-header { background:#1a2e10; color:#69db7c; }
+  .panel-refrigerated { border-color:#0d3b5e !important; }
+  .panel-frozen { border-color:#1a1a4d !important; }
+  .panel-room_temp { border-color:#3b2100 !important; }
+  .panel-pantry { border-color:#1a2e10 !important; }
+  .min-width-0 { min-width:0; }
+  .urgency-3d { color:#ffd43b; }
+  /* Camera */
+  .cam-stage { aspect-ratio:16/9; background:#000; border-radius:.5rem; overflow:hidden; position:relative;
+    display:flex; align-items:center; justify-content:center; }
+  .cam-feed { position:absolute; inset:0; }
+  .cam-dot { position:absolute; right:12px; top:12px; width:9px; height:9px; border-radius:50%;
+    background:#f55; box-shadow:0 0 8px #f55; animation:blink 1.2s infinite; }
+  @keyframes blink { 50% { opacity:.25; } }
+  /* Stream Deck */
+  .deck { display:grid; grid-template-columns:repeat(5,1fr); gap:8px; max-width:540px; }
+  .deck-start { max-width:760px; }
+  .deck-start .key { font-size:.85rem; }
+  .deck-start .key i { font-size:1.7rem; }
+  .key { aspect-ratio:1/1; border-radius:10px; display:flex; flex-direction:column; align-items:center;
+    justify-content:center; gap:3px; cursor:pointer; user-select:none; border:2px solid rgba(255,255,255,.12);
+    font-size:.72rem; text-align:center; color:#fff; }
+  .key:hover { filter:brightness(1.18); }
+  .key:active { transform:scale(.96); }
+  .key i { font-size:1.25rem; }
+  .keypad button { font-size:1.5rem; min-height:58px; }
+</style>
+</head>
+<body>
+<nav class="navbar navbar-expand-lg bg-body-tertiary border-bottom sticky-top">
+  <div class="container-fluid">
+    <span class="navbar-brand d-flex align-items-center"><img src="logo-mark.png" alt="" class="brand-logo me-2">Pantry Raider</span>
+    <ul class="navbar-nav flex-row flex-wrap gap-1" id="nav">
+      <li class="nav-item"><button class="nav-link active px-2" data-screen="inventory"><i class="bi bi-grid me-1"></i>Inventory</button></li>
+      <li class="nav-item"><button class="nav-link px-2" data-screen="expiring"><i class="bi bi-clock-history me-1"></i>Expiring</button></li>
+      <li class="nav-item"><button class="nav-link px-2" data-screen="add"><i class="bi bi-plus-circle me-1"></i>Manage Pantry</button></li>
+      <li class="nav-item"><button class="nav-link px-2" data-screen="cook"><i class="bi bi-fire me-1"></i>Cook</button></li>
+      <li class="nav-item"><button class="nav-link px-2" data-screen="mealplan"><i class="bi bi-calendar-week me-1"></i>Meal Plan</button></li>
+      <li class="nav-item"><button class="nav-link px-2" data-screen="camera"><i class="bi bi-camera-video me-1"></i>Camera</button></li>
+      <li class="nav-item"><button class="nav-link px-2" data-screen="convert"><i class="bi bi-rulers me-1"></i>Convert</button></li>
+      <li class="nav-item"><button class="nav-link px-2" data-screen="start"><i class="bi bi-grid-1x2 me-1"></i>Start Page</button></li>
+      <li class="nav-item"><button class="nav-link px-2" data-screen="deck"><i class="bi bi-grid-3x3-gap me-1"></i>Stream Deck</button></li>
+      <li class="nav-item"><button class="nav-link px-2" data-screen="settings"><i class="bi bi-gear me-1"></i>Settings</button></li>
+    </ul>
+  </div>
+</nav>
+
+<div class="container-fluid px-3 px-lg-4 pb-5" style="max-width:1140px">
+  <div class="alert alert-info d-flex align-items-center gap-2 mt-3" role="alert">
+    <i class="bi bi-info-circle-fill"></i>
+    <div><strong>Interactive demo.</strong> Sample data, runs entirely in your browser. The real app is self-hosted, backed by Grocy
+      (plus optional Mealie, a vision LLM, and Home Assistant).
+      <a href="https://github.com/Syracuse3DPrintingOrg/PantryRaider" class="alert-link" target="_blank" rel="noopener">View the project &rarr;</a></div>
+  </div>
+
+  <!-- INVENTORY -->
+  <section class="screen active" id="screen-inventory">
+    <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
+      <h4 class="mb-0"><i class="bi bi-grid me-2"></i>Inventory</h4>
+      <span class="text-secondary small">Stock grouped by storage. Items expiring soon are flagged.</span>
+    </div>
+    <div class="row g-3" id="inv-panels"></div>
+  </section>
+
+  <!-- EXPIRING -->
+  <section class="screen" id="screen-expiring">
+    <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 my-3">
+      <h4 class="mb-0"><i class="bi bi-clock-history me-2"></i>Expiring items</h4>
+      <span class="text-secondary small">What needs using up, soonest first.</span>
+    </div>
+    <div class="row g-3 mb-4" id="exp-summary"></div>
+    <div class="table-responsive">
+      <table class="table table-hover align-middle">
+        <thead><tr><th>Item</th><th>Amount</th><th>Location</th><th>Status</th><th></th></tr></thead>
+        <tbody id="exp-rows"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ADD / SCAN -->
+  <section class="screen" id="screen-add">
+    <h4 class="my-3"><i class="bi bi-plus-circle me-2"></i>Add food</h4>
+    <p class="text-secondary">Scan a barcode (camera or USB scanner); Open Food Facts fills in the details. Try it:</p>
+    <div class="d-flex gap-2 mb-3 flex-wrap">
+      <button class="btn btn-primary" onclick="demoScan()"><i class="bi bi-upc-scan me-1"></i>Scan a barcode</button>
+      <button class="btn btn-outline-success" onclick="commitPending()"><i class="bi bi-cloud-upload me-1"></i>Commit all to inventory</button>
+    </div>
+    <div class="card">
+      <div class="card-header d-flex align-items-center"><i class="bi bi-hourglass-split me-2"></i>Pending review
+        <span class="badge text-bg-warning ms-2" id="pending-count">0</span></div>
+      <div class="list-group list-group-flush" id="pending-list">
+        <div class="list-group-item text-secondary">Nothing scanned yet. Hit &ldquo;Scan a barcode&rdquo; above.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- COOK -->
+  <section class="screen" id="screen-cook">
+    <h4 class="my-3"><i class="bi bi-fire me-2"></i>What can I cook?</h4>
+    <p class="text-secondary">Recipes ranked by how much is already in stock. Items expiring soon nudge a recipe up.</p>
+    <div id="cook-tiers"></div>
+  </section>
+
+  <!-- MEAL PLAN -->
+  <section class="screen" id="screen-mealplan">
+    <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 my-3">
+      <h4 class="mb-0"><i class="bi bi-calendar-week me-2"></i>Meal plan</h4>
+      <span class="text-secondary small">This week, synced with Mealie. Drag recipes onto a slot in the real app.</span>
+    </div>
+    <div class="table-responsive">
+      <table class="table table-bordered align-middle text-center mb-0" id="plan-table"></table>
+    </div>
+  </section>
+
+  <!-- CAMERA -->
+  <section class="screen" id="screen-camera">
+    <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 my-3">
+      <h4 class="mb-0"><i class="bi bi-camera-video me-2"></i>Camera</h4>
+      <div class="btn-group btn-group-sm" id="cam-switch"></div>
+    </div>
+    <div class="cam-stage">
+      <div class="cam-feed" id="cam-feed"></div>
+      <span class="cam-dot"></span>
+      <span class="position-absolute bottom-0 start-0 m-2 badge bg-dark bg-opacity-75" id="cam-label">Front Door</span>
+    </div>
+    <p class="text-secondary small mt-2">Network cameras (from Home Assistant or by IP) on the screen and the Stream Deck.</p>
+  </section>
+
+  <!-- CONVERT -->
+  <section class="screen" id="screen-convert">
+    <h4 class="my-3"><i class="bi bi-rulers me-2"></i>Kitchen conversions</h4>
+    <div class="row g-3">
+      <div class="col-md-7">
+        <div class="card">
+          <div class="card-header"><i class="bi bi-calculator me-2"></i>Custom conversion</div>
+          <div class="card-body">
+            <div class="row g-2 align-items-end">
+              <div class="col-12 col-md-4">
+                <label class="form-label">Value</label>
+                <input id="cv-val" class="form-control form-control-lg text-end" value="2" readonly
+                       data-bs-toggle="modal" data-bs-target="#padModal" style="cursor:pointer">
+              </div>
+              <div class="col-6 col-md-4"><label class="form-label">From</label><select id="cv-from" class="form-select form-select-lg" onchange="convert()"></select></div>
+              <div class="col-6 col-md-4"><label class="form-label">To</label><select id="cv-to" class="form-select form-select-lg" onchange="convert()"></select></div>
+            </div>
+            <div class="display-6 mt-3 text-info" id="cv-result">&mdash;</div>
+          </div>
+        </div>
+      </div>
+      <div class="col-md-5">
+        <div class="card">
+          <div class="card-header"><i class="bi bi-list-check me-2"></i>Handy equivalents</div>
+          <table class="table table-sm table-borderless align-middle mb-0 fs-6">
+            <tbody>
+              <tr><td class="ps-3">1 cup</td><td class="text-end pe-3">16 tbsp = 240 ml</td></tr>
+              <tr><td class="ps-3">1 stick of butter</td><td class="text-end pe-3">8 tbsp = 113 g</td></tr>
+              <tr><td class="ps-3">1 cup flour</td><td class="text-end pe-3">125 g</td></tr>
+              <tr><td class="ps-3">1 large egg</td><td class="text-end pe-3">about 50 g</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- START PAGE -->
+  <section class="screen" id="screen-start">
+    <h4 class="my-3"><i class="bi bi-grid-1x2 me-2"></i>Start Page</h4>
+    <p class="text-secondary">An optional full-screen launcher that works like an on-screen Stream Deck: same key catalog,
+      same shared custom keys. Home Assistant, media, and macro keys fire right from the screen, no deck required.</p>
+    <div class="deck deck-start" id="start-grid"></div>
+    <div class="alert alert-secondary mt-3 mb-0" id="start-msg">Tap a key&hellip;</div>
+  </section>
+
+  <!-- STREAM DECK -->
+  <section class="screen" id="screen-deck">
+    <h4 class="my-3"><i class="bi bi-grid-3x3-gap me-2"></i>Stream Deck kiosk</h4>
+    <p class="text-secondary">A kitchen control surface. Tap a key to see what it does. The real editor lets you drag your own custom keys onto the grid.</p>
+    <div class="deck" id="deck"></div>
+    <div class="alert alert-secondary mt-3 mb-0" id="deck-msg">Tap a key&hellip;</div>
+  </section>
+
+  <!-- SETTINGS -->
+  <section class="screen" id="screen-settings">
+    <h4 class="my-3"><i class="bi bi-gear me-2"></i>Settings</h4>
+    <p class="text-secondary">A guided setup wizard connects each service. Everything is optional except Grocy, the inventory backend.</p>
+    <div class="row g-3" id="settings-cards"></div>
+  </section>
+
+  <footer class="text-secondary small text-center pt-4 mt-4 border-top">
+    Pantry Raider &middot; self-hosted food spoilage tracker &middot;
+    <a href="https://github.com/Syracuse3DPrintingOrg/PantryRaider" target="_blank" rel="noopener">github.com/Syracuse3DPrintingOrg/PantryRaider</a>
+  </footer>
+</div>
+
+<!-- Keypad modal (Convert) -->
+<div class="modal fade" id="padModal" tabindex="-1"><div class="modal-dialog modal-sm modal-dialog-centered"><div class="modal-content">
+  <div class="modal-header py-2"><h6 class="modal-title">Enter value</h6><button class="btn-close" data-bs-dismiss="modal"></button></div>
+  <div class="modal-body">
+    <input id="pad-display" class="form-control form-control-lg text-end mb-2" value="2" readonly>
+    <div class="row row-cols-3 g-2 keypad" id="keypad"></div>
+  </div>
+  <div class="modal-footer py-2"><button class="btn btn-primary" data-bs-dismiss="modal">Done</button></div>
+</div></div></div>
+
+<script src="vendor/bootstrap.bundle.min.js"></script>
+<script>
+function esc(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+// ---- Navigation -----------------------------------------------------------
+document.getElementById('nav').addEventListener('click', e => {
+  const t = e.target.closest('button[data-screen]'); if (!t) return;
+  document.querySelectorAll('#nav .nav-link').forEach(x => x.classList.toggle('active', x === t));
+  document.querySelectorAll('.screen').forEach(s => s.classList.toggle('active', s.id === 'screen-' + t.dataset.screen));
+});
+
+// ---- Inventory ------------------------------------------------------------
+const PANELS = [
+  {key:'refrigerated', label:'Refrigerated', icon:'bi-thermometer-low', items:[
+    {n:'Whole milk', q:'1 gal', d:3}, {n:'Greek yogurt', q:'4 cups', d:9},
+    {n:'Cheddar cheese', q:'250 g', d:21}, {n:'Spinach', q:'1 bag', d:1},
+    {n:'Chicken breast', q:'1.5 kg', d:2}, {n:'Parmesan', q:'200 g', d:25}]},
+  {key:'frozen', label:'Frozen', icon:'bi-snow', items:[
+    {n:'Blueberries', q:'2 lb', d:120}, {n:'Peas', q:'1 bag', d:200}, {n:'Pizza dough', q:'3 balls', d:60}]},
+  {key:'room_temp', label:'Room Temp / Counter', icon:'bi-sun', items:[
+    {n:'Bananas', q:'5', d:2}, {n:'Tomatoes', q:'6', d:4}, {n:'Garlic', q:'1 bulb', d:60}, {n:'Onions', q:'4', d:40}]},
+  {key:'pantry', label:'Pantry / Dry Storage', icon:'bi-box-seam', items:[
+    {n:'Spaghetti', q:'500 g', d:400}, {n:'Olive oil', q:'750 ml', d:300},
+    {n:'Canned tomatoes', q:'3 cans', d:500}, {n:'Rice', q:'2 kg', d:400}]},
+];
+function expiryBadge(d){
+  if (d<=0) return '<span class="expiry-badge badge-expired">Today</span>';
+  if (d<=2) return `<span class="expiry-badge badge-today">${d}d</span>`;
+  if (d<=5) return `<span class="expiry-badge badge-3d">${d}d</span>`;
+  if (d<=14) return `<span class="expiry-badge badge-7d">${d}d</span>`;
+  return '<span class="expiry-badge badge-ok">Fresh</span>';
+}
+function itemRow(it){
+  return `<div class="item-row"><div class="item-name"><div class="item-name-text">${esc(it.n)}</div></div>
+    <span class="item-qty">${esc(it.q)}</span>${expiryBadge(it.d)}
+    <button class="btn btn-outline-secondary btn-sm py-0 px-1 ms-1"><i class="bi bi-pencil"></i></button>
+    <button class="btn btn-outline-secondary btn-sm py-0 px-1"><i class="bi bi-arrows-move"></i></button></div>`;
+}
+function renderInventory(){
+  document.getElementById('inv-panels').innerHTML = PANELS.map(p => `
+    <div class="col-md-6"><div class="border rounded panel-${p.key}" style="border-width:1px !important">
+      <div class="panel-header"><i class="bi ${p.icon}"></i>${esc(p.label)}<span class="panel-count">${p.items.length}</span></div>
+      <div class="panel-body">${p.items.map(itemRow).join('')}</div>
+    </div></div>`).join('');
+}
+
+// ---- Add / Scan -----------------------------------------------------------
+const SCAN = [
+  {n:'Sparkling water', q:'12 pack', loc:'Pantry'}, {n:'Peanut butter', q:'1 jar', loc:'Pantry'},
+  {n:'Butter', q:'250 g', loc:'Refrigerated'}, {n:'Salsa', q:'1 jar', loc:'Refrigerated'},
+  {n:'Sourdough loaf', q:'1', loc:'Room Temp'}, {n:'Maple syrup', q:'500 ml', loc:'Pantry'},
+];
+let pending = [];
+function demoScan(){ pending.push(SCAN[Math.floor(Math.random()*SCAN.length)]); renderPending(); }
+function renderPending(){
+  document.getElementById('pending-count').textContent = pending.length;
+  const el = document.getElementById('pending-list');
+  if (!pending.length){ el.innerHTML = '<div class="list-group-item text-secondary">Nothing scanned yet. Hit &ldquo;Scan a barcode&rdquo; above.</div>'; return; }
+  el.innerHTML = pending.map((it,i) => `<div class="list-group-item d-flex align-items-center gap-2">
+    <span class="flex-grow-1">${esc(it.n)} <span class="text-secondary small">&middot; ${esc(it.q)} &rarr; ${esc(it.loc)}</span></span>
+    <button class="btn btn-outline-danger btn-sm" onclick="pending.splice(${i},1);renderPending()"><i class="bi bi-x"></i></button></div>`).join('');
+}
+function commitPending(){ pending = []; renderPending(); }
+
+// ---- Cook -----------------------------------------------------------------
+const TIERS = {
+  ready:   {label:'Ready to Cook', icon:'bi-check-circle', color:'success'},
+  staples: {label:'With Pantry Staples', icon:'bi-egg-fried', color:'info'},
+  shopping:{label:'Worth a Shop Run', icon:'bi-cart', color:'warning'},
+};
+const RECIPES = {
+  ready: [
+    {name:'Spaghetti aglio e olio', m:6, t:6, exp:['Garlic'], desc:'Garlic, olive oil, chili, parsley over pasta.'},
+    {name:'Cheesy scrambled eggs', m:4, t:4, exp:[], desc:'Soft scramble with cheddar.'}],
+  staples: [
+    {name:'Garlic butter chicken', m:5, t:7, exp:['Chicken breast','Spinach'], desc:'Pan-seared chicken in garlic butter.'},
+    {name:'Creamed spinach', m:4, t:6, exp:['Spinach'], desc:'Spinach, parmesan, a little cream.'},
+    {name:'Tomato pasta', m:5, t:6, exp:['Tomatoes'], desc:'Fresh tomato sauce over spaghetti.'}],
+  shopping: [
+    {name:'Chicken parmesan', m:5, t:9, exp:['Chicken breast'], desc:'Breaded chicken, marinara, mozzarella.', missing:2},
+    {name:'Banana oat pancakes', m:4, t:7, exp:['Bananas'], desc:'Quick weekend pancakes.', missing:2}],
+};
+function recipeCard(s, tier){
+  const m = TIERS[tier];
+  return `<div class="col"><div class="card h-100"><div class="card-body py-2 d-flex flex-column">
+    <div class="d-flex justify-content-between align-items-start gap-2">
+      <div class="min-width-0 fw-semibold">${esc(s.name)}</div>
+      <span class="badge bg-secondary flex-shrink-0">${s.m}/${s.t}</span>
+    </div>
+    ${s.exp.length ? `<div class="small urgency-3d mt-1"><i class="bi bi-clock-history me-1"></i>Uses expiring: ${s.exp.map(esc).join(', ')}</div>` : ''}
+    <div class="small text-secondary mt-1 text-truncate">${esc(s.desc)}</div>
+    <div class="mt-auto pt-2 d-flex gap-1 flex-wrap">
+      <button class="btn btn-sm btn-outline-info" onclick="setActive('${esc(s.name)}',this)"><i class="bi bi-fire me-1"></i>Cook</button>
+      <button class="btn btn-sm btn-outline-success"><i class="bi bi-check2-circle me-1"></i>Cooked it</button>
+      ${tier==='shopping' && s.missing ? `<button class="btn btn-sm btn-outline-warning"><i class="bi bi-cart-plus me-1"></i>${s.missing}</button>` : ''}
+    </div></div></div></div>`;
+}
+function renderCook(){
+  document.getElementById('cook-tiers').innerHTML = Object.entries(TIERS).map(([k,m]) => {
+    const items = RECIPES[k] || []; if (!items.length) return '';
+    return `<div class="mb-3">
+      <div class="d-flex align-items-baseline gap-2 mb-2">
+        <h6 class="text-${m.color} mb-0"><i class="bi ${m.icon} me-1"></i>${m.label}</h6>
+        <span class="badge text-bg-${m.color}">${items.length}</span>
+      </div>
+      <div class="row g-2 row-cols-1 row-cols-md-2 row-cols-lg-3">${items.map(s=>recipeCard(s,k)).join('')}</div>
+    </div>`;
+  }).join('');
+}
+function setActive(name, btn){ btn.innerHTML = '<i class="bi bi-check2 me-1"></i>Current recipe'; btn.classList.replace('btn-outline-info','btn-info'); }
+
+// ---- Camera ---------------------------------------------------------------
+const CAMERAS = [{name:'Front Door', a:'#0d3b5e', b:'#103a4b'}, {name:'Driveway', a:'#3b2100', b:'#5a3a0d'}, {name:'Garage', a:'#1a1a4d', b:'#2b1b5a'}];
+function renderCamSwitch(){
+  document.getElementById('cam-switch').innerHTML = CAMERAS.map((c,i) =>
+    `<button class="btn btn-outline-info${i===0?' active':''}" onclick="selectCam(${i})">${esc(c.name)}</button>`).join('');
+  selectCam(0);
+}
+function selectCam(i){
+  const c = CAMERAS[i];
+  document.getElementById('cam-label').textContent = c.name;
+  document.getElementById('cam-feed').style.background =
+    `repeating-linear-gradient(45deg, ${c.a}, ${c.a} 18px, ${c.b} 18px, ${c.b} 36px)`;
+  document.querySelectorAll('#cam-switch .btn').forEach((b,j)=>b.classList.toggle('active', j===i));
+}
+
+// ---- Convert --------------------------------------------------------------
+const UNITS = { Volume:{ml:1,l:1000,tsp:4.929,tbsp:14.787,cup:240,'fl oz':29.574}, Mass:{g:1,kg:1000,oz:28.35,lb:453.592} };
+function fillUnits(){
+  let html=''; for (const [cat,u] of Object.entries(UNITS)) html += `<optgroup label="${cat}">`+Object.keys(u).map(k=>`<option value="${cat}:${k}">${k}</option>`).join('')+'</optgroup>';
+  cvFrom.innerHTML=html; cvTo.innerHTML=html; cvFrom.value='Volume:cup'; cvTo.value='Volume:ml';
+}
+const cvVal=document.getElementById('cv-val'), cvFrom=document.getElementById('cv-from'), cvTo=document.getElementById('cv-to'), cvRes=document.getElementById('cv-result');
+function convert(){
+  const v=parseFloat(cvVal.value); const [fc,fu]=cvFrom.value.split(':'); const [tc,tu]=cvTo.value.split(':');
+  if (isNaN(v)){ cvRes.textContent='—'; return; }
+  if (fc!==tc){ cvRes.innerHTML='<span class="fs-6 text-secondary">Pick units in the same category</span>'; return; }
+  cvRes.textContent = `${+(v*UNITS[fc][fu]/UNITS[tc][tu]).toFixed(3)} ${tu}`;
+}
+function buildKeypad(){
+  const pad=document.getElementById('keypad'), disp=document.getElementById('pad-display');
+  disp.value=cvVal.value;
+  ['7','8','9','4','5','6','1','2','3','.','0','⌫'].forEach(k=>{
+    const col=document.createElement('div'); col.className='col';
+    const b=document.createElement('button'); b.className='btn btn-outline-secondary w-100'; b.textContent=k;
+    b.onclick=()=>{ if(k==='⌫') disp.value=disp.value.slice(0,-1)||'0';
+      else if(k==='.'&&disp.value.includes('.')){} else disp.value=(disp.value==='0'&&k!=='.')?k:disp.value+k;
+      cvVal.value=disp.value; convert(); };
+    col.appendChild(b); pad.appendChild(col);
+  });
+}
+
+// ---- Stream Deck ----------------------------------------------------------
+const KEYS = [
+  {i:'bi-grid',l:'Inventory',c:'#1f6feb',m:'Opens the inventory dashboard on the display.'},
+  {i:'bi-clock-history',l:'Expiring',c:'#9e6a03',m:'Jumps to items that need using up soon.'},
+  {i:'bi-plus-circle',l:'Add',c:'#238636',m:'Add food: scan, photo, or manual entry.'},
+  {i:'bi-hourglass-split',l:'Pending',c:'#8957e5',m:'Review scanned items waiting to be committed.'},
+  {i:'bi-cloud-upload',l:'Commit',c:'#1a7f37',m:'Commit all pending scans into Grocy.'},
+  {i:'bi-fire',l:'Cook',c:'#bc4c00',m:'What can I cook? Recipes ranked by stock.'},
+  {i:'bi-stopwatch',l:'Timer',c:'#0d9488',m:'Start a kitchen timer, shared with the screen.'},
+  {i:'bi-cloud-sun',l:'Weather',c:'#1e40af',m:'Tap to open the weather page on the display.'},
+  {i:'bi-house',l:'Lights',c:'#475569',m:'Home Assistant key: toggle an entity.'},
+  {i:'bi-play-circle',l:'Play',c:'#7c3aed',m:'Media key: play/pause a Home Assistant media_player.'},
+  {i:'bi-camera-video',l:'Camera',c:'#0f172a',m:'Shows a live camera snapshot; press to open the full feed.'},
+  {i:'bi-upc-scan',l:'Scan mode',c:'#0369a1',m:'Cycle the scanner: Stock / Use / Shop.'},
+  {i:'bi-cart',l:'Shopping',c:'#0f766e',m:'Open the shopping list.'},
+  {i:'bi-brightness-high',l:'Brightness',c:'#374151',m:'Cycle the deck brightness.'},
+  {i:'bi-gear',l:'Settings',c:'#6b7280',m:'Open the setup page on the display.'},
+];
+function renderKeys(gridId, msgId, keys){
+  const d=document.getElementById(gridId);
+  d.innerHTML = keys.map(k=>`<div class="key" style="background:${k.c}" data-m="${esc(k.m)}" data-l="${esc(k.l)}"><i class="bi ${k.i}"></i><span>${k.l}</span></div>`).join('');
+  d.querySelectorAll('.key').forEach(el=>el.onclick=()=>document.getElementById(msgId).innerHTML=`<strong>${el.dataset.l}</strong>: ${el.dataset.m}`);
+}
+function renderDeck(){ renderKeys('deck','deck-msg',KEYS); }
+// The Start Page shares the deck's key catalog and custom keys; its action keys
+// (Home Assistant, media, macro) execute server-side, so they work on any screen.
+const START_KEYS = KEYS.map(k =>
+  k.l==='Lights' ? {...k, m:'Home Assistant key: fires from the screen, no deck needed.'} :
+  k.l==='Play'   ? {...k, m:'Media key: plays/pauses right from the screen.'} : k);
+function renderStart(){ renderKeys('start-grid','start-msg',START_KEYS); }
+
+// ---- Expiring -------------------------------------------------------------
+function expStatus(d){
+  if (d<=0) return '<span class="badge text-bg-warning">Today</span>';
+  if (d<=3) return `<span class="badge text-bg-warning">${d}d left</span>`;
+  return `<span class="badge text-bg-success">${d}d left</span>`;
+}
+function renderExpiring(){
+  // Derive from the same inventory data; show anything within two weeks.
+  const rows = [];
+  PANELS.forEach(p => p.items.forEach(it => { if (it.d <= 14) rows.push({...it, loc:p.label}); }));
+  rows.sort((a,b)=>a.d-b.d);
+  const counts = {exp:0, today:0, soon:0, later:0};
+  rows.forEach(r => { if (r.d<0) counts.exp++; else if (r.d===0) counts.today++; else if (r.d<=3) counts.soon++; else counts.later++; });
+  const card = (n,v,cls)=>`<div class="col-6 col-md-3"><div class="card text-center ${cls}"><div class="card-body py-2">
+    <div class="fs-3 fw-bold">${v}</div><div class="text-secondary small">${n}</div></div></div></div>`;
+  document.getElementById('exp-summary').innerHTML =
+    card('Expired',counts.exp,'border-danger') + card('Today',counts.today,'border-warning')
+    + card('Within 3 Days',counts.soon,'') + card('Later',counts.later,'');
+  document.getElementById('exp-rows').innerHTML = rows.map(r => `<tr>
+    <td><strong>${esc(r.n)}</strong></td><td>${esc(r.q)}</td>
+    <td><span class="badge bg-secondary">${esc(r.loc)}</span></td><td>${expStatus(r.d)}</td>
+    <td><button class="btn btn-sm btn-outline-success py-0 px-1" title="Mark consumed"><i class="bi bi-check-lg"></i></button></td></tr>`).join('');
+}
+
+// ---- Meal plan ------------------------------------------------------------
+const PLAN_DAYS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+const PLAN = {
+  Breakfast:['Greek yogurt & berries','Oatmeal','Cheesy scrambled eggs','Smoothie','Banana oat pancakes','Avocado toast','Bagels & lox'],
+  Lunch:    ['Tomato pasta','Leftover chicken','Spinach salad','Grain bowl','Soup & bread','Tacos','Sandwiches'],
+  Dinner:   ['Garlic butter chicken','Chicken parmesan','Spaghetti aglio e olio','Stir-fry','Pizza night','Roast & veg','Creamed spinach'],
+};
+function renderMealPlan(){
+  let html = '<thead><tr><th></th>' + PLAN_DAYS.map(d=>`<th class="text-secondary small">${d}</th>`).join('') + '</tr></thead><tbody>';
+  for (const meal of Object.keys(PLAN)){
+    html += `<tr><th class="text-start text-secondary small align-middle">${meal}</th>` + PLAN[meal].map(r =>
+      `<td class="small"><span class="d-inline-block px-2 py-1 rounded bg-body-tertiary">${esc(r)}</span></td>`).join('') + '</tr>';
+  }
+  document.getElementById('plan-table').innerHTML = html + '</tbody>';
+}
+
+// ---- Settings -------------------------------------------------------------
+const SETTINGS = [
+  {icon:'bi-box-seam', name:'Grocy', ok:true, note:'Inventory backend', fields:[['URL','grocy.home.lan'],['Status','Connected']]},
+  {icon:'bi-journal-richtext', name:'Mealie', ok:true, note:'Recipes, meal plan, shopping', fields:[['URL','mealie.home.lan'],['API','v1 detected']]},
+  {icon:'bi-stars', name:'AI provider', ok:true, note:'Vision & recipe generation', fields:[['Provider','Anthropic'],['Model','claude (vision)']]},
+  {icon:'bi-house-gear', name:'Home Assistant', ok:false, note:'Cameras, notifications, voice', fields:[['Status','Not configured']]},
+  {icon:'bi-display', name:'Interface', ok:true, note:'Theme, kiosk, display', fields:[['Theme','Dark'],['Kiosk','Auto on Pi display']]},
+  {icon:'bi-hdd-network', name:'Stream Deck', ok:true, note:'Physical control surface', fields:[['Device','15-key'],['Pages','Kitchen, Home']]},
+  {icon:'bi-grid-1x2', name:'Start Page', ok:true, note:'On-screen launcher, shares custom keys with the deck', fields:[['Keys','15'],['Home screen','Yes']]},
+];
+function renderSettings(){
+  document.getElementById('settings-cards').innerHTML = SETTINGS.map(s => `
+    <div class="col-md-6 col-xl-4"><div class="card h-100"><div class="card-body">
+      <div class="d-flex align-items-center gap-2 mb-1">
+        <i class="bi ${s.icon} fs-5"></i><span class="fw-semibold">${esc(s.name)}</span>
+        <span class="badge ${s.ok?'text-bg-success':'text-bg-secondary'} ms-auto">${s.ok?'Connected':'Not set up'}</span>
+      </div>
+      <div class="text-secondary small mb-2">${esc(s.note)}</div>
+      <table class="table table-sm table-borderless mb-2 small"><tbody>${
+        s.fields.map(([k,v])=>`<tr><td class="text-secondary">${esc(k)}</td><td class="text-end">${esc(v)}</td></tr>`).join('')
+      }</tbody></table>
+      <button class="btn btn-sm ${s.ok?'btn-outline-secondary':'btn-outline-primary'} w-100">
+        <i class="bi ${s.ok?'bi-pencil':'bi-plug'} me-1"></i>${s.ok?'Edit':'Connect'}</button>
+    </div></div></div>`).join('');
+}
+
+// ---- Init -----------------------------------------------------------------
+renderInventory(); renderExpiring(); renderPending(); renderCook(); renderMealPlan();
+renderCamSwitch(); fillUnits(); buildKeypad(); convert(); renderDeck(); renderStart(); renderSettings();
+</script>
+</body>
+</html>

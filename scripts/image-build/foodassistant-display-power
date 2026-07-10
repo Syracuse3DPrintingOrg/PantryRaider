@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+# foodassistant-display-power -- blank or wake the kiosk display via the
+# compositor (FoodAssistant-8khi).
+#
+# Usage: foodassistant-display-power on|off
+#
+# On a cage/wlroots DRM kiosk, cutting the panel with `vcgencmd display_power 0`
+# powers HDMI/DSI off below the compositor. cage loses the output and the screen
+# drops to the Linux console, and `display_power 1` does not bring cage back, so
+# the display is stuck on the console until a reboot. The supported path is to
+# tell the compositor to turn the output off/on through the wlr-output-power
+# protocol, which keeps cage in control and recovers cleanly.
+#
+# This mirrors foodassistant-apply-rotation: it resolves the kiosk session's
+# Wayland socket and the connected output, then drives wlr-randr --off/--on. It
+# exits non-zero if the compositor or the tool is unreachable, so the caller can
+# fall back to a firmware/X11 method.
+set -uo pipefail
+
+action="${1:-}"
+case "$action" in
+  on)  flag="--on" ;;
+  off) flag="--off" ;;
+  *) echo "Usage: $0 on|off" >&2; exit 2 ;;
+esac
+
+if ! command -v wlr-randr >/dev/null 2>&1; then
+  echo "wlr-randr not installed; cannot drive the compositor display power" >&2
+  exit 1
+fi
+
+# Resolve the kiosk Wayland socket and the connected output. Unlike rotation
+# (run from ExecStartPost while cage starts), power toggles happen well after
+# boot, so a single short probe is enough.
+sock="$(ls /run/user/*/wayland-* 2>/dev/null | grep -v '\.lock$' | head -1 || true)"
+if [ -z "$sock" ]; then
+  echo "Could not reach the kiosk compositor (no Wayland socket)" >&2
+  exit 1
+fi
+export XDG_RUNTIME_DIR="$(dirname "$sock")"
+export WAYLAND_DISPLAY="$(basename "$sock")"
+
+# The connector line is the only one starting in column 0.
+out="$(wlr-randr 2>/dev/null | awk '/^[A-Za-z]/{print $1; exit}' || true)"
+if [ -z "$out" ]; then
+  echo "Could not find a connected output" >&2
+  exit 1
+fi
+
+wlr-randr --output "$out" "$flag"
+echo "Set $out power $action via the compositor"
