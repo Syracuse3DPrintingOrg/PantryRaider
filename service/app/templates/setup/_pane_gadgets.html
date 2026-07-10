@@ -1,0 +1,148 @@
+{% from "setup/_macros.html" import panel, srow, toggle with context %}
+<!-- Bluetooth thermometers (FoodAssistant-mnks): the management surface for
+     the probe feature that lives day-to-day on the Timers page. Renders in
+     every mode: a thermometer sits near whichever device has the radio, and
+     the Home Assistant source works anywhere. The live status, device lists,
+     and entity list are filled by static/js/setup/panes.js from
+     /gadgets/state and /gadgets/ha-entities when the pane opens. -->
+        <div class="tab-pane fade" id="pane-gadgets">
+          <p class="pane-intro">Wireless probe thermometers (Inkbird, ThermoPro including the TempSpike, Combustion, Govee grill probes, ThermoWorks BlueDOT) show live temperatures on the Timers page and raise an on-screen alert when a probe reaches its target. Readings stay on your own network; no cloud account is involved.</p>
+
+          {% call panel('Thermometers',
+                        'The master switch for probe temperatures on the Timers page.',
+                        pill_text=('On' if s.gadgets_enabled else 'Off'),
+                        pill_kind=('good' if s.gadgets_enabled else 'neutral'),
+                        pill_id='gadgets-pill') %}
+            {% call srow('Enable thermometers', 'Adding your first thermometer below turns this on for you.') %}
+              {{ toggle('gadgets_enabled', checked=s.gadgets_enabled) }}
+            {% endcall %}
+          {% endcall %}
+
+          {% call panel('Bluetooth reader',
+                        'The reader listens for thermometers over Bluetooth on this device and reports their temperatures to the app.',
+                        pill_id='gadgets-reader-pill', pill_text='Checking') %}
+            <div class="mb-2 mt-1" id="gadgets-reader-status">
+              <span class="text-secondary small">Checking the reader…</span>
+            </div>
+
+            <!-- Setup guidance, shown only while the reader has never checked
+                 in on this device (panes.js flips it by reader_age_seconds). -->
+            <div id="gadgets-reader-help" style="display:none">
+              {% if is_pi_appliance %}
+              <div class="alert alert-secondary d-flex align-items-start gap-2" role="alert">
+                <i class="bi bi-info-circle fs-5"></i>
+                <div>
+                  This device does not have the thermometer reader turned on yet.
+                  Set it up here and thermometers in range appear below.
+                  <div class="mt-2">
+                    <button type="button" class="btn btn-outline-info btn-sm" onclick="installGadgetsReader(this)">
+                      <i class="bi bi-download me-1"></i>Set up for me
+                    </button>
+                    <div class="test-result mt-2" id="gadgets-install-result"></div>
+                  </div>
+                  <div class="small text-secondary mt-2">
+                    The reader can also be chosen at install time, or added later by
+                    running <code>sudo foodassistant-gadgets-setup</code> on the device.
+                  </div>
+                </div>
+              </div>
+              {% else %}
+              <div class="alert alert-secondary d-flex align-items-start gap-2" role="alert">
+                <i class="bi bi-info-circle fs-5"></i>
+                <div>
+                  The reader runs on the server itself and needs a Bluetooth radio
+                  there. To install it, run this on the server, in your Pantry Raider
+                  folder:
+                  <div class="font-monospace small my-2">sudo ./scripts/image-build/foodassistant-gadgets-setup</div>
+                  The <code>gadgets/README.md</code> file in that folder covers the
+                  details. No Bluetooth radio on the server? If Home Assistant
+                  already sees your thermometers, use the From Home Assistant
+                  section below instead; it needs no radio here.
+                </div>
+              </div>
+              {% endif %}
+            </div>
+
+            {% call srow('Your thermometers', 'Thermometers this device reads, with their latest probe readings.') %}
+              <div id="gadgets-devices"><span class="text-secondary small">Loading…</span></div>
+            {% endcall %}
+            {% call srow('Found nearby', 'Thermometers the reader can see that are not added yet.') %}
+              <div id="gadgets-discovered"><span class="text-secondary small">Loading…</span></div>
+            {% endcall %}
+            {% call srow('Add by address', 'Add a thermometer that is not in range right now, by its Bluetooth address.',
+                         'The address (like AA:BB:CC:DD:EE:FF) is usually on a sticker on the thermometer or in its phone app. For a Combustion probe, use its serial number.') %}
+              <div class="d-flex flex-column gap-2" style="max-width:420px">
+                <input type="text" class="form-control font-monospace" id="gadget-add-id" placeholder="AA:BB:CC:DD:EE:FF">
+                <input type="text" class="form-control" id="gadget-add-name" placeholder="A name for it (e.g. Grill)">
+                <select class="form-select" id="gadget-add-protocol">
+                  <option value="inkbird" selected>Inkbird (iBBQ)</option>
+                  <option value="thermopro">ThermoPro (TP25/TP27)</option>
+                  <option value="tempspike">ThermoPro TempSpike (TP96x)</option>
+                  <option value="combustion">Combustion</option>
+                  <option value="govee_grill">Govee grill (H518x)</option>
+                  <option value="bluedot">ThermoWorks BlueDOT</option>
+                </select>
+                <div>
+                  <button type="button" class="btn btn-outline-info btn-sm" onclick="gadgetsAddManual(this)">
+                    <i class="bi bi-plus-lg me-1"></i>Add thermometer
+                  </button>
+                </div>
+              </div>
+              <div class="test-result mt-2" id="gadget-add-result"></div>
+            {% endcall %}
+          {% endcall %}
+
+          {% call panel('From Home Assistant',
+                        'If Home Assistant already sees your Bluetooth thermometers, Pantry Raider can read them from there. Works with Bluetooth proxies too, so no radio is needed on this device.',
+                        pill_text=('On' if s.gadget_ha_enabled else 'Off'),
+                        pill_kind=('good' if s.gadget_ha_enabled else 'neutral'),
+                        pill_id='gadgets-ha-pill') %}
+            {% if not s.streamdeck_ha_token %}
+            <div class="form-text mb-2"><i class="bi bi-house-gear me-1"></i>
+              Connect Home Assistant first, under
+              <a href="#" onclick="openSettingsPane('pane-home-assistant'); return false;">Settings, Home Assistant</a>.
+            </div>
+            {% endif %}
+            {% call srow('Read from Home Assistant', 'Adding an entity below turns this on for you.') %}
+              {{ toggle('gadget_ha_enabled', checked=s.gadget_ha_enabled) }}
+            {% endcall %}
+            {% call srow('Temperature entities', 'Each entity shows as one probe on the Timers page, targets and alerts included.',
+                         'Pick from the temperature sensors Home Assistant knows, or type an entity id like sensor.grill_probe_1.') %}
+              <div class="input-group" style="max-width:420px">
+                <input type="text" class="form-control font-monospace" id="gadget-ha-entity"
+                       list="gadget-ha-entity-list" placeholder="sensor.grill_probe_1">
+                <button type="button" class="btn btn-outline-info" onclick="gadgetsHaAdd(this)">
+                  <i class="bi bi-plus-lg me-1"></i>Add
+                </button>
+              </div>
+              <div class="form-check mt-1">
+                <input type="checkbox" class="form-check-input" id="gadget-ha-hide-empty"
+                       checked onchange="gadgetsHaToggleHideEmpty(this)">
+                <label class="form-check-label small text-secondary" for="gadget-ha-hide-empty">
+                  Only show sensors with a current reading
+                </label>
+              </div>
+              <datalist id="gadget-ha-entity-list"></datalist>
+              <div class="test-result mt-1" id="gadget-ha-add-result"></div>
+              <div class="mt-2" id="gadget-ha-list">
+                {% for entity in s.gadget_ha_entities %}
+                <div class="d-flex align-items-center gap-2 small mb-1">
+                  <i class="bi bi-thermometer-half text-secondary"></i>
+                  <span class="font-monospace">{{ entity }}</span>
+                  <button type="button" class="btn btn-outline-danger btn-sm ms-auto py-0"
+                          onclick="gadgetsHaRemove('{{ entity }}')" title="Stop reading this entity">
+                    <i class="bi bi-trash3"></i>
+                  </button>
+                </div>
+                {% else %}
+                <span class="text-secondary small">No entities added yet.</span>
+                {% endfor %}
+              </div>
+            {% endcall %}
+          {% endcall %}
+
+          <button type="button" class="btn btn-outline-info btn-sm" onclick="savePaneGadgets(this)">
+            <i class="bi bi-check-lg me-1"></i>Save Thermometers
+          </button>
+          <div class="test-result mt-2 mb-3" id="gadgets-save-result"></div>
+        </div>

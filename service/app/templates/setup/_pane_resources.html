@@ -1,0 +1,84 @@
+{# Resources (FoodAssistant-do2u): live hardware readings for this device.
+   The pane renders empty shells; loadResources() (static/js/setup/resources.js)
+   fills them from /setup/resources and refreshes every few seconds while the
+   pane is open. Sections whose metric this environment lacks stay hidden, so
+   a server without a temperature sensor simply shows no temperature card. #}
+
+<style>
+  /* Big, kiosk-readable numbers on a 1024x600 panel. Bars reuse the theme
+     tokens; nothing here scrolls sideways. */
+  .res-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 0.75rem; }
+  .res-card { border: 1px solid var(--bs-border-color); border-radius: 0.75rem;
+              background: var(--bs-tertiary-bg); padding: 1rem 1.1rem; min-width: 0; }
+  .res-title { font-size: 0.75rem; font-weight: 700; text-transform: uppercase;
+               letter-spacing: 0.5px; color: var(--bs-secondary-color);
+               display: flex; align-items: center; gap: 0.4rem; margin-bottom: 0.35rem; }
+  .res-big { font-size: 2rem; font-weight: 700; line-height: 1.1; }
+  .res-sub { font-size: 0.8rem; color: var(--bs-secondary-color); margin-top: 0.2rem; overflow-wrap: anywhere; }
+  .res-bar { height: 10px; border-radius: 999px; background: var(--bs-secondary-bg);
+             overflow: hidden; margin-top: 0.55rem; }
+  .res-bar > div { height: 100%; border-radius: 999px; background: var(--bs-success);
+                   transition: width 0.4s; }
+  .res-bar > .res-warn { background: var(--bs-warning); }
+  .res-bar > .res-bad { background: var(--bs-danger); }
+  .res-cores { display: flex; gap: 4px; align-items: flex-end; height: 34px; margin-top: 0.55rem; }
+  .res-core { flex: 1 1 0; min-width: 5px; background: var(--bs-secondary-bg);
+              border-radius: 3px; position: relative; overflow: hidden; height: 100%; }
+  .res-core > div { position: absolute; left: 0; right: 0; bottom: 0;
+                    background: var(--bs-primary); transition: height 0.4s; }
+  .res-disk-row { margin-top: 0.7rem; }
+  .res-disk-row:first-child { margin-top: 0; }
+  .res-disk-label { display: flex; justify-content: space-between; gap: 0.5rem;
+                    font-size: 0.85rem; flex-wrap: wrap; }
+  .res-power-line { font-size: 0.85rem; margin-top: 0.3rem; display: flex; gap: 0.4rem; align-items: baseline; }
+</style>
+
+<div class="tab-pane fade" id="pane-resources">
+  <p class="pane-intro">Live readings from this device: processor, memory, storage, temperature{% if is_pi %}, and power{% endif %}. Updates every few seconds while this page is open.
+    <span class="text-secondary small ms-2" id="res-updated"></span>
+  </p>
+
+  <div class="res-grid">
+    <div class="res-card d-none" id="res-cpu-card">
+      <div class="res-title"><i class="bi bi-cpu"></i>Processor</div>
+      <div class="res-big" id="res-cpu-big">--</div>
+      <div class="res-bar"><div id="res-cpu-bar" style="width:0%"></div></div>
+      <div class="res-cores d-none" id="res-cores" title="Per-core use"></div>
+      <div class="res-sub" id="res-cpu-sub"></div>
+    </div>
+
+    <div class="res-card d-none" id="res-mem-card">
+      <div class="res-title"><i class="bi bi-memory"></i>Memory</div>
+      <div class="res-big" id="res-mem-big">--</div>
+      <div class="res-bar"><div id="res-mem-bar" style="width:0%"></div></div>
+      <div class="res-sub" id="res-mem-sub"></div>
+    </div>
+
+    <div class="res-card d-none" id="res-temp-card">
+      <div class="res-title"><i class="bi bi-thermometer-half"></i>Temperature</div>
+      <div class="res-big" id="res-temp-big">--</div>
+      <div class="res-sub" id="res-temp-sub"></div>
+    </div>
+
+    <div class="res-card d-none" id="res-uptime-card">
+      <div class="res-title"><i class="bi bi-clock-history"></i>Up for</div>
+      <div class="res-big" style="font-size:1.4rem" id="res-uptime-big">--</div>
+      <div class="res-sub">Since the device last started.</div>
+    </div>
+
+    <div class="res-card d-none" id="res-power-card">
+      <div class="res-title"><i class="bi bi-lightning-charge"></i>Power</div>
+      <div class="res-big" style="font-size:1.4rem" id="res-power-big">--</div>
+      <div class="res-sub" id="res-power-sub"></div>
+    </div>
+  </div>
+
+  <div class="res-card mt-3 d-none" id="res-disk-card">
+    <div class="res-title"><i class="bi bi-device-hdd"></i>Storage</div>
+    <div id="res-disks"></div>
+  </div>
+
+  <div class="text-secondary small mt-3 d-none" id="res-empty">
+    No readings are available on this device right now.
+  </div>
+</div>

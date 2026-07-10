@@ -1,0 +1,175 @@
+# Production compose: runs the prebuilt image from GHCR, no local build needed.
+#
+#   curl -fsSL https://raw.githubusercontent.com/Syracuse3DPrintingOrg/PantryRaider/main/docker-compose.prod.yml -o docker-compose.yml
+#   docker compose up -d
+#   # then open http://YOUR-HOST:9284/setup
+#
+# Add backends with profiles, e.g.:
+#   docker compose --profile with-grocy --profile with-mealie up -d
+#
+# Pin a version by setting FOODASSISTANT_TAG (e.g. v1.0.0); defaults to latest.
+services:
+  service:
+    image: ghcr.io/syracuse3dprintingorg/pantryraider:${FOODASSISTANT_TAG:-latest}
+    container_name: foodassistant-service
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      - TZ=${TZ:-America/New_York}
+      # Lets the Updates page trigger an immediate update via the watchtower
+      # service below. Same token as that service. WATCHTOWER_URL points at it on
+      # the compose network; the app degrades gracefully if watchtower is off.
+      - WATCHTOWER_URL=${WATCHTOWER_URL:-http://watchtower:8080}
+      - WATCHTOWER_HTTP_API_TOKEN=${WATCHTOWER_HTTP_API_TOKEN:-foodassistant-update}
+      # Optional label printing (FoodAssistant-gyri). Empty by default so the app
+      # never tries to reach a print server. To print, start the with-printing
+      # profile below and point this at that CUPS container:
+      #   CUPS_SERVER=cups:631 docker compose --profile with-printing up -d
+      - CUPS_SERVER=${CUPS_SERVER:-}
+    volumes:
+      - ./data:/app/data
+    ports:
+      - "9284:8000"
+    # These enable Forager remote access (a WireGuard hub tunnel run inside this
+    # container) and are otherwise inert: NET_ADMIN plus /dev/net/tun let
+    # wg-quick create the interface, and the src_valid_mark sysctl keeps
+    # wg-quick happy about the fwmark it sets for the split-tunnel route.
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - "/dev/net/tun:/dev/net/tun"
+    sysctls:
+      - net.ipv4.conf.all.src_valid_mark=1
+    restart: unless-stopped
+    # Watchtower only touches containers with this label (see the watchtower
+    # service below), so enabling auto-updates never disturbs Grocy/Mealie/Ollama.
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+    depends_on:
+      grocy:
+        condition: service_started
+        required: false
+
+  grocy:
+    image: lscr.io/linuxserver/grocy:4.6.0   # pinned; see "Upgrading pinned images" in README
+    container_name: foodassistant-grocy
+    profiles: ["with-grocy"]
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=${TZ:-America/New_York}
+    volumes:
+      - ./grocy:/config
+    ports:
+      - "9383:80"
+    restart: unless-stopped
+
+  mealie:
+    image: ghcr.io/mealie-recipes/mealie:v3.19.2   # pinned; see "Upgrading pinned images" in README
+    container_name: foodassistant-mealie
+    profiles: ["with-mealie"]
+    environment:
+      - TZ=${TZ:-America/New_York}
+      - ALLOW_SIGNUP=false
+      - BASE_URL=http://localhost:9285
+    volumes:
+      - ./mealie:/app/data
+    ports:
+      - "9285:9000"
+    restart: unless-stopped
+
+  ollama:
+    image: ollama/ollama:0.30.8   # pinned; see "Upgrading pinned images" in README
+    container_name: foodassistant-ollama
+    profiles: ["with-ollama"]
+    volumes:
+      - ./ollama:/root/.ollama
+    ports:
+      - "11434:11434"
+    restart: unless-stopped
+
+  # Optional containerized CUPS for label printing (FoodAssistant-gyri), only
+  # started with:
+  #   CUPS_SERVER=cups:631 docker compose --profile with-printing up -d
+  # Off by default. Network printers (IPP / driverless) and Zebra ZPL label
+  # printers are added from the app (Settings, Printing, Add by address) or the
+  # CUPS admin at http://THIS-HOST:6631. USB and Bluetooth printers need the
+  # printer's device passed into this container (uncomment devices:/privileged).
+  # Config and added queues persist in the cups-config named volume.
+  cups:
+    image: olbat/cupsd@sha256:28c47cfe20d59c94e07c37c3759d469624ba209daa0e5821ed3b6b1d6f665bf5   # CUPS + cups-filters (rastertolabel); pinned. Our config is applied at start below.
+    container_name: foodassistant-cups
+    profiles: ["with-printing"]
+    environment:
+      - TZ=${TZ:-America/New_York}
+    # Apply the Pantry Raider CUPS config + Zebra PPD at start so the app can
+    # discover, add, and print to printers over the compose network with no
+    # manual setup (FoodAssistant-32dd): ServerAlias so it is reachable by the
+    # "cups" service name, LAN admin without a password so the in-app Add flow
+    # can run lpadmin, and the Zebra ZPL PPD. Fetched from the repo; a failed
+    # fetch keeps the last good config (persisted in the cups-config volume) and
+    # cupsd still starts.
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        u=https://raw.githubusercontent.com/Syracuse3DPrintingOrg/PantryRaider/main/docker/cups
+        if wget -qO /tmp/cupsd.new "$$u/cupsd.conf" && [ -s /tmp/cupsd.new ]; then
+          cp /tmp/cupsd.new /etc/cups/cupsd.conf; echo "Applied Pantry Raider cupsd.conf"
+        else
+          echo "WARN: could not fetch cupsd.conf; keeping the existing one"
+        fi
+        mkdir -p /usr/share/ppd/foodassistant
+        wget -qO /usr/share/ppd/foodassistant/zebra-zpl.ppd "$$u/zebra-zpl.ppd" || echo "WARN: could not fetch the Zebra PPD"
+        exec /usr/sbin/cupsd -f
+    volumes:
+      # A NAMED volume, not a bind mount: Docker seeds a fresh named volume from
+      # the image's /etc/cups, so cupsd has its config and added queues persist.
+      # A bind mount to an empty host dir would shadow the config and crash cupsd.
+      - cups-config:/etc/cups
+    ports:
+      # CUPS admin UI, so you can add and manage printers from a browser too.
+      - "6631:631"
+    # USB / Bluetooth printer passthrough (best-effort; uncomment as needed):
+    # devices:
+    #   - "/dev/bus/usb:/dev/bus/usb"
+    # privileged: true
+    restart: unless-stopped
+
+  # Automatic updates for the server (non-Pi) install, ON BY DEFAULT. A plain
+  # server has no host bridge, so it cannot run the in-app one-button update the
+  # Pi appliances use. Watchtower fills that gap: it watches the Pantry Raider
+  # image on GHCR and, when a new version is published, pulls it and recreates
+  # the service container (which brings in updated Python dependencies, since
+  # they are baked into the image). New deps need no separate step.
+  #
+  # WATCHTOWER_LABEL_ENABLE means it ONLY touches containers carrying the
+  # com.centurylinklabs.watchtower.enable=true label (just the service above),
+  # so Grocy, Mealie, and Ollama stay on their pinned versions and are never
+  # auto-updated. Security note: Watchtower needs the Docker socket, which is
+  # host-root-equivalent access. To turn auto-updates OFF, stop this one service
+  # (docker compose stop watchtower) or pin FOODASSISTANT_TAG to a fixed version.
+  watchtower:
+    image: containrrr/watchtower:1.7.1   # pinned; see "Upgrading pinned images" in README
+    container_name: foodassistant-watchtower
+    environment:
+      - TZ=${TZ:-America/New_York}
+      - WATCHTOWER_LABEL_ENABLE=true
+      - WATCHTOWER_CLEANUP=true
+      - WATCHTOWER_POLL_INTERVAL=${WATCHTOWER_POLL_INTERVAL:-86400}
+      # Manual "Update now" support: the app posts to the HTTP API to apply an
+      # update immediately instead of waiting for the next poll. PERIODIC_POLLS
+      # keeps the scheduled daily check running alongside the API (enabling the
+      # API alone would otherwise disable it). The token is shared with the app
+      # service below so it can authenticate the trigger.
+      - WATCHTOWER_HTTP_API_UPDATE=true
+      - WATCHTOWER_HTTP_API_PERIODIC_POLLS=true
+      - WATCHTOWER_HTTP_API_TOKEN=${WATCHTOWER_HTTP_API_TOKEN:-foodassistant-update}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    restart: unless-stopped
+
+volumes:
+  # Holds the CUPS server's config and added printer queues so they survive a
+  # container recreate (label printing, with-printing profile).
+  cups-config:

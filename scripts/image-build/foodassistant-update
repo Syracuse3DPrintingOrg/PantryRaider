@@ -1,0 +1,906 @@
+#!/usr/bin/env bash
+# FoodAssistant over-the-air update helper (Pi Remote / venv deployments).
+# ======================================================================
+# Pulls the latest source into the on-device git checkout, then (re)deploys the
+# running copies from it: the web app under APP_DIR, the Stream Deck controller
+# package under SD_DST, and the venv dependencies when requirements.txt changed.
+# Finally it restarts whichever services it actually refreshed.
+#
+# It is invoked by the host bridge (POST /update), which runs as root, so it
+# can write under /opt and restart systemd units. It prints a short human log
+# to stdout and, as its LAST line, a single JSON object the bridge parses and
+# relays to the web UI. Every exit path emits that JSON line.
+#
+# Design notes:
+#   - The deploy is idempotent and re-runnable. It does NOT gate on whether the
+#     pull moved HEAD, so a manual `git pull` done beforehand no longer defeats
+#     it: it always re-syncs the deployed copies from the current checkout.
+#   - The pull is best effort. `git pull --ff-only` never leaves a half-merged
+#     tree, so a failed pull (offline, no upstream, or already pulled by hand)
+#     is logged and we go on to deploy whatever HEAD is checked out.
+#   - Dependency installs are gated on a content hash of requirements.txt vs the
+#     deployed copy, not on the pull, so a manual pull still triggers pip when
+#     the requirements actually changed, and an unchanged tree skips the slow
+#     Pi pip step.
+#   - Both the web app AND the Stream Deck package are redeployed. The deck copy
+#     was previously never refreshed, so deck code changes never reached devices.
+#
+# Layout on a Pi Remote device (see firstboot.sh deploy_remote_service and
+# install_streamdeck):
+#   REPO_DIR   - git checkout that is the update source (pulled here)
+#   APP_DIR    - deployed app copy the web service runs from
+#   VENV_DIR   - Python venv holding the service + Stream Deck dependencies
+#   SERVICE    - the web UI systemd unit to restart after an app refresh
+#   SD_DST     - deployed Stream Deck package the deck service runs from
+#   SD_SERVICE - the Stream Deck systemd unit to restart after a deck refresh
+set -uo pipefail
+
+# Candidate locations for the git checkout, in priority order. The first that
+# is a git working tree wins. These mirror firstboot.sh's REPO_DIR default and
+# the baked-image / curl-installer clone locations.
+REPO_CANDIDATES="${REPO_DIR:-} /opt/foodassistant-src /home/foodassistant/FoodAssistant"
+APP_DIR="${APP_DIR:-/opt/foodassistant/service}"
+VENV_DIR="${VENV_DIR:-/opt/foodassistant/venv}"
+SERVICE="${SERVICE:-foodassistant-remote.service}"
+SD_DST="${SD_DST:-/opt/foodassistant/foodassistant_streamdeck}"
+SD_SERVICE="${SD_SERVICE:-foodassistant-streamdeck.service}"
+GD_DST="${GD_DST:-/opt/foodassistant/foodassistant_gadgets}"
+GD_SERVICE="${GD_SERVICE:-foodassistant-gadgets.service}"
+# The kiosk browser caches the loaded page, so after redeploying the app we
+# restart it (when present) to reload fresh CSS/JS. Absent on headless installs.
+KIOSK_SERVICE="${KIOSK_SERVICE:-foodassistant-kiosk.service}"
+# Where the helper scripts are installed. Overridable so the update logic can be
+# exercised in tests without root.
+BIN_DIR="${BIN_DIR:-/usr/local/bin}"
+# The Wi-Fi fallback AP watchdog is the one helper that runs from sbin: its
+# systemd unit was written at firstboot pointing at /usr/local/sbin, so the
+# copy there is the one that actually executes.
+SBIN_DIR="${SBIN_DIR:-/usr/local/sbin}"
+# Update channel (FoodAssistant-wkwx): "main" follows the branch tip (the
+# historical behavior and the default), "stable" checks out the newest release
+# tag. The app persists the choice to CHANNEL_FILE through the host bridge
+# (POST /update/channel) on settings save and again before each update, which
+# is the one seam both Pi shapes share (Pi Hosted and Pi Remote both run the
+# bridge and this helper); UPDATE_CHANNEL overrides it for tests and manual runs.
+CHANNEL_FILE="${CHANNEL_FILE:-/etc/foodassistant/update-channel}"
+# On a Pi Hosted box the stable channel also pins the app image: the published
+# image carries a tag per release (see .github/workflows/publish-image.yml), so
+# FOODASSISTANT_TAG in the stack .env is set to the release version. The value
+# it replaced is kept in PIN_STATE_FILE so switching back to main restores it.
+PIN_STATE_FILE="${PIN_STATE_FILE:-/etc/foodassistant/update-tag-restore}"
+
+# Plain stdout log lines (the bridge tails stdout for a human summary too).
+log() { printf '%s\n' "$*"; }
+
+# Flush pending filesystem writes to the SD card. Called at the two points where
+# a power cut would otherwise be most damaging: after the new image is fully
+# local (so the image store is durable before we tear the old container down)
+# and after the container swap (so the new state is on the card, not just in the
+# page cache). `sync` is a no-op-cheap barrier; failures are non-fatal.
+_sync() { sync 2>/dev/null || true; }
+
+# Write CONTENT to PATH atomically (temp file in the same dir, flush, rename),
+# so a power cut never leaves a half-written config file. Falls back to a direct
+# write if the temp file cannot be created.
+_atomic_write() {
+  local path="$1" content="$2" dir tmp
+  dir="$(dirname "$path")"
+  mkdir -p "$dir" 2>/dev/null || true
+  tmp="$(mktemp "$dir/.$(basename "$path").XXXXXX" 2>/dev/null)" || {
+    printf '%s' "$content" > "$path"; return $?
+  }
+  printf '%s' "$content" > "$tmp"
+  sync "$tmp" 2>/dev/null || sync
+  mv -f "$tmp" "$path"
+  _sync
+}
+
+# Emit the final JSON result line and exit. A python one-liner does the JSON
+# encoding so log text with quotes/newlines is escaped correctly (no
+# hand-rolled JSON). The process exit code mirrors ok (0 on success). The
+# service_synced / streamdeck_synced / deps_installed fields let the UI show
+# exactly what changed; older callers that only read ok/error/before/after/
+# restarted keep working since those keys are unchanged.
+_result() {
+  local ok="$1" error="$2" before="$3" after="$4" restarted="$5" \
+        service_synced="${6:-0}" streamdeck_synced="${7:-0}" deps="${8:-0}" \
+        recovered="${9:-0}"
+  OK="$ok" ERR="$error" BEFORE="$before" AFTER="$after" RESTARTED="$restarted" \
+  SVC="$service_synced" SD="$streamdeck_synced" DEPS="$deps" REC="$recovered" \
+  python3 -c '
+import json, os
+print(json.dumps({
+    "ok": os.environ["OK"] == "1",
+    "error": os.environ.get("ERR", ""),
+    "before": os.environ.get("BEFORE", ""),
+    "after": os.environ.get("AFTER", ""),
+    "restarted": os.environ.get("RESTARTED", "") == "1",
+    "service_synced": os.environ.get("SVC", "") == "1",
+    "streamdeck_synced": os.environ.get("SD", "") == "1",
+    "deps_installed": os.environ.get("DEPS", "") == "1",
+    "remote_recovered": os.environ.get("REC", "") == "1",
+}))'
+  if [ "$ok" = "1" ]; then exit 0; fi
+  exit 1
+}
+
+# Restart a unit only if it is actually installed. Returns 0 when it restarted.
+_restart_unit() {
+  local unit="$1"
+  if ! systemctl list-unit-files "$unit" >/dev/null 2>&1; then
+    log "Unit $unit is not installed; skipping restart."
+    return 1
+  fi
+  if systemctl restart "$unit"; then
+    log "Restarted $unit"
+    return 0
+  fi
+  log "WARN: failed to restart $unit"
+  return 1
+}
+
+# Find the git checkout.
+REPO=""
+for cand in $REPO_CANDIDATES; do
+  [ -n "$cand" ] || continue
+  if [ -d "$cand/.git" ]; then REPO="$cand"; break; fi
+done
+if [ -z "$REPO" ]; then
+  log "No git checkout found (looked in: $REPO_CANDIDATES)."
+  _result 0 "No git checkout found on this device; cannot update." "" "" 0
+fi
+log "Using git checkout at $REPO"
+
+before="$(git -C "$REPO" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+log "Current commit: $before"
+
+# Resolve the update channel: the env var wins, then the persisted file, and
+# anything unrecognized (including an absent file) means "main" so devices that
+# predate the channel keep their historical behavior.
+channel="${UPDATE_CHANNEL:-}"
+if [ -z "$channel" ] && [ -f "$CHANNEL_FILE" ]; then
+  channel="$(head -n1 "$CHANNEL_FILE" 2>/dev/null | tr -d '[:space:]')"
+fi
+case "$channel" in stable) ;; *) channel="main" ;; esac
+log "Update channel: $channel"
+
+recovered=0
+release_tag=""
+if [ "$channel" = "stable" ]; then
+  # Stable channel: the update target is the newest release tag, not the branch
+  # tip. Tags never move, so there is no ff-only/force-push recovery to worry
+  # about here: a new release is simply a NEW tag, and a re-fetch finds it.
+  # --force covers the pathological re-tag case by letting the fetch update a
+  # tag that was deleted and recreated upstream.
+  log "Fetching release tags..."
+  if fetch_out="$(git -C "$REPO" fetch --tags --force origin 2>&1)"; then
+    log "$fetch_out"
+  else
+    log "Could not fetch tags (offline or no upstream); continuing with the current checkout:"
+    log "$fetch_out"
+  fi
+  release_tag="$(git -C "$REPO" tag -l 'v*' | grep -E '^v[0-9]+(\.[0-9]+)*$' | sort -V | tail -n1)"
+  if [ -z "$release_tag" ]; then
+    log "No release tags found; keeping the current checkout until a release is published."
+  elif [ "$(git -C "$REPO" rev-parse HEAD 2>/dev/null)" = \
+         "$(git -C "$REPO" rev-parse "refs/tags/$release_tag^{commit}" 2>/dev/null)" ]; then
+    log "Already on release $release_tag."
+  elif co_out="$(git -C "$REPO" checkout --force --detach "refs/tags/$release_tag" 2>&1)"; then
+    log "Checked out release $release_tag."
+  else
+    log "WARN: could not check out $release_tag; continuing with the current checkout:"
+    log "$co_out"
+  fi
+else
+  # Main channel. A device coming back from the stable channel sits on a
+  # detached tag checkout, which a plain pull cannot move; reattach to the
+  # branch first so the fast-forward below works.
+  if [ "$(git -C "$REPO" rev-parse --abbrev-ref HEAD 2>/dev/null || echo HEAD)" = "HEAD" ]; then
+    if git -C "$REPO" fetch origin main >/dev/null 2>&1 \
+        && reattach_out="$(git -C "$REPO" checkout --force -B main origin/main 2>&1)"; then
+      log "Reattached the checkout to main."
+      log "$reattach_out"
+    else
+      log "Detached HEAD and could not reattach to main; continuing with the current checkout."
+    fi
+  fi
+  # Best effort fast-forward. A failed pull is not fatal: --ff-only is atomic, so
+  # the worst case is we redeploy the commit that is already checked out, which is
+  # exactly what we want after a manual pull or when offline.
+  log "Fetching and fast-forwarding..."
+  if pull_out="$(git -C "$REPO" pull --ff-only 2>&1)"; then
+    log "$pull_out"
+  else
+    log "git pull did not fast-forward:"
+    log "$pull_out"
+    # A rewritten remote (force-push), a diverged local branch, or a dirty tree
+    # would otherwise strand the device on this checkout forever: every future
+    # update would fail the ff-only pull the same way. The checkout is purely an
+    # update SOURCE (the deployed app, deck package, and compose file all live
+    # outside it), so when the remote is reachable it is safe to make the
+    # checkout match origin exactly and carry on.
+    branch="$(git -C "$REPO" rev-parse --abbrev-ref HEAD 2>/dev/null || echo HEAD)"
+    if [ "$branch" = "HEAD" ]; then
+      log "Detached HEAD; continuing with the current checkout."
+    elif fetch_out="$(git -C "$REPO" fetch origin "$branch" 2>&1)"; then
+      if reset_out="$(git -C "$REPO" reset --hard "origin/$branch" 2>&1)"; then
+        log "Recovered: reset the checkout to origin/$branch."
+        log "$reset_out"
+        recovered=1
+      else
+        log "WARN: could not reset to origin/$branch (continuing with the current checkout):"
+        log "$reset_out"
+      fi
+    else
+      log "Could not fetch origin/$branch (offline or no upstream); continuing with the current checkout:"
+      log "$fetch_out"
+    fi
+  fi
+fi
+
+after="$(git -C "$REPO" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+log "Checkout now at: $after"
+
+restarted=0
+svc_synced=0
+sd_synced=0
+gd_synced=0
+deps=0
+
+# Sync the host-side Stream Deck package from the checkout to SD_DST. The deck
+# runs as its own host systemd unit, NOT inside the app container, so the
+# pi_hosted Docker update path never touches it. Both the Docker path and the
+# venv path must call this or deck-only code changes never reach a hosted
+# device (FoodAssistant-aus1: the Docker branch returned before the deck sync
+# and left the deck stale). Sets sd_synced=1 on success; the caller restarts
+# SD_SERVICE.
+sync_streamdeck() {
+  local sd_src="$REPO/streamdeck/foodassistant_streamdeck"
+  if [ ! -d "$sd_src" ]; then
+    log "No streamdeck package in the checkout; skipping deck sync."
+    return 0
+  fi
+  local sd_parent; sd_parent="$(dirname "$SD_DST")"
+  if [ ! -d "$sd_parent" ]; then
+    log "Stream Deck parent dir $sd_parent does not exist; skipping deck sync."
+    return 0
+  fi
+  log "Syncing Stream Deck package into $SD_DST"
+  # Replace any prior copy outright. Copying into an existing target dir nests
+  # the package one level too deep (SD_DST/foodassistant_streamdeck), which
+  # leaves __main__.py unreachable and breaks `python -m`.
+  rm -rf "$SD_DST"
+  if cp -a "$sd_src" "$SD_DST"; then
+    # Manual installs have landed with mode 700 and broken the service; make
+    # the tree world-readable, then hand it to whoever runs the deck service.
+    chmod -R a+rX "$SD_DST" 2>/dev/null || true
+    local sd_owner; sd_owner="$(stat -c %U "$VENV_DIR" 2>/dev/null || true)"
+    if [ -n "$sd_owner" ]; then
+      chown -R "$sd_owner" "$SD_DST" 2>/dev/null || true
+    fi
+    sd_synced=1
+  else
+    log "WARN: could not sync $SD_DST"
+  fi
+}
+
+# Sync the host-side Bluetooth thermometer reader the same way. Like the deck
+# it is a host systemd unit the Docker update path never touches. The reader
+# is OPT-IN (installed by foodassistant-gadgets-setup); an install that never
+# opted in has no GD_DST, and this is then a silent no-op, so a normal update
+# never grows the feature onto a device uninvited.
+sync_gadgets() {
+  local gd_src="$REPO/gadgets/foodassistant_gadgets"
+  if [ ! -d "$gd_src" ] || [ ! -d "$GD_DST" ]; then
+    return 0
+  fi
+  log "Syncing thermometer reader package into $GD_DST"
+  # Replace outright: copying into an existing dir nests the package one
+  # level too deep and breaks `python -m` (same trap as the deck).
+  rm -rf "$GD_DST"
+  if cp -a "$gd_src" "$GD_DST"; then
+    chmod -R a+rX "$GD_DST" 2>/dev/null || true
+    local gd_owner; gd_owner="$(stat -c %U "$VENV_DIR" 2>/dev/null || true)"
+    if [ -n "$gd_owner" ]; then
+      chown -R "$gd_owner" "$GD_DST" 2>/dev/null || true
+    fi
+    gd_synced=1
+  else
+    log "WARN: could not sync $GD_DST"
+  fi
+}
+
+# Keep ALL installed helper scripts current so future runs use the latest
+# versions. A plain git pull does not refresh the bin dir, and overwriting the
+# running script in place is safe (the open inode keeps executing). Done before
+# the deploy branches so both the Docker (Pi Hosted) and venv (Pi Remote) paths
+# pick up newer helpers. Every extensionless foodassistant-* file in
+# scripts/image-build is a bin helper (display-power, set-rotation,
+# apply-rotation, accel-rotation, restore, this script); syncing the whole set
+# also INSTALLS helpers that did not exist when the device was imaged, which
+# previously never reached deployed devices at all (FoodAssistant-2ty6). The
+# host bridge is excluded here: it is a long-running daemon with its own
+# refresh-and-scheduled-restart block below.
+_self_updated=0
+for _hsrc in "$REPO/scripts/image-build/foodassistant-"*; do
+  [ -f "$_hsrc" ] || continue
+  _h="$(basename "$_hsrc")"
+  case "$_h" in
+    foodassistant-host-bridge) continue ;;
+    *.*) continue ;;  # unit files and provisioning scripts, not bin helpers
+  esac
+  _h_existed=0
+  [ -f "$BIN_DIR/$_h" ] && _h_existed=1
+  if ! cmp -s "$_hsrc" "$BIN_DIR/$_h"; then
+    if install -m 755 "$_hsrc" "$BIN_DIR/$_h" 2>/dev/null; then
+      log "Refreshed $BIN_DIR/$_h"
+      # Only a REPLACED updater warrants a re-exec; a first-time install means
+      # this very run is already the newest version.
+      if [ "$_h" = "foodassistant-update" ] && [ "$_h_existed" = "1" ]; then
+        _self_updated=1
+      fi
+    else
+      log "WARN: could not refresh $BIN_DIR/$_h"
+    fi
+  fi
+done
+
+# When THIS script just replaced itself, the rest of this run would still
+# execute the old version (the shell keeps the old inode), so any step added
+# in the new version would only apply on the NEXT update press. That
+# one-press-behind gap has bitten repeatedly (the image-name migration, the
+# helper sync itself, the cursor retrofit). Re-exec the fresh copy once; the
+# guard env stops a loop, and the re-run's pull is a cheap no-op since the
+# checkout is already current.
+if [ "$_self_updated" = "1" ] && [ -z "${FA_UPDATE_REEXEC:-}" ] \
+    && [ -x "$BIN_DIR/foodassistant-update" ]; then
+  log "Updater refreshed itself; re-running the new version so every new step applies now."
+  FA_UPDATE_REEXEC=1 exec "$BIN_DIR/foodassistant-update"
+fi
+
+# Keep the host bridge current too. It is a long-running root daemon (on
+# 127.0.0.1:9299), NOT a re-exec'd helper, so a new file only takes effect after
+# a restart, and new app code that calls a new bridge route fails with a 404
+# until then. We must NOT restart it inline: THIS script is a child of the
+# bridge process (the bridge ran us via subprocess.run for POST /update), so an
+# inline `systemctl restart` would kill us mid-update. Install the new file, then
+# schedule a DETACHED restart a few seconds out so our JSON result reaches the UI
+# first and the restart runs outside our (soon-to-be-killed) cgroup. Done before
+# the Pi Hosted Docker branch below so both hosted and remote devices get it.
+# Devices imaged before the kiosk unit gained its rotation ExecStartPost never
+# re-apply the saved display rotation on boot: the unit file is written once at
+# firstboot and no update path rewrites it, so the 2026-06-24 fix never reached
+# already-deployed devices (FoodAssistant-prqg). The unit is generated with
+# device-specific values, so it cannot be reinstalled from the repo like the
+# bridge unit; instead the one missing line is patched in place.
+KIOSK_UNIT="${KIOSK_UNIT:-/etc/systemd/system/foodassistant-kiosk.service}"
+if [ -f "$KIOSK_UNIT" ] && ! grep -q "foodassistant-apply-rotation" "$KIOSK_UNIT"; then
+  if sed -i '/^Restart=/i ExecStartPost=-/usr/local/bin/foodassistant-apply-rotation' "$KIOSK_UNIT" 2>/dev/null; then
+    systemctl daemon-reload 2>/dev/null || true
+    log "Patched $KIOSK_UNIT: saved rotation now re-applies on every kiosk start."
+  else
+    log "WARN: could not patch $KIOSK_UNIT for rotation re-apply."
+  fi
+fi
+
+# Devices imaged before the kiosk unit gained its boot hardening (seatd
+# ordering, no start-limit give-up, a bounded wait for the app before the
+# browser launches) still race seatd at boot and freeze on a Chromium
+# connection-refused page when the kiosk beats the app up
+# (FoodAssistant-9ext / FoodAssistant-kyl2). The unit is device-generated, so
+# ship the additions as a drop-in rather than rewriting it. Skipped when the
+# unit itself already carries the app wait (a fresh provision).
+KIOSK_DROPIN_DIR="${KIOSK_DROPIN_DIR:-${KIOSK_UNIT}.d}"
+_kdropin="$KIOSK_DROPIN_DIR/10-foodassistant-boot.conf"
+if [ -f "$KIOSK_UNIT" ] && [ ! -f "$_kdropin" ] \
+    && ! grep -q "command -v curl" "$KIOSK_UNIT"; then
+  # The kiosk URL is the last http(s) argument of the unit's ExecStart.
+  _kurl="$(grep -oE 'https?://[^ "\\]+' "$KIOSK_UNIT" | tail -n1)"
+  if mkdir -p "$KIOSK_DROPIN_DIR" 2>/dev/null; then
+    {
+      echo "[Unit]"
+      echo "Wants=seatd.service"
+      echo "After=seatd.service"
+      echo "StartLimitIntervalSec=0"
+      echo ""
+      echo "[Service]"
+      echo "TimeoutStartSec=240"
+      if [ -n "$_kurl" ]; then
+        echo "ExecStartPre=-/bin/sh -c 'command -v curl >/dev/null 2>&1 || exit 0; for i in \$\$(seq 1 40); do curl -sf -o /dev/null --max-time 2 \"$_kurl\" && exit 0; sleep 2; done; exit 0'"
+      fi
+    } > "$_kdropin" 2>/dev/null \
+      && systemctl daemon-reload 2>/dev/null || true
+    if [ -f "$_kdropin" ]; then
+      log "Installed kiosk boot drop-in: seatd ordering, no start-limit give-up, app wait."
+    else
+      log "WARN: could not install the kiosk boot drop-in."
+    fi
+  else
+    log "WARN: could not create $KIOSK_DROPIN_DIR for the kiosk boot drop-in."
+  fi
+fi
+
+# Hide the kiosk cursor on deployed devices. Fresh provisions get a transparent
+# XCursor theme plus Environment lines in the unit (firstboot), but devices
+# imaged earlier never received them, and the old auto-detection kept the
+# cursor whenever a pointer was attached at provision time, which misfired on
+# USB barcode scanners (they enumerate a composite HID mouse). Deliver the
+# theme and a drop-in here, honouring an explicit HIDE_CURSOR=false in
+# config.env. Paths are env-overridable for tests.
+CURSOR_THEME_DIR="${CURSOR_THEME_DIR:-/usr/share/icons/foodassistant-hidden}"
+_hide_cursor_pref=""
+for _cfg in /etc/foodassistant/config.env /boot/firmware/foodassistant.config.env /boot/foodassistant.config.env; do
+  [ -f "$_cfg" ] || continue
+  _v="$(grep -E '^ *(export +)?HIDE_CURSOR=' "$_cfg" 2>/dev/null | tail -n1 | sed 's/.*=//; s/["'"'"']//g')"
+  [ -n "$_v" ] && _hide_cursor_pref="$_v"
+done
+_cdropin="$KIOSK_DROPIN_DIR/20-foodassistant-cursor.conf"
+case "$_hide_cursor_pref" in
+  false|FALSE|False|0|no|NO|No) : ;;  # explicit opt-out: leave the cursor alone
+  *)
+    if [ -f "$KIOSK_UNIT" ] && [ ! -f "$_cdropin" ] \
+        && ! grep -q "XCURSOR_THEME" "$KIOSK_UNIT"; then
+      mkdir -p "$CURSOR_THEME_DIR/cursors" 2>/dev/null || true
+      if [ -d "$CURSOR_THEME_DIR/cursors" ]; then
+        # A minimal valid single-image Xcursor whose only pixel is fully
+        # transparent (same bytes firstboot writes; format: Xcursor(3)).
+        printf '\130\143\165\162\020\000\000\000\000\000\001\000\001\000\000\000\002\000\375\377\001\000\000\000\034\000\000\000\044\000\000\000\002\000\375\377\001\000\000\000\001\000\000\000\001\000\000\000\001\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000' \
+          > "$CURSOR_THEME_DIR/cursors/left_ptr" 2>/dev/null || true
+        for _cn in default left_ptr_watch watch text xterm hand1 hand2 pointer \
+                   top_left_arrow arrow crosshair fleur grabbing; do
+          ln -sf left_ptr "$CURSOR_THEME_DIR/cursors/$_cn" 2>/dev/null || true
+        done
+        printf '[Icon Theme]\nName=FoodAssistant Hidden Cursor\nComment=Fully transparent cursor for touch/Stream Deck kiosks\n' \
+          > "$CURSOR_THEME_DIR/index.theme" 2>/dev/null || true
+      fi
+      if [ -s "$CURSOR_THEME_DIR/cursors/left_ptr" ] && mkdir -p "$KIOSK_DROPIN_DIR" 2>/dev/null; then
+        {
+          echo "[Service]"
+          echo "Environment=XCURSOR_PATH=$(dirname "$CURSOR_THEME_DIR")"
+          echo "Environment=XCURSOR_THEME=$(basename "$CURSOR_THEME_DIR")"
+          echo "Environment=XCURSOR_SIZE=24"
+        } > "$_cdropin" 2>/dev/null \
+          && systemctl daemon-reload 2>/dev/null || true
+        if [ -f "$_cdropin" ]; then
+          log "Installed the hidden-cursor theme and kiosk drop-in (HIDE_CURSOR=false in config.env restores the pointer)."
+        else
+          log "WARN: could not install the kiosk cursor drop-in."
+        fi
+      else
+        log "WARN: could not write the hidden cursor theme."
+      fi
+    fi
+    ;;
+esac
+
+# The vc4 HDMI CEC input devices advertise relative axes, which hands the
+# Wayland seat a pointer and makes cage draw a cursor on mouse-less kiosks; no
+# cursor theme or client CSS can remove a compositor seat cursor. Ignore the
+# CEC devices for libinput on deployed devices (fresh provisions get the same
+# rule from firstboot). A real mouse is unaffected. The kiosk restart later in
+# this run makes it take effect.
+CEC_RULES_FILE="${CEC_RULES_FILE:-/etc/udev/rules.d/71-foodassistant-cec-pointer.rules}"
+if [ ! -f "$CEC_RULES_FILE" ] && mkdir -p "$(dirname "$CEC_RULES_FILE")" 2>/dev/null; then
+  cat > "$CEC_RULES_FILE" 2>/dev/null <<'RULES'
+# Pantry Raider kiosk: the vc4 HDMI CEC input devices expose relative axes,
+# which makes the Wayland seat grow a pointer and the compositor draw a cursor
+# even with no mouse attached. The kiosk does not use CEC input; ignore it.
+SUBSYSTEM=="input", KERNEL=="event*", ATTRS{name}=="vc4-hdmi*", ENV{LIBINPUT_IGNORE_DEVICE}="1"
+RULES
+  if [ -f "$CEC_RULES_FILE" ]; then
+    udevadm control --reload-rules 2>/dev/null || true
+    udevadm trigger --subsystem-match=input 2>/dev/null || true
+    log "Installed the CEC pointer ignore rule; the compositor cursor goes away with the kiosk restart."
+  else
+    log "WARN: could not write $CEC_RULES_FILE"
+  fi
+fi
+
+# Quiet the boot console on deployed kiosk devices. Fresh provisions get the
+# kernel cmdline additions from firstboot's quiet_boot step, but devices imaged
+# earlier still scroll kernel and systemd text on the attached display before
+# the kiosk appears (FoodAssistant-go5e). Append any missing params to the
+# single-line cmdline file; params already present, or a key an operator set to
+# another value (say loglevel=7), are left alone, so re-runs never duplicate
+# anything. console=tty1 stays untouched (the kiosk unit owns tty1) and tty2+
+# gettys remain available for debugging. Gated on the kiosk unit so headless
+# boxes keep a verbose console. Paths are env-overridable for tests.
+CMDLINE_CANDIDATES="${CMDLINE_CANDIDATES:-/boot/firmware/cmdline.txt /boot/cmdline.txt}"
+_quiet_params="quiet loglevel=3 vt.global_cursor_default=0 logo.nologo consoleblank=0 rd.systemd.show_status=false systemd.show_status=false"
+if [ -f "$KIOSK_UNIT" ]; then
+  for _cmdline in $CMDLINE_CANDIDATES; do
+    [ -f "$_cmdline" ] || continue
+    _cline="$(tr -d '\n' < "$_cmdline")"
+    _missing=""
+    for _p in $_quiet_params; do
+      _k="${_p%%=*}"
+      if [ "$_p" = "$_k" ]; then
+        case " $_cline " in *" $_p "*) continue ;; esac
+      else
+        case " $_cline " in *" $_k="*) continue ;; esac
+      fi
+      _missing="$_missing $_p"
+    done
+    _missing="${_missing# }"
+    if [ -n "$_missing" ]; then
+      if printf '%s\n' "$_cline $_missing" > "$_cmdline" 2>/dev/null; then
+        log "Quieted the boot console in $_cmdline (added: $_missing); takes effect after the next reboot."
+      else
+        log "WARN: could not update $_cmdline to quiet the boot console."
+      fi
+    fi
+    break
+  done
+fi
+
+# Kiosk devices imaged before firstboot installed a colour emoji font render
+# every emoji in the UI as an empty box (Chromium under cage has no desktop
+# font stack to fall back on; FoodAssistant-438t). Fresh provisions get
+# fonts-noto-color-emoji at firstboot; retrofit it here. Gated on the kiosk
+# unit (headless boxes skip it) and the package being absent, best-effort and
+# time-bounded so an offline device never stalls or fails the update. The
+# kiosk restart later in this run makes the font take effect.
+if [ -f "$KIOSK_UNIT" ] && command -v dpkg-query >/dev/null 2>&1 \
+    && ! dpkg-query -W -f='${Status}' fonts-noto-color-emoji 2>/dev/null \
+       | grep -q "install ok installed"; then
+  if DEBIAN_FRONTEND=noninteractive timeout 120 apt-get install -y \
+      --no-install-recommends fonts-noto-color-emoji >/dev/null 2>&1; then
+    log "Installed fonts-noto-color-emoji; emoji show after the kiosk restarts."
+  elif DEBIAN_FRONTEND=noninteractive timeout 120 apt-get update >/dev/null 2>&1 \
+      && DEBIAN_FRONTEND=noninteractive timeout 120 apt-get install -y \
+         --no-install-recommends fonts-noto-color-emoji >/dev/null 2>&1; then
+    log "Installed fonts-noto-color-emoji (after an apt update); emoji show after the kiosk restarts."
+  else
+    log "WARN: could not install fonts-noto-color-emoji (offline?); emoji stay as boxes until a later update."
+  fi
+fi
+
+# WireGuard tools power Forager remote access (the bridge runs wg/wg-quick on
+# the host). Fresh provisions install them at firstboot; retrofit existing
+# devices here so turning on remote access does not fail with "could not set
+# up remote access". Best-effort and time-bounded, like the font retrofit.
+if command -v dpkg-query >/dev/null 2>&1 \
+    && ! dpkg-query -W -f='${Status}' wireguard-tools 2>/dev/null \
+       | grep -q "install ok installed"; then
+  if DEBIAN_FRONTEND=noninteractive timeout 120 apt-get install -y \
+      --no-install-recommends wireguard-tools >/dev/null 2>&1; then
+    log "Installed wireguard-tools; Forager remote access can now be turned on."
+  elif DEBIAN_FRONTEND=noninteractive timeout 120 apt-get update >/dev/null 2>&1 \
+      && DEBIAN_FRONTEND=noninteractive timeout 120 apt-get install -y \
+         --no-install-recommends wireguard-tools >/dev/null 2>&1; then
+    log "Installed wireguard-tools (after an apt update); Forager remote access can now be turned on."
+  else
+    log "WARN: could not install wireguard-tools (offline?); Forager remote access stays unavailable until a later update."
+  fi
+fi
+
+# libheif-examples provides heif-convert, which the host bridge uses to
+# transcode iPhone HEIC/HEIF photos on a USB drive to JPEG for the screensaver
+# slideshow (browsers cannot render HEIC natively). Fresh provisions install it
+# at firstboot; retrofit existing devices here so HEIC photos start showing.
+# Best-effort and time-bounded, like the font and WireGuard retrofits; without
+# it HEIC photos are simply skipped and other formats still show.
+if command -v dpkg-query >/dev/null 2>&1 \
+    && ! dpkg-query -W -f='${Status}' libheif-examples 2>/dev/null \
+       | grep -q "install ok installed"; then
+  if DEBIAN_FRONTEND=noninteractive timeout 120 apt-get install -y \
+      --no-install-recommends libheif-examples >/dev/null 2>&1; then
+    log "Installed libheif-examples; iPhone HEIC photos now show in the slideshow."
+  elif DEBIAN_FRONTEND=noninteractive timeout 120 apt-get update >/dev/null 2>&1 \
+      && DEBIAN_FRONTEND=noninteractive timeout 120 apt-get install -y \
+         --no-install-recommends libheif-examples >/dev/null 2>&1; then
+    log "Installed libheif-examples (after an apt update); iPhone HEIC photos now show in the slideshow."
+  else
+    log "WARN: could not install libheif-examples (offline?); HEIC photos stay skipped until a later update."
+  fi
+fi
+
+# Keep the Wi-Fi fallback AP watchdog current too. The generic sync above
+# installs the repo copy under BIN_DIR like any other helper, but the watchdog
+# unit written at firstboot executes /usr/local/sbin/foodassistant-ap-watchdog,
+# so that copy must be refreshed separately or deployed devices keep running
+# the version they were imaged with (FoodAssistant-fuat). Gated on the unit
+# file so a device without the AP fallback never grows a stray sbin script.
+AP_WATCHDOG_UNIT="${AP_WATCHDOG_UNIT:-/etc/systemd/system/foodassistant-ap-watchdog.service}"
+_wsrc="$REPO/scripts/image-build/foodassistant-ap-watchdog"
+if [ -f "$AP_WATCHDOG_UNIT" ] && [ -f "$_wsrc" ] \
+    && ! cmp -s "$_wsrc" "$SBIN_DIR/foodassistant-ap-watchdog"; then
+  if install -m 755 "$_wsrc" "$SBIN_DIR/foodassistant-ap-watchdog" 2>/dev/null; then
+    log "Refreshed $SBIN_DIR/foodassistant-ap-watchdog (AP fallback watchdog)"
+  else
+    log "WARN: could not refresh $SBIN_DIR/foodassistant-ap-watchdog"
+  fi
+fi
+
+_bsrc="$REPO/scripts/image-build/foodassistant-host-bridge"
+_bdst="$BIN_DIR/foodassistant-host-bridge"
+if [ -f "$_bsrc" ]; then
+  _bs="$(sha1sum "$_bsrc" 2>/dev/null | cut -d' ' -f1)"
+  _bd="$(sha1sum "$_bdst" 2>/dev/null | cut -d' ' -f1)"
+  if [ "$_bs" != "$_bd" ] && install -m 755 "$_bsrc" "$_bdst" 2>/dev/null; then
+    log "Refreshed $_bdst (host bridge); scheduling a detached restart"
+    # Refresh the unit file too if it changed, then reload systemd.
+    _bsvc="$REPO/scripts/image-build/foodassistant-host-bridge.service"
+    if [ -f "$_bsvc" ] && ! cmp -s "$_bsvc" /etc/systemd/system/foodassistant-host-bridge.service; then
+      install -m 644 "$_bsvc" /etc/systemd/system/foodassistant-host-bridge.service 2>/dev/null \
+        && systemctl daemon-reload 2>/dev/null || true
+    fi
+    if command -v systemd-run >/dev/null 2>&1; then
+      systemd-run --on-active=5s --unit="fa-bridge-restart-$$" \
+        systemctl restart foodassistant-host-bridge.service >/dev/null 2>&1 \
+        || setsid bash -c 'sleep 5; systemctl restart foodassistant-host-bridge.service' >/dev/null 2>&1 &
+    else
+      setsid bash -c 'sleep 5; systemctl restart foodassistant-host-bridge.service' >/dev/null 2>&1 &
+    fi
+  elif [ "$_bs" = "$_bd" ]; then
+    log "Host bridge unchanged; no restart needed."
+  fi
+fi
+
+INSTALL_DIR="${INSTALL_DIR:-/opt/foodassistant}"
+
+# Re-assert the optional label print stack when it was previously enabled
+# (FoodAssistant-gyri). A user who turned printing on has PRINTING_ENABLED=1 in
+# the stack .env; an OS package prune, a reflash, or a cupsd config reset could
+# otherwise silently break printing after an update. The generic helper sync
+# above already installed foodassistant-print-setup into BIN_DIR, so re-run it:
+# it is idempotent and quick when everything is already in place, and it keeps
+# CUPS_SERVER current in the .env. GUARDED on the marker, so a device that never
+# enabled printing (the default, including Dan's server) never installs CUPS.
+_PRINT_ENV_FILE="${PRINT_ENV_FILE:-$INSTALL_DIR/.env}"
+if [ -f "$_PRINT_ENV_FILE" ] \
+    && grep -qiE '^PRINTING_ENABLED=(1|true|yes|on)' "$_PRINT_ENV_FILE" 2>/dev/null; then
+  if [ -x "$BIN_DIR/foodassistant-print-setup" ]; then
+    log "Printing was enabled; re-asserting the print stack."
+    if INSTALL_DIR="$INSTALL_DIR" "$BIN_DIR/foodassistant-print-setup" >/dev/null 2>&1; then
+      log "Print stack re-asserted."
+    else
+      log "WARN: print stack re-assert reported problems; printing may need attention in Settings."
+    fi
+  else
+    log "Printing was enabled but foodassistant-print-setup is not installed; skipping re-assert."
+  fi
+fi
+
+# --- Pi Hosted (Docker) deployment -----------------------------------------
+# On a Pi Hosted appliance the app runs from a prebuilt image (see
+# docker-compose.appliance.yml: only ./data is mounted, the code lives in the
+# image), NOT a volume-mounted checkout, so "update" means pulling the new image
+# and recreating the service container. The git fast-forward above still matters
+# because it refreshes the local build-from-source fallback and the Stream Deck
+# package. We detect this layout by the compose project at INSTALL_DIR and exit
+# through this branch so the venv path below never runs on a hosted box.
+COMPOSE_FILE="$INSTALL_DIR/docker-compose.yml"
+if [ -f "$COMPOSE_FILE" ] && command -v docker >/dev/null 2>&1; then
+  log "Pi Hosted deployment detected at $INSTALL_DIR; updating via Docker."
+  if ! cd "$INSTALL_DIR"; then
+    _result 0 "Could not enter $INSTALL_DIR to run the Docker update." "$before" "$after" 0 0 0 0 "$recovered"
+  fi
+
+  # One-time image migration: the project moved to a GitHub organization, and
+  # the published image with it. A compose file deployed before the move still
+  # pulls the legacy personal-account package, which no longer receives builds,
+  # so rewrite the image reference in place (idempotent: the old string is gone
+  # after the first run). NOTE: this runs from the REFRESHED helper, so a device
+  # updating from the pre-move version needs two Update presses: the first pull
+  # refreshes this script, the second applies the migration and pulls the new
+  # image.
+  if grep -q "ghcr.io/syracuse3dprinting/foodassistant" "$COMPOSE_FILE" 2>/dev/null; then
+    if sed -i "s|ghcr.io/syracuse3dprinting/foodassistant|ghcr.io/syracuse3dprintingorg/pantryraider|g" "$COMPOSE_FILE"; then
+      log "Migrated compose image reference to ghcr.io/syracuse3dprintingorg/pantryraider"
+    else
+      log "WARN: could not rewrite the legacy image reference in $COMPOSE_FILE"
+    fi
+  fi
+
+  # Keep the pulled image on the same channel as the source checkout. The
+  # publish workflow tags every release image with its version (0.8.0 and 0.8),
+  # while :latest follows main, so on the stable channel FOODASSISTANT_TAG in
+  # the stack .env is pinned to the resolved release. The value it replaced is
+  # saved once to PIN_STATE_FILE and restored when the device returns to the
+  # main channel, so an operator's own pin is never lost. Compose files that
+  # hardcode their image tag simply ignore the variable, which is harmless.
+  ENV_FILE="${ENV_FILE:-$INSTALL_DIR/.env}"
+  _set_env_tag() {
+    # Set FOODASSISTANT_TAG=$1 in ENV_FILE (replace the line or append it). The
+    # new contents are written atomically so a power cut here cannot corrupt the
+    # stack .env and leave the compose image reference unreadable on next boot.
+    local body
+    if [ -f "$ENV_FILE" ] && grep -q '^FOODASSISTANT_TAG=' "$ENV_FILE" 2>/dev/null; then
+      body="$(sed "s|^FOODASSISTANT_TAG=.*|FOODASSISTANT_TAG=$1|" "$ENV_FILE")"
+      _atomic_write "$ENV_FILE" "$body
+"
+    elif [ -f "$ENV_FILE" ]; then
+      body="$(cat "$ENV_FILE")"
+      _atomic_write "$ENV_FILE" "$body
+FOODASSISTANT_TAG=$1
+"
+    else
+      _atomic_write "$ENV_FILE" "FOODASSISTANT_TAG=$1
+"
+    fi
+  }
+  _cur_env_tag="$(grep '^FOODASSISTANT_TAG=' "$ENV_FILE" 2>/dev/null | tail -n1 | cut -d= -f2-)"
+  if [ "$channel" = "stable" ] && [ -n "$release_tag" ]; then
+    _pin_ver="${release_tag#v}"
+    if [ "$_cur_env_tag" != "$_pin_ver" ]; then
+      if [ ! -f "$PIN_STATE_FILE" ]; then
+        _atomic_write "$PIN_STATE_FILE" "${_cur_env_tag:-latest}
+" 2>/dev/null \
+          || log "WARN: could not record the previous image tag in $PIN_STATE_FILE"
+      fi
+      if _set_env_tag "$_pin_ver" 2>/dev/null; then
+        log "Pinned the app image to $_pin_ver (stable channel)."
+      else
+        log "WARN: could not pin FOODASSISTANT_TAG in $ENV_FILE; the image stays on $_cur_env_tag."
+      fi
+    fi
+  elif [ "$channel" = "main" ] && [ -f "$PIN_STATE_FILE" ]; then
+    _restore_tag="$(head -n1 "$PIN_STATE_FILE" 2>/dev/null | tr -d '[:space:]')"
+    [ -n "$_restore_tag" ] || _restore_tag="latest"
+    if _set_env_tag "$_restore_tag" 2>/dev/null; then
+      rm -f "$PIN_STATE_FILE" 2>/dev/null || true
+      log "Back on the main channel; the app image follows $_restore_tag again."
+    else
+      log "WARN: could not restore FOODASSISTANT_TAG in $ENV_FILE."
+    fi
+  fi
+
+  img_before="$(docker compose images -q service 2>/dev/null | head -n1)"
+
+  # Prefer the published image. Fall back to building from the on-device source
+  # we just fast-forwarded if the pull fails (image not public, offline, or no
+  # auth). The build context resolves through REPO_DIR (see the compose file).
+  # Pull the new image FULLY before touching the running container. Docker
+  # writes the new image into its content-addressed store and only moves the tag
+  # reference once every layer is present, so a power cut mid-pull leaves the OLD
+  # image intact and the running stack untouched: never a half-updated state.
+  built_from_source=0
+  if pull_log="$(docker compose pull service 2>&1)"; then
+    log "$pull_log"
+    # Flush the freshly pulled image to the card before we recreate the
+    # container, so the new image survives a power loss during the swap.
+    _sync
+  else
+    log "Image pull failed; building from the on-device source instead:"
+    log "$pull_log"
+    if build_log="$(REPO_DIR="$REPO" docker compose build service 2>&1)"; then
+      log "$build_log"
+      built_from_source=1
+    else
+      log "$build_log"
+      _result 0 "Image pull and local build both failed; the running version is unchanged." "$before" "$after" 0 0 0 0 "$recovered"
+    fi
+  fi
+
+  # Recreate only the service container so Grocy and Mealie keep running.
+  if up_log="$(REPO_DIR="$REPO" docker compose up -d --no-deps service 2>&1)"; then
+    log "$up_log"
+  elif printf '%s' "$up_log" | grep -qi "already in use\|name.*is already in use\|Conflict"; then
+    # A recreate can deadlock when a previous interrupted run left the old
+    # container renamed (e.g. <hash>_foodassistant-service) still holding the
+    # name. Docker then refuses to give the new container that name. Clean up
+    # the conflicting containers and retry once with a forced recreate.
+    log "$up_log"
+    log "Name conflict on recreate; removing the leftover container(s) and retrying."
+    docker rm -f foodassistant-service >/dev/null 2>&1 || true
+    for _c in $(docker ps -a --format '{{.Names}}' 2>/dev/null | grep -E '_foodassistant-service$'); do
+      log "Removing stale container $_c"
+      docker rm -f "$_c" >/dev/null 2>&1 || true
+    done
+    if up_log="$(REPO_DIR="$REPO" docker compose up -d --no-deps --force-recreate service 2>&1)"; then
+      log "$up_log"
+      recovered=1
+    else
+      log "$up_log"
+      _result 0 "Could not recreate the service container; the running version may be unchanged." "$before" "$after" 0 0 0 0 "$recovered"
+    fi
+  else
+    log "$up_log"
+    _result 0 "Could not recreate the service container; the running version may be unchanged." "$before" "$after" 0 0 0 0 "$recovered"
+  fi
+
+  # The container was recreated on the already-local new image (atomic swap:
+  # compose stops the old one and starts the new one, and restart:unless-stopped
+  # brings it back after a reboot). Flush the new state to the card.
+  _sync
+  img_after="$(docker compose images -q service 2>/dev/null | head -n1)"
+  # Reload the on-screen kiosk so the new UI shows (absent on headless boxes).
+  _restart_unit "$KIOSK_SERVICE" && restarted=1
+
+  # The Stream Deck package lives on the host as its own systemd unit, so the
+  # Docker app update above never touches it. Sync and restart it here or a
+  # pi_hosted device never receives deck code changes (FoodAssistant-aus1).
+  sync_streamdeck
+  if [ "$sd_synced" = "1" ]; then _restart_unit "$SD_SERVICE" && restarted=1; fi
+  sync_gadgets
+  if [ "$gd_synced" = "1" ]; then _restart_unit "$GD_SERVICE" && restarted=1; fi
+
+  changed=0
+  if [ "$built_from_source" = "1" ]; then changed=1; fi
+  if [ -n "$img_after" ] && [ "$img_before" != "$img_after" ]; then changed=1; fi
+  if [ "$changed" = "1" ]; then
+    log "Pi Hosted update complete (service image refreshed, streamdeck=$sd_synced)."
+    _result 1 "" "$before" "$after" "$restarted" 1 "$sd_synced" 0 "$recovered"
+  else
+    log "Pi Hosted already up to date (service image unchanged, streamdeck=$sd_synced)."
+    _result 1 "" "$before" "$after" "$restarted" 0 "$sd_synced" 0 "$recovered"
+  fi
+fi
+
+# --- Web app service --------------------------------------------------------
+svc_src="$REPO/service"
+if [ -d "$svc_src" ]; then
+  # Reinstall venv deps only when the deployed requirements differ from the
+  # source (covers both a first deploy and any requirements.txt change). We
+  # compare the DEPLOYED copy rather than the pre/post-pull commit so a manual
+  # pull still installs when needed and a no-op run stays fast.
+  src_req="$svc_src/requirements.txt"
+  dst_req="$APP_DIR/requirements.txt"
+  need_pip=0
+  if [ -f "$src_req" ]; then
+    if [ ! -f "$dst_req" ]; then
+      need_pip=1
+    else
+      sa="$(sha1sum "$src_req" 2>/dev/null | cut -d' ' -f1)"
+      da="$(sha1sum "$dst_req" 2>/dev/null | cut -d' ' -f1)"
+      [ "$sa" != "$da" ] && need_pip=1
+    fi
+  fi
+  if [ "$need_pip" = "1" ] && [ -x "$VENV_DIR/bin/pip" ]; then
+    log "requirements changed; installing into venv at $VENV_DIR"
+    if "$VENV_DIR/bin/pip" install --quiet -r "$src_req"; then
+      deps=1
+    else
+      log "pip install failed; leaving the running version in place."
+      _result 0 "Dependency install failed; the old version is still running." "$before" "$after" 0 0 0 0 "$recovered"
+    fi
+  else
+    log "requirements unchanged; skipping pip install."
+  fi
+
+  # Refresh the deployed app copy (the service runs from APP_DIR, separate from
+  # the git checkout so a pull never half-swaps files under a running process).
+  if [ -d "$APP_DIR" ]; then
+    log "Syncing service app into $APP_DIR"
+    if cp -a "$svc_src/." "$APP_DIR/"; then
+      svc_synced=1
+    else
+      log "WARN: could not sync $APP_DIR"
+    fi
+  else
+    log "App dir $APP_DIR does not exist; skipping service sync."
+  fi
+else
+  log "No service/ in the checkout; skipping app sync."
+fi
+
+# --- Stream Deck controller -------------------------------------------------
+sync_streamdeck
+
+# --- Bluetooth thermometer reader ---------------------------------------------
+sync_gadgets
+
+# --- Restart the services we actually refreshed -----------------------------
+if [ "$svc_synced" = "1" ] || [ "$deps" = "1" ]; then
+  _restart_unit "$SERVICE" && restarted=1
+fi
+if [ "$sd_synced" = "1" ]; then
+  _restart_unit "$SD_SERVICE" && restarted=1
+fi
+if [ "$gd_synced" = "1" ]; then
+  _restart_unit "$GD_SERVICE" && restarted=1
+fi
+# Reload the on-screen kiosk so the new app code actually shows. The browser
+# would otherwise keep serving the page it loaded before the deploy.
+if [ "$svc_synced" = "1" ]; then
+  _restart_unit "$KIOSK_SERVICE" && restarted=1
+fi
+
+if [ "$svc_synced" = "0" ] && [ "$sd_synced" = "0" ]; then
+  log "Nothing to deploy (no service or Stream Deck source found)."
+  _result 0 "Nothing to deploy; no app or Stream Deck source found on this device." "$before" "$after" "$restarted" "$svc_synced" "$sd_synced" "$deps" "$recovered"
+fi
+
+log "Update complete (service=$svc_synced streamdeck=$sd_synced deps=$deps restarted=$restarted)."
+_result 1 "" "$before" "$after" "$restarted" "$svc_synced" "$sd_synced" "$deps" "$recovered"
