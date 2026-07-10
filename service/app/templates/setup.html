@@ -1,0 +1,631 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="{{ theme_mode }}"
+      data-ui-scale="{{ ui_scale_factor | default(1.0) }}"
+      data-display-rotation="{{ display_rotation | default(0) }}"
+      data-rotation-mode="{{ 'compositor' if is_pi else 'css' }}"
+      data-is-pi="{{ '1' if is_pi else '0' }}">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- Resolve all relative links against the app root (or the HA Ingress prefix) -->
+  <base href="{{ ingress_path }}/">
+  <title>Settings: {{ app_name }}</title>
+  {% if theme_css %}
+  <link href="{{ theme_css }}" rel="stylesheet">
+  {% else %}
+  <link href="static/vendor/bootstrap.min.css" rel="stylesheet">
+  {% endif %}
+  {% if theme_overlay %}
+  <link href="{{ theme_overlay }}" rel="stylesheet">
+  {% endif %}
+  {% if custom_theme_active %}
+  {# Custom theme override for this standalone page, mirroring base.html so a
+     selected custom theme (live or saved) actually retints the Settings page
+     itself, not just the /ui pages (FoodAssistant-nw49). #}
+  <style>
+    :root,
+    [data-bs-theme="{{ theme_mode }}"] {
+      --bs-primary: {{ custom_theme_primary }};
+      --bs-link-color: {{ custom_theme_primary }};
+      --bs-link-hover-color: {{ custom_theme_primary }};
+      --bs-secondary: {{ custom_theme_accent }};
+      --bs-success: {{ custom_theme_accent }};
+      --bs-body-bg: {{ custom_theme_bg }};
+      --bs-body-color: {{ custom_theme_text }};
+      --bs-emphasis-color: {{ custom_theme_text }};
+      --bs-secondary-bg: {{ custom_theme_surface }};
+      --bs-tertiary-bg: {{ custom_theme_surface }};
+      --bs-border-color: {{ custom_theme_surface }};
+      --bs-card-bg: {{ custom_theme_surface }};
+      --bs-card-cap-bg: {{ custom_theme_surface }};
+      --bs-modal-bg: {{ custom_theme_surface }};
+      --bs-dropdown-bg: {{ custom_theme_surface }};
+      --bs-list-group-bg: {{ custom_theme_surface }};
+      --bs-input-bg: {{ custom_theme_surface }};
+    }
+    body { background-color: var(--bs-body-bg); color: var(--bs-body-color); }
+    .btn-primary { background-color: {{ custom_theme_primary }}; border-color: {{ custom_theme_primary }}; }
+    .btn-success { background-color: {{ custom_theme_accent }}; border-color: {{ custom_theme_accent }}; }
+    .nav-link.active, .float-nav-link.active { color: {{ custom_theme_primary }}; }
+  </style>
+  {% endif %}
+  {% if background_image_url %}
+  {# Background image (FoodAssistant-e2t6), mirrored onto the standalone Settings
+     page so the chosen background is visible while configuring it. #}
+  <style>
+    body::before {
+      content: ""; position: fixed; inset: 0; z-index: -1;
+      background: url("{{ background_image_url }}") center / cover no-repeat;
+      opacity: {{ background_opacity }};
+      pointer-events: none;
+    }
+  </style>
+  {% endif %}
+  <link href="static/vendor/bootstrap-icons.min.css" rel="stylesheet">
+  <link rel="icon" type="image/svg+xml" href="static/icons/favicon.svg">
+  <link rel="icon" type="image/png" sizes="32x32" href="static/icons/favicon-32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="static/icons/favicon-16.png">
+  <link rel="icon" type="image/x-icon" href="static/icons/favicon.ico">
+  <link rel="apple-touch-icon" href="static/icons/apple-touch-icon.png">
+  <script src="static/js/kiosk-display.js"></script>
+  {# Kiosk boot intro: pre-paint blackout guard + intro.js (FoodAssistant-a8xy) #}
+  {% include "_intro.html" %}
+  <style>
+    body { background: var(--bs-body-bg); }
+    /* Shared */
+    .setup-wrap { max-width: 1240px; margin: 1.5rem auto; padding: 0 1rem 4rem; }
+    /* The sticky menu frame holds the group toggle + the section pills together,
+       so the toggle stays reachable while a long pane scrolls. It scrolls
+       internally if the menu itself is taller than the viewport. */
+    .side-menu { max-height: calc(100vh - 2rem); overflow-y: auto; }
+    /* Denser variant for the busy Start Page / Stream Deck editors so a whole
+       page of controls fits on a laptop screen (Pantry Raider): tighter card
+       padding, smaller gaps between blocks, and compact labels. Long help text
+       moves into info() tooltips instead of full-width paragraphs. */
+    .editor-dense { padding: 1rem 1.1rem; }
+    .editor-dense .form-label { margin-bottom: 0.15rem; font-size: 0.85rem; }
+    .editor-dense .form-text { margin-top: 0.15rem; }
+    .editor-dense .editor-block { margin-bottom: 0.85rem; }
+    .editor-dense .editor-block:last-child { margin-bottom: 0; }
+    .editor-dense .block-head { font-weight: 600; font-size: 0.9rem; display: flex; align-items: center; gap: 0.35rem; margin-bottom: 0.35rem; }
+    .section-card { background: var(--bs-tertiary-bg); border: 1px solid var(--bs-border-color); border-radius: 0.75rem; padding: 1.5rem; margin-bottom: 1.25rem; }
+    .section-title { font-size: 1.05rem; font-weight: 600; margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem; }
+    .pane-intro { font-size: 0.85rem; color: var(--bs-secondary-color); margin: -0.25rem 0 1rem; }
+    /* Sub-header inside a section card, matching the editor-dense block-head
+       look so multi-part cards (Backup) read the same as the dense editors. */
+    .subsection-title { font-weight: 600; font-size: 0.9rem; display: flex; align-items: center; gap: 0.35rem; margin-bottom: 0.35rem; }
+    /* A section card that matches the active settings search is outlined so
+       the hit is findable inside a long pane. */
+    .section-card.search-hit { border-color: var(--bs-primary); box-shadow: 0 0 0 1px var(--bs-primary); }
+    .test-result { font-size: 0.82rem; margin-top: 0.4rem; min-height: 1.2rem; }
+    .badge-req { font-size: 0.65rem; vertical-align: middle; }
+    .logo { font-size: 1.5rem; font-weight: 700; letter-spacing: -0.5px; }
+    .side-menu { position: sticky; top: 1rem; }
+    .side-menu .nav-link { text-align: left; }
+    /* Plain-language group headings in the single settings menu. Small,
+       uppercase, and non-interactive; the first one has no top margin. */
+    .menu-heading { font-size: 0.7rem; font-weight: 700; text-transform: uppercase;
+                    letter-spacing: 0.5px; color: var(--bs-secondary-color);
+                    padding: 0.15rem 0.5rem; margin-top: 0.75rem; }
+    .menu-heading:first-child { margin-top: 0; }
+    .nav-tab-row { background: var(--bs-body-bg); border: 1px solid var(--bs-border-color); border-radius: 0.5rem; }
+    /* A nested tab is offset and tinted so the tree structure reads at a glance. */
+    .nav-tab-row.nav-tab-child { margin-left: 1.75rem; border-left: 3px solid var(--bs-primary); }
+    /* Drag-and-drop feedback: a line above for a reorder, a box for a nest. */
+    .nav-tab-row.nav-drop-before { box-shadow: 0 -3px 0 0 var(--bs-primary); }
+    .nav-tab-row.nav-drop-into { outline: 2px dashed var(--bs-primary); outline-offset: -2px; }
+    .nav-tab-row[draggable="true"] { cursor: default; }
+    @media (max-width: 767px) {
+      .side-menu { position: static; }
+      .side-menu .nav { flex-direction: row !important; flex-wrap: nowrap; overflow-x: auto; }
+      .side-menu .nav-link { white-space: nowrap; }
+    }
+    /* Wizard (first-time setup only) */
+    .wiz-wrap { max-width: 680px; margin: 2rem auto; padding: 0 1rem 4rem; }
+    /* Progress bar */
+    .wiz-progress { display: flex; align-items: center; justify-content: center; gap: 0; margin-bottom: 2rem; flex-wrap: nowrap; }
+    .wiz-step-dot { display: flex; flex-direction: column; align-items: center; flex: 1; max-width: 100px; }
+    .wiz-step-num { width: 2rem; height: 2rem; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+                    font-size: 0.85rem; font-weight: 700; border: 2px solid var(--bs-border-color);
+                    background: var(--bs-tertiary-bg); color: var(--bs-secondary-color); transition: all 0.2s; }
+    .wiz-step-num.active { border-color: var(--bs-primary); background: var(--bs-primary); color: #fff; }
+    .wiz-step-num.done { border-color: var(--bs-success); background: var(--bs-success); color: #fff; }
+    .wiz-step-label { font-size: 0.68rem; color: var(--bs-secondary-color); margin-top: 0.2rem; text-align: center; white-space: nowrap; }
+    .wiz-connector { flex: 1; height: 2px; background: var(--bs-border-color); max-width: 40px; margin-bottom: 1.1rem; }
+    .wiz-connector.done { background: var(--bs-success); }
+    /* Wizard cards */
+    .wiz-card { background: var(--bs-tertiary-bg); border: 1px solid var(--bs-border-color); border-radius: 0.75rem; padding: 2rem; }
+    .wiz-card-title { font-size: 1.35rem; font-weight: 700; margin-bottom: 0.4rem; }
+    .wiz-card-sub { color: var(--bs-secondary-color); margin-bottom: 1.5rem; font-size: 0.9rem; }
+    /* Install mode buttons */
+    .install-card { border: 2px solid var(--bs-border-color); border-radius: 0.6rem; padding: 1.25rem 1rem; cursor: pointer; transition: border-color 0.15s, background 0.15s; text-align: center; }
+    .install-card:hover { border-color: var(--bs-primary); }
+    .install-card.selected { border-color: var(--bs-primary); background: rgba(var(--bs-primary-rgb), 0.08); }
+    .install-card .icon { font-size: 2rem; margin-bottom: 0.4rem; }
+    .install-card .label { font-weight: 600; font-size: 0.95rem; }
+    .install-card .desc { font-size: 0.78rem; color: var(--bs-secondary-color); margin-top: 0.25rem; }
+    /* Summary list */
+    .summary-item { display: flex; align-items: center; gap: 0.6rem; padding: 0.55rem 0; border-bottom: 1px solid var(--bs-border-color); font-size: 0.9rem; }
+    .summary-item:last-child { border-bottom: none; }
+    .summary-icon { width: 1.5rem; text-align: center; }
+    .summary-fix-link { font-size: 0.78rem; margin-left: auto; white-space: nowrap; }
+    /* Live install/start log panels: fixed-height scroll region so streaming
+       output does not push the page longer. The tailer auto-scrolls to bottom. */
+    .install-log { max-height: 14rem; overflow: auto; white-space: pre-wrap; }
+    /* Keep the menu/content hidden until init() has activated the pane a
+       #pane-* hash asks for, so the page never paints one pane and then
+       visibly switches to another. visibility (not display) avoids any
+       layout shift while hidden. */
+    .menu-initializing .side-menu, .menu-initializing .tab-content { visibility: hidden; }
+
+    /* Contrast hardening (FoodAssistant-tjlm), mirrored from base.html so the
+       standalone Settings page is legible under every theme. Loaded after the
+       theme overlay and at higher specificity so it corrects the active side
+       menu pill, accent badges, and the Save (outline-info) buttons. */
+    .nav-pills .nav-link.active,
+    .nav-pills .show > .nav-link,
+    .side-menu .nav-link.active { color: #fff !important; }
+    .badge.bg-success, .badge.bg-info, .badge.bg-warning,
+    .badge.text-bg-success, .badge.text-bg-info, .badge.text-bg-warning {
+      color: #000 !important;
+    }
+    {% if theme_mode == 'light' %}
+    .btn-outline-info { color: #0a6e80 !important; border-color: #0a6e80 !important; }
+    .btn-outline-info:hover { background-color: #0a6e80 !important; border-color: #0a6e80 !important; color: #fff !important; }
+    .badge.bg-secondary, .badge.text-bg-secondary { color: #000 !important; }
+    {% else %}
+    .btn-outline-info { color: #6ed5e8 !important; border-color: #6ed5e8 !important; }
+    .btn-outline-info:hover { background-color: #6ed5e8 !important; border-color: #6ed5e8 !important; color: #06222a !important; }
+    {% endif %}
+
+    /* --- Stripe-style dense settings (FoodAssistant-jcnh) -------------------
+       Panel / row / pill / toggle component classes and the Overview landing
+       grid. Everything here is scoped under .setup-wrap so it never leaks onto
+       the /ui pages, and it builds on the existing theme tokens (Bootstrap CSS
+       vars plus the brand accent) so it retints with the chosen theme. The
+       accent (pink) is kept separate from the semantic state colours. */
+    .setup-wrap .set-panel { border: 1px solid var(--bs-border-color); border-radius: 0.75rem;
+                             background: var(--bs-tertiary-bg); margin-bottom: 1rem; overflow: hidden; }
+    .setup-wrap .set-panel-head { display: flex; align-items: flex-start; gap: 0.75rem;
+                                  padding: 0.8rem 1rem; border-bottom: 1px solid var(--bs-border-color); }
+    .setup-wrap .set-panel-head-main { flex: 1 1 auto; min-width: 0; }
+    .setup-wrap .set-panel-title { font-weight: 600; font-size: 0.98rem; }
+    .setup-wrap .set-panel-desc { font-size: 0.8rem; color: var(--bs-secondary-color); margin-top: 0.1rem; }
+    .setup-wrap .set-panel-head-aside { flex: 0 0 auto; display: flex; align-items: center; gap: 0.5rem; }
+    .setup-wrap .set-panel-body { padding: 0 1rem; }
+    .setup-wrap .set-row { display: flex; align-items: flex-start; gap: 1rem;
+                           padding: 14px 0; border-bottom: 1px solid var(--bs-border-color); }
+    .setup-wrap .set-row:last-child { border-bottom: none; }
+    .setup-wrap .set-row-label { flex: 0 0 190px; max-width: 190px; padding-top: 0.3rem; }
+    .setup-wrap .set-row-name { font-weight: 600; font-size: 0.88rem; }
+    .setup-wrap .set-row-hint { font-size: 0.76rem; color: var(--bs-secondary-color); margin-top: 0.1rem; }
+    .setup-wrap .set-row-control { flex: 1 1 auto; min-width: 0; }
+    .setup-wrap .set-row-actions { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; }
+    @media (max-width: 575px) {
+      .setup-wrap .set-row { flex-direction: column; gap: 0.4rem; }
+      .setup-wrap .set-row-label { flex-basis: auto; max-width: none; padding-top: 0; }
+    }
+    /* State pills: semantic colours, kept separate from the pink accent. */
+    .setup-wrap .set-pill { display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.72rem;
+                            font-weight: 600; padding: 0.15rem 0.55rem; border-radius: 999px; white-space: nowrap; }
+    .setup-wrap .set-pill-good { background: rgba(var(--bs-success-rgb), 0.16); color: var(--bs-success); }
+    .setup-wrap .set-pill-neutral { background: var(--bs-secondary-bg); color: var(--bs-secondary-color); }
+    .setup-wrap .set-pill-pink { background: rgba(var(--bs-primary-rgb), 0.16); color: var(--bs-primary); }
+    .setup-wrap .set-pill-warn { background: rgba(var(--bs-warning-rgb), 0.18); color: var(--bs-warning); }
+    /* Red state pill for the Status dashboard (unreachable / error). */
+    .setup-wrap .set-pill-bad { background: rgba(var(--bs-danger-rgb), 0.16); color: var(--bs-danger); }
+    /* Toggle switch: pink when on. */
+    .setup-wrap .set-toggle { position: relative; display: inline-block; width: 42px; height: 24px;
+                              flex: 0 0 auto; cursor: pointer; vertical-align: middle; }
+    .setup-wrap .set-toggle input { position: absolute; opacity: 0; width: 0; height: 0; }
+    .setup-wrap .set-toggle-track { position: absolute; inset: 0; background: var(--bs-secondary-bg);
+                                    border: 1px solid var(--bs-border-color); border-radius: 999px;
+                                    transition: background 0.15s, border-color 0.15s; }
+    .setup-wrap .set-toggle-thumb { position: absolute; top: 3px; left: 3px; width: 16px; height: 16px;
+                                    background: #fff; border-radius: 50%; transition: transform 0.15s;
+                                    box-shadow: 0 1px 2px rgba(0,0,0,0.3); }
+    .setup-wrap .set-toggle input:checked + .set-toggle-track { background: var(--bs-primary); border-color: var(--bs-primary); }
+    .setup-wrap .set-toggle input:checked + .set-toggle-track .set-toggle-thumb { transform: translateX(18px); }
+    .setup-wrap .set-toggle input:focus-visible + .set-toggle-track { box-shadow: 0 0 0 3px rgba(var(--bs-primary-rgb), 0.35); }
+    .setup-wrap .set-toggle-disabled { opacity: 0.55; cursor: not-allowed; }
+    /* API keys table. */
+    .setup-wrap .set-keys-wrap { overflow-x: auto; }
+    .setup-wrap .set-keys { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+    .setup-wrap .set-keys th { text-align: left; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.4px;
+                               color: var(--bs-secondary-color); font-weight: 700; padding: 0.5rem 0.5rem;
+                               border-bottom: 1px solid var(--bs-border-color); }
+    .setup-wrap .set-keys td { padding: 0.55rem 0.5rem; border-bottom: 1px solid var(--bs-border-color); vertical-align: middle; }
+    .setup-wrap .set-keys tbody:last-of-type tr:last-child td { border-bottom: none; }
+    .setup-wrap .set-keys-actions { text-align: right; white-space: nowrap; }
+    /* Overview landing. */
+    .setup-wrap .ov-group { margin-bottom: 1.5rem; }
+    .setup-wrap .ov-group-head { font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;
+                                 color: var(--bs-secondary-color); margin-bottom: 0.6rem; }
+    .setup-wrap .ov-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 0.75rem; }
+    .setup-wrap .ov-card { display: flex; gap: 0.75rem; text-align: left; align-items: flex-start; padding: 0.9rem;
+                           border: 1px solid var(--bs-border-color); border-radius: 0.7rem; background: var(--bs-tertiary-bg);
+                           cursor: pointer; transition: border-color 0.15s, transform 0.05s; width: 100%; color: inherit; }
+    .setup-wrap .ov-card:hover { border-color: var(--bs-primary); }
+    .setup-wrap .ov-card:active { transform: translateY(1px); }
+    .setup-wrap .ov-card-icon { flex: 0 0 auto; width: 2.2rem; height: 2.2rem; border-radius: 0.55rem;
+                                display: flex; align-items: center; justify-content: center; font-size: 1.1rem;
+                                background: rgba(var(--bs-primary-rgb), 0.12); color: var(--bs-primary); }
+    .setup-wrap .ov-card-main { display: flex; flex-direction: column; }
+    .setup-wrap .ov-card-title { font-weight: 600; font-size: 0.9rem; }
+    .setup-wrap .ov-card-desc { font-size: 0.78rem; color: var(--bs-secondary-color); margin-top: 0.15rem; line-height: 1.3; }
+    /* Label designer (FoodAssistant-or5e): the editable schematic canvas. The
+       outer canvas is the label stock; the inner box is the printable area
+       inside the margins, where the field boxes live (positioned in fractions
+       of the inner area, exactly as the render engine reads them). */
+    .setup-wrap .ld-canvas { position: relative; width: 320px; max-width: 100%; background: #fff;
+                             border: 1px solid var(--bs-border-color); border-radius: 4px;
+                             box-shadow: 0 1px 3px rgba(0,0,0,0.25); touch-action: none;
+                             user-select: none; overflow: hidden; }
+    .setup-wrap .ld-inner { position: absolute; border: 1px dashed rgba(0,0,0,0.25); }
+    .setup-wrap .ld-box { position: absolute; box-sizing: border-box; border: 1px solid var(--bs-primary);
+                          background: rgba(var(--bs-primary-rgb), 0.10); color: #111; font-size: 0.62rem;
+                          line-height: 1.05; padding: 2px 3px; overflow: hidden; cursor: move;
+                          border-radius: 2px; white-space: nowrap; text-overflow: ellipsis; }
+    .setup-wrap .ld-box.ld-selected { background: rgba(var(--bs-primary-rgb), 0.24);
+                                       outline: 2px solid var(--bs-primary); z-index: 3; }
+    .setup-wrap .ld-box-label { pointer-events: none; }
+    .setup-wrap .ld-handle { position: absolute; right: -1px; bottom: -1px; width: 12px; height: 12px;
+                             background: var(--bs-primary); border-radius: 2px; cursor: nwse-resize; }
+  </style>
+</head>
+<body>
+
+{% from "setup/_macros.html" import info, secret_input, extra_keys, ai_model_field, satellite_keys, upstream_cards, recipe_connection_cards, ds_toggle with context %}
+
+
+{# FIRST-TIME WIZARD  (shown when configured=False) #}
+{% if not configured %}
+
+{% include "setup/_wizard.html" %}
+
+{% endif %}
+
+
+{# Settings form: shown when configured=True (also rendered for re-visits).
+   On first-time setup this block is hidden; wizard above handles that flow. #}
+{% if configured %}
+<div class="setup-wrap" id="settings-root">
+
+  {% if demo_mode %}
+  <!-- Read-only DEMO MODE (FoodAssistant-pxp0): the whole settings surface is
+       here to look at, but every Save is refused by the server. Say so up front. -->
+  <div class="alert alert-secondary d-flex align-items-center gap-2 mt-3 mb-0" role="alert">
+    <i class="bi bi-eye fs-5"></i>
+    <div>
+      <strong>Demo mode.</strong>
+      You can look through every setting, but saving is turned off on this public
+      demo.
+    </div>
+  </div>
+  {% endif %}
+
+  {% if features.satellite %}
+  <!-- Pi Remote indicator so it is obvious this is a satellite, not the main
+       server's settings (FoodAssistant-batt). Most backend config is mirrored
+       read-only from the main server. -->
+  <div class="alert alert-info d-flex align-items-center gap-2 mt-3 mb-0" role="alert">
+    <i class="bi bi-hdd-network fs-5"></i>
+    <div>
+      <strong>This is a Pi Remote (satellite).</strong>
+      It mirrors a main Pantry Raider server. Backend settings (Grocy, Mealie, AI,
+      weather) are managed on the main server and shown here read-only. This device
+      keeps its own display, Stream Deck, and security settings.
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- AP fallback banner: shown when the device is in hotspot setup mode -->
+  <div id="ap-fallback-banner" class="alert alert-warning alert-dismissible fade show d-none" role="alert">
+    <i class="bi bi-wifi me-2"></i><strong>Running in Wi-Fi setup mode.</strong>
+    Connect your device to the <strong>FoodAssistant</strong> hotspot to configure the network,
+    then the hotspot will disable itself.
+    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+  </div>
+
+  <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 my-3">
+    <div class="logo"><i class="bi bi-fridge me-2 text-primary"></i>Pantry Raider
+      <span class="text-secondary fw-normal fs-6 ms-1">Settings</span></div>
+    <a href="ui/" class="btn btn-sm btn-outline-secondary"><i class="bi bi-arrow-left me-1"></i>Back to app</a>
+  </div>
+
+  {% set _inv_ok = features.satellite or (s.grocy_api_key and s.grocy_base_url and s.grocy_base_url != 'http://grocy:80') %}
+  {% set _sec_ok = (not s.auth_required) or s.auth_password %}
+  {% if not _inv_ok or not _sec_ok %}
+  <div class="alert alert-warning py-2 small mb-3 d-flex align-items-center gap-2">
+    <i class="bi bi-exclamation-triangle-fill flex-shrink-0"></i>
+    <span>
+      {%- if not _inv_ok %}Grocy is not configured: inventory features need a Grocy URL and API key.{% endif %}
+      {%- if not _inv_ok and not _sec_ok %} &nbsp;{% endif %}
+      {%- if not _sec_ok %}Set a password in Security to protect the app.{% endif %}
+    </span>
+  </div>
+  {% endif %}
+
+  <div class="row g-3 menu-initializing">
+
+    <!-- Side menu -->
+    <div class="col-md-3">
+      <div class="side-menu">
+        {# Search box: filters the menu to panes whose title, section headers,
+           or field labels match, and outlines the matching cards when a
+           filtered pane opens. #}
+        <div class="mb-2">
+          <input type="search" class="form-control form-control-sm" id="settings-search"
+                 placeholder="Search settings" autocomplete="off" spellcheck="false"
+                 aria-label="Search settings" oninput="settingsSearch(this.value)">
+        </div>
+        {# One always-visible menu, grouped under four plain-language headings
+           (Kitchen, This Device, Connections, System) so every pane is one
+           click away and nothing is hidden behind a toggle. Wi-Fi lives on its
+           own Network pane under This Device (FoodAssistant-s6q, -42n4, -kjk8). #}
+        {# inline status: True = configured, False/None = needs attention #}
+        {% set inv_ok = features.satellite or (s.grocy_api_key and s.grocy_base_url and s.grocy_base_url != 'http://grocy:80') %}
+        {% set ai_ok  = s.vision_provider and s.vision_provider != 'none' %}
+        {% set rec_ok = recipes_backend_active == 'native' or s.mealie_api_key %}
+        {% set sec_ok = (not s.auth_required) or s.auth_password %}
+        {% set rem_ok = s.remote_server_url and s.upstream_api_key %}
+        <div class="nav flex-column nav-pills gap-1" role="tablist">
+
+          {# Overview is the landing: a grid of category cards. It opens by
+             default (its pill and pane carry active) so Settings greets the
+             user with a scannable map instead of dropping them into one pane
+             (FoodAssistant-jcnh). #}
+          <button class="nav-link active d-flex align-items-center" data-bs-toggle="pill" data-bs-target="#pane-overview" type="button">
+            <i class="bi bi-grid me-2"></i>Overview
+          </button>
+
+          {# Status: a health dashboard of this device and the services it talks
+             to (FoodAssistant-w00b). Opening it lazy-loads /setup/status/summary
+             into the row pills. Sits right below Overview, above the groups. #}
+          <button class="nav-link d-flex align-items-center" data-bs-toggle="pill" data-bs-target="#pane-status" type="button" onclick="loadStatusSummary()">
+            <i class="bi bi-heart-pulse me-2"></i>Status
+          </button>
+
+          {# Resources (FoodAssistant-do2u): live processor, memory, storage,
+             temperature, and power readings. Opening it starts a refresh loop
+             that stops when the pane is left. #}
+          <button class="nav-link d-flex align-items-center" data-bs-toggle="pill" data-bs-target="#pane-resources" type="button" onclick="startResourcesRefresh()">
+            <i class="bi bi-speedometer2 me-2"></i>Resources
+          </button>
+
+          <div class="menu-heading">Kitchen</div>
+          {% if not features.satellite %}
+          <button class="nav-link d-flex align-items-center" data-bs-toggle="pill" data-bs-target="#pane-inventory" type="button">
+            <i class="bi bi-fridge me-2"></i>Inventory
+            <i class="bi bi-{{ 'check-circle-fill text-success' if inv_ok else 'exclamation-circle-fill text-warning' }} ms-auto" title="{{ 'Configured' if inv_ok else 'Not configured' }}"></i>
+          </button>
+          {% endif %}
+          <button class="nav-link d-flex align-items-center" data-bs-toggle="pill" data-bs-target="#pane-personalization-recipes" type="button" onclick="showRecipeSource()">
+            <i class="bi bi-journal-richtext me-2"></i>Recipes
+            <i class="bi bi-{{ 'check-circle-fill text-success' if rec_ok else 'dash-circle text-secondary' }} ms-auto" title="{{ 'Configured' if rec_ok else 'Optional' }}"></i>
+          </button>
+          {# Recipe suggestions (FoodAssistant-ysj1): the personal taste tuning,
+             kept apart from the Recipes connection settings so saving tastes
+             cannot overwrite the Mealie URL, key, or recipe source. #}
+          <button class="nav-link d-flex align-items-center" data-bs-toggle="pill" data-bs-target="#pane-recipe-tuning" type="button">
+            <i class="bi bi-sliders me-2"></i>Recipe suggestions
+          </button>
+          <button class="nav-link d-flex align-items-center" data-bs-toggle="pill" data-bs-target="#pane-scanning" type="button">
+            <i class="bi bi-upc-scan me-2"></i>Scanning &amp; AI
+            <i class="bi bi-{{ 'check-circle-fill text-success' if ai_ok else 'dash-circle text-secondary' }} ms-auto" title="{{ 'AI configured' if ai_ok else 'AI optional' }}"></i>
+          </button>
+
+          <div class="menu-heading">This Device</div>
+          <button class="nav-link d-flex align-items-center" data-bs-toggle="pill" data-bs-target="#pane-screen" type="button"{% if is_pi %} onclick="loadDisplayStatus(); loadHardwareStatus()"{% endif %}>
+            <i class="bi bi-display me-2"></i>Display &amp; Sleep
+          </button>
+          {# Network: Wi-Fi, Ethernet, this device's hostname, and the link name.
+             The Wi-Fi/hostname/hardware cards are Pi-only; the link-name card
+             renders in every mode, so this pill shows everywhere. #}
+          <button class="nav-link d-flex align-items-center" data-bs-toggle="pill" data-bs-target="#pane-network" type="button"{% if is_pi %} onclick="loadNetworkStatus(); loadHardwareDetect(); loadHardwareStatus()"{% endif %}>
+            <i class="bi bi-wifi me-2"></i>Network
+          </button>
+          {# The Start Page and (on a Pi) Stream Deck editors share one pill: a
+             toggle at the top of the pane flips between them, and they share
+             one custom-button library. The pill keeps id "pill-deckstart" so
+             deck/start deep links and the search index can reach it. #}
+          <button class="nav-link d-flex align-items-center" data-bs-toggle="pill" data-bs-target="#pane-start-page" type="button" id="pill-deckstart" onclick="showDeckStart('start');{% if is_pi %} _sdLoadProfiles();{% endif %}">
+            <i class="bi bi-grid-3x3-gap me-2"></i>{% if is_pi %}Start Page &amp; Stream Deck{% else %}Start Page{% endif %}
+          </button>
+          <button class="nav-link d-flex align-items-center" data-bs-toggle="pill" data-bs-target="#pane-appearance" type="button">
+            <i class="bi bi-palette me-2"></i>Appearance
+          </button>
+
+          <div class="menu-heading">Connections</div>
+          <button class="nav-link d-flex align-items-center" data-bs-toggle="pill" data-bs-target="#pane-home-assistant" type="button">
+            <i class="bi bi-house-gear me-2"></i>Home Assistant
+          </button>
+          <button class="nav-link d-flex align-items-center" data-bs-toggle="pill" data-bs-target="#pane-connections" type="button" onclick="_camPresetChanged(); _camPrefillScanCidr()">
+            <i class="bi bi-camera-video me-2"></i>Cameras
+          </button>
+          {% if not features.satellite %}
+          {# Forager: the account (sign-in, plan and usage) and remote access.
+             Main-install only; a satellite forwards AI and has no local app to
+             sign in or expose. Opening it refreshes the account and tunnel
+             status the same way the page init does. #}
+          <button class="nav-link d-flex align-items-center" data-bs-toggle="pill" data-bs-target="#pane-forager" type="button" onclick="_initCloudMeta(); _loadCloudStatus(); _loadTunnelStatus()">
+            <i class="bi bi-cloud me-2"></i>Forager
+          </button>
+          {% endif %}
+
+          <div class="menu-heading">System</div>
+          <button class="nav-link d-flex align-items-center" data-bs-toggle="pill" data-bs-target="#pane-devices" type="button"{% if not features.satellite %} onclick="loadDevices()"{% endif %}>
+            <i class="bi bi-hdd-stack me-2"></i>Fleet &amp; Remote Access
+            {% if features.satellite %}
+            <i class="bi bi-{{ 'check-circle-fill text-success' if rem_ok else 'exclamation-circle-fill text-warning' }} ms-auto" title="{{ 'Main server configured' if rem_ok else 'Server URL + key required' }}"></i>
+            {% endif %}
+          </button>
+          <button class="nav-link d-flex align-items-center" data-bs-toggle="pill" data-bs-target="#pane-security" type="button">
+            <i class="bi bi-shield-lock me-2"></i>Security
+            <i class="bi bi-{{ 'check-circle-fill text-success' if sec_ok else 'exclamation-circle-fill text-warning' }} ms-auto" title="{{ 'Configured' if sec_ok else 'Password required' }}"></i>
+          </button>
+          <button class="nav-link d-flex align-items-center" data-bs-toggle="pill" data-bs-target="#pane-printing" type="button" onclick="loadPrintQueues(); refreshLabelPreview(); loadDecorativeIcons(); ldInit(); bluetoothPrintPaneOpen()">
+            <i class="bi bi-printer me-2"></i>Printing
+          </button>
+          <button class="nav-link d-flex align-items-center" data-bs-toggle="pill" data-bs-target="#pane-gadgets" type="button" onclick="gadgetsPaneOpen()">
+            <i class="bi bi-thermometer-half me-2"></i>Thermometers
+          </button>
+          <button class="nav-link d-flex align-items-center" data-bs-toggle="pill" data-bs-target="#pane-backups" type="button">
+            <i class="bi bi-cloud-arrow-down me-2"></i>Backups &amp; Updates
+          </button>
+          <button class="nav-link d-flex align-items-center" data-bs-toggle="pill" data-bs-target="#pane-advanced" type="button">
+            <i class="bi bi-tools me-2"></i>Advanced
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Content panes -->
+    <div class="col-md-9">
+      <div class="tab-content">
+
+
+        {% include "setup/_pane_overview.html" %}
+
+
+        {% include "setup/_pane_status.html" %}
+
+
+        {% include "setup/_pane_resources.html" %}
+
+
+        {% include "setup/_pane_inventory.html" %}
+
+
+        {% include "setup/_pane_scanning.html" %}
+
+
+        {% if not features.satellite %}
+        {% include "setup/_pane_forager.html" %}
+        {% endif %}
+
+
+        {% include "setup/_pane_personalization_recipes.html" %}
+
+
+        {% include "setup/_pane_personalization_tuning.html" %}
+
+
+        {% include "setup/_pane_appearance.html" %}
+
+
+        {% include "setup/_pane_connections.html" %}
+
+
+        {% include "setup/_pane_home_assistant.html" %}
+
+
+        {% include "setup/_pane_network.html" %}
+
+
+        {% include "setup/_pane_security.html" %}
+
+
+        {% include "setup/_pane_printing.html" %}
+
+
+        {% include "setup/_pane_gadgets.html" %}
+
+
+        {% include "setup/_pane_backups.html" %}
+
+
+        {% include "setup/_pane_advanced.html" %}
+
+
+        {% include "setup/_pane_devices.html" %}
+
+
+        {# Weather location/units no longer have their own settings section: they
+           are set on the Weather page itself (Pantry Raider). These hidden inputs
+           stay so the Stream Deck save still reads the current location/units the
+           deck weather key should use. #}
+        {% if not features.satellite %}
+        <input type="hidden" id="streamdeck_weather_location" value="{{ s.streamdeck_weather_location }}">
+        <input type="hidden" id="streamdeck_weather_units" value="{{ s.streamdeck_weather_units }}">
+        {% endif %}
+
+        {% include "setup/_pane_start_page.html" %}
+
+
+        {% include "setup/_pane_screen.html" %}
+
+
+        {% include "setup/_pane_streamdeck.html" %}
+
+
+      </div>
+    </div>
+  </div>
+</div><!-- /setup-wrap -->
+{% endif %}
+
+
+<script src="static/vendor/bootstrap.bundle.min.js"></script>
+<script>
+const TABS = {{ tabs | tojson }};
+// Pristine built-in layout for the nav editor's Reset to defaults (FoodAssistant-oret).
+window.TABS_DEFAULT = {{ tabs_default | tojson }};
+// On-screen Start Page editor data (Pantry Raider): the shared custom buttons
+// and the saved layout. The built-in key catalog is the deck's own (_sdCatalog),
+// so the Start Page and Stream Deck editors are identical.
+const START_CUSTOMS = {{ start_customs | tojson }};
+window.START_LAYOUT = {{ (s.start_page_layout or []) | tojson }};
+// Full shared custom-key definitions (same store as the Stream Deck), so the
+// Start Page can render editable custom-key rows identical to the deck's.
+window.START_OVERRIDES = {{ (s.streamdeck_key_overrides or []) | tojson }};
+const HAS_AUTH_PASSWORD = {{ 'true' if has.auth_password else 'false' }};
+const IS_CONFIGURED = {{ 'true' if configured else 'false' }};
+// Server-side API base for a co-hosted Grocy. Always loopback so the app
+// container can reach it (mDNS may not resolve inside the container). The
+// browser "Open Grocy" link is a separate, reachable URL (GROCY_BROWSER_LINK).
+const PI_GROCY_DEFAULT = 'http://localhost:9383';
+// Human-facing link to open Grocy in a browser (LAN IP, or <hostname>.local
+// when the IP cannot be determined).
+const GROCY_BROWSER_LINK = {{ (grocy_browser_link or '') | tojson }};
+const IS_SATELLITE = {{ 'true' if is_satellite else 'false' }};
+// Provider-dependent model picker data (used by setup/helpers.js).
+const AI_MODELS = {{ ai_models | tojson }};
+window.__APP_VERSION = "{{ version }}";
+// First-time wizard bootstrap values (used by setup/wizard.js).
+const SETUP_CURRENT_MODE = {{ current_mode | tojson }};
+const WIZ_HAS_GROCY_KEY = {{ 'true' if has.grocy_api_key else 'false' }};
+const WIZ_HAS_AI_KEY = {{ 'true' if (has.gemini_api_key or has.openai_api_key or has.anthropic_api_key) else 'false' }};
+const WIZ_HAS_MEALIE_KEY = {{ 'true' if has.mealie_api_key else 'false' }};
+// Whether this install is already connected to a Forager account, so the
+// wizard's summary counts a Forager sign-in as AI configured.
+const WIZ_CLOUD_LINKED = {{ 'true' if s.cloud_instance_token else 'false' }};
+</script>
+{# The setup script lives in static/js/setup/, split by concern. Load order
+   matters only for the top-level statements: menu.js runs the page init, so
+   everything it calls loads first, and dirty-guard.js wraps fetch last. #}
+<script src="static/js/setup/helpers.js?v={{ version }}"></script>
+<script src="static/js/setup/nav-editor.js?v={{ version }}"></script>
+<script src="static/js/setup/panes.js?v={{ version }}"></script>
+<script src="static/js/setup/label-designer.js?v={{ version }}"></script>
+<script src="static/js/setup/deck-editor.js?v={{ version }}"></script>
+<script src="static/js/setup/cameras-ha.js?v={{ version }}"></script>
+<script src="static/js/setup/devices-updates.js?v={{ version }}"></script>
+<script src="static/js/setup/hardware.js?v={{ version }}"></script>
+<script src="static/js/setup/status.js?v={{ version }}"></script>
+<script src="static/js/setup/resources.js?v={{ version }}"></script>
+<script src="static/js/setup/display.js?v={{ version }}"></script>
+{% if not configured %}
+<script src="static/js/setup/wizard.js?v={{ version }}"></script>
+{% endif %}
+<script src="static/js/setup/menu.js?v={{ version }}"></script>
+<script src="static/js/setup/dirty-guard.js?v={{ version }}"></script>
+{# The screensaver script backs the Display pane's Test button
+   (window.__screensaverTest) and, on a kiosk, the normal idle behaviour. #}
+<div id="screensaver-config" data-minutes="{{ s.screensaver_minutes }}" data-speed="{{ s.screensaver_speed }}" data-ken-burns-speed="{{ s.screensaver_ken_burns_speed }}" data-mode="{{ s.screensaver_mode }}" data-all-clients="{{ 'true' if s.screensaver_all_clients else 'false' }}" hidden></div>
+<script src="static/js/screensaver.js?v={{ version }}"></script>
+{# On-screen keyboard for kiosk touchscreens (FoodAssistant-wo9j): a kiosk in
+   the setup wizard or the settings page needs to type API keys and names. #}
+{% include "_osk.html" %}
+</body>
+</html>
