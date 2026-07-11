@@ -1,0 +1,704 @@
+{% from "setup/_macros.html" import info, secret_input, extra_keys, ai_model_field, satellite_keys, upstream_cards, recipe_connection_cards, ds_toggle with context %}
+{# On the attached kiosk display, steer the user to finish setup from a phone or
+   computer instead of typing the whole wizard on a touchscreen (cssj). Shown
+   only when the page is opened in kiosk mode; a link reveals the on-screen
+   wizard for anyone who would rather continue here. #}
+{% if kiosk and setup_phone_url %}
+<div class="wiz-wrap" id="kiosk-setup-hint">
+  <div class="wiz-card text-center">
+    <div class="wiz-card-title"><i class="bi bi-phone text-primary me-2"></i>Finish setup from your phone or computer</div>
+    <p class="wiz-card-sub mb-4">First-time setup is easiest on a device with a keyboard. On a phone or computer
+      that is on the same network, open the address below, or scan this code.</p>
+    <img src="ui/qr?url={{ setup_phone_url | urlencode }}" alt="Setup QR code"
+         class="img-fluid mb-3" style="max-width: 240px; background:#fff; padding:10px; border-radius:6px;">
+    <div class="mb-4"><code class="user-select-all fs-6">{{ setup_phone_url }}</code></div>
+    <button type="button" class="btn btn-link btn-sm text-secondary" onclick="showKioskWizard()">
+      Continue on this screen instead
+    </button>
+  </div>
+</div>
+{% endif %}
+
+<div class="wiz-wrap{% if kiosk and setup_phone_url %} d-none{% endif %}" id="wizard-root">
+
+  <!-- Header -->
+  <div class="d-flex align-items-center gap-3 mb-3">
+    <div class="logo d-flex align-items-center"><img src="static/icons/logo-mark.png" alt="" style="height:34px;width:auto" class="me-2">{{ app_name }}</div>
+    <span class="badge bg-secondary">Setup</span>
+  </div>
+
+  <!-- Progress indicator -->
+  <div class="wiz-progress" id="wiz-progress" aria-label="Setup progress">
+    <div class="wiz-step-dot"><div class="wiz-step-num active" id="dot-1">1</div><div class="wiz-step-label">Welcome</div></div>
+    <div class="wiz-connector" id="con-1-2"></div>
+    <div class="wiz-step-dot"><div class="wiz-step-num" id="dot-2">2</div><div class="wiz-step-label">Security</div></div>
+    <div class="wiz-connector" id="con-2-3"></div>
+    <div class="wiz-step-dot"><div class="wiz-step-num" id="dot-3">3</div><div class="wiz-step-label">Hardware</div></div>
+    <div class="wiz-connector" id="con-3-4"></div>
+    <div class="wiz-step-dot"><div class="wiz-step-num" id="dot-4">4</div><div class="wiz-step-label">Grocy</div></div>
+    <div class="wiz-connector" id="con-4-5"></div>
+    <div class="wiz-step-dot"><div class="wiz-step-num" id="dot-5">5</div><div class="wiz-step-label">AI</div></div>
+    <div class="wiz-connector" id="con-5-6"></div>
+    <div class="wiz-step-dot"><div class="wiz-step-num" id="dot-6">6</div><div class="wiz-step-label">Optional</div></div>
+    <div class="wiz-connector" id="con-6-7"></div>
+    <div class="wiz-step-dot"><div class="wiz-step-num" id="dot-7">7</div><div class="wiz-step-label">Done</div></div>
+  </div>
+
+  <!-- Step 1: Welcome / deployment mode -->
+  <div class="wiz-card" id="wiz-step-1">
+    <div class="wiz-card-title"><i class="bi bi-house-door text-primary me-2"></i>Welcome to {{ app_name }}</div>
+    <div class="wiz-card-sub">
+      Let's get you set up in a few minutes. First, how is this device being used?
+      {% if is_pi and board_model %}<span class="badge bg-success ms-1"><i class="bi bi-cpu me-1"></i>{{ board_model }}</span>{% endif %}
+    </div>
+
+    <div class="row g-3 mb-3">
+      {% for key, m in deployment_modes.items() %}
+      <div class="col-sm-6">
+        <div class="install-card{{ ' selected' if key == current_mode else '' }}" id="mode-{{ key }}" onclick="selectInstallMode('{{ key }}')">
+          {% if key == 'server' %}
+          <div class="icon text-info"><i class="bi bi-server"></i></div>
+          <div class="label">Server hosted</div>
+          <div class="desc">Docker on a PC, NAS, or cloud VM. Connects to Grocy running on the same server or elsewhere on your network.</div>
+          {% elif key == 'pi_hosted' %}
+          <div class="icon text-success"><i class="bi bi-house-gear"></i></div>
+          <div class="label">Pi Hosted</div>
+          <div class="desc">Everything runs on this Pi: Pantry Raider and Grocy. Works with or without a screen: plug a display in any time to turn it into a kiosk.</div>
+          {% elif key == 'pi_remote' %}
+          <div class="icon text-warning"><i class="bi bi-dpad"></i></div>
+          <div class="label">Pi Remote</div>
+          <div class="desc">A control surface only. This device drives a Stream Deck and/or kiosk pointed at a Pantry Raider server already running elsewhere on your network. Runs on a Pi 3.</div>
+          {% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+
+    <!-- Pi Remote: collect and test the server URL inline -->
+    <div class="section-card mb-3 d-none" id="wiz-remote-panel">
+      <div class="mb-2">
+        <label class="form-label">Main server URL <span class="badge bg-danger badge-req ms-1">Required</span></label>
+        <div class="input-group">
+          <input type="url" class="form-control" id="remote_server_url"
+                 placeholder="http://192.168.1.50:9284" value="{{ s.remote_server_url }}">
+          <button class="btn btn-outline-secondary btn-sm" type="button"
+                  onclick="scanLanForServer('remote_server_url', 'wiz-scan-result')">
+            <i class="bi bi-search me-1"></i>Scan LAN
+          </button>
+          <button class="btn btn-outline-info btn-sm" type="button" id="wiz-pair-btn"
+                  onclick="requestServerAccess()">
+            <i class="bi bi-key me-1"></i>Request access
+          </button>
+        </div>
+        <div class="form-text">Address of the main Pantry Raider server, no trailing slash.</div>
+        <div id="wiz-scan-result" class="small mt-1"></div>
+        <div id="wiz-pairing-result" class="small mt-1"></div>
+      </div>
+      <div class="mb-2">
+        <label class="form-label">Server API key <span class="badge bg-danger badge-req ms-1">Required</span></label>
+        {{ secret_input('upstream_api_key', 'API key from the main server') }}
+        <div class="form-text">Press Request access to get a key from the server with a confirmation code, or create one yourself on the server under Settings &rarr; Security &amp; Access and paste it here.</div>
+      </div>
+      <button class="btn btn-outline-warning btn-sm" type="button" onclick="syncFromUpstream()">
+        <i class="bi bi-arrow-repeat me-1"></i>Sync from server
+      </button>
+      <div class="test-result" id="upstream-result"></div>
+      <div class="alert alert-secondary py-2 small mt-2 mb-0">
+        <i class="bi bi-info-circle me-1"></i>This device pulls Grocy, AI keys, and expiry defaults from the main server, so those steps are skipped.
+      </div>
+    </div>
+
+    {% if hosted_unavailable %}
+    <div class="alert alert-warning py-2 small mb-3">
+      <i class="bi bi-exclamation-triangle me-1"></i>Pi Hosted is hidden because this board has too little memory to run the full stack locally. Use Pi Remote to point it at a Pantry Raider server on your network.
+    </div>
+    {% endif %}
+
+    <p class="small text-secondary mb-4" id="wiz-mode-hint">
+      {% if not is_pi %}You can change Grocy and AI details on the next steps.{% endif %}
+    </p>
+
+    <div class="d-flex justify-content-end">
+      <button class="btn btn-primary" onclick="wizNext()" id="wiz-next-1">
+        Next <i class="bi bi-arrow-right ms-1"></i>
+      </button>
+    </div>
+  </div>
+
+  <!-- Step 2: Security -->
+  <div class="wiz-card d-none" id="wiz-step-2">
+    <div class="wiz-card-title"><i class="bi bi-shield-lock text-success me-2"></i>Security</div>
+    <div class="wiz-card-sub" id="wiz-sec-sub">Set a password to protect your food inventory. Required before setup completes.</div>
+
+    <div class="section-card mb-3">
+      <div class="form-check form-switch mb-3">
+        <input class="form-check-input" type="checkbox" role="switch" id="auth_required"
+               checked onchange="toggleAuthRequired()">
+        <label class="form-check-label" for="auth_required" id="auth_required_label">Require authentication to use the app</label>
+      </div>
+      <div class="mb-3">
+        <label class="form-label">UI Password <span class="badge bg-danger badge-req ms-1" id="wiz-pw-badge">Required</span></label>
+        {{ secret_input('auth_password', 'Choose a password for the web UI') }}
+        <div class="form-text" id="auth-pw-hint">Required while authentication is on. Setup will not complete without it.</div>
+      </div>
+      <div class="mb-3" id="wiz-pw-confirm-row">
+        <label class="form-label" for="auth_password_confirm">Confirm password</label>
+        <input type="password" class="form-control" id="auth_password_confirm"
+               placeholder="Re-enter the password" autocomplete="new-password"
+               oninput="wizCheckPasswordMatch()">
+        <div class="form-text text-danger d-none" id="wiz-pw-mismatch">
+          <i class="bi bi-exclamation-triangle me-1"></i>The passwords do not match.
+        </div>
+      </div>
+      {# The primary API key is not set during setup any more (FoodAssistant-9mu5):
+         there is no reason to make a new user save a master key. When a headless
+         client or satellite needs access, create a named key later in
+         Settings, Security & Access. #}
+      <div class="mb-3 d-none" id="wiz-pin-row" style="max-width: 240px;">
+        <label class="form-label">Kiosk PIN <span class="text-secondary small">(optional, digits only)</span></label>
+        {{ secret_input('kiosk_pin', 'e.g. 1234') }}
+        <div class="form-text">A lightweight lock for this device's touchscreen. Leave blank for none.</div>
+      </div>
+    </div>
+
+    <div class="d-flex justify-content-between">
+      <button class="btn btn-outline-secondary" onclick="wizBack()"><i class="bi bi-arrow-left me-1"></i>Back</button>
+      <button class="btn btn-primary" onclick="wizNext()">Next <i class="bi bi-arrow-right ms-1"></i></button>
+    </div>
+  </div>
+
+  <!-- Step 3: Hardware -->
+  <div class="wiz-card d-none" id="wiz-step-3">
+    <div class="wiz-card-title"><i class="bi bi-cpu text-info me-2"></i>Hardware</div>
+    <div class="wiz-card-sub">Tell Pantry Raider what's connected so it can configure the display and Stream Deck correctly. Skip anything you don't have.</div>
+
+    {% if hardware_presets %}
+    <div class="section-card mb-3">
+      <div class="section-title"><i class="bi bi-magic me-1"></i>Start from a preset</div>
+      <p class="text-secondary small mb-2">Building one of our known setups? Pick it to fill in the rotation, screen size, display, and Stream Deck in one step. You can still adjust anything below afterward.</p>
+      <div class="d-flex flex-wrap gap-2 align-items-center">
+        <select class="form-select form-select-sm w-auto" id="hw_preset_wiz">
+          <option value="">Choose a preset...</option>
+          {% for pid, preset in hardware_presets.items() %}
+          <option value="{{ pid }}">{{ preset.label }}</option>
+          {% endfor %}
+        </select>
+        <button type="button" class="btn btn-outline-info btn-sm" onclick="applyHardwarePreset('hw_preset_wiz')">
+          <i class="bi bi-check-lg me-1"></i>Apply
+        </button>
+        <span class="test-result hw-preset-result ms-1"></span>
+      </div>
+    </div>
+    {% endif %}
+
+    <div class="section-card mb-3">
+      <div class="section-title"><i class="bi bi-hdd-stack me-1"></i>Stream Deck</div>
+      <div class="form-check form-switch mb-2">
+        <input class="form-check-input" type="checkbox" role="switch" id="has_streamdeck"
+               {{ 'checked' if s.has_streamdeck else '' }}
+               onchange="toggleStreamDeckOptions()">
+        <label class="form-check-label" for="has_streamdeck">Stream Deck connected to this device</label>
+      </div>
+      <div id="wiz-streamdeck-opts" class="{{ '' if s.has_streamdeck else 'd-none' }}">
+        <label class="form-label mt-2">Key count <span class="text-secondary small">(which model?)</span></label>
+        <select class="form-select form-select-sm w-auto" id="streamdeck_key_count">
+          <option value="6" {{ 'selected' if s.streamdeck_key_count == 6 else '' }}>6 keys (Stream Deck Mini)</option>
+          <option value="15" {{ 'selected' if (s.streamdeck_key_count == 15 or not s.streamdeck_key_count) else '' }}>15 keys (Stream Deck MK.2 / Classic)</option>
+          <option value="32" {{ 'selected' if s.streamdeck_key_count == 32 else '' }}>32 keys (Stream Deck XL)</option>
+        </select>
+        <div class="form-text sd-autodetect-hint text-success d-none"><i class="bi bi-check-circle me-1"></i>Auto-detected from the attached deck.</div>
+        <div class="form-text">Used to fill the key layout correctly.</div>
+      </div>
+      {% if is_pi %}
+      <div id="wiz-hwdetect-streamdeck-hint" class="d-none mt-2">
+        <div class="text-warning small mb-1"><i class="bi bi-exclamation-circle me-1"></i>Stream Deck detected, but its service is not set up.</div>
+        <button type="button" class="btn btn-outline-info btn-sm" onclick="_installHw('streamdeck', this, 'wiz-hwdetect-streamdeck-result')">
+          <i class="bi bi-grid-3x3-gap me-1"></i>Enable Stream Deck
+        </button>
+        <div class="test-result mt-1" id="wiz-hwdetect-streamdeck-result"></div>
+      </div>
+      {% endif %}
+    </div>
+
+    <div class="section-card mb-3">
+      <div class="section-title"><i class="bi bi-display me-1"></i>Display</div>
+      <div class="form-check form-switch mb-2">
+        <input class="form-check-input" type="checkbox" role="switch" id="wiz_has_display"
+               {{ 'checked' if (s.ui_scale != "normal" or s.display_rotation != 0 or s.display_touch) else '' }}
+               onchange="toggleDisplayOptions()">
+        <label class="form-check-label" for="wiz_has_display">Display connected to this device</label>
+      </div>
+      <div id="wiz-display-opts" class="{{ '' if (s.ui_scale != 'normal' or s.display_rotation != 0 or s.display_touch) else 'd-none' }}">
+        <div class="row g-3 mb-2">
+          <div class="col-sm-6">
+            <label class="form-label">Screen size</label>
+            <select class="form-select form-select-sm" id="ui_scale_wiz" onchange="syncScale()">
+              {% for key, sc in ui_scales.items() %}
+              <option value="{{ key }}" {{ 'selected' if s.ui_scale == key else '' }}>{{ sc.label }}</option>
+              {% endfor %}
+            </select>
+            <div class="form-text">Controls the zoom level in kiosk mode.</div>
+          </div>
+          <div class="col-sm-6">
+            <label class="form-label">Orientation</label>
+            <select class="form-select form-select-sm" id="display_rotation_wiz" onchange="syncRotation()">
+              {% for deg in display_rotations %}
+              <option value="{{ deg }}" {{ 'selected' if s.display_rotation == deg else '' }}>{{ deg }}&deg;{{ ' (normal)' if deg == 0 else '' }}</option>
+              {% endfor %}
+            </select>
+            <div class="form-text">Rotate if the display is mounted sideways or upside-down.</div>
+          </div>
+        </div>
+        <div class="mb-2">
+          <label class="form-label">Display type{{ info('A resistive Waveshare 3.5-4 inch HDMI LCD is the ADS7846 SPI option; a Waveshare HDMI HAT with a USB touch cable is the USB touch option. The touch overlay is installed at provision, or later from Settings, Display & Sleep, Apply touch driver.') }}</label>
+          <select class="form-select form-select-sm" id="display_type_wiz" onchange="syncDisplayType()">
+            {% for key, dt in display_types.items() %}
+            <option value="{{ key }}" {{ 'selected' if (s.display_type or 'generic') == key else '' }}>{{ dt.label }}</option>
+            {% endfor %}
+          </select>
+          <div class="form-text">Pick the type that matches your panel.</div>
+        </div>
+        <div class="form-check form-switch">
+          <input class="form-check-input" type="checkbox" role="switch" id="display_touch"
+                 {{ 'checked' if s.display_touch else '' }}>
+          <label class="form-check-label" for="display_touch">Touch-compatible display</label>
+        </div>
+      </div>
+      {% if is_pi %}
+      <div id="wiz-hwdetect-kiosk-hint" class="d-none mt-2">
+        <div class="text-warning small mb-1"><i class="bi bi-exclamation-circle me-1"></i>Display detected, but the kiosk is not set up.</div>
+        <button type="button" class="btn btn-outline-info btn-sm" onclick="_installHw('kiosk', this, 'wiz-hwdetect-kiosk-result')">
+          <i class="bi bi-display me-1"></i>Enable kiosk
+        </button>
+        <div class="test-result mt-1" id="wiz-hwdetect-kiosk-result"></div>
+      </div>
+      {% endif %}
+    </div>
+
+    <div class="d-flex justify-content-between">
+      <button class="btn btn-outline-secondary" onclick="wizBack()"><i class="bi bi-arrow-left me-1"></i>Back</button>
+      <button class="btn btn-primary" onclick="wizNext()">Next <i class="bi bi-arrow-right ms-1"></i></button>
+    </div>
+  </div>
+
+  <!-- Step 4: Grocy -->
+  <div class="wiz-card d-none" id="wiz-step-4">
+    <div class="wiz-card-title"><i class="bi bi-fridge text-info me-2"></i>Inventory</div>
+    <div class="wiz-card-sub">Pantry Raider keeps your stock, locations, and history in its built-in inventory. It sets itself up for you, nothing to configure here.</div>
+
+    <div class="section-card mb-3">
+      {# Grocy is the inventory engine, configured automatically by the
+         background first-run task (services/first_run.startup_first_run). The
+         customer is not sent to Grocy: we show status here, keep the manual
+         connect fields (ids unchanged so validation/save still work) tucked in
+         an Advanced disclosure for the rare server-with-external-Grocy case, and
+         the generated Grocy admin sign-in is revealable later under Settings,
+         Inventory (FoodAssistant-f8kp). #}
+      {% if has.grocy_api_key %}
+      <div class="alert alert-success py-2 small mb-0">
+        <i class="bi bi-check-circle me-1"></i>Your inventory is set up and ready.
+      </div>
+      {% else %}
+      <div class="alert alert-info py-2 small mb-2" id="wiz-grocy-auto-note">
+        <div id="grocy-install-result">
+          <span class="spinner-border spinner-border-sm me-1"></span>Getting your inventory ready&hellip;
+        </div>
+        <div class="form-text mt-1">This is automatic. It normally finished during installation; if a slow first boot is still wrapping up, you can continue and it will be ready in a moment, nothing to press here.</div>
+        <div class="test-result mt-1 d-none" id="grocy-result"></div>
+        <pre class="install-log d-none bg-body-tertiary border rounded p-2 small mt-2 mb-0" data-log="grocy"></pre>
+      </div>
+      {% endif %}
+
+      <details class="mt-3">
+        <summary class="small text-secondary">Advanced: connect a different inventory server</summary>
+        <div class="mt-2">
+          <div class="mb-3">
+            <label class="form-label">Grocy URL</label>
+            <input type="url" class="form-control" id="grocy_base_url"
+                   placeholder="http://192.168.1.10:9383"
+                   value="{{ s.grocy_base_url if (s.grocy_base_url and s.grocy_base_url != 'http://grocy:80') else suggested_grocy_url }}">
+            <div class="form-text">Full URL to a Grocy you run yourself, no trailing slash. Leave as-is to use the built-in one.</div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Grocy API Key</label>
+            {{ secret_input('grocy_api_key', 'From your own Grocy: Manage API keys') }}
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Grocy Public URL <span class="text-secondary small">(optional, reverse proxy)</span></label>
+            <input type="url" class="form-control" id="grocy_public_url"
+                   placeholder="https://grocy.yourdomain.com"
+                   value="{{ s.grocy_public_url }}">
+          </div>
+          <button class="btn btn-outline-secondary btn-sm" onclick="testGrocy()">
+            <i class="bi bi-plug me-1"></i>Test Connection
+          </button>
+        </div>
+      </details>
+    </div>
+
+    <div class="d-flex justify-content-between">
+      <button class="btn btn-outline-secondary" onclick="wizBack()"><i class="bi bi-arrow-left me-1"></i>Back</button>
+      <button class="btn btn-primary" onclick="wizNext()">Next <i class="bi bi-arrow-right ms-1"></i></button>
+    </div>
+  </div>
+
+  <!-- Step 5: AI Provider -->
+  <div class="wiz-card d-none" id="wiz-step-5">
+    <div class="wiz-card-title"><i class="bi bi-magic text-warning me-2"></i>AI Provider</div>
+    <div class="wiz-card-sub">Analyzes food photos, receipts, and barcodes. Optional: you can add this later.</div>
+
+    <div class="section-card mb-3">
+      <div class="mb-3">
+        <label class="form-label">Provider{{ info('None turns off photo import, receipt scanning, barcode enrichment, and recipe suggestions; inventory and manual entry keep working. You can add a provider any time from Settings.') }}</label>
+        <select class="form-select" id="vision_provider" onchange="showProvider(); wizUpdateAiKeyVisibility()">
+          {# Forager first, and the default until an AI provider works: sign in
+             with the account and scanning just works, no keys to manage. #}
+          <option value="cloud" {{ 'selected' if s.vision_provider == 'cloud' or not ai_configured else '' }}>Forager (sign in, easiest)</option>
+          <option value="gemini" {{ 'selected' if s.vision_provider == 'gemini' and ai_configured else '' }}>Google Gemini (cloud, free key)</option>
+          <option value="openai" {{ 'selected' if s.vision_provider == 'openai' else '' }}>OpenAI (cloud)</option>
+          <option value="anthropic" {{ 'selected' if s.vision_provider == 'anthropic' else '' }}>Anthropic Claude (cloud)</option>
+          <option value="ollama" {{ 'selected' if s.vision_provider == 'ollama' else '' }}>Ollama (local, no API key needed)</option>
+          <option value="none">None (skip AI for now)</option>
+        </select>
+      </div>
+
+      <div id="wiz-ai-none-note" class="alert alert-secondary py-2 small d-none">
+        <i class="bi bi-info-circle me-1"></i>AI features (photo import, barcode enrichment, recipe suggestions) will be unavailable.
+        You can add a provider later from Settings.
+      </div>
+
+      <!-- Forager fields: sign in with the account made on the Forager website
+           and scanning just works, no API keys to manage. -->
+      <div class="provider-fields d-none" id="fields-cloud">
+        <p class="text-secondary small">Sign in with your Forager account and scanning just works:
+          photos, receipts, and barcodes are read for you, with nothing else to set up.</p>
+        {% if s.cloud_instance_token %}
+        <div class="alert alert-success py-2 small mb-0">
+          <i class="bi bi-check-circle me-1"></i>Signed in. Scanning is ready.
+        </div>
+        {% else %}
+        <div style="max-width:420px">
+          <div class="mb-2">
+            <label class="form-label small mb-1" for="wiz_cloud_email">Email</label>
+            <input type="email" class="form-control form-control-sm" id="wiz_cloud_email"
+                   placeholder="you@example.com" autocomplete="email" spellcheck="false">
+          </div>
+          <div class="mb-2">
+            <label class="form-label small mb-1" for="wiz_cloud_password">Password</label>
+            <input type="password" class="form-control form-control-sm" id="wiz_cloud_password"
+                   placeholder="Your Forager password" autocomplete="current-password">
+          </div>
+          <div class="mb-2">
+            <label class="form-label small mb-1" for="wiz_cloud_kitchen_name">Kitchen name <span class="text-secondary">(optional)</span></label>
+            <input type="text" class="form-control form-control-sm" id="wiz_cloud_kitchen_name"
+                   value="{{ suggested_kitchen_name }}" placeholder="e.g. Home kitchen"
+                   autocomplete="off" spellcheck="false" oninput="sanitizeKitchenName(this)">
+            <div class="form-text">How this device appears on your Forager account. Letters, numbers, and dashes; it is used in your kitchen's web address.</div>
+          </div>
+          {# Shown only when the account has two-factor sign-in on and Forager
+             asks for a code (cloudSignin reveals it). #}
+          <div class="mb-2 d-none" id="wiz_cloud_totp_wrap">
+            <label class="form-label small mb-1" for="wiz_cloud_totp">Code from your authenticator app</label>
+            <input type="text" class="form-control form-control-sm" id="wiz_cloud_totp"
+                   inputmode="text" autocomplete="one-time-code" spellcheck="false"
+                   placeholder="6-digit code, or a recovery code">
+            <div class="form-text">Your Forager account uses two-factor sign-in. Enter the current code from your authenticator app, or one of your recovery codes.</div>
+          </div>
+          <button type="button" class="btn btn-info btn-sm" onclick="cloudSignin(this, 'wiz_')">
+            <i class="bi bi-box-arrow-in-right me-1"></i>Sign in and connect
+          </button>
+          <div class="form-text mt-2">New to Forager?
+            <a href="{{ cloud_signup_url }}" target="_blank" rel="noopener">Create an account</a>,
+            then come back here to sign in.</div>
+          {# Revealed by _initCloudMeta() only when Forager is reachable and
+             offers Google sign-in; otherwise it stays hidden, no error. #}
+          <button type="button" class="btn btn-outline-light btn-sm ms-1 d-none" id="wiz_cloud-google-btn"
+                  onclick="cloudGoogleStart('wiz_')">
+            <i class="bi bi-google me-1"></i>Continue with Google
+          </button>
+          <div class="form-text">Your password goes to Forager only, to sign you in. It is never
+            saved on this device.</div>
+          <div class="test-result mt-2" id="wiz_cloud-signin-result"></div>
+        </div>
+        {% endif %}
+      </div>
+
+      <!-- Gemini fields -->
+      <div class="provider-fields" id="fields-gemini">
+        <div class="mb-3">
+          <label class="form-label">Gemini API Key</label>
+          {{ secret_input('gemini_api_key', 'Free key at aistudio.google.com') }}
+          <div class="form-text"><a href="https://aistudio.google.com/apikey" target="_blank">Get a free key at aistudio.google.com</a></div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Model</label>
+          {{ ai_model_field('gemini', s.gemini_model) }}
+        </div>
+      </div>
+
+      <!-- OpenAI fields -->
+      <div class="provider-fields d-none" id="fields-openai">
+        <div class="mb-3">
+          <label class="form-label">OpenAI API Key</label>
+          {{ secret_input('openai_api_key', 'platform.openai.com → API keys') }}
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Model <span class="text-secondary small">(must be vision-capable)</span></label>
+          {{ ai_model_field('openai', s.openai_model) }}
+        </div>
+      </div>
+
+      <!-- Anthropic fields -->
+      <div class="provider-fields d-none" id="fields-anthropic">
+        <div class="mb-3">
+          <label class="form-label">Anthropic API Key</label>
+          {{ secret_input('anthropic_api_key', 'console.anthropic.com → API Keys') }}
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Model</label>
+          {{ ai_model_field('anthropic', s.anthropic_model) }}
+        </div>
+      </div>
+
+      <!-- Ollama fields -->
+      <div class="provider-fields d-none" id="fields-ollama">
+        <div class="mb-3">
+          <label class="form-label">Ollama URL</label>
+          <input type="url" class="form-control" id="ollama_base_url"
+                 placeholder="http://ollama:11434" value="{{ s.ollama_base_url }}">
+          <div class="form-text">Run with <code>docker compose --profile with-ollama up -d</code>, then pull a vision model.</div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Model</label>
+          {{ ai_model_field('ollama', s.ollama_model) }}
+        </div>
+      </div>
+
+      <div id="wiz-ai-test-row" class="">
+        <button class="btn btn-outline-info btn-sm" onclick="testVision()">
+          <i class="bi bi-plug me-1"></i>Test Connection
+        </button>
+        <div class="test-result" id="vision-result"></div>
+      </div>
+    </div>
+
+    <div class="d-flex justify-content-between">
+      <button class="btn btn-outline-secondary" onclick="wizBack()"><i class="bi bi-arrow-left me-1"></i>Back</button>
+      <button class="btn btn-primary" onclick="wizNext()">Next <i class="bi bi-arrow-right ms-1"></i></button>
+    </div>
+  </div>
+
+  <!-- Step 6: Optional Integrations -->
+  <div class="wiz-card d-none" id="wiz-step-6">
+    <div class="wiz-card-title"><i class="bi bi-puzzle text-secondary me-2"></i>Optional Integrations</div>
+    <div class="wiz-card-sub">Connect a barcode scanner, recipe suggestions, remote access, and more. All optional: add later in Settings.</div>
+
+    <!-- Collapsible barcode scanner section -->
+    <div class="section-card mb-3">
+      <button class="btn btn-link p-0 text-decoration-none d-flex align-items-center gap-2 w-100"
+              type="button" data-bs-toggle="collapse" data-bs-target="#scanner-collapse" aria-expanded="false">
+        <i class="bi bi-upc-scan text-success"></i>
+        <span class="fw-semibold">Barcode Scanner</span>
+        <span class="badge bg-secondary ms-1">Optional</span>
+        <i class="bi bi-chevron-down ms-auto"></i>
+      </button>
+      <div class="collapse mt-3" id="scanner-collapse">
+        <p class="text-secondary small">A USB or Bluetooth scanner plugged into any device (this server, a Pi host, or a Pi Remote) works on the Manage Pantry page automatically, all at the same time, alongside the in-browser camera scanner. This setting is just a hint for which method you reach for first; nothing here turns the others off.</p>
+        <div class="mb-3">
+          <label class="form-label">Scanner type</label>
+          <select class="form-select" id="wiz-scanner_type" onchange="wizScannerTypeChanged()">
+            <option value=""    {{ 'selected' if not s.scanner_type else '' }}>Not set (pick on Manage Pantry page)</option>
+            <option value="usb" {{ 'selected' if s.scanner_type == 'usb' else '' }}>USB / Bluetooth HID (keyboard wedge)</option>
+            <option value="camera" {{ 'selected' if s.scanner_type == 'camera' else '' }}>Camera / built-in scan module</option>
+          </select>
+        </div>
+        <div id="wiz-scanner-usb-hint" class="d-none">
+          <p class="text-secondary small">USB and Bluetooth HID scanners emit barcodes as keystrokes. No drivers needed: plug in and scan.
+            Test below: click the field and scan a barcode.</p>
+          <div class="input-group mb-2">
+            <span class="input-group-text"><i class="bi bi-upc"></i></span>
+            <input type="text" class="form-control font-monospace" id="wiz-scanner-test-input"
+                   placeholder="Scan a barcode here…" autocomplete="off" spellcheck="false"
+                   oninput="wizScannerTestInput(this.value)" onkeydown="if(event.key==='Enter'){wizScannerTestEnter(this.value);this.select();}">
+          </div>
+          <div class="test-result" id="wiz-scanner-test-result"></div>
+          <p class="form-text mt-2">Running a Waveshare scan-engine module on a kiosk? See the
+            <a href="https://docs.pantryraider.app/hardware/waveshare-barcode-scanner/" target="_blank" rel="noopener">hands-free setup codes</a>
+            to make it scan on sight without the button.</p>
+        </div>
+        <div id="wiz-scanner-camera-hint" class="d-none">
+          <p class="text-secondary small">Camera scanning runs in the browser on the Manage Pantry page, no server-side setup needed.
+            Make sure your browser has camera permission for this site.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Collapsible External Recipes section -->
+    <div class="section-card mb-3">
+      <button class="btn btn-link p-0 text-decoration-none d-flex align-items-center gap-2 w-100"
+              type="button" data-bs-toggle="collapse" data-bs-target="#recipes-collapse" aria-expanded="false">
+        <i class="bi bi-globe2 text-info"></i>
+        <span class="fw-semibold">External Recipe Suggestions</span>
+        <span class="badge bg-secondary ms-1">Optional</span>
+        <i class="bi bi-chevron-down ms-auto"></i>
+      </button>
+      <div class="collapse mt-3" id="recipes-collapse">
+        <p class="text-secondary small">Powers the "What can I cook?" page with web recipes.
+          TheMealDB is free with no key. Spoonacular needs a free API key but has a much larger catalog.
+          You can always change this in Settings.</p>
+        <div class="mb-3">
+          <label class="form-label">Source</label>
+          <select class="form-select" id="recipe_source_wiz" onchange="showRecipeSourceWiz()">
+            <option value="themealdb" {{ 'selected' if s.recipe_source not in ('spoonacular','off') else '' }}>TheMealDB (free, no key needed)</option>
+            <option value="spoonacular" {{ 'selected' if s.recipe_source == 'spoonacular' else '' }}>Spoonacular (free API key required)</option>
+            <option value="off" {{ 'selected' if s.recipe_source == 'off' else '' }}>Off</option>
+          </select>
+        </div>
+        <div id="wiz-source-spoonacular" class="{{ '' if s.recipe_source == 'spoonacular' else 'd-none' }}">
+          <div class="mb-2">
+            <label class="form-label">Spoonacular API Key</label>
+            <input type="password" class="form-control font-monospace" id="spoonacular_api_key_wiz"
+                   placeholder="Your Spoonacular API key"
+                   value="{{ '***' if s.spoonacular_api_key else '' }}"
+                   autocomplete="new-password">
+            <div class="form-text">Get a free key at <a href="https://spoonacular.com/food-api" target="_blank">spoonacular.com/food-api</a>.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Collapsible Remote Access section. Two ways to reach your kitchen from
+         outside your home: Forager (included with a plan, ready-made web
+         address, turned on right here) or Cloudflare Tunnel (free, do-it-
+         yourself, finished in Settings). The Forager enable reuses the same
+         path and gates as the settings pane (tunnelEnable + POST
+         /setup/tunnel/enable). -->
+    <div class="section-card mb-3">
+      <button class="btn btn-link p-0 text-decoration-none d-flex align-items-center gap-2 w-100"
+              type="button" data-bs-toggle="collapse" data-bs-target="#tunnel-wiz-collapse"
+              aria-expanded="false" onclick="wizForagerRemoteGate()">
+        <i class="bi bi-cloud-arrow-up text-warning"></i>
+        <span class="fw-semibold">Remote Access</span>
+        <span class="badge bg-secondary ms-1">Optional</span>
+        <i class="bi bi-chevron-down ms-auto"></i>
+      </button>
+      <div class="collapse mt-3" id="tunnel-wiz-collapse">
+        <p class="text-secondary small">Reach your kitchen from anywhere, not just on your home
+          network, without opening ports on your router. Pick the way that suits you.</p>
+
+        <div class="section-card mb-2">
+          <div class="section-title"><i class="bi bi-cloud-check text-info me-1"></i>Forager
+            <span class="badge bg-info ms-1">Included with a plan</span></div>
+          <p class="text-secondary small mb-2">Turn it on and your kitchen gets a ready-made web
+            address you can share, with nothing to set up.</p>
+          <div id="wiz-forager-remote-ready" class="d-none">
+            <button type="button" class="btn btn-outline-info btn-sm" id="wiz-tunnel-enable-btn"
+                    onclick="tunnelEnable(this, 'wiz-tunnel-result', wizRefreshTunnel)">
+              <i class="bi bi-globe2 me-1"></i>Turn on remote access
+            </button>
+            <div class="small mt-2" id="wiz-tunnel-status"></div>
+          </div>
+          <div id="wiz-forager-remote-gate" class="alert alert-secondary py-2 small mb-0 d-none">
+            <i class="bi bi-info-circle me-1"></i><span id="wiz-forager-remote-gate-msg"></span>
+          </div>
+          <div class="test-result mt-1" id="wiz-tunnel-result"></div>
+        </div>
+
+        <div class="section-card mb-0">
+          <div class="section-title"><i class="bi bi-cloud me-1 text-warning"></i>Cloudflare Tunnel
+            <span class="badge bg-success ms-1">Free</span></div>
+          <p class="text-secondary small mb-2">A free do-it-yourself option: run a small helper on
+            this device and paste a Cloudflare setup code. You finish this one in Settings after the
+            wizard, and remote access starts on its own.</p>
+          <a class="btn btn-sm btn-outline-secondary" href="setup#pane-forager" target="_self">
+            <i class="bi bi-box-arrow-up-right me-1"></i>Set up Cloudflare in Settings
+          </a>
+        </div>
+      </div>
+    </div>
+
+    <!-- Mealie lives under an Advanced disclosure below the cards (matching
+         the Grocy step's style): recipes are built into Pantry Raider, so a
+         normal first run never needs to see this. It also stays available in
+         Settings later. -->
+    <details class="mb-3">
+      <summary class="small text-secondary">Advanced: connect a Mealie you already run</summary>
+      <div class="mt-2" id="mealie-collapse">
+        <p class="text-secondary small">Recipes, the meal plan, and the shopping list are built into Pantry Raider, so most kitchens need nothing here. Already use Mealie? Connect it and your Mealie library keeps working; you can also copy it into Pantry Raider later from Settings.</p>
+        {% if mealie_action == 'running' %}
+        <div class="d-flex align-items-center gap-2 flex-wrap mb-2">
+          <span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>Mealie is running on this device</span>
+          {% if not has.mealie_api_key %}
+          <button class="btn btn-outline-info btn-sm" type="button" onclick="firstRunProvision('mealie', this, 'mealie-start-result', val('mealie_base_url'), false)"
+                  title="If Mealie is still on its stock sign-in, Pantry Raider signs in, creates its own API token, secures the account, and adds a Groceries shopping list.">
+            <i class="bi bi-stars me-1"></i>Set up for me
+          </button>
+          {% endif %}
+          <a class="btn btn-outline-secondary btn-sm" id="wiz-mealie-open" href="{{ mealie_browser_link or suggested_mealie_url or '#' }}" target="_blank">
+            <i class="bi bi-box-arrow-up-right me-1"></i>Open Mealie
+          </a>
+        </div>
+        <div class="test-result mb-2" id="mealie-start-result"></div>
+        <pre class="install-log d-none bg-body-tertiary border rounded p-2 small mb-2" data-log="mealie"></pre>
+        <p class="text-secondary small" id="mealie-token-hint">Open Mealie in a new tab, sign in as admin, go to User Profile, and create an API token. Paste the token below.</p>
+        {% endif %}
+        <div class="mb-3">
+          <label class="form-label">Mealie URL <span class="text-secondary small">(internal, for API calls)</span></label>
+          <div class="input-group">
+            <input type="url" class="form-control" id="mealie_base_url"
+                   placeholder="http://192.168.1.10:9285"
+                   value="{{ s.mealie_base_url or suggested_mealie_internal_url or suggested_mealie_url }}">
+            <a class="btn btn-outline-secondary" id="mealie-url-open" href="{{ mealie_browser_link or suggested_mealie_url or '#' }}" target="_blank" title="Open Mealie in new tab">
+              <i class="bi bi-box-arrow-up-right"></i>
+            </a>
+          </div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Mealie Public URL <span class="text-secondary small">(optional, for browser links)</span></label>
+          <input type="url" class="form-control" id="mealie_public_url"
+                 placeholder="https://mealie.example.com" value="{{ s.mealie_public_url }}">
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Mealie API Token</label>
+          {{ secret_input('mealie_api_key', 'Mealie: User Profile > API Tokens') }}
+        </div>
+        <button class="btn btn-outline-info btn-sm" onclick="testMealie()">
+          <i class="bi bi-plug me-1"></i>Test Connection
+        </button>
+        <div class="test-result" id="mealie-result"></div>
+      </div>
+    </details>
+
+    <div class="d-flex justify-content-between">
+      <button class="btn btn-outline-secondary" onclick="wizBack()"><i class="bi bi-arrow-left me-1"></i>Back</button>
+      <div class="d-flex gap-2">
+        <button class="btn btn-primary" onclick="wizNext()">Next <i class="bi bi-arrow-right ms-1"></i></button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Step 7: Done -->
+  <div class="wiz-card d-none" id="wiz-step-7">
+    <div class="wiz-card-title"><i class="bi bi-check-circle-fill text-success me-2"></i>Ready to Go</div>
+    <div class="wiz-card-sub">Here's what you've configured. Click the button below to save and start using Pantry Raider.</div>
+
+    <!-- Summary list, built by JS -->
+    <div id="wiz-summary" class="mb-4"></div>
+
+    <!-- Validation errors (shown if something required is missing) -->
+    <div id="wiz-errors" class="alert alert-warning d-none mb-3">
+      <strong><i class="bi bi-exclamation-triangle-fill me-1"></i>A few things still need attention:</strong>
+      <ul class="mb-0 mt-1 ps-3 small" id="wiz-error-list"></ul>
+    </div>
+
+    <div id="wiz-save-result" class="mb-3"></div>
+
+    <div class="d-flex flex-wrap justify-content-between gap-2">
+      <button class="btn btn-outline-secondary" onclick="wizBack()"><i class="bi bi-arrow-left me-1"></i>Back</button>
+      <button class="btn btn-success btn-lg px-4" onclick="wizSaveAll()" id="wiz-finish-btn">
+        <i class="bi bi-rocket-takeoff me-2"></i>Start using Pantry Raider
+      </button>
+    </div>
+  </div>
+
+</div><!-- /wiz-wrap -->
