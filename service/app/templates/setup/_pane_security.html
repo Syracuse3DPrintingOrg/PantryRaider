@@ -1,0 +1,205 @@
+{% from "setup/_macros.html" import info, secret_input, panel, srow, pill, toggle with context %}
+<!-- Security (FoodAssistant-jcnh): rebuilt to the dense panel/row pattern.
+             Authentication and API keys are the two panels; the change-password
+             flow is gated behind a Change action instead of always-visible
+             paired fields, and the API keys read as a proper table. Field ids
+             (auth_required, auth_password, current_password, viewer_password,
+             api_key, and the satellite-key inputs) are unchanged so the save
+             path and its current-password check keep working. -->
+        <div class="tab-pane fade" id="pane-security">
+          <p class="pane-intro">Who can reach the app and how login is protected.</p>
+
+          {% call panel('Authentication',
+                        'How people sign in to this app.',
+                        pill_text=('On' if s.auth_required else 'Off'),
+                        pill_kind=('good' if s.auth_required else 'neutral'),
+                        pill_id='auth-state-pill') %}
+            {% call srow('Require a password',
+                         'Ask for a password to use the app.',
+                         'A UI password is required by default. Turn this off only when an outer layer already gates access, such as a reverse proxy (Pangolin, Authelia, Cloudflare Access) or the Home Assistant add-on, which authenticates through HA itself.') %}
+              {{ toggle('auth_required', checked=s.auth_required, onchange='toggleAuthRequired()', label='Require a password to use the app') }}
+            {% endcall %}
+
+            {% call srow('Password',
+                         'The main login password.',
+                         'Saved passwords are never sent back to the browser. Changing or removing a set password needs the current one, so an open settings page cannot lock you out.') %}
+              {# The device password is separate from Forager sign-in and works
+                 offline; keep it as the fallback (FoodAssistant-vg1f). #}
+              {% if s.forager_only_login_risk() %}
+              <div class="alert alert-warning py-2 small mb-2" style="max-width:420px">
+                <i class="bi bi-exclamation-triangle me-1"></i>This device is signed in with
+                Forager but has no device password. Set one below so a Forager outage cannot
+                lock you out. Your device password is separate from Forager and always works
+                offline.
+              </div>
+              {% elif s.cloud_linked() %}
+              <div class="form-text mb-2" style="max-width:420px">Separate from Forager sign-in:
+                your device password always works, even if the Forager server is offline. Keep it
+                set and remembered as your fallback.</div>
+              {% endif %}
+              <div class="set-row-actions">
+                {% if s.auth_password %}{{ pill('Set', 'good') }}
+                {% elif s.auth_required %}{{ pill('Required', 'pink') }}
+                {% else %}{{ pill('Not set', 'neutral') }}{% endif %}
+                <button class="btn btn-outline-secondary btn-sm" type="button"
+                        onclick="revealSecretChange('change-password-block', this)">
+                  <i class="bi bi-pencil me-1"></i>{{ 'Change' if s.auth_password else 'Set password' }}
+                </button>
+              </div>
+              <div id="change-password-block" class="d-none mt-2" style="max-width:360px">
+                {% if s.auth_password %}
+                <label class="form-label small mb-1" for="current_password">Current password</label>
+                <input type="password" class="form-control form-control-sm mb-2" id="current_password"
+                       autocomplete="current-password" placeholder="Enter your current password">
+                {% endif %}
+                <label class="form-label small mb-1">New password</label>
+                {{ secret_input('auth_password', 'Protects the web UI login page') }}
+                <label class="form-label small mb-1 mt-2" for="auth_password_confirm">Confirm new password</label>
+                <input type="password" class="form-control form-control-sm" id="auth_password_confirm"
+                       autocomplete="new-password" placeholder="Re-enter the new password">
+                <div class="form-text" id="auth-pw-hint">Required while authentication is on. The app will not finish setup without it.</div>
+              </div>
+            {% endcall %}
+
+            {% call srow('Kitchen access',
+                         'An optional second, limited password.',
+                         'Share this one with the household: it opens the kitchen pages (inventory, timers, scanning, recipes) but keeps Settings, backups, and updates behind the main password. Leave it unset if everyone should use the main password.') %}
+              <div class="set-row-actions">
+                {% if has.viewer_password %}{{ pill('Set', 'good') }}{% else %}{{ pill('Optional', 'neutral') }}{% endif %}
+                <button class="btn btn-outline-secondary btn-sm" type="button"
+                        onclick="revealSecretChange('viewer-password-block', this)">
+                  <i class="bi bi-pencil me-1"></i>{{ 'Change' if has.viewer_password else 'Set a password' }}
+                </button>
+              </div>
+              <div id="viewer-password-block" class="d-none mt-2" style="max-width:360px">
+                {{ secret_input('viewer_password', 'A second password for kitchen-only access') }}
+              </div>
+            {% endcall %}
+
+            {% call srow('Two-factor',
+                         'A code from an authenticator app.',
+                         'Adds a second step to the device password: a 6-digit code from an authenticator app (Google Authenticator, Authy, Bitwarden, 1Password, and others). Works offline, no email or text needed. Signing in from outside your home network always asks for it.') %}
+              {% if s.local_totp_enabled or s.totp_secret %}
+              <div class="set-row-actions mb-2">{{ pill('On', 'good') }}
+                <span class="text-secondary small">Two-factor is on for this device.</span>
+              </div>
+              <div class="mb-2" style="max-width: 320px;">
+                <label class="form-label small mb-1">Current code or password</label>
+                <input type="text" class="form-control form-control-sm font-monospace" id="totp-disable-code"
+                       placeholder="Code or your password" autocomplete="off">
+                <div class="form-text">Needed to turn 2FA off or make new recovery codes.</div>
+              </div>
+              <div class="d-flex flex-wrap gap-2">
+                <button class="btn btn-outline-secondary btn-sm" onclick="regenRecoveryCodes()">
+                  <i class="bi bi-arrow-repeat me-1"></i>New recovery codes
+                </button>
+                <button class="btn btn-outline-danger btn-sm" onclick="disableTOTP()">
+                  <i class="bi bi-shield-x me-1"></i>Turn off 2FA
+                </button>
+              </div>
+              <div id="totp-manage-result" class="mt-2"></div>
+              {% else %}
+              <div class="set-row-actions mb-1">{{ pill('Off', 'neutral') }}
+                <button class="btn btn-outline-info btn-sm" onclick="setupTOTP()">
+                  <i class="bi bi-shield-plus me-1"></i>Set up 2FA
+                </button>
+              </div>
+              {% endif %}
+              <div id="totp-setup" class="mt-3 d-none">
+                <div class="text-center mb-2">
+                  <img id="totp-qr" src="" alt="QR code" style="max-width:200px">
+                </div>
+                <p class="small text-secondary">Scan with your authenticator app, then enter the code to confirm.</p>
+                <div class="input-group mb-2" style="max-width:320px">
+                  <input type="text" class="form-control font-monospace" id="totp-code"
+                         placeholder="000000" maxlength="6" inputmode="numeric">
+                  <button class="btn btn-success" onclick="verifyTOTP()">
+                    <i class="bi bi-check2 me-1"></i>Enable
+                  </button>
+                </div>
+                <div class="form-text small" id="totp-secret-display"></div>
+                <div id="totp-result" class="mt-2"></div>
+              </div>
+            {% endcall %}
+          {% endcall %}
+
+          {# API keys: the primary X-API-Key plus, on a main install, one row per
+             satellite/additional key. Reuses the existing generate/keep/delete
+             wiring and the __KEEP__ sentinel (secrets are never echoed to the
+             page), just presented as a table (FoodAssistant-jcnh). #}
+          {% call panel('API keys',
+                        'Keys that let Home Assistant, headless clients, and satellite devices reach this app.') %}
+            <div class="set-keys-wrap">
+              <table class="set-keys">
+                <thead>
+                  <tr><th>Name</th><th>Key</th><th>Type</th><th class="set-keys-actions">Actions</th></tr>
+                </thead>
+                {# The legacy primary key row shows only on installs that
+                   already have one. New installs never set a master key
+                   (FoodAssistant-f8kp): each device or integration gets its
+                   own named key below, so one can be revoked without
+                   disturbing the rest. #}
+                {% if s.api_key %}
+                <tbody>
+                  <tr>
+                    <td>Primary key</td>
+                    <td style="min-width:230px">{{ secret_input('api_key', 'Sent as X-API-Key header') }}</td>
+                    <td>{{ pill('Server', 'neutral') }}</td>
+                    <td class="set-keys-actions">
+                      <button class="btn btn-outline-secondary btn-sm" type="button" onclick="generateApiKey()">
+                        <i class="bi bi-arrow-repeat me-1"></i>Regenerate{{ info('Regenerating the primary key disconnects every existing satellite and headless client until they are given the new key. Add per-satellite keys below to rotate one device at a time instead.') }}
+                      </button>
+                    </td>
+                  </tr>
+                </tbody>
+                {% endif %}
+                {% if not features.satellite %}
+                <tbody class="satellite-extra-keys">
+                  {% for i in range(extra_api_key_count) %}
+                  <tr class="satellite-key-row">
+                    <td><input type="text" class="form-control form-control-sm satellite-key-name"
+                               value="{{ extra_api_key_names[i] if i < extra_api_key_names|length else '' }}"
+                               placeholder="name (optional)"></td>
+                    <td><input type="text" class="form-control form-control-sm font-monospace satellite-key-input"
+                               value="__KEEP__:{{ i }}" data-keep="1" readonly
+                               placeholder="•••• saved satellite key"></td>
+                    <td>{{ pill('Satellite', 'neutral') }}</td>
+                    <td class="set-keys-actions">
+                      <button class="btn btn-outline-danger btn-sm" type="button" title="Remove this key"
+                              onclick="this.closest('.satellite-key-row').remove()">
+                        <i class="bi bi-trash3"></i>
+                      </button>
+                    </td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+                {% endif %}
+              </table>
+            </div>
+            {% if not features.satellite %}
+            <div class="d-flex align-items-center gap-2 mt-2 mb-2">
+              <button class="btn btn-outline-secondary btn-sm" type="button" onclick="addSatelliteKey()">
+                <i class="bi bi-plus-lg me-1"></i>Create key
+              </button>
+              <span class="form-text mb-0">Give each satellite or headless client its own key so you can rotate or remove it without touching the others. Copy a new key before you save: it is hidden afterward.</span>
+            </div>
+            {% endif %}
+          {% endcall %}
+
+          {% if features.satellite %}
+          {% call panel('Kiosk PIN', "A lightweight lock for this device's screen.", pill_text='Optional', pill_kind='neutral') %}
+            <p class="text-secondary small mt-2 mb-2">A satellite turns the UI password off by default (the main server owns access control). Set a short numeric PIN for a lock that is easy to enter on the touchscreen. Leave blank for no lock.</p>
+            {% call srow('PIN', 'Digits only.') %}
+              <div style="max-width:220px">{{ secret_input('kiosk_pin', 'e.g. 1234') }}</div>
+            {% endcall %}
+            {% call srow('Read-only while locked', 'Let visitors browse without the PIN.', 'When enabled, visitors can browse inventory without entering the PIN. Write actions (adding or editing items) are blocked until they log in.') %}
+              {{ toggle('kiosk_readonly_when_locked', checked=s.kiosk_readonly_when_locked, label='Allow read-only browsing while locked') }}
+            {% endcall %}
+          {% endcall %}
+          {% endif %}
+
+          <button type="button" class="btn btn-outline-info btn-sm" onclick="savePaneSecurity(this)">
+            <i class="bi bi-check-lg me-1"></i>Save Security
+          </button>
+          <div class="test-result mt-2" id="security-save-result"></div>
+        </div>
