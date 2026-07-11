@@ -1,0 +1,170 @@
+{% extends "base.html" %}
+{% block title %}Camera: Pantry Raider{% endblock %}
+
+{% block content %}
+<div class="mt-3 mb-3 d-flex align-items-center justify-content-between flex-wrap gap-2">
+  <h4 class="mb-0"><i class="bi bi-camera-video me-2"></i>Camera</h4>
+  {% if cameras and cameras|length > 1 %}
+  <div class="btn-group btn-group-sm" role="group" id="cameraSwitcher">
+    {% for cam in cameras %}
+    <button type="button"
+            class="btn btn-outline-info{% if loop.index0 == initial_index %} active{% endif %}"
+            data-cam-index="{{ loop.index0 }}"
+            onclick="selectCamera({{ loop.index0 }})">
+      {{ cam.name or ("Camera " ~ loop.index) }}
+    </button>
+    {% endfor %}
+  </div>
+  {% endif %}
+</div>
+
+{% if cameras %}
+<div id="cameraStage"
+     class="d-flex align-items-center justify-content-center rounded overflow-hidden"
+     style="background:#000; width:100%; min-height:70vh;">
+  <video id="cameraVideo" class="d-none" controls autoplay muted playsinline
+         style="max-width:100%; max-height:82vh; object-fit:contain; background:#000;"></video>
+  <img id="cameraImg" class="d-none" alt="Camera feed"
+       style="max-width:100%; max-height:82vh; object-fit:contain; background:#000;">
+  <div id="cameraError" class="d-none text-center text-secondary p-4">
+    <i class="bi bi-camera-video-off fs-1 d-block mb-2"></i>
+    <div id="cameraErrorMsg">Camera unavailable. Check that the feed is reachable.</div>
+  </div>
+</div>
+{% else %}
+<div class="card">
+  <div class="card-body text-center text-secondary py-5">
+    <i class="bi bi-camera-video-off fs-1 d-block mb-3"></i>
+    <p class="mb-3">No cameras are configured yet.</p>
+    <a href="{{ ingress_path }}/setup#pane-connections" class="btn btn-outline-info btn-sm">
+      <i class="bi bi-gear me-1"></i>Add a camera in Settings
+    </a>
+  </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{% if cameras %}
+<script>
+  // Camera feeds rendered from app settings. Three display modes:
+  //   - HLS (.m3u8 stream): a <video> element (native HLS where supported).
+  //   - Home Assistant (and any snapshot-only camera): a refreshing <img> driven
+  //     by the snapshot proxy. HA's MJPEG stream is unreliable inside an <img>
+  //     (and the token cannot go in the URL), so a periodic still is the robust,
+  //     proven path, the same one the Stream Deck uses.
+  //   - Direct MJPEG (a manual stream URL): a plain <img> on the stream.
+  // An onerror shows a friendly "unavailable" panel instead of a broken icon.
+  const CAMERAS = {{ cameras|tojson }};
+  const videoEl = document.getElementById('cameraVideo');
+  const imgEl = document.getElementById('cameraImg');
+  const errEl = document.getElementById('cameraError');
+  const errMsgEl = document.getElementById('cameraErrorMsg');
+  // How often the refreshing-snapshot mode pulls a new still, in milliseconds.
+  const SNAPSHOT_INTERVAL_MS = 1500;
+  let snapTimer = null;
+  let snapOk = false;
+
+  function _stopSnapshot() {
+    if (snapTimer) { clearInterval(snapTimer); snapTimer = null; }
+  }
+
+  function _hideAll() {
+    videoEl.classList.add('d-none');
+    imgEl.classList.add('d-none');
+    errEl.classList.add('d-none');
+  }
+
+  function _showError(msg) {
+    _hideAll();
+    if (errMsgEl) {
+      errMsgEl.textContent = msg || 'Camera unavailable. Check that the feed is reachable.';
+    }
+    errEl.classList.remove('d-none');
+  }
+
+  // Refresh a same-origin <img> straight from the snapshot proxy. The proxy is
+  // same-origin, so there is no mixed-content or CORS issue and a bare <img src>
+  // is the most reliable path (more so than fetch+blob inside the kiosk's
+  // Chromium). The proxy adds the Home Assistant bearer token server-side. On
+  // the first load failure we do one diagnostic fetch to surface the HTTP status.
+  let snapSrc = '';
+  function _startSnapshot(src) {
+    snapOk = false;
+    snapSrc = src;
+    const tick = () => {
+      const sep = src.includes('?') ? '&' : '?';
+      imgEl.src = `${src}${sep}_=${Date.now()}`;
+    };
+    imgEl.classList.remove('d-none');
+    errEl.classList.add('d-none');
+    tick();
+    snapTimer = setInterval(tick, SNAPSHOT_INTERVAL_MS);
+  }
+
+  async function _reportSnapshotError() {
+    if (!snapSrc) { _showError(); return; }
+    try {
+      const sep = snapSrc.includes('?') ? '&' : '?';
+      const res = await fetch(`${snapSrc}${sep}_=${Date.now()}`, {cache: 'no-store'});
+      if (res.ok) return;  // it actually works now; leave the image alone
+      let detail = '';
+      try { detail = (await res.json()).detail || ''; } catch (e) { /* not json */ }
+      _showError(`Camera proxy returned HTTP ${res.status}${detail ? ': ' + detail : ''}.`);
+    } catch (e) {
+      _showError(`Could not reach the camera proxy: ${e}`);
+    }
+  }
+
+  function selectCamera(index) {
+    const cam = CAMERAS[index];
+    _stopSnapshot();
+    if (!cam) { _showError(); return; }
+    // Stop any previous img/video load before switching source.
+    imgEl.removeAttribute('src');
+    videoEl.pause();
+    videoEl.removeAttribute('src');
+    videoEl.load();
+    _hideAll();
+
+    // Accept both the current shape (stream_src) and the older one (stream_url).
+    const stream = (cam.stream_src || cam.stream_url || '').trim();
+
+    if (stream && stream.toLowerCase().split('?')[0].endsWith('.m3u8')) {
+      // Live HLS via <video>.
+      videoEl.src = stream;
+      videoEl.classList.remove('d-none');
+      videoEl.play().catch(() => { /* autoplay may be blocked; controls remain */ });
+    } else {
+      // Everything else: refresh the snapshot through the proxy by index. The
+      // proxy handles HA cameras (bearer token) and redirects manual cameras to
+      // their own snapshot URL, so this one path works for every camera without
+      // depending on which fields the server populated.
+      _startSnapshot(`ui/camera/${index}/snapshot`);
+    }
+
+    // Update the switcher active state.
+    document.querySelectorAll('#cameraSwitcher [data-cam-index]').forEach(btn => {
+      btn.classList.toggle('active', parseInt(btn.dataset.camIndex, 10) === index);
+    });
+  }
+
+  imgEl.addEventListener('load', () => { snapOk = true; errEl.classList.add('d-none'); });
+  imgEl.addEventListener('error', () => {
+    // Keep the last good frame on a transient miss; on the first failure fetch
+    // the proxy once to show the real HTTP status. The direct (non-snapshot)
+    // <img> modes have no snapSrc, so they fall back to the generic panel.
+    if (snapOk) return;
+    if (snapTimer) { _reportSnapshotError(); } else { _showError(); }
+  });
+  videoEl.addEventListener('error', () => { if (!snapTimer) _showError(); });
+
+  // Start on the requested camera (the server resolved ?cam=index|name to an
+  // index, defaulting to 0), so a Stream Deck camera key opens its own feed.
+  const INITIAL_INDEX = {{ initial_index|default(0) }};
+  if (CAMERAS.length) {
+    selectCamera(INITIAL_INDEX >= 0 && INITIAL_INDEX < CAMERAS.length ? INITIAL_INDEX : 0);
+  }
+</script>
+{% endif %}
+{% endblock %}
