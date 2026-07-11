@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+{% block title %}Share a recipe: Forager{% if turnstile_site_key %}<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>{% endif %}
+{% endblock %}
+{% block content %}
+<h1>Share a recipe</h1>
+
+{% if gate_blocked %}
+<div class="card">
+  <p>{{ gate_message }}</p>
+  <p class="muted small">Open the Pantry Raider app in your kitchen, go to
+  Settings, and sign in with this email and password. Once your kitchen has
+  checked in, this page opens up. Prefer to send recipes without a kitchen?
+  <a href="mailto:support@pantryraider.app">Ask us to turn on uploads</a> for
+  your account.</p>
+  <a class="btn btn-outline" href="/account">Back to my account</a>
+</div>
+{% else %}
+<p class="muted">Add one of your own recipes to the community. Type it in, or
+upload a PDF or a photo and we will tidy up the formatting for you. You always
+get to check it over before it is shared.</p>
+
+{% if notice %}<div class="alert alert-notice">{{ notice }}</div>{% endif %}
+{% if error %}<div class="alert alert-error">{{ error }}</div>{% endif %}
+
+<div class="card">
+  <form method="post" action="/recipes/upload" enctype="multipart/form-data">
+    <h2>How would you like to add it?</h2>
+    <div class="method-picker" role="radiogroup" aria-label="How to add your recipe">
+      <label class="method-option">
+        <input type="radio" name="method" value="manual" checked
+               onchange="pickMethod('manual')">
+        <span>Type it in</span>
+      </label>
+      <label class="method-option">
+        <input type="radio" name="method" value="pdf"
+               onchange="pickMethod('pdf')">
+        <span>Upload a PDF</span>
+      </label>
+      <label class="method-option">
+        <input type="radio" name="method" value="photo"
+               onchange="pickMethod('photo')">
+        <span>Upload a photo</span>
+      </label>
+    </div>
+
+    <div id="method-manual" class="method-panel">
+      <label for="title">Recipe name</label>
+      <input type="text" id="title" name="title" value="{{ form.title or '' }}"
+             maxlength="200">
+      <label for="ingredients">Ingredients (one per line)</label>
+      <textarea id="ingredients" name="ingredients" rows="6"
+                placeholder="1 cup flour&#10;2 eggs&#10;1 pinch salt">{{ form.ingredients or '' }}</textarea>
+      <label for="steps">Steps (one per line)</label>
+      <textarea id="steps" name="steps" rows="6"
+                placeholder="Mix the dry ingredients.&#10;Add the eggs and stir.">{{ form.steps or '' }}</textarea>
+      <p class="muted small">We only tidy the wording and layout. Your
+      ingredients, amounts, and method stay exactly as you wrote them.</p>
+    </div>
+
+    <div id="method-pdf" class="method-panel" hidden>
+      <label for="pdf">Recipe PDF</label>
+      <input type="file" id="pdf" name="pdf" accept="application/pdf">
+      <p class="muted small">We read the text from your PDF and draft the
+      recipe for you to check. If it is a scan with no readable text, try the
+      photo option instead.</p>
+    </div>
+
+    <div id="method-photo" class="method-panel" hidden>
+      <label for="photo">Recipe photo</label>
+      <input type="file" id="photo" name="photo" accept="image/*">
+      <p class="muted small">Take a clear photo of the recipe, from a book or a
+      card, and we will read it and draft it for you to check.</p>
+    </div>
+
+    <label for="attribution">Who should we credit?</label>
+    <input type="text" id="attribution" name="attribution"
+           value="{{ form.attribution or '' }}" maxlength="500"
+           placeholder="From my grandmother's recipe box" required>
+    <p class="muted small">Every shared recipe carries a credit line saying who
+    to thank or where it came from.</p>
+
+    {# Honeypot: hidden from people, tempting to a form-stuffing bot. #}
+    <div class="hp-field" aria-hidden="true">
+      <label for="website">Website</label>
+      <input type="text" id="website" name="website" tabindex="-1" autocomplete="off">
+    </div>
+    {% if turnstile_site_key %}
+    <div class="cf-turnstile" data-sitekey="{{ turnstile_site_key }}" style="margin-bottom:0.9rem;"></div>
+    {% endif %}
+
+    <button class="btn" type="submit">Format my recipe</button>
+  </form>
+</div>
+
+<style>
+  .method-picker { display: flex; flex-wrap: wrap; gap: 0.6rem; margin-bottom: 1.2rem; }
+  .method-option {
+    display: inline-flex; align-items: center; gap: 0.45rem; margin: 0;
+    padding: 0.55rem 0.9rem; border: 1px solid var(--border);
+    border-radius: 0.5rem; color: var(--text); cursor: pointer;
+  }
+  .method-option:has(input:checked) { border-color: var(--primary); color: var(--primary); }
+  .method-option input { width: auto; margin: 0; }
+  textarea {
+    width: 100%; padding: 0.6rem 0.8rem; margin-bottom: 1rem;
+    background: var(--bg); color: var(--text);
+    border: 1px solid var(--border); border-radius: 0.45rem;
+    font-size: 1rem; font-family: inherit; line-height: 1.5;
+  }
+  textarea:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-soft); }
+  input[type=file] { color: var(--muted); margin-bottom: 1rem; }
+</style>
+<script>
+  function pickMethod(which) {
+    ["manual", "pdf", "photo"].forEach(function (m) {
+      document.getElementById("method-" + m).hidden = (m !== which);
+    });
+  }
+</script>
+{% endif %}
+{% endblock %}

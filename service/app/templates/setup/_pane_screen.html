@@ -1,0 +1,441 @@
+{% from "setup/_macros.html" import info, panel, srow, pill, toggle, secret_input with context %}
+
+{# Photo source picker for the slideshow (FoodAssistant-af1l), shared by the
+   Pi and off-Pi screensaver cards. Google Photos and iCloud do not offer
+   reliable read access for third-party apps, so the sources here are the
+   ones that keep working: the built-in USB drive, a folder, an Immich album,
+   or direct image links. display.js shows the fields for the picked source
+   and Test counts what the source would play before anything is saved. #}
+{% macro photo_source_fields() -%}
+  <div class="mt-3 border-top pt-2">
+    <div class="d-flex align-items-center gap-2 mb-2">
+      <label class="form-label small mb-0" for="photo_source">Photo source{{ info('Where the slideshow photos come from. Google Photos and iCloud do not offer reliable access for third-party apps; point Pantry Raider at an Immich album, a folder, or image links instead.') }}</label>
+      <select class="form-select form-select-sm" style="max-width:240px" id="photo_source" onchange="photoSourceChanged()">
+        <option value="built-in" {{ 'selected' if s.photo_source == 'built-in' or not s.photo_source else '' }}>USB drive (built-in)</option>
+        <option value="folder" {{ 'selected' if s.photo_source == 'folder' else '' }}>Folder on this server</option>
+        <option value="immich" {{ 'selected' if s.photo_source == 'immich' else '' }}>Immich album</option>
+        <option value="urls" {{ 'selected' if s.photo_source == 'urls' else '' }}>Image links</option>
+      </select>
+    </div>
+    <div id="photo-source-folder" class="{{ '' if s.photo_source == 'folder' else 'd-none' }}">
+      <label class="form-label small mb-1" for="photo_folder">Folder path{{ info('Leave blank to use the photos folder inside the app\'s data directory; drop images there and they play. Any other path the app can read works too, including a mounted network share.') }}</label>
+      <input type="text" class="form-control form-control-sm font-monospace" id="photo_folder"
+             style="max-width:420px" placeholder="data/photos" value="{{ s.photo_folder or '' }}">
+    </div>
+    <div id="photo-source-immich" class="{{ '' if s.photo_source == 'immich' else 'd-none' }}">
+      <label class="form-label small mb-1" for="immich_base_url">Immich server URL</label>
+      <input type="url" class="form-control form-control-sm font-monospace" id="immich_base_url"
+             style="max-width:420px" placeholder="http://192.168.1.50:2283" value="{{ s.immich_base_url or '' }}">
+      <label class="form-label small mb-1 mt-2" for="immich_api_key">API key{{ info('Create one in Immich under Account Settings, API Keys. It stays on this server; the kiosk browser never sees it.') }}</label>
+      <div style="max-width:420px">{{ secret_input('immich_api_key', 'Immich → Account Settings → API Keys') }}</div>
+      <label class="form-label small mb-1 mt-2" for="immich_album_id">Album id{{ info('Open the album in Immich and copy the last part of its web address.') }}</label>
+      <input type="text" class="form-control form-control-sm font-monospace" id="immich_album_id"
+             style="max-width:420px" placeholder="9f3a6c1e-...." value="{{ s.immich_album_id or '' }}">
+    </div>
+    <div id="photo-source-urls" class="{{ '' if s.photo_source == 'urls' else 'd-none' }}">
+      <label class="form-label small mb-1" for="photo_urls">Image links{{ info('One direct image link per line. Each link must point straight at an image file the kiosk can reach, not at a photo-sharing page.') }}</label>
+      <textarea class="form-control form-control-sm font-monospace" id="photo_urls" rows="4"
+                style="max-width:420px" placeholder="https://example.com/photo-1.jpg">{{ s.photo_urls or '' }}</textarea>
+    </div>
+    <div class="d-flex align-items-center gap-2 mt-2">
+      <button type="button" class="btn btn-outline-secondary btn-sm" id="photo-source-test-btn" onclick="testPhotoSource()">
+        <i class="bi bi-images me-1"></i>Test photos
+      </button>
+      <span class="test-result" id="photo-source-test-result"></span>
+    </div>
+    <div id="photo-source-test-thumb" class="mt-2"></div>
+  </div>
+{%- endmacro %}
+<!-- Display & Sleep (FoodAssistant-jcnh): dense panel/row pattern. The kiosk
+             display, orientation, screensaver, scheduled reboot, the on-screen
+             nav bar, and the kiosk service are separate panels. Every control id
+             and the JS-touched rows (touch-provision-row, touch-calibrate-row,
+             kms-rotation-status, photo-advanced, kiosk-status-row) are unchanged
+             so the display, calibration, screensaver, and kiosk-install JS keep
+             working. -->
+        <div class="tab-pane fade" id="pane-screen">
+          {% if is_pi %}
+          <p class="pane-intro">The screen wired to this appliance, plus the on-screen navigation bar. Panel settings only affect the local kiosk display, not browsers on other devices.</p>
+          {% else %}
+          <p class="pane-intro">How the app behaves on a screen: the on-screen navigation bar and quiet mode. Panel, sleep, and screensaver settings appear here on a device with an attached display.</p>
+          {% endif %}
+
+          {% if is_pi and hardware_presets %}
+          {% call panel('Hardware preset', 'Set rotation, screen size, display, and Stream Deck for a known setup all at once.') %}
+            {% call srow('Preset', 'You can fine-tune afterward.') %}
+              <div class="d-flex flex-wrap gap-2 align-items-center">
+                <select class="form-select form-select-sm w-auto" id="hw_preset">
+                  <option value="">Choose a preset...</option>
+                  {% for pid, preset in hardware_presets.items() %}
+                  <option value="{{ pid }}">{{ preset.label }}</option>
+                  {% endfor %}
+                </select>
+                <button type="button" class="btn btn-outline-info btn-sm" onclick="applyHardwarePreset('hw_preset')">
+                  <i class="bi bi-check-lg me-1"></i>Apply preset
+                </button>
+                <span class="test-result hw-preset-result ms-1"></span>
+              </div>
+            {% endcall %}
+          {% endcall %}
+          {% endif %}
+
+          {% if is_pi %}
+          {% call panel('Kiosk display', 'The attached panel: size, touch, sleep, and screensaver. Scale and rotation apply without a reboot.') %}
+            {% call srow('Scale', 'Larger for a small panel.') %}
+              <select class="form-select" id="ui_scale" style="max-width:320px" onchange="applyDisplay()">
+                {% for key, sc in ui_scales.items() %}
+                <option value="{{ key }}" {{ 'selected' if s.ui_scale == key else '' }}>{{ sc.label }}</option>
+                {% endfor %}
+              </select>
+            {% endcall %}
+            {% call srow('Display type', 'Match your panel.',
+                         'A resistive Waveshare 3.5-4 inch HDMI LCD is the ADS7846 SPI option; a Waveshare HDMI HAT with a USB touch cable is the USB touch option. After choosing, use Apply touch driver below so the boot overlay is written (a reboot loads it).') %}
+              <select class="form-select form-select-sm" style="max-width:320px" id="display_type">
+                {% for key, dt in display_types.items() %}
+                <option value="{{ key }}" {{ 'selected' if (s.display_type or 'generic') == key else '' }}>{{ dt.label }}</option>
+                {% endfor %}
+              </select>
+            {% endcall %}
+            {% call srow('Touch-compatible display', 'Turn on for a touch panel.',
+                         'Turn on when the panel accepts touch input. Pick the matching display type above, then use Apply touch driver so the right driver loads.') %}
+              {{ toggle('display_touch', checked=s.display_touch, label='Touch-compatible display') }}
+            {% endcall %}
+            {% if is_pi %}
+            {% call srow('Touch driver', 'Write the boot overlay the panel needs.',
+                         'Writes the boot config the selected display type needs (for an ADS7846 SPI panel this enables SPI and adds the touch overlay). Needed once, and again only if you change the display type. Takes effect after a reboot.') %}
+              <div id="touch-provision-row">
+                <button class="btn btn-outline-secondary btn-sm" onclick="applyTouchDriver(this)">
+                  <i class="bi bi-usb-plug me-1"></i>Apply touch driver
+                </button>
+                <button class="btn btn-outline-secondary btn-sm ms-1" onclick="applyTouchDriver(this, true)"
+                        title="Write the overlay and reboot now to load it">
+                  <i class="bi bi-arrow-repeat me-1"></i>Apply &amp; reboot
+                </button>
+                <div class="test-result mt-2" id="touch-provision-result"></div>
+              </div>
+            {% endcall %}
+            {% call srow('Calibrate touchscreen', 'Tap the four corners on the device.',
+                         'Launches a four-corner tap test on the Pi\'s attached touchscreen. Stand at the device and tap each crosshair. If a calibration comes out wrong, Reset reverts to the panel default. Recalibrate after changing the display rotation.') %}
+              <div id="touch-calibrate-row">
+                <button class="btn btn-outline-secondary btn-sm" onclick="startTouchCalibration()">
+                  <i class="bi bi-crosshair me-1"></i>Calibrate touchscreen
+                </button>
+                <button class="btn btn-outline-secondary btn-sm ms-1" onclick="resetTouchCalibration()"
+                        title="Remove the calibration matrix and revert to the panel default">
+                  <i class="bi bi-arrow-counterclockwise me-1"></i>Reset calibration
+                </button>
+                <div class="test-result mt-2" id="touch-calibrate-result"></div>
+              </div>
+            {% endcall %}
+            {% endif %}
+            {% call srow('Display sleep', 'Minutes idle, 0 = off.',
+                         'Blanks the kiosk screen after inactivity. A touch, key press, or a Stream Deck button press wakes it. The Stream Deck has its own separate timeout.') %}
+              <input class="form-control form-control-sm" style="max-width:120px" type="number"
+                     id="display_idle_timeout" min="0" max="120" step="5" value="{{ s.display_idle_timeout }}">
+            {% endcall %}
+            {% call srow('Wake on motion', 'Uses the built-in accelerometer.',
+                         'Wakes a sleeping screen when the device is moved or bumped, on kits that include the sensor. A screen touch or a Stream Deck button press always wakes the display too. Auto keeps it off on devices without the sensor.') %}
+              <select class="form-select form-select-sm" style="max-width:320px" id="wake_on_motion">
+                <option value="auto" {{ 'selected' if s.wake_on_motion == 'auto' or not s.wake_on_motion else '' }}>Auto (on when a motion sensor is fitted)</option>
+                <option value="on" {{ 'selected' if s.wake_on_motion == 'on' else '' }}>On</option>
+                <option value="off" {{ 'selected' if s.wake_on_motion == 'off' else '' }}>Off</option>
+              </select>
+            {% endcall %}
+            {% call srow('Screensaver', 'Minutes idle, 0 = off.',
+                         'Dims the page to the gliding logo and clock after inactivity; any touch brings the page right back. Unlike Display sleep, which switches the panel off, the screensaver keeps the display on, so it suits panels that wake slowly or misbehave when powered off. Per device.') %}
+              <input class="form-control form-control-sm" style="max-width:120px" type="number"
+                     id="screensaver_minutes" min="0" max="120" step="1" value="{{ s.screensaver_minutes }}">
+            {% endcall %}
+            {% call srow('Screensaver speed', 'How fast the logo glides.') %}
+              <select class="form-select form-select-sm" style="max-width:320px" id="screensaver_speed">
+                <option value="slow" {{ 'selected' if s.screensaver_speed == 'slow' else '' }}>Slow</option>
+                <option value="normal" {{ 'selected' if s.screensaver_speed == 'normal' or not s.screensaver_speed else '' }}>Normal</option>
+                <option value="fast" {{ 'selected' if s.screensaver_speed == 'fast' else '' }}>Fast</option>
+              </select>
+            {% endcall %}
+            {% call srow('Timer pill size', 'How big the floating timers show.',
+                         'Pick Large or Extra large if the countdowns are hard to read from across the kitchen.') %}
+              <select class="form-select form-select-sm" style="max-width:320px" id="screensaver_pill_scale">
+                <option value="normal" {{ 'selected' if s.screensaver_pill_scale == 'normal' or not s.screensaver_pill_scale else '' }}>Normal</option>
+                <option value="large" {{ 'selected' if s.screensaver_pill_scale == 'large' else '' }}>Large</option>
+                <option value="xlarge" {{ 'selected' if s.screensaver_pill_scale == 'xlarge' else '' }}>Extra large</option>
+              </select>
+            {% endcall %}
+            {% call srow('Screensaver style', 'Logo, photos, or a retro saver.',
+                         'Bouncing logo drifts the mark and clock around the panel. Photos plays your pictures from the source picked below: a USB drive (put them in a folder named photos or pictures at the top of the drive), a folder on this server, an Immich album, or a list of image links; it falls back to the logo when the source is empty. Flying toasters sends winged toasters and toast across a black screen, and Starfield streams stars out from the centre. The clock stays on every style. Per device.') %}
+              <select class="form-select form-select-sm" style="max-width:320px" id="screensaver_mode" onchange="screensaverModeChanged()">
+                <option value="bounce" {{ 'selected' if s.screensaver_mode == 'bounce' or not s.screensaver_mode else '' }}>Bouncing logo</option>
+                <option value="photos" {{ 'selected' if s.screensaver_mode == 'photos' else '' }}>Photo slideshow</option>
+                <option value="toasters" {{ 'selected' if s.screensaver_mode == 'toasters' else '' }}>Flying toasters</option>
+                <option value="starfield" {{ 'selected' if s.screensaver_mode == 'starfield' else '' }}>Starfield</option>
+              </select>
+              <div id="photo-advanced" class="mt-2 {{ '' if s.screensaver_mode == 'photos' else 'd-none' }}">
+                <div class="d-flex align-items-center gap-2 mb-2">
+                  <label class="form-label small mb-0" for="screensaver_photo_seconds">Seconds per photo</label>
+                  <input type="number" class="form-control form-control-sm" id="screensaver_photo_seconds"
+                         min="2" max="120" style="max-width:120px" value="{{ s.screensaver_photo_seconds or 25 }}">
+                </div>
+                <label class="set-toggle-row d-inline-flex align-items-center gap-2">
+                  {{ toggle('screensaver_ken_burns', checked=(s.screensaver_ken_burns or s.screensaver_ken_burns is none), label='Ken Burns effect') }}
+                  <span class="small">Ken Burns effect{{ info('A slow pan and zoom across each photo, the classic slideshow motion. Turn it off to hold each photo perfectly still.') }}</span>
+                </label>
+                <div class="d-flex align-items-center gap-2 mt-2">
+                  <label class="form-label small mb-0" for="screensaver_ken_burns_speed">Pan and zoom speed{{ info('How far the Ken Burns pan and zoom travels across each photo. Turn it up if the motion looks nearly still on your screen, down for a gentler glide.') }}</label>
+                  <select class="form-select form-select-sm" style="max-width:160px" id="screensaver_ken_burns_speed">
+                    <option value="slow" {{ 'selected' if s.screensaver_ken_burns_speed == 'slow' else '' }}>Slow</option>
+                    <option value="normal" {{ 'selected' if s.screensaver_ken_burns_speed == 'normal' or not s.screensaver_ken_burns_speed else '' }}>Normal</option>
+                    <option value="fast" {{ 'selected' if s.screensaver_ken_burns_speed == 'fast' else '' }}>Fast</option>
+                  </select>
+                </div>
+                {{ photo_source_fields() }}
+              </div>
+            {% endcall %}
+            {% call srow('Screensaver on every browser', 'Not just the kiosk.',
+                         'Normally the screensaver only runs on the kiosk display. Turn this on to have every browser viewing this install, a desktop or a phone included, dim to the screensaver after the same idle minutes. Any touch, click, or key press brings the page right back.') %}
+              {{ toggle('screensaver_all_clients', checked=s.screensaver_all_clients, label='Screensaver on every browser') }}
+            {% endcall %}
+            {% call srow('On-screen keyboard', 'A touch keyboard in kiosk mode.',
+                         'In kiosk mode a touch keyboard slides up whenever a text field is tapped, so names, barcodes, and searches can be typed without a physical keyboard. Turn it off if this kiosk has a keyboard attached. Per device.') %}
+              {{ toggle('osk_enabled', checked=s.osk_enabled, label='On-screen keyboard') }}
+            {% endcall %}
+            {% call srow('Advanced display', 'Nudge the edges in if the panel clips.',
+                         'Most panels need nothing here: the kiosk already pulls content in when the screen shows fewer pixels than the browser draws. If a stubborn panel still clips a button at an edge (some hide a rim behind the bezel), raise that edge a few pixels at a time until nothing is cut off, then Save display settings. Per device.') %}
+              <div class="d-flex flex-wrap gap-2 align-items-end">
+                <div>
+                  <label class="form-label small mb-1" for="display_margin_top">Top</label>
+                  <input type="number" class="form-control form-control-sm" style="max-width:90px"
+                         id="display_margin_top" min="0" max="200" step="1" value="{{ s.display_margin_top }}">
+                </div>
+                <div>
+                  <label class="form-label small mb-1" for="display_margin_right">Right</label>
+                  <input type="number" class="form-control form-control-sm" style="max-width:90px"
+                         id="display_margin_right" min="0" max="200" step="1" value="{{ s.display_margin_right }}">
+                </div>
+                <div>
+                  <label class="form-label small mb-1" for="display_margin_bottom">Bottom</label>
+                  <input type="number" class="form-control form-control-sm" style="max-width:90px"
+                         id="display_margin_bottom" min="0" max="200" step="1" value="{{ s.display_margin_bottom }}">
+                </div>
+                <div>
+                  <label class="form-label small mb-1" for="display_margin_left">Left</label>
+                  <input type="number" class="form-control form-control-sm" style="max-width:90px"
+                         id="display_margin_left" min="0" max="200" step="1" value="{{ s.display_margin_left }}">
+                </div>
+              </div>
+              <div class="form-text mt-1">Pixels to hold back from each edge. 0 leaves the edge alone.</div>
+            {% endcall %}
+            {% call srow('Display', 'Save, or preview the screensaver now.',
+                         'Test starts the screensaver on this screen right away with the style and speed picked above; any touch or key press dismisses it. To preview a kiosk panel, open its own settings page and press Test there.') %}
+              <div class="d-flex gap-2 flex-wrap">
+                <button class="btn btn-outline-info btn-sm" onclick="saveDisplaySettings()">
+                  <i class="bi bi-check-lg me-1"></i>Save display settings
+                </button>
+                <button class="btn btn-outline-secondary btn-sm" onclick="testScreensaver()">
+                  <i class="bi bi-moon-stars me-1"></i>Test screensaver
+                </button>
+              </div>
+              <div class="test-result mt-2" id="display-save-result"></div>
+              <div class="form-text mt-1" id="display-hint">CSS changes apply on the kiosk immediately.</div>
+            {% endcall %}
+          {% endcall %}
+
+          {% call panel('Orientation', 'Rotates the kiosk display. Applies when the kiosk restarts (a few seconds); no reboot needed.') %}
+            {% call srow('Current rotation', 'What the display is set to now.') %}
+              <div id="kms-rotation-status">
+                <span class="text-secondary small">Checking...</span>
+              </div>
+            {% endcall %}
+            {% call srow('Framebuffer rotation', 'Use 90 or 270 for portrait.',
+                         'Rotates the whole display output, including the boot screen and the kiosk browser. Recalibrate the touchscreen after changing it.') %}
+              <select class="form-select" id="kms_rotation" style="max-width:280px">
+                <option value="0">0&deg; (normal)</option>
+                <option value="90">90&deg;</option>
+                <option value="180">180&deg;</option>
+                <option value="270">270&deg;</option>
+              </select>
+              <div class="d-flex gap-2 flex-wrap align-items-center mt-2">
+                <button class="btn btn-outline-warning btn-sm" onclick="setKmsRotation(false)">
+                  <i class="bi bi-arrow-repeat me-1"></i>Apply (restart kiosk)
+                </button>
+                <button class="btn btn-outline-danger btn-sm" onclick="setKmsRotation(true)">
+                  <i class="bi bi-power me-1"></i>Apply and reboot device
+                </button>
+              </div>
+              <div class="form-text mt-2">Apply restarts the kiosk to show the new orientation in a few seconds. If touch feels misaligned after rotating, use Apply and reboot device once the orientation looks right, which fully realigns the touchscreen.</div>
+              <div class="test-result mt-2" id="kms-rotation-result"></div>
+              <div class="alert alert-secondary py-2 small mt-3 mb-0">
+                <i class="bi bi-info-circle me-1"></i>Run <code>sudo foodassistant-set-rotation 90</code> via SSH for the same effect.
+              </div>
+            {% endcall %}
+          {% endcall %}
+          {% endif %}
+
+          {% if not is_pi %}
+          {% call panel('Screensaver', 'Dims the page to a floating clock after inactivity. Normally kiosk-only; extend it to every browser below.') %}
+            {% call srow('Screensaver', 'Minutes idle, 0 = off.',
+                         'Any touch, click, or key press brings the page right back.') %}
+              <input class="form-control form-control-sm" style="max-width:120px" type="number"
+                     id="screensaver_minutes" min="0" max="120" step="1" value="{{ s.screensaver_minutes }}">
+            {% endcall %}
+            {% call srow('Screensaver speed', 'How fast the logo glides.') %}
+              <select class="form-select form-select-sm" style="max-width:320px" id="screensaver_speed">
+                <option value="slow" {{ 'selected' if s.screensaver_speed == 'slow' else '' }}>Slow</option>
+                <option value="normal" {{ 'selected' if s.screensaver_speed == 'normal' or not s.screensaver_speed else '' }}>Normal</option>
+                <option value="fast" {{ 'selected' if s.screensaver_speed == 'fast' else '' }}>Fast</option>
+              </select>
+            {% endcall %}
+            {% call srow('Timer pill size', 'How big the floating timers show.',
+                         'Pick Large or Extra large if the countdowns are hard to read from across the kitchen.') %}
+              <select class="form-select form-select-sm" style="max-width:320px" id="screensaver_pill_scale">
+                <option value="normal" {{ 'selected' if s.screensaver_pill_scale == 'normal' or not s.screensaver_pill_scale else '' }}>Normal</option>
+                <option value="large" {{ 'selected' if s.screensaver_pill_scale == 'large' else '' }}>Large</option>
+                <option value="xlarge" {{ 'selected' if s.screensaver_pill_scale == 'xlarge' else '' }}>Extra large</option>
+              </select>
+            {% endcall %}
+            {% call srow('Screensaver style', 'Logo, photos, or a retro saver.',
+                         'Photos plays your pictures from the source picked below: a folder on this server, an Immich album, or a list of image links; it falls back to the logo when the source is empty. Flying toasters sends winged toasters and toast across a black screen, and Starfield streams stars out from the centre. The clock stays on every style.') %}
+              <select class="form-select form-select-sm" style="max-width:320px" id="screensaver_mode" onchange="screensaverModeChanged()">
+                <option value="bounce" {{ 'selected' if s.screensaver_mode == 'bounce' or not s.screensaver_mode else '' }}>Bouncing logo</option>
+                <option value="photos" {{ 'selected' if s.screensaver_mode == 'photos' else '' }}>Photo slideshow</option>
+                <option value="toasters" {{ 'selected' if s.screensaver_mode == 'toasters' else '' }}>Flying toasters</option>
+                <option value="starfield" {{ 'selected' if s.screensaver_mode == 'starfield' else '' }}>Starfield</option>
+              </select>
+              <div id="photo-advanced" class="mt-2 {{ '' if s.screensaver_mode == 'photos' else 'd-none' }}">
+                <div class="d-flex align-items-center gap-2 mb-2">
+                  <label class="form-label small mb-0" for="screensaver_photo_seconds">Seconds per photo</label>
+                  <input type="number" class="form-control form-control-sm" id="screensaver_photo_seconds"
+                         min="2" max="120" style="max-width:120px" value="{{ s.screensaver_photo_seconds or 25 }}">
+                </div>
+                <label class="set-toggle-row d-inline-flex align-items-center gap-2">
+                  {{ toggle('screensaver_ken_burns', checked=(s.screensaver_ken_burns or s.screensaver_ken_burns is none), label='Ken Burns effect') }}
+                  <span class="small">Ken Burns effect{{ info('A slow pan and zoom across each photo, the classic slideshow motion. Turn it off to hold each photo perfectly still.') }}</span>
+                </label>
+                <div class="d-flex align-items-center gap-2 mt-2">
+                  <label class="form-label small mb-0" for="screensaver_ken_burns_speed">Pan and zoom speed{{ info('How far the Ken Burns pan and zoom travels across each photo. Turn it up if the motion looks nearly still on your screen, down for a gentler glide.') }}</label>
+                  <select class="form-select form-select-sm" style="max-width:160px" id="screensaver_ken_burns_speed">
+                    <option value="slow" {{ 'selected' if s.screensaver_ken_burns_speed == 'slow' else '' }}>Slow</option>
+                    <option value="normal" {{ 'selected' if s.screensaver_ken_burns_speed == 'normal' or not s.screensaver_ken_burns_speed else '' }}>Normal</option>
+                    <option value="fast" {{ 'selected' if s.screensaver_ken_burns_speed == 'fast' else '' }}>Fast</option>
+                  </select>
+                </div>
+                {{ photo_source_fields() }}
+              </div>
+            {% endcall %}
+            {% call srow('Screensaver on every browser', 'Not just the kiosk.',
+                         'Normally the screensaver only runs on a kiosk display. Turn this on to have every browser viewing this install, a desktop or a phone included, dim to the screensaver after the same idle minutes.') %}
+              {{ toggle('screensaver_all_clients', checked=s.screensaver_all_clients, label='Screensaver on every browser') }}
+            {% endcall %}
+            {% call srow('On-screen keyboard', 'A touch keyboard in kiosk mode.',
+                         'A browser put in kiosk (touch) mode gets a touch keyboard that slides up whenever a text field is tapped. Turn it off if the kiosk screen has a keyboard attached.') %}
+              {{ toggle('osk_enabled', checked=s.osk_enabled, label='On-screen keyboard') }}
+            {% endcall %}
+            {% call srow('Screensaver', 'Save, or preview it now.',
+                         'Test starts the screensaver on this screen right away with the style and speed picked above; any touch or key press dismisses it.') %}
+              <div class="d-flex gap-2 flex-wrap">
+                <button class="btn btn-outline-info btn-sm" onclick="saveScreensaverSettings()">
+                  <i class="bi bi-check-lg me-1"></i>Save screensaver settings
+                </button>
+                <button class="btn btn-outline-secondary btn-sm" onclick="testScreensaver()">
+                  <i class="bi bi-moon-stars me-1"></i>Test screensaver
+                </button>
+              </div>
+              <div class="test-result mt-2" id="screensaver-save-result"></div>
+            {% endcall %}
+          {% endcall %}
+          {% endif %}
+
+          {% call panel('On-screen navigation bar',
+                        'An optional fixed bar of nav icons docked to a screen edge, handy on touch screens. This is the default for devices not customised here.') %}
+            {% call srow('On-screen nav menu', 'Whether the bar shows at all.',
+                         'Auto hides it on a Stream Deck kiosk at large / extra-large scale, where the deck does the navigating and the small screen is better used for content. The top bar keeps a hamburger menu either way, so you can always reach Settings.') %}
+              <select class="form-select form-select-sm" id="nav_visibility" style="max-width:320px">
+                <option value="auto"   {{ 'selected' if (s.nav_visibility or 'auto') == 'auto' else '' }}>Auto (hide on a Stream Deck kiosk at large scale)</option>
+                <option value="shown"  {{ 'selected' if s.nav_visibility == 'shown' else '' }}>Always show</option>
+                <option value="hidden" {{ 'selected' if s.nav_visibility == 'hidden' else '' }}>Always hide</option>
+              </select>
+            {% endcall %}
+            {% call srow('Dock position', 'Which screen edge it sits on.',
+                         'Bottom is a horizontal bar; left and right are vertical. A drag on the device overrides this per-device.') %}
+              <select class="form-select form-select-sm" id="floating_nav_position" style="max-width:280px">
+                <option value="off"    {{ 'selected' if s.floating_nav_position == 'off' else '' }}>Off</option>
+                <option value="bottom" {{ 'selected' if s.floating_nav_position == 'bottom' else '' }}>Bottom edge</option>
+                <option value="left"   {{ 'selected' if s.floating_nav_position == 'left' else '' }}>Left edge</option>
+                <option value="right"  {{ 'selected' if s.floating_nav_position == 'right' else '' }}>Right edge</option>
+              </select>
+            {% endcall %}
+            {% call srow('Hide with a Stream Deck', 'At any scale, when a deck is connected.',
+                         'A narrower version of Auto: hides the on-screen nav whenever a Stream Deck is connected, at any scale.') %}
+              {{ toggle('floating_nav_autohide_streamdeck', checked=s.floating_nav_autohide_streamdeck, label='Hide the nav bar when a Stream Deck is connected') }}
+            {% endcall %}
+            {% call srow('Floating timer chips', 'Countdown chips on every page.',
+                         'Small countdown chips in the bottom corner while timers are running; tap one to open the Timers page. Auto keeps them off at large / extra-large scale, where a small kiosk screen has no room to spare.') %}
+              <select class="form-select form-select-sm" id="timer_chips" style="max-width:320px">
+                <option value="auto" {{ 'selected' if (s.timer_chips or 'auto') == 'auto' else '' }}>Auto (hide at large / extra-large scale)</option>
+                <option value="on"   {{ 'selected' if s.timer_chips == 'on' else '' }}>Always show</option>
+                <option value="off"  {{ 'selected' if s.timer_chips == 'off' else '' }}>Always hide</option>
+              </select>
+            {% endcall %}
+            {% call srow('Quiet mode', 'Visual-only timer alerts.',
+                         'When on, a finished kitchen timer is shown only by highlighting its floating chip, with no audible chime. Per device, so each kiosk can be loud or silent.') %}
+              {{ toggle('quiet_mode', checked=s.quiet_mode, label='Quiet mode (visual-only alerts)') }}
+            {% endcall %}
+            {% call srow('Navigation menu', 'Save the settings above.') %}
+              <button type="button" class="btn btn-outline-info btn-sm" onclick="saveFloatingNav()">
+                <i class="bi bi-check-lg me-1"></i>Save navigation menu
+              </button>
+              <div class="test-result mt-2" id="floating-nav-result"></div>
+            {% endcall %}
+          {% endcall %}
+
+          {% if is_pi_appliance %}
+          {# The frequency defaults preserve the pre-frequency behaviour: a
+             stored time with no frequency means nightly (FoodAssistant-8x4u). #}
+          {% set _reboot_freq = scheduled_reboot_frequency or ('nightly' if scheduled_reboot_time else 'off') %}
+          {% call panel('Scheduled reboot', 'Reboot the appliance automatically to keep a long-running kiosk fresh.') %}
+            {% call srow('Schedule', 'Never, nightly, or weekly.',
+                         'How often the appliance reboots itself, and at what local time (24-hour clock).') %}
+              <div class="d-flex flex-wrap gap-2 align-items-end">
+                <div>
+                  <label class="form-label small mb-1" for="scheduled_reboot_frequency">Frequency</label>
+                  <select class="form-select form-select-sm" id="scheduled_reboot_frequency" style="max-width:150px" onchange="rebootFreqChanged()">
+                    <option value="off" {{ 'selected' if _reboot_freq == 'off' else '' }}>Off</option>
+                    <option value="nightly" {{ 'selected' if _reboot_freq == 'nightly' else '' }}>Nightly</option>
+                    <option value="weekly" {{ 'selected' if _reboot_freq == 'weekly' else '' }}>Weekly</option>
+                  </select>
+                </div>
+                <div id="scheduled-reboot-day-wrap" class="{{ '' if _reboot_freq == 'weekly' else 'd-none' }}">
+                  <label class="form-label small mb-1" for="scheduled_reboot_day">Day</label>
+                  <select class="form-select form-select-sm" id="scheduled_reboot_day" style="max-width:150px">
+                    {% for _day in ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'] %}
+                    <option value="{{ loop.index0 }}" {{ 'selected' if scheduled_reboot_day == loop.index0 else '' }}>{{ _day }}</option>
+                    {% endfor %}
+                  </select>
+                </div>
+                <div id="scheduled-reboot-time-wrap" class="{{ 'd-none' if _reboot_freq == 'off' else '' }}">
+                  <label class="form-label small mb-1" for="scheduled_reboot_time">Time</label>
+                  <input type="time" class="form-control form-control-sm" id="scheduled_reboot_time" style="max-width:150px" value="{{ scheduled_reboot_time }}">
+                </div>
+                <button type="button" class="btn btn-outline-info btn-sm" onclick="saveScheduledReboot(this)">
+                  <i class="bi bi-check-lg me-1"></i>Save schedule
+                </button>
+                <span class="test-result" id="scheduled-reboot-result"></span>
+              </div>
+            {% endcall %}
+          {% endcall %}
+          {% endif %}
+
+          {% if is_pi %}
+          {# Kiosk Service sits at the bottom: a one-time provision step. #}
+          {% call panel('Kiosk service', 'Runs the on-device browser in full-screen kiosk mode.') %}
+            {% call srow('Service', 'Provision it if you added the screen later.',
+                         'Runs the on-device browser in full-screen kiosk mode. If you attached the screen after the first install, provision it here, no SSH needed.') %}
+              <div id="kiosk-status-row" class="mb-2"><span class="text-secondary small">Checking...</span></div>
+              <button class="btn btn-outline-info btn-sm d-none" id="btn-install-kiosk" onclick="installKiosk(this)">
+                <i class="bi bi-download me-1"></i>Install kiosk service
+              </button>
+              <div class="test-result mt-2" id="kiosk-install-result"></div>
+              <pre class="install-log d-none bg-body-tertiary border rounded p-2 small mt-2 mb-0" data-log="kiosk"></pre>
+            {% endcall %}
+          {% endcall %}
+          {% endif %}
+        </div>
