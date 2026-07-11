@@ -1,0 +1,323 @@
+/*
+ * kiosk.css — Touch-target sizing for 7" 1024×600 capacitive touchscreen.
+ * Loaded dynamically when localStorage.kioskMode === 'true'.
+ * All rules follow WCAG 2.5.5 minimum 44×44 px target guidance.
+ */
+
+/* ── Buttons ───────────────────────────────────────────────────────────────── */
+.btn,
+a.btn {
+  min-height: 48px;
+  min-width: 48px;
+  padding: 10px 16px;
+}
+
+/* Small icon-only buttons used in inventory item rows */
+.btn-icon {
+  min-height: 44px;
+  min-width: 44px;
+  padding: 8px 10px;
+  font-size: 1rem;
+}
+
+/* ── Navigation ─────────────────────────────────────────────────────────────── */
+.nav-link {
+  padding: 12px 16px;
+}
+
+/* Non-essential controls that strand or distract on a touch kiosk: the API
+ * (Swagger) link opens a tab the kiosk browser cannot close or return from, the
+ * keyboard-shortcuts helper needs a physical keyboard, and Defaults, About, and
+ * AI Declarations are reference pages no one needs on a wall-mounted screen.
+ * Settings stays visible so the device is still configurable, and the phone QR
+ * code stays too, since scanning it to open the UI on a phone is most useful
+ * precisely on a wall-mounted kiosk. Hidden only in kiosk mode, since this
+ * stylesheet loads only when kioskMode is set. */
+.kiosk-hide {
+  display: none !important;
+}
+
+/* In kiosk mode the three-dots "More" menu is the only dropdown a touch user
+ * has, and the reference links above (Defaults, About, API docs, shortcuts) are
+ * kiosk-hidden, which would leave just Settings. Reveal the overflow copies of
+ * the secondary nav destinations (Recipes, Cook, Current Recipe, Meal Plan,
+ * Camera, ...) so every page stays reachable from the kebab on a kiosk of any
+ * width, not only the under-820px panels the base stylesheet already handles. */
+.nav-overflow-item {
+  display: list-item !important;
+}
+
+/* Nav-tab links (add.html input tabs, etc.) */
+.nav-tabs .nav-link,
+.nav-pills .nav-link {
+  padding: 12px 16px;
+  min-height: 48px;
+}
+
+/* ── Timers page ────────────────────────────────────────────────────────────── */
+/* The per-timer +1 min / Cancel buttons and Clear all are the page's main
+ * mid-cook controls, often pressed with messy hands: give them a bigger hit
+ * area than the generic .btn minimum. */
+.timer-clear-all,
+.timer-card .btn {
+  min-height: 56px;
+  min-width: 88px;
+  padding: 12px 20px;
+  font-size: 1.1rem;
+}
+/* The start-a-timer presets and common-food chips are setup controls, not
+ * mid-cook ones: keep them at the 44px touch minimum but compact, so the two
+ * rows stay tight on a 1024x600 panel and the running timers and temperatures
+ * above them get the screen. */
+.timer-preset {
+  min-height: 44px;
+  min-width: 0;
+  padding: 8px 12px;
+  font-size: 0.95rem;
+}
+/* The big countdown and probe readouts are sized for a desktop monitor; on a
+ * 600px-tall panel they crowd everything else off. Still readable across a
+ * kitchen at these sizes. */
+.timer-card .timer-count { font-size: 3.5rem !important; }
+.probe-card .probe-temp { font-size: 3rem !important; }
+
+/* ── List groups ────────────────────────────────────────────────────────────── */
+.list-group-item {
+  padding: 14px 16px;
+}
+
+/* ── Form controls ──────────────────────────────────────────────────────────── */
+input,
+select,
+textarea {
+  min-height: 44px;
+  font-size: 1rem !important;
+}
+
+/* Ensure Bootstrap's .form-select / .form-control also hit minimum */
+.form-control,
+.form-select {
+  min-height: 44px;
+  font-size: 1rem !important;
+}
+
+/* form-control-sm and form-select-sm in the import queue need a bump too */
+.form-control-sm,
+.form-select-sm {
+  min-height: 40px;
+  font-size: 0.95rem !important;
+}
+
+/* ── Badges ─────────────────────────────────────────────────────────────────── */
+.badge {
+  font-size: 0.85rem;
+  padding: 6px 10px;
+}
+
+/* Inventory page custom expiry badges (rendered in JS) */
+.expiry-badge {
+  font-size: 0.82rem;
+  padding: 4px 8px;
+}
+
+/* ── Tables ─────────────────────────────────────────────────────────────────── */
+.table td,
+.table th {
+  padding: 10px 12px;
+}
+
+/* ── Inventory grid — drag handles / item-row action zone ───────────────────── */
+/*
+ * Each .item-row renders three .btn-icon buttons (edit, move, consume).
+ * The entire row acts as the touch hit area; ensure it is tall enough.
+ */
+.item-row {
+  min-height: 48px;
+  padding: 8px 12px;
+}
+
+/* Diet/cuisine pills on the Cook page */
+.diet-pill,
+.cuisine-pill {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  padding: 8px 14px;
+  font-size: 0.9rem;
+}
+
+/* Cook-page preference toggle button */
+.cook-prefs-toggle {
+  min-height: 48px;
+  padding: 10px 16px;
+  font-size: 1rem;
+}
+
+/* Panel headers (collapsible category panels on inventory page) */
+.panel-header {
+  min-height: 48px;
+}
+
+/* ── Modal footers ──────────────────────────────────────────────────────────── */
+.modal-footer .btn,
+.modal-footer a.btn {
+  min-height: 48px;
+  padding: 10px 20px;
+}
+
+/* ── Close buttons ──────────────────────────────────────────────────────────── */
+.btn-close {
+  min-width: 44px;
+  min-height: 44px;
+}
+
+/* ── Auto-simplify layout (FoodAssistant-muwj) ──────────────────────────────────
+ * In kiosk mode (this stylesheet only loads when kioskMode is set) tighten the
+ * page chrome and prefer a single column so dense pages fit the small attached
+ * panel without horizontal scrolling. This mirrors the small-viewport media
+ * query in base.html but is keyed on kiosk mode, so it also applies on a kiosk
+ * whose reported viewport is wider than the breakpoint.
+ *
+ * NOTE: the ui_scale -> zoom factor mapping (kiosk-display.js, applied from the
+ * data-ui-scale attribute) was audited and is correct, NOT inverted. Nothing in
+ * this file changes those scale factors or their labels. */
+#pageContent {
+  padding-left: 0.75rem !important;
+  padding-right: 0.75rem !important;
+}
+#pageContent .row > [class*="col-"] {
+  flex: 0 0 100%;
+  max-width: 100%;
+}
+#pageContent .card {
+  margin-bottom: 0.5rem;
+}
+/* Let content panels flow into the page instead of scrolling inside their own
+ * fixed-height box. On a touch kiosk a nested scroll area (for example the
+ * inventory list capped at 60vh) traps the flick, leaving only a thin strip to
+ * scroll the whole page. Neutralising the inner cap makes the PAGE the single
+ * scroll surface, which is what a finger expects. Modals, dropdowns, the
+ * settings side menu, and log boxes keep their own scrolling (different rules). */
+.panel-body {
+  max-height: none !important;
+  overflow: visible !important;
+}
+
+/* ── Reclaim vertical space + smooth touch scrolling ────────────────────────
+ * A wall panel is short (often 480px tall), so the fixed top bar is costly.
+ * Slim it and shrink the body offset to give content more room, and turn on
+ * momentum scrolling so a flick scrolls the page on a capacitive screen. */
+html, body {
+  -webkit-overflow-scrolling: touch;
+  /* overscroll-behavior-y: contain is deliberately ABSENT. Combined with the
+   * overflow-x clip below, Chromium (149, the kiosk engine) treats every
+   * vertical touch flick on the document as contained overscroll and moves
+   * nothing: the exact "flick does nothing on app pages, Settings fine"
+   * dead-scroll Dan hit on the Bandit. Reproduced and bisected in a
+   * touch-emulating Chromium against this stylesheet; dropping the contain
+   * restores scrolling with the clip intact. A cage kiosk has no
+   * pull-to-refresh or rubber-band chrome to contain anyway. */
+  /* Keep the whole document a first-class touch scroller. With a UI scale
+   * (CSS zoom on <html>) applied, Chromium treated a flick on an app page as
+   * targeting the horizontally-overflowing-but-clipped root (the overflow-x
+   * clip below) and scrolled nothing; the setup page, which does not load
+   * this sheet, kept scrolling. kiosk-display.js now compensates the layout
+   * width (width: 100%/scale) so a scaled page no longer overflows sideways
+   * at all, and `manipulation` here keeps panning immediate (no double-tap
+   * zoom ambiguity) without restricting pan axes, so wide tables and the
+   * sideways-scrolling nav tab row still pan horizontally inside their own
+   * containers. */
+  touch-action: manipulation;
+}
+/* The page itself never scrolls sideways on a kiosk panel (a portrait 600px
+ * screen made this visible: one over-wide row put the whole page on a
+ * horizontal scroll and content hung off the right edge, and a 270-rotated
+ * panel showed the same slight right overflow, FoodAssistant-7irg). The clip
+ * is set on BOTH html and body: html alone still let content hang off the
+ * right on the rotated Bandit, so body carries the guard too. Vertical stays
+ * the single page scroll; anything genuinely wide (a table) scrolls inside
+ * its own container instead. This is kiosk-only (this stylesheet loads only
+ * in kiosk mode), so a normal desktop browser is untouched. */
+html,
+body {
+  overflow-x: hidden;
+  max-width: 100%;
+}
+body {
+  /* padding-top matches the slimmer navbar below (was 60px), plus any advanced
+   * display top inset. The left/right/bottom insets pull normal-flow content in
+   * from a panel edge that clips; box-sizing keeps that padding inside the
+   * viewport instead of widening the page. See the "Advanced display safe-area
+   * insets" block in kiosk-display.js for where these variables come from. */
+  box-sizing: border-box;
+  padding-top: calc(50px + var(--kiosk-inset-top, 0px));
+  padding-left: var(--kiosk-inset-left, 0px);
+  padding-right: var(--kiosk-inset-right, 0px);
+  padding-bottom: var(--kiosk-inset-bottom, 0px);
+}
+.navbar.fixed-top {
+  padding-top: 4px;
+  padding-bottom: 4px;
+  min-height: 50px;
+  /* A position:fixed element is placed against the viewport, so body padding
+   * never moves it: without these it stays flush to a clipping panel edge and
+   * loses the hamburger. Inset the fixed top bar (and the floating nav) by the
+   * same safe-area amount so nothing sits in the off-panel strip. */
+  top: var(--kiosk-inset-top, 0px) !important;
+  left: var(--kiosk-inset-left, 0px) !important;
+  right: var(--kiosk-inset-right, 0px) !important;
+}
+/* The floating nav is fixed and docks to an edge, so it needs the same inset as
+ * the top navbar or it too sits in the off-panel strip. Nudge each dock in by
+ * the matching safe-area amount (the base dock rules pin the edge to 0). */
+.float-nav-dock-right  { right: var(--kiosk-inset-right, 0px) !important; }
+.float-nav-dock-left   { left: var(--kiosk-inset-left, 0px) !important; }
+.float-nav-dock-left, .float-nav-dock-right { bottom: var(--kiosk-inset-bottom, 0px) !important; }
+.navbar-brand {
+  font-size: 1.05rem;
+}
+
+/* On a narrow kiosk panel the primary tab row is flex-nowrap and overruns the
+   right edge (an 800x480 panel rotated to portrait is roughly 500px wide, and a
+   Stream Deck suppresses the floating nav that would otherwise collapse it). The
+   deck, the floating nav, and the More overflow menu already cover navigation,
+   so hide the redundant inline tab row on a narrow panel; a wide landscape kiosk
+   keeps its tabs (FoodAssistant-e6kp). Kiosk-only since this sheet loads only in
+   kiosk mode. */
+@media (max-width: 767.98px) {
+  .navbar.fixed-top .nav-primary { display: none !important; }
+}
+
+/* ── Floating nav as the primary touch navigation ───────────────────────────
+ * floating-nav.js auto-enables it in kiosk mode so navigation is one tap away
+ * without opening the hamburger. Make its targets comfortably tappable. */
+.float-nav {
+  gap: 0.4rem;
+  padding: 0.45rem;
+  opacity: 0.97;
+}
+.float-nav-link {
+  width: 3.25rem;
+  height: 3.25rem;
+  font-size: 1.5rem;
+}
+.float-nav-handle {
+  padding: 0.25rem 0;
+  font-size: 1.15rem;
+}
+
+/* Hide the mouse pointer on the kiosk (FoodAssistant-1dp5).
+ * The firstboot transparent XCURSOR theme only hides cage's own compositor
+ * cursor; fullscreen Chromium still paints its own arrow over the page via
+ * wl_pointer.set_cursor, so a pointer stays visible despite HIDE_CURSOR=auto.
+ * UNCONDITIONAL on purpose: this used to be gated on pointer:coarse, but
+ * touch panels and barcode scanners expose phantom mouse handlers that make
+ * Chromium report a fine pointer, so the gate kept the cursor visible on the
+ * exact devices it was meant to fix (Dan's pi_remote, Jul 2026 device diag:
+ * XCURSOR env active, theme installed, cursor still drawn). This stylesheet
+ * only loads in kiosk mode, so desktop sessions are unaffected; a mouse user
+ * on a kiosk sets HIDE_CURSOR=false, which should skip kiosk cursor hiding
+ * entirely. */
+html, body, * {
+  cursor: none !important;
+}

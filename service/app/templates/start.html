@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+{# Kiosk display attrs (FoodAssistant-2e0f): this is a standalone full-screen
+   page that does NOT load base.html or kiosk.css, so it must carry the same
+   scale/rotation/margin attributes and load kiosk-display.js itself. Without
+   them the panel's safe-area insets were never applied here and the Glance grid
+   ran off the clipped right edge of the Bandit panel. #}
+<html lang="en" data-bs-theme="{{ theme_mode }}"
+      data-ui-scale="{{ ui_scale_factor | default(1.0) }}"
+      data-display-rotation="{{ display_rotation | default(0) }}"
+      data-rotation-mode="{{ 'compositor' if is_pi else 'css' }}"
+      data-is-pi="{{ '1' if is_pi else '0' }}"
+      data-display-margin-top="{{ display_margin_top | default(0) }}"
+      data-display-margin-right="{{ display_margin_right | default(0) }}"
+      data-display-margin-bottom="{{ display_margin_bottom | default(0) }}"
+      data-display-margin-left="{{ display_margin_left | default(0) }}">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <base href="{{ ingress_path }}/">
+  <title>Start: Pantry Raider</title>
+  {% if theme_css %}
+  <link href="{{ theme_css }}" rel="stylesheet">
+  {% else %}
+  <link href="static/vendor/bootstrap.min.css" rel="stylesheet">
+  {% endif %}
+  {% if theme_overlay %}<link href="{{ theme_overlay }}" rel="stylesheet">{% endif %}
+  {% if custom_theme_active %}
+  <style>
+    :root, [data-bs-theme="{{ theme_mode }}"] {
+      --bs-primary: {{ custom_theme_primary }}; --bs-link-color: {{ custom_theme_primary }};
+      --bs-body-bg: {{ custom_theme_bg }}; --bs-body-color: {{ custom_theme_text }};
+      --bs-secondary-bg: {{ custom_theme_surface }}; --bs-tertiary-bg: {{ custom_theme_surface }};
+    }
+    body { background-color: var(--bs-body-bg); color: var(--bs-body-color); }
+  </style>
+  {% endif %}
+  {% if background_image_url %}
+  <style>
+    body::before { content: ""; position: fixed; inset: 0; z-index: -1;
+      background: url("{{ background_image_url }}") center / cover no-repeat;
+      opacity: {{ background_opacity }}; pointer-events: none; }
+  </style>
+  {% endif %}
+  <link href="static/vendor/bootstrap-icons.min.css" rel="stylesheet">
+  <link rel="icon" type="image/svg+xml" href="static/icons/favicon.svg">
+  {# Kiosk boot intro: pre-paint blackout guard + intro.js (FoodAssistant-a8xy) #}
+  {% include "_intro.html" %}
+  {# On-screen keyboard for kiosk touchscreens (FoodAssistant-wo9j) #}
+  {% include "_osk.html" %}
+  <style>
+    html, body { height: 100%; margin: 0; overflow: hidden; }
+    /* The Start Page is full screen and replaces the fixed/floating menus, so it
+       deliberately renders no navbar. A small Exit affordance keeps it escapable. */
+    /* Pad by the panel safe-area insets (set on <html> by kiosk-display.js) plus
+       the base gutter, so the grid never runs off a clipped panel edge on the
+       kiosk (FoodAssistant-2e0f). The insets are 0 on a normal browser. */
+    .start-wrap { position: fixed; inset: 0; display: flex; flex-direction: column;
+      padding: calc(1.2vmin + var(--kiosk-inset-top, 0px))
+               calc(1.2vmin + var(--kiosk-inset-right, 0px))
+               calc(1.2vmin + var(--kiosk-inset-bottom, 0px))
+               calc(1.2vmin + var(--kiosk-inset-left, 0px)); }
+    .start-grid {
+      flex: 1 1 auto; display: grid; gap: 1.2vmin; min-height: 0;
+      grid-template-columns: repeat({{ cols }}, 1fr);
+      grid-template-rows: repeat({{ rows }}, 1fr);
+    }
+    .start-key {
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 0.6vmin; border: 2px solid rgba(255,255,255,0.15);
+      border-radius: 1.4vmin; background: #1f2937; color: #fff;
+      cursor: pointer; user-select: none; overflow: hidden; text-align: center;
+      padding: 0.8vmin; transition: transform 0.05s ease, filter 0.1s ease;
+    }
+    .start-key:hover { filter: brightness(1.12); }
+    .start-key:active { transform: scale(0.96); }
+    .start-key.blank { background: transparent; border-style: dashed; opacity: 0.25; cursor: default; }
+    .start-key.blank:hover { filter: none; }
+    .start-key.deckonly { opacity: 0.85; }
+    /* Live timer key faces (FoodAssistant-uzra): running keys show the shared
+       countdown like a deck key; expired keys pulse until pressed. */
+    .start-key .countdown { font-size: min(6vw, 8vh); font-weight: 700; line-height: 1; color: #fff; }
+    .start-key.timer-running { filter: brightness(1.15); }
+    .start-key.timer-done { animation: sk-done 1.1s ease-in-out infinite; }
+    @keyframes sk-done {
+      0%, 100% { background-color: #7f1d1d !important; }
+      50% { background-color: #b45309 !important; }
+    }
+    .start-key .ico { font-size: min(7vw, 9vh); line-height: 1; color: #fff; }
+    /* Live built-in faces (FoodAssistant-x2u7): weather/forecast temperature,
+       expiring count, and camera snapshot preview, mirroring the Stream Deck. */
+    .start-key .live-big { font-size: min(6vw, 8vh); font-weight: 700; line-height: 1; color: #fff; }
+    .start-key .live-sub { font-size: min(2vw, 2.8vh); font-weight: 600; line-height: 1.05; color: #fff;
+      opacity: 0.92; max-width: 100%; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical; }
+    .start-key.live-muted { filter: grayscale(0.5) brightness(0.85); }
+    .start-key.expiring-alert { background-color: #b54708 !important; }
+    /* Camera snapshot fills the key; the label sits on a legibility scrim. */
+    .start-key.has-snapshot { background-size: cover; background-position: center;
+      justify-content: flex-end; padding: 0; }
+    .start-key.has-snapshot .ico { display: none; }
+    .start-key.has-snapshot .lbl { width: 100%; padding: 0.5vmin 0.6vmin;
+      background: linear-gradient(to top, rgba(0,0,0,0.72), rgba(0,0,0,0)); }
+    .start-key .lbl { font-size: min(2.2vw, 3.2vh); font-weight: 600; line-height: 1.05; color: #fff;
+      max-width: 100%; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical; }
+    .start-exit { position: fixed; top: 1vmin; right: 1vmin; z-index: 5; opacity: 0.5; }
+    .start-exit:hover { opacity: 1; }
+    .start-toast { position: fixed; bottom: 2vmin; left: 50%; transform: translateX(-50%);
+      background: var(--bs-secondary-bg); color: var(--bs-body-color); border: 1px solid var(--bs-border-color);
+      border-radius: 0.6rem; padding: 0.5rem 1rem; z-index: 6; display: none; }
+    /* Glance mode (FoodAssistant-gg33): an auto-generated home. Large square
+       buttons to the top-level nav pages fill the space; they use the same
+       .start-key look. The column count is responsive (auto-fit), so the grid
+       reflows between the kiosk landscape panel and a phone in portrait without
+       any horizontal overflow. */
+    a.start-key { text-decoration: none; }
+    .glance-grid {
+      flex: 1 1 auto; display: grid; gap: 1.2vmin; min-height: 0;
+      grid-template-columns: repeat(auto-fit, minmax(min(26vmin, 44%), 1fr));
+      grid-auto-rows: 1fr;
+    }
+    /* Notification pills: short rounded rows below the grid, much smaller than
+       the square buttons. Each carries an icon, a short label, and a live count. */
+    .glance-pills { flex: 0 0 auto; display: flex; flex-wrap: wrap; gap: 1.2vmin;
+      justify-content: center; align-items: center; padding-top: 1.4vmin; }
+    .glance-pill { display: inline-flex; align-items: center; gap: 0.8vmin;
+      text-decoration: none; color: #fff; background: #1f2937;
+      border: 2px solid rgba(255,255,255,0.15); border-radius: 999px;
+      padding: 0.7vmin 1.6vmin; cursor: pointer; user-select: none;
+      transition: filter 0.1s ease; }
+    .glance-pill:hover { filter: brightness(1.12); }
+    .glance-pill .pill-ico { font-size: min(3.2vw, 3.4vh); line-height: 1; }
+    .glance-pill .pill-label { font-size: min(2.4vw, 2.8vh); font-weight: 600; line-height: 1; }
+    .glance-pill .pill-count { font-size: min(2.4vw, 3vh); font-weight: 700; line-height: 1;
+      min-width: 2.4vh; text-align: center; padding: 0.2vmin 1vmin;
+      background: rgba(255,255,255,0.16); border-radius: 999px; }
+    .glance-pill .pill-count.pill-clear { background: transparent; opacity: 0.8; padding: 0.2vmin 0.4vmin; }
+    .glance-pill.has-count { border-color: var(--bs-primary, #F2006E); }
+    .glance-pill.has-count .pill-count { background: var(--bs-primary, #F2006E); color: #fff; }
+  </style>
+</head>
+<body>
+  {% if not enabled %}
+  <div class="d-flex flex-column align-items-center justify-content-center" style="height:100%; gap:1rem; text-align:center; padding:2rem">
+    <i class="bi bi-grid-3x3-gap" style="font-size:3rem; opacity:0.6"></i>
+    <h4 class="mb-0">The Start Page is turned off</h4>
+    <p class="text-secondary mb-2">Turn it on in Settings &rarr; Personalization &rarr; Start Page, then choose its keys.</p>
+    <div class="d-flex gap-2">
+      <a href="setup#pane-start-page" class="btn btn-primary btn-sm"><i class="bi bi-gear me-1"></i>Open Settings</a>
+      <a href="ui/inventory" class="btn btn-outline-secondary btn-sm">Back to app</a>
+    </div>
+  </div>
+  {% else %}
+  <a href="ui/inventory" class="btn btn-outline-secondary btn-sm start-exit" title="Exit the Start Page"><i class="bi bi-box-arrow-up-right"></i></a>
+  <div class="start-wrap">
+    {% if glance %}
+    {# Glance home (FoodAssistant-gg33): auto grid of the top-level nav pages. #}
+    <div class="glance-grid">
+      {% for p in glance_pages %}
+      <a class="start-key" href="{{ p.href }}">
+        <i class="bi {{ p.icon }} ico"></i><span class="lbl">{{ p.label }}</span>
+      </a>
+      {% endfor %}
+    </div>
+    {# Notification pills: live counts that navigate to the relevant page. #}
+    <div class="glance-pills">
+      <a class="glance-pill" href="ui/pending" data-pill data-endpoint="action-items/count" title="Review inbox">
+        <i class="bi bi-inbox pill-ico"></i><span class="pill-label">Review</span>
+        <span class="pill-count" data-count-slot>&middot;</span>
+      </a>
+      <a class="glance-pill" href="ui/pending" data-pill data-endpoint="events/count" title="On-screen alerts">
+        <i class="bi bi-bell pill-ico"></i><span class="pill-label">Alerts</span>
+        <span class="pill-count" data-count-slot>&middot;</span>
+      </a>
+      <a class="glance-pill" href="ui/expiring" data-pill data-endpoint="expiring/count?days=7" title="Expiring soon">
+        <i class="bi bi-clock-history pill-ico"></i><span class="pill-label">Expiring</span>
+        <span class="pill-count" data-count-slot>&middot;</span>
+      </a>
+    </div>
+    {% else %}
+    <div class="start-grid">
+      {% for k in layout %}
+        {% if k.kind == 'blank' %}
+        <div class="start-key blank"></div>
+        {% elif k.kind == 'builtin' %}
+        <div class="start-key" role="button" tabindex="0" style="background: {{ k.color }}"
+             data-kind="builtin" data-href="{{ k.href }}" data-key="{{ k.key }}"{% if k.live %} data-live="{{ k.live }}"{% endif %}>
+          <i class="bi {{ k.icon }} ico"></i><span class="lbl">{{ k.label }}</span>
+        </div>
+        {% elif k.kind == 'custom' %}
+        <div class="start-key custom" role="button" tabindex="0" style="background: {{ k.color }}"
+             data-kind="custom" data-type="{{ k.type }}" data-id="{{ k.id }}"{% if k.timer_label %} data-timer-label="{{ k.timer_label }}"{% endif %}>
+          <i class="bi {{ k.icon }} ico"></i><span class="lbl">{{ k.label }}</span>
+        </div>
+        {% else %}
+        <div class="start-key deckonly" role="button" tabindex="0" style="background: {{ k.color }}"
+             data-kind="deckonly" data-label="{{ k.label }}" data-key="{{ k.key }}">
+          <i class="bi {{ k.icon }} ico"></i><span class="lbl">{{ k.label }}</span>
+        </div>
+        {% endif %}
+      {% endfor %}
+    </div>
+    {% endif %}
+  </div>
+  <div class="start-toast" id="start-toast"></div>
+  {% if glance %}
+  <script>
+    (function () {
+      // Glance notification pills (FoodAssistant-gg33): each pill polls a count
+      // endpoint and shows the number when > 0, or a calm check when all clear.
+      // Uses the same staggered, pause-when-hidden poll pattern as the live key
+      // faces so a background kiosk tab stops hammering the endpoints.
+      const pills = Array.from(document.querySelectorAll('.glance-pill[data-endpoint]'));
+      if (!pills.length) return;
+      function url(path) { return new URL(path, document.baseURI).href; }
+      function render(pill, count) {
+        const slot = pill.querySelector('[data-count-slot]');
+        if (!slot) return;
+        if (count > 0) {
+          pill.classList.add('has-count');
+          slot.classList.remove('pill-clear');
+          slot.textContent = count > 99 ? '99+' : String(count);
+        } else {
+          pill.classList.remove('has-count');
+          slot.classList.add('pill-clear');
+          slot.innerHTML = '<i class="bi bi-check2"></i>';
+        }
+      }
+      function poll(pill) {
+        if (document.hidden) return;
+        fetch(url(pill.dataset.endpoint))
+          .then(r => r.json())
+          .then(d => { if (d && typeof d.count === 'number') render(pill, d.count); })
+          .catch(() => {});  // leave the last good count on a transient error
+      }
+      // Stagger the first fetches so they do not all land at once, then refresh
+      // each on a slow cadence (these counts change on the order of minutes).
+      pills.forEach((pill, i) => {
+        setTimeout(() => { poll(pill); setInterval(() => poll(pill), 60 * 1000); }, 250 + i * 250);
+      });
+      document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) pills.forEach(poll);
+      });
+    })();
+  </script>
+  {% else %}
+  <script>
+    (function () {
+      // Where a shared custom button sends you on-screen. The action-typed deck
+      // buttons (HA toggle, media, macro) and the built-in HA slot keys fire
+      // server-side via ui/start/fire, so they work without a connected deck.
+      const ROUTE = { shopping_add: 'ui/shopping',
+        weather: 'ui/weather', camera: 'ui/camera' };
+      const FIRE = { ha_action: 1, media: 1, macro: 1, timer: 1 };
+      // Built-in timer keys start/advance the shared timer instead of just
+      // opening the Timers page, matching the deck key (FoodAssistant-6ifu).
+      // The timers_view key still navigates.
+      const FIRE_KEYS = { timer_1: 1, timer_2: 1, timer_3: 1,
+        timer_eggs: 1, timer_pasta: 1, timer_rice: 1 };
+      function toast(msg) {
+        const t = document.getElementById('start-toast');
+        t.textContent = msg; t.style.display = 'block';
+        clearTimeout(t._h); t._h = setTimeout(() => { t.style.display = 'none'; }, 2200);
+      }
+      // Resolve a relative app path against the <base href>, not the current
+      // /ui/start URL. Setting location.href on a relative value resolves it
+      // against the page URL, which would make "ui/" become "/ui/ui/" and the
+      // key appear to do nothing (Pantry Raider).
+      function go(path) { location.href = new URL(path, document.baseURI).href; }
+      function fireServer(name, long) {
+        const url = new URL('ui/start/fire/' + encodeURIComponent(name), document.baseURI);
+        if (long) url.searchParams.set('long', 'true');
+        fetch(url, { method: 'POST' })
+          .then(r => r.json())
+          .then(d => { toast(d.detail || (d.ok ? 'Done.' : 'That did not work.')); pollTimers(); })
+          .catch(() => toast('Could not reach the server.'));
+      }
+
+      // Live timer faces: keys that can start a timer adopt the matching
+      // shared-registry timer by label (the deck does the same), show its
+      // remaining time ticking locally from deadline_epoch, and pulse when
+      // done until a press dismisses it.
+      const TIMER_LABELS = { timer_1: 'Timer 1', timer_2: 'Timer 2', timer_3: 'Timer 3',
+        timer_eggs: 'Eggs', timer_pasta: 'Pasta', timer_rice: 'Rice' };
+      const timerKeys = [];  // { el, label, orig: {icoHTML, lbl} }
+      document.querySelectorAll('.start-key[role="button"]').forEach(el => {
+        let label = null;
+        if (el.dataset.kind === 'builtin' && TIMER_LABELS[el.dataset.key]) label = TIMER_LABELS[el.dataset.key];
+        if (el.dataset.kind === 'custom' && el.dataset.timerLabel) label = el.dataset.timerLabel;
+        if (label) {
+          timerKeys.push({ el, label,
+            orig: { ico: el.querySelector('.ico').outerHTML, lbl: el.querySelector('.lbl').textContent } });
+        }
+      });
+      let liveTimers = [];
+      function mmss(sec) {
+        sec = Math.max(0, Math.round(sec));
+        return Math.floor(sec / 60) + ':' + String(sec % 60).padStart(2, '0');
+      }
+      function renderTimerKeys() {
+        const now = Date.now() / 1000;
+        timerKeys.forEach(k => {
+          const t = liveTimers.find(x => x.label === k.label);
+          if (!t) {
+            if (k.el.classList.contains('timer-running') || k.el.classList.contains('timer-done')) {
+              k.el.classList.remove('timer-running', 'timer-done');
+              k.el.innerHTML = k.orig.ico + '<span class="lbl">' + k.orig.lbl + '</span>';
+            }
+            return;
+          }
+          const remaining = t.deadline_epoch - now;
+          const done = remaining <= 0;
+          k.el.classList.toggle('timer-running', !done);
+          k.el.classList.toggle('timer-done', done);
+          k.el.innerHTML = '<span class="countdown">' + (done ? 'Done' : mmss(remaining)) + '</span>' +
+                           '<span class="lbl">' + k.orig.lbl + '</span>';
+        });
+      }
+      function pollTimers() {
+        if (!timerKeys.length) return;
+        // Hidden (background tab): the local render tick keeps the visible
+        // countdown honest from deadline_epoch; resync when shown again.
+        if (document.hidden) return;
+        fetch(new URL('timers', document.baseURI))
+          .then(r => r.json())
+          .then(d => { liveTimers = (d && d.timers) || d || []; renderTimerKeys(); })
+          .catch(() => {});
+      }
+      if (timerKeys.length) {
+        pollTimers();
+        setInterval(pollTimers, 3000);
+        setInterval(renderTimerKeys, 1000);
+        document.addEventListener('visibilitychange', () => {
+          if (!document.hidden) pollTimers();
+        });
+      }
+      function fire(el) {
+        if (el.dataset.kind === 'builtin') {
+          if (FIRE_KEYS[el.dataset.key]) { fireServer(el.dataset.key); return; }
+          go(el.dataset.href); return;
+        }
+        if (el.dataset.kind === 'deckonly') {
+          // The built-in HA slot keys (ha_1..ha_5) execute server-side; the
+          // rest (paging, brightness, deck workflow) really do need hardware.
+          if (/^ha_[1-5]$/.test(el.dataset.key || '')) { fireServer(el.dataset.key); return; }
+          toast('"' + (el.dataset.label || 'This') + '" runs on a connected Stream Deck.'); return;
+        }
+        const t = el.dataset.type;
+        if (ROUTE[t]) { go(ROUTE[t]); return; }
+        if (FIRE[t]) { fireServer(el.dataset.id); return; }
+        go('ui/');
+      }
+      // Long press on a timer key resets it, like holding the deck key
+      // (FoodAssistant-b8o1). Pointer events cover touch and mouse; a long
+      // press swallows the click that follows so it cannot also short-press.
+      const LONG_MS = 550;
+      function timerName(el) {
+        if (el.dataset.kind === 'builtin' && FIRE_KEYS[el.dataset.key]) return el.dataset.key;
+        if (el.dataset.kind === 'custom' && el.dataset.type === 'timer') return el.dataset.id;
+        return null;
+      }
+      document.querySelectorAll('.start-key[role="button"]').forEach(el => {
+        const tname = timerName(el);
+        if (tname) {
+          let holdT = null;
+          el.addEventListener('pointerdown', () => {
+            holdT = setTimeout(() => {
+              holdT = null;
+              el._longFired = true;
+              fireServer(tname, true);
+            }, LONG_MS);
+          });
+          ['pointerup', 'pointercancel', 'pointerleave'].forEach(evn =>
+            el.addEventListener(evn, () => { if (holdT) { clearTimeout(holdT); holdT = null; } }));
+        }
+        el.addEventListener('click', () => {
+          if (el._longFired) { el._longFired = false; return; }
+          fire(el);
+        });
+        el.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fire(el); } });
+      });
+    })();
+  </script>
+  <script>
+    (function () {
+      // Live built-in key faces (FoodAssistant-x2u7): weather, forecast, the
+      // expiring count, and a camera snapshot preview, mirroring the Stream
+      // Deck. Every fetch failure leaves a clean static fallback face; nothing
+      // here throws in a way that can block the grid or the timer loop above.
+      const WX_UNITS = ("{{ weather_units }}".toLowerCase() === "c") ? "C" : "F";
+      const wx = { weather: null, forecast: null };
+      const expiringKeys = [];
+      const cameraKeys = [];
+      document.querySelectorAll('.start-key[data-live]').forEach(el => {
+        // Remember the stock icon+label face so any failure restores it cleanly.
+        el._origFace = el.innerHTML;
+        const kind = el.dataset.live;
+        if (kind === 'weather') wx.weather = el;
+        else if (kind === 'forecast') wx.forecast = el;
+        else if (kind === 'expiring') expiringKeys.push(el);
+        else if (kind === 'camera') cameraKeys.push(el);
+      });
+      function url(path) { return new URL(path, document.baseURI).href; }
+      function esc(s) {
+        return String(s).replace(/[&<>"]/g, c =>
+          ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+      }
+      function restore(el) {
+        el.classList.remove('live-muted', 'expiring-alert', 'has-snapshot');
+        el.style.backgroundImage = '';
+        if (el._origFace != null && el.innerHTML !== el._origFace) el.innerHTML = el._origFace;
+      }
+
+      // -- weather + forecast (one shared fetch feeds both keys) ------------
+      const hasWx = !!(wx.weather || wx.forecast);
+      function wxNoSignal(el) {
+        el.classList.add('live-muted');
+        el.classList.remove('has-snapshot');
+        el.innerHTML = '<i class="bi bi-cloud-slash ico"></i><span class="lbl">No signal</span>';
+      }
+      function renderWeather(fc) {
+        const cur = (fc && fc.current) || {};
+        if (wx.weather) {
+          const temp = cur.temp;
+          if (temp === undefined || temp === null || temp === '?') { wxNoSignal(wx.weather); }
+          else {
+            wx.weather.classList.remove('live-muted');
+            const desc = String(cur.desc || '').trim();
+            wx.weather.innerHTML = '<span class="live-big">' + esc(temp) + '°' + WX_UNITS + '</span>' +
+              '<span class="live-sub">' + (esc(desc) || 'Weather') + '</span>';
+          }
+        }
+        if (wx.forecast) {
+          const day = (fc && fc.days && fc.days[0]) || null;
+          if (!day || day.hi === undefined) { wxNoSignal(wx.forecast); }
+          else {
+            wx.forecast.classList.remove('live-muted');
+            const lo = (day.lo === undefined || day.lo === null) ? '?' : day.lo;
+            wx.forecast.innerHTML = '<span class="live-big">' + esc(day.hi) + '°</span>' +
+              '<span class="live-sub">Low ' + esc(lo) + '°</span>';
+          }
+        }
+      }
+      function pollWeather() {
+        if (!hasWx || document.hidden) return;
+        fetch(url('ui/weather/data'))
+          .then(r => r.json())
+          .then(d => {
+            if (d && d.ok && d.forecast) renderWeather(d.forecast);
+            else { if (wx.weather) wxNoSignal(wx.weather); if (wx.forecast) wxNoSignal(wx.forecast); }
+          })
+          .catch(() => {});  // keep the last good face on a transient error
+      }
+
+      // -- expiring count --------------------------------------------------
+      function renderExpiring(count) {
+        expiringKeys.forEach(el => {
+          if (count > 0) {
+            el.classList.add('expiring-alert');
+            el.innerHTML = '<span class="live-big">' + esc(count) + '</span>' +
+              '<span class="live-sub">Expiring</span>';
+          } else {
+            restore(el);  // calm state: back to the stock icon face
+          }
+        });
+      }
+      function pollExpiring() {
+        if (!expiringKeys.length || document.hidden) return;
+        fetch(url('expiring/count'))
+          .then(r => r.json())
+          .then(d => { if (d && typeof d.count === 'number') renderExpiring(d.count); })
+          .catch(() => {});
+      }
+
+      // -- camera snapshot preview ----------------------------------------
+      function pollCamera() {
+        if (!cameraKeys.length || document.hidden) return;
+        cameraKeys.forEach(el => {
+          const idx = el.dataset.camIndex || '0';
+          const src = url('ui/camera/' + encodeURIComponent(idx) + '/snapshot') + '?t=' + Date.now();
+          const img = new Image();
+          img.onload = () => {
+            el.classList.add('has-snapshot');
+            el.style.backgroundImage = 'url("' + src + '")';
+          };
+          img.onerror = () => { el.classList.remove('has-snapshot'); el.style.backgroundImage = ''; };
+          img.src = src;
+        });
+      }
+
+      // Stagger the first fetches so they do not all land at once, then poll
+      // each on a cadence sized to how fast its data changes. Every poll is
+      // skipped while the tab is hidden (the guards above) and kicked once on
+      // return, so a background kiosk tab stops hammering the endpoints.
+      function start(fn, delay, every) { setTimeout(() => { fn(); setInterval(fn, every); }, delay); }
+      if (hasWx) start(pollWeather, 200, 10 * 60 * 1000);          // weather: every 10 min
+      if (expiringKeys.length) start(pollExpiring, 600, 2 * 60 * 1000);  // count: every 2 min
+      if (cameraKeys.length) start(pollCamera, 1000, 20 * 1000);         // snapshot: every 20 s
+      if (hasWx || expiringKeys.length || cameraKeys.length) {
+        document.addEventListener('visibilitychange', () => {
+          if (document.hidden) return;
+          pollWeather(); pollExpiring(); pollCamera();
+        });
+      }
+    })();
+  </script>
+  {% endif %}
+  {% endif %}
+  {# Applies the panel safe-area insets and kiosk scale/rotation to this
+     standalone page, same as the other full-screen kiosk pages
+     (FoodAssistant-2e0f). #}
+  <script src="static/js/kiosk-display.js?v={{ app_version }}"></script>
+</body>
+</html>
