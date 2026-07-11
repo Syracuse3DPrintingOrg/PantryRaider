@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% import "_marketing.html" as m %}
+{% block title %}Pricing: Forager{% endblock %}
+{% block content %}
+
+<section class="hero" style="padding-bottom:0;">
+  <span class="eyebrow">Pricing</span>
+  <h1 style="max-width:20ch; margin-left:auto; margin-right:auto;">Simple pricing, cancel anytime</h1>
+  <p class="lead">Start with a 30-day free trial, then pick the plan that fits
+  how you cook. Pantry Raider itself stays free and open source with your own
+  AI key.</p>
+</section>
+
+<section class="section" style="margin-top:1.5rem;">
+  {{ m.pricing_cards() }}
+  <p class="muted small" style="text-align:center; max-width: 58ch; margin: 1.25rem auto 0;">
+    A subscription keeps your kitchen reachable from anywhere and refills your
+    scanning credits. Cancel anytime.
+  </p>
+</section>
+
+{{ m.how_it_works() }}
+
+{{ m.closing_cta() }}
+
+{% endblock %}

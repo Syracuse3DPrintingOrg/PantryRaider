@@ -1,0 +1,49 @@
+{% from "setup/_macros.html" import info, panel, srow, pill, upstream_cards with context %}
+<!-- Fleet & Remote Access (FoodAssistant-jcnh): dense panel/row pattern. On a
+             main install this is the satellite registry plus a LAN scan; on a
+             satellite it is the main-server link (upstream_cards, converted in
+             _macros.html). Control ids (devices-list, scan_cidr, scan-result)
+             and the loadDevices()/scanLan() hooks are unchanged. -->
+        <div class="tab-pane fade" id="pane-devices">
+          {% if features.satellite %}
+          <p class="pane-intro">This device is a satellite: it runs the full app but pulls its backend config (Grocy, Mealie, AI keys, and expiry defaults) from your main Pantry Raider server.</p>
+          {{ upstream_cards() }}
+          {% else %}
+          <p class="pane-intro">Any Pi Remote satellites that pull their config from this server. Each satellite checks in on every config sync, so the list updates itself.</p>
+
+          {% call panel('Known devices', 'Satellites that have checked in with this server.') %}
+            {% call srow('Devices', 'Refresh to check in the latest.') %}
+              <div id="devices-list">
+                <span class="text-secondary small"><span class="spinner-border spinner-border-sm me-2"></span>Loading...</span>
+              </div>
+              <button class="btn btn-outline-secondary btn-sm mt-2" onclick="loadDevices()" title="Refresh">
+                <i class="bi bi-arrow-clockwise me-1"></i>Refresh
+              </button>
+            {% endcall %}
+          {% endcall %}
+
+          {# Pairing requests (FoodAssistant-4box): a new satellite on the LAN
+             can ask this server for its own API key; the request shows here
+             (and as a toast) with the code the device is displaying, so the
+             user can confirm they match before approving. #}
+          {% call panel('Pairing requests', 'Devices on your network asking to join. Approve one only when the code below matches the code on its screen.') %}
+            {% call srow('Waiting', 'Requests expire after 5 minutes.') %}
+              <div id="pairing-requests">
+                <span class="text-secondary small">No devices are asking to join right now.</span>
+              </div>
+            {% endcall %}
+          {% endcall %}
+
+          {% call panel('Find devices on the LAN', 'Scan your local network for Pantry Raider instances that have not checked in yet.') %}
+            {% call srow('Scan', 'Leave the range blank for this server\'s subnet.') %}
+              <div class="input-group" style="max-width:420px">
+                <input type="text" class="form-control" id="scan_cidr" placeholder="192.168.1.0/24 (optional)" autocomplete="off">
+                <button class="btn btn-outline-info" type="button" onclick="scanLan()" id="scan-lan-btn">
+                  <i class="bi bi-search me-1"></i>Scan LAN
+                </button>
+              </div>
+              <div class="test-result mt-1" id="scan-result"></div>
+            {% endcall %}
+          {% endcall %}
+          {% endif %}
+        </div>

@@ -1,0 +1,112 @@
+{% extends "admin_base.html" %}
+{% block title %}Recipes: Forager admin{% endblock %}
+{% block admin_content %}
+{% macro mod_button(recipe_id, action, label, cls, status, page) %}
+<form class="inline" method="post" action="/admin/recipes/{{ recipe_id }}/moderate">
+  <input type="hidden" name="action" value="{{ action }}">
+  <input type="hidden" name="status" value="{{ status }}">
+  <input type="hidden" name="page" value="{{ page }}">
+  <button class="btn {{ cls }}" type="submit">{{ label }}</button>
+</form>
+{% endmacro %}
+<div class="dash-head">
+  <h1 style="margin-bottom:0.25rem;">Community recipes</h1>
+  <a class="btn btn-outline" href="/admin">Back to overview</a>
+</div>
+<p class="muted">
+  Moderate shared recipes. New submissions currently land
+  <strong>{{ "pending review" if require_approval else "approved (auto)" }}</strong>;
+  flip CLOUD_RECIPE_REQUIRE_APPROVAL to change that. Approved recipes are the
+  only ones the community browser shows; hiding, rejecting, or deleting one
+  pulls it from view right away.
+</p>
+
+<div class="card">
+  <div class="actions-row" style="margin-bottom:0.75rem;">
+    {% for f in filters %}
+    <a class="btn {{ 'btn-outline' if f == status else 'btn-quiet' }}"
+       href="/admin/recipes?status={{ f }}">{{ f|capitalize }}</a>
+    {% endfor %}
+  </div>
+
+  <div class="table-wrap">
+    <table class="admin">
+      <thead>
+        <tr>
+          <th>Title</th><th>Submitter</th><th>Attribution</th>
+          <th class="num">Rating</th><th class="num">Reports</th>
+          <th>Status</th><th>Shared</th><th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+        <tr>
+          <td>{{ r.title }}</td>
+          <td>{{ r.submitter }}</td>
+          <td>{{ r.attribution }}</td>
+          <td class="num">
+            {% if r.rating_count %}{{ r.average_rating }} ({{ r.rating_count }}){% else %}-{% endif %}
+          </td>
+          <td class="num">
+            {% if r.report_count %}<span class="badge badge-danger">{{ r.report_count }}</span>{% else %}0{% endif %}
+          </td>
+          <td>
+            {% if r.status == "approved" %}<span class="badge badge-success">approved</span>
+            {% elif r.status == "pending" %}<span class="badge badge-primary">pending</span>
+            {% else %}<span class="badge">{{ r.status }}</span>{% endif %}
+          </td>
+          <td>{{ r.created[:10] }}</td>
+          <td>
+            <div class="actions-row">
+              {% if r.status != "approved" %}
+              {{ mod_button(r.id, "approve", "Approve", "btn-outline", status, page) }}
+              {% endif %}
+              {% if r.status == "approved" %}
+              {{ mod_button(r.id, "hide", "Hide", "btn-quiet", status, page) }}
+              {% endif %}
+              {% if r.status == "hidden" %}
+              {{ mod_button(r.id, "unhide", "Restore", "btn-outline", status, page) }}
+              {% endif %}
+              {% if r.status != "rejected" %}
+              {{ mod_button(r.id, "reject", "Reject", "btn-quiet", status, page) }}
+              {% endif %}
+              <form class="inline" method="post"
+                    action="/admin/recipes/{{ r.id }}/delete"
+                    onsubmit="return confirm('Delete this recipe for good? Its ratings and reports go with it.')">
+                <input type="hidden" name="status" value="{{ status }}">
+                <input type="hidden" name="page" value="{{ page }}">
+                <button class="btn btn-quiet" type="submit">Delete</button>
+              </form>
+            </div>
+          </td>
+        </tr>
+        {% if r.reasons %}
+        <tr>
+          <td colspan="8" class="muted small">
+            <strong>Flag reasons:</strong>
+            {% for reason in r.reasons %}
+            <span class="badge">{{ reason or "(no reason given)" }}</span>
+            {% endfor %}
+          </td>
+        </tr>
+        {% endif %}
+        {% else %}
+        <tr><td colspan="8" class="muted">No recipes in this view.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {% if has_prev or has_next %}
+  <div class="actions-row" style="margin-top:0.75rem;">
+    {% if has_prev %}
+    <a class="btn btn-quiet" href="/admin/recipes?status={{ status }}&page={{ page - 1 }}">Previous</a>
+    {% endif %}
+    <span class="muted small">Page {{ page }} of {{ total }} total</span>
+    {% if has_next %}
+    <a class="btn btn-quiet" href="/admin/recipes?status={{ status }}&page={{ page + 1 }}">Next</a>
+    {% endif %}
+  </div>
+  {% endif %}
+</div>
+{% endblock %}
