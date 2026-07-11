@@ -1,0 +1,70 @@
+# Brand sync: applies pending patches and regenerates the brand icon set.
+#
+# Two jobs in one, because they arrive together:
+# - patches/pending/*.patch are exact commits (git format-patch) applied with
+#   git am, so author, message, and content land intact. This is the escape
+#   hatch for hosted dev sessions that can reach the GitHub API but not git
+#   push (for example right after this repo was renamed).
+# - scripts/gen-icons.py regenerates every icon derivative (favicons, PWA
+#   icons, apple-touch, header mark, ghosted watermark source) from the master
+#   service/app/static/icons/logo.png, so replacing the master is all a logo
+#   refresh takes.
+#
+# Pushes made here use GITHUB_TOKEN and do not retrigger workflows, so this
+# cannot loop.
+name: Brand sync
+on:
+  push:
+    branches: [main]
+    paths:
+      - "patches/pending/*.patch"
+      - "service/app/static/icons/logo.png"
+      - "scripts/gen-icons.py"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Apply pending patches and regenerate icons
+        run: |
+          set -e
+          git config user.name "Dan"
+          git config user.email "dm.marafino@gmail.com"
+          shopt -s nullglob
+          patches=(patches/pending/*.patch)
+          if [ ${#patches[@]} -gt 0 ]; then
+            git am --3way "${patches[@]}"
+          fi
+          # One-time tidy: a web upload once landed the master logo under
+          # blob/ (a GitHub URL pasted as a path); move it home.
+          if [ -f "blob/main/service/app/static/icons/logo.png" ]; then
+            mkdir -p service/app/static/icons
+            git mv -f blob/main/service/app/static/icons/logo.png service/app/static/icons/logo.png
+            rm -rf blob
+            git add -A
+          fi
+          if [ -f service/app/static/icons/logo.png ] && [ -f scripts/gen-icons.py ]; then
+            pip -q install pillow
+            python scripts/gen-icons.py
+          fi
+          git rm -r -q --ignore-unmatch patches/pending
+          git add -A
+          if ! git diff --cached --quiet; then
+            # Repo convention: every commit bumps at least the patch version.
+            scripts/bump-version.sh patch >/dev/null 2>&1 || true
+            git add -A
+            git commit -m "Regenerate brand icons and remove applied patches"
+          fi
+          git push

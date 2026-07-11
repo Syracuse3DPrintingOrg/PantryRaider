@@ -1,0 +1,917 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="{{ theme_mode }}"
+      data-ui-scale="{{ ui_scale_factor | default(1.0) }}"
+      data-display-rotation="{{ display_rotation | default(0) }}"
+      data-rotation-mode="{{ 'compositor' if is_pi else 'css' }}"
+      data-display-margin-top="{{ display_margin_top | default(0) }}"
+      data-display-margin-right="{{ display_margin_right | default(0) }}"
+      data-display-margin-bottom="{{ display_margin_bottom | default(0) }}"
+      data-display-margin-left="{{ display_margin_left | default(0) }}"
+      data-is-pi="{{ '1' if is_pi else '0' }}"
+      data-quiet-mode="{{ 'true' if quiet_mode else 'false' }}"
+      data-clock-format="{{ clock_format | default('auto') }}">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- Resolve all relative links against the app root (or the HA Ingress prefix) -->
+  <base href="{{ ingress_path }}/">
+  <title>{% block title %}{{ app_name }}{% endblock %}</title>
+  <!-- PWA: manifest and service worker are served from the site root so the app
+       installs with scope "/" (FoodAssistant-fd3z). Absolute paths on purpose so
+       they resolve against the origin root, not the <base> prefix. -->
+  <link rel="manifest" href="/manifest.webmanifest">
+  <meta name="theme-color" content="#212529">
+  <link rel="icon" type="image/svg+xml" href="static/icons/favicon.svg">
+  <link rel="icon" type="image/png" sizes="32x32" href="static/icons/favicon-32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="static/icons/favicon-16.png">
+  <link rel="icon" type="image/x-icon" href="static/icons/favicon.ico">
+  <link rel="icon" type="image/png" sizes="192x192" href="static/icons/icon-192.png">
+  <link rel="apple-touch-icon" href="static/pwa/apple-touch-icon-180.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Pantry Raider">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="virtual-keyboard" content="overlays-content">
+  <script>
+    // Register the PWA service worker for an offline app shell and installability
+    // (FoodAssistant-fd3z). Guarded two ways: the browser must support workers,
+    // and the page must be a secure context (https) or localhost. Over plain-http
+    // on the LAN a worker cannot register, so this is a deliberate no-op there and
+    // the app behaves exactly as it does today. Registered from the origin root
+    // with scope "/" so it can control every page.
+    if ('serviceWorker' in navigator &&
+        (window.isSecureContext ||
+         location.hostname === 'localhost' ||
+         location.hostname === '127.0.0.1')) {
+      window.addEventListener('load', function () {
+        navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(function () {});
+      });
+    }
+  </script>
+  {% if theme_css %}
+  <link href="{{ theme_css }}" rel="stylesheet">
+  {% else %}
+  <link href="static/vendor/bootstrap.min.css" rel="stylesheet">
+  {% endif %}
+  {% if theme_overlay %}
+  <link href="{{ theme_overlay }}" rel="stylesheet">
+  {% endif %}
+  {% if custom_theme_active %}
+  {# Custom theme builder (FoodAssistant-hatd). Inline override layered after the
+     base Bootstrap stylesheet, mirroring how an overlay theme works but built
+     from the user's saved swatches rather than a vendored file. Maps the five
+     editable colours onto the most visible Bootstrap CSS variables plus a few
+     derived ones (rgb pairs for utilities, link colours, card/input surfaces) so
+     the result stays cohesive across the whole UI. data-bs-theme is already set
+     to custom_theme_base on <html>, so this only retints, it does not flip
+     light/dark. #}
+  <style>
+    :root,
+    [data-bs-theme="{{ theme_mode }}"] {
+      --bs-primary: {{ custom_theme_primary }};
+      --bs-link-color: {{ custom_theme_primary }};
+      --bs-link-hover-color: {{ custom_theme_primary }};
+      --bs-secondary: {{ custom_theme_accent }};
+      --bs-success: {{ custom_theme_accent }};
+      --bs-body-bg: {{ custom_theme_bg }};
+      --bs-body-color: {{ custom_theme_text }};
+      --bs-emphasis-color: {{ custom_theme_text }};
+      --bs-secondary-bg: {{ custom_theme_surface }};
+      --bs-tertiary-bg: {{ custom_theme_surface }};
+      --bs-border-color: {{ custom_theme_surface }};
+      --bs-card-bg: {{ custom_theme_surface }};
+      --bs-card-cap-bg: {{ custom_theme_surface }};
+      --bs-modal-bg: {{ custom_theme_surface }};
+      --bs-dropdown-bg: {{ custom_theme_surface }};
+      --bs-list-group-bg: {{ custom_theme_surface }};
+      --bs-input-bg: {{ custom_theme_surface }};
+    }
+    body { background-color: var(--bs-body-bg); color: var(--bs-body-color); }
+    .btn-primary { background-color: {{ custom_theme_primary }}; border-color: {{ custom_theme_primary }}; }
+    .btn-success { background-color: {{ custom_theme_accent }}; border-color: {{ custom_theme_accent }}; }
+    .nav-link.active, .float-nav-link.active { color: {{ custom_theme_primary }}; }
+  </style>
+  {% endif %}
+  {% if background_image_url %}
+  {# Background image (FoodAssistant-e2t6): a fixed full-viewport layer behind
+     everything via body::before, at an adjustable opacity. The body keeps its
+     theme background colour as the base the image sits on, so a partly-opaque
+     image blends with the theme and text on cards stays readable. #}
+  <style>
+    body::before {
+      content: ""; position: fixed; inset: 0; z-index: -1;
+      background: url("{{ background_image_url }}") center / cover no-repeat;
+      opacity: {{ background_opacity }};
+      pointer-events: none;
+    }
+  </style>
+  {% else %}
+  {# Default: a faint ghosted brand mark centred behind the app. Opacity is kept
+     very low and tuned per light/dark so the pink raccoon reads as a watermark
+     without ever competing with page text (cards sit on their own surface above
+     it). A user-set background image replaces it entirely. #}
+  <style>
+    body::before {
+      content: ""; position: fixed; inset: 0; z-index: -1;
+      background: url("static/icons/logo-mark.png") center center / min(58vmin, 460px) no-repeat;
+      opacity: {{ '0.04' if theme_mode == 'light' else '0.06' }};
+      pointer-events: none;
+    }
+  </style>
+  {% endif %}
+  <link href="static/vendor/bootstrap-icons.min.css" rel="stylesheet">
+  <script>
+    // Kiosk mode: load touch-target CSS before first paint to avoid reflow flash
+    if (localStorage.getItem('kioskMode') === 'true') {
+      var _kl = document.createElement('link');
+      _kl.rel = 'stylesheet';
+      _kl.href = 'static/css/kiosk.css?v={{ app_version }}';
+      document.head.appendChild(_kl);
+    }
+  </script>
+  <!-- ?v={{ app_version }} busts the browser cache on every update so a kiosk
+       picks up new CSS/JS instead of serving stale copies. -->
+  <!-- Applies scale + orientation on the attached kiosk display only. Loads
+       BEFORE the intro guard on purpose: this script latches kioskMode from
+       the kiosk's ?kiosk=1 boot URL, and the intro checks that flag. With the
+       old order the boot load saw no kiosk flag (no intro, no shown marker)
+       and the FIRST in-app navigation played the intro instead, which read as
+       a splash screen between menus (FoodAssistant-9dhh). -->
+  <script src="static/js/kiosk-display.js?v={{ app_version }}"></script>
+  {# Kiosk boot intro: pre-paint blackout guard + intro.js (FoodAssistant-a8xy) #}
+  {% include "_intro.html" %}
+  <!-- Pi only: auto-enable kiosk mode when a display is attached, unless the
+       user has made an explicit choice (FoodAssistant-h437) -->
+  <script src="static/js/kiosk-auto.js?v={{ app_version }}"></script>
+  <!-- USB-keyboard navigation: number keys jump to nav tabs, "?" shows help -->
+  <script src="static/js/keyboard-nav.js?v={{ app_version }}"></script>
+  <!-- Kiosk only: report activity so the host bridge wakes the display/deck -->
+  <script src="static/js/kiosk-idle.js?v={{ app_version }}"></script>
+  <!-- On-screen floating navigation menu: corner placement + drag to reposition -->
+  <script src="static/js/floating-nav.js?v={{ app_version }}"></script>
+  <!-- Floating timer chips: one chip per running server-side timer, every page -->
+  <script src="static/js/timer-chips.js?v={{ app_version }}"></script>
+  <!-- Discoverable "Install app" affordance when the PWA can be installed -->
+  <script src="static/js/pwa-install.js?v={{ app_version }}"></script>
+  {# On-screen "update available" popup (FoodAssistant-5wtc). A small dismissible
+     banner shown once per version per browser when a newer release is out. Left
+     off the Settings page (which has its own update check) and off demo mode.
+     The script throttles the check per browser and the server prefers its cached
+     result, so this never hammers GitHub even on the kiosk's frequent reloads. #}
+  {% if not demo_mode and active != 'setup' %}
+  <div id="update-notice-config" hidden></div>
+  <script src="static/js/update-notice.js?v={{ app_version }}"></script>
+  {% endif %}
+  {# On-screen Home Assistant event channel: notification toasts + camera
+     pop-ups. Rendered on every device so each can opt in or out for itself (a
+     per-device localStorage override of the server default); the poller exits
+     immediately and polls nothing when this device is not showing events. #}
+  <div id="ha-events-config" data-default="{{ '1' if ha_events_enabled else '0' }}" data-popup-seconds="{{ ha_camera_popup_seconds }}" hidden></div>
+  <script src="static/js/ha-events.js?v={{ app_version }}"></script>
+  {# Kiosk screensaver: after the configured idle minutes the page dims to a
+     floating clock; any touch dismisses it. Runs in kiosk mode (or in every
+     browser when data-all-clients is on) and only when a timeout is set
+     (FoodAssistant-y65x). #}
+  <div id="screensaver-config" data-minutes="{{ screensaver_minutes }}" data-speed="{{ screensaver_speed }}" data-pill-scale="{{ screensaver_pill_scale }}" data-photo-seconds="{{ screensaver_photo_seconds }}" data-ken-burns="{{ 'true' if screensaver_ken_burns else 'false' }}" data-ken-burns-speed="{{ screensaver_ken_burns_speed }}" data-mode="{{ screensaver_mode }}" data-all-clients="{{ 'true' if screensaver_all_clients else 'false' }}" hidden></div>
+  <script src="static/js/screensaver.js?v={{ app_version }}"></script>
+  {# On-screen keyboard for kiosk touchscreens (FoodAssistant-wo9j) #}
+  {% include "_osk.html" %}
+  <style>
+    body { padding-top: 60px; }
+    .navbar-brand { font-weight: 700; letter-spacing: -0.5px; }
+    /* Brand mark (pink line-art raccoon). The pink reads on both dark and light
+       navbars; height-capped so it never grows the fixed 60px bar. */
+    .brand-logo { height: 30px; width: auto; }
+    /* Two-level nav top row (FoodAssistant-gg33, -2e0f): keep every top-level
+       label on a single line and let the row scroll sideways if the tabs
+       overflow, at ALL widths (not just the narrow-panel breakpoint), so labels
+       never wrap onto two lines or overlap on a desktop browser. Tight padding
+       and a small icon gap keep the row compact. */
+    .navbar .nav-primary { min-width: 0; flex: 1 1 auto; overflow-x: auto; scrollbar-width: none; }
+    .navbar .nav-primary::-webkit-scrollbar { display: none; }
+    .navbar .nav-primary .nav-link { white-space: nowrap; padding-left: 0.55rem; padding-right: 0.55rem; }
+    .navbar .nav-primary .nav-link .bi { margin-right: 0.3rem; }
+    .badge-days { font-size: 0.85em; }
+    .table th { white-space: nowrap; }
+    .btn-icon { padding: 0.2rem 0.45rem; font-size: 0.8rem; }
+    .urgency-expired { color: #ff6b6b; }
+    .urgency-today   { color: #ffa94d; }
+    .urgency-3d      { color: #ffd43b; }
+    .urgency-ok      { color: #69db7c; }
+    .flash { position: fixed; top: 70px; right: 1rem; z-index: 9999; min-width: 280px; }
+    /* When the navbar is collapsed (small/landscape panels like the 800x480
+       Pi touchscreen), the open menu overlays the page. Cap its height to the
+       viewport and let it scroll so a long tab list never runs off a short
+       screen or hides behind page content. */
+    @media (max-width: 991.98px) {
+      /* Keep the main menu visible on a phone instead of folding it behind the
+         hamburger, WITHOUT growing the bar (a taller bar would cover the page,
+         since the body only reserves 60px of top padding). The bar stays a
+         single row: brand, then the primary nav which scrolls sideways if the
+         tabs overflow, then the hamburger. The hamburger's utility controls open
+         as an overlay panel below the bar rather than adding rows to it. */
+      .navbar > .container-fluid { flex-wrap: nowrap; }
+      .navbar-brand,
+      .navbar-toggler { flex-shrink: 0; }
+      .navbar .nav-primary {
+        min-width: 0;
+        flex: 1 1 auto;
+        overflow-x: auto;
+        flex-wrap: nowrap;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+      }
+      .navbar .nav-primary::-webkit-scrollbar { display: none; }
+      .navbar .nav-primary .nav-link { white-space: nowrap; }
+      /* Utility menu (QR, kiosk, settings, overflow, sign out) overlays below the
+         bar so opening it never changes the bar height. */
+      .navbar-collapse {
+        position: absolute;
+        top: 100%;
+        right: 0;
+        z-index: 1031;
+        min-width: 14rem;
+        max-height: calc(100vh - 60px);
+        overflow-y: auto;
+        padding: 0.5rem 0.75rem;
+        background: var(--bs-tertiary-bg, #2b3035);
+        border: 1px solid var(--bs-border-color, rgba(255, 255, 255, 0.15));
+        border-top: 0;
+        border-radius: 0 0 0 0.5rem;
+        box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.4);
+      }
+    }
+    /* In-header sub-page pill row (FoodAssistant-gg33, -2e0f): the active
+       top-level's sub-pages as a compact group of pills, reading as a second
+       row of the main menu. Same background as the navbar, and STICKY directly
+       under the fixed 60px bar so it stays put instead of scrolling away. Pills
+       are sized to their label and grouped together (not stretched full width);
+       the group scrolls sideways only if it overflows a narrow panel. */
+    .subpill-bar {
+      background: var(--bs-tertiary-bg, #2b3035);
+      border-bottom: 1px solid var(--bs-border-color, rgba(255, 255, 255, 0.12));
+      padding: 0.3rem 0.75rem;
+      /* Sticky under the fixed navbar. The `top` inset is measured from the
+         body's padding box, and body already reserves the navbar height via
+         padding-top, so `top: 0` pins the pill flush at the navbar's bottom edge
+         in both normal and kiosk modes. A non-zero value stacks ON TOP of that
+         reserved padding and drops the pill a full navbar-height too low, which
+         left a large empty gap on the kiosk (FoodAssistant-2e0f, Dan). */
+      position: sticky;
+      top: 0;
+      z-index: 1020;
+    }
+    .subpill-inner {
+      display: flex;
+      gap: 0.35rem;
+      flex-wrap: nowrap;
+      overflow-x: auto;
+      scrollbar-width: none;
+    }
+    .subpill-inner::-webkit-scrollbar { display: none; }
+    .subpill-btn {
+      flex: 0 0 auto;
+      white-space: nowrap;
+      color: var(--bs-body-color);
+      background: transparent;
+      border: 1px solid var(--bs-border-color, rgba(255, 255, 255, 0.2));
+      padding: 0.25rem 0.85rem;
+      border-radius: 999px;
+      font-size: 0.85rem;
+      line-height: 1.45;
+    }
+    .subpill-btn:hover { border-color: var(--bs-primary); }
+    .subpill-btn.active {
+      background: var(--bs-primary);
+      border-color: var(--bs-primary);
+      color: #fff;
+      font-weight: 600;
+    }
+    /* Hide the top nav row on a phone browser too (FoodAssistant-gg33, Dan): it
+       is unusable narrow. Navigation falls to the hamburger (which now lists
+       every top-level page) plus the sub-pill. Desktop keeps the top row; the
+       kiosk hide lives in kiosk.css. */
+    @media (max-width: 767.98px) {
+      .navbar.fixed-top .nav-primary { display: none !important; }
+    }
+    /* Small-screen kiosk cluster (FoodAssistant-7j5b).
+       q6ql: page simplification on a narrow panel (the 800x480 pi_remote/
+       pi_hosted kiosk and similar). The top-level tabs are NOT folded away here:
+       all of them stay in the primary nav, which scrolls sideways when they
+       overflow (see the 991.98px block above), so every page is reachable from
+       the bar itself rather than buried in the kebab.
+       The ui_scale -> zoom mapping used by kiosk-display.js was audited and is
+       correct (not inverted); nothing here changes those scale factors. */
+    @media (max-width: 820px) {
+      /* Larger touch targets for the tabs on a narrow panel. */
+      .navbar-nav .nav-link { padding: 0.6rem 0.85rem; }
+      /* muwj: auto-simplify the page on a small viewport: tighter gutters,
+         single-column rows, and trimmed non-critical chrome so content fits an
+         800x480 panel without horizontal scroll. CSS-only and scoped to the
+         breakpoint, so desktop/phone layout is unaffected. */
+      #pageContent { padding-left: 0.75rem !important; padding-right: 0.75rem !important; }
+      #pageContent .row > [class*="col-"] { flex: 0 0 100%; max-width: 100%; }
+      #pageContent .card { margin-bottom: 0.5rem; }
+      /* Let content panels flow into the page so the whole page scrolls as one
+         surface; a nested scroll box (e.g. the inventory list at 60vh) otherwise
+         traps a finger flick and only a thin strip scrolls the page. */
+      .panel-body { max-height: none !important; overflow: visible !important; }
+      /* The floating nav is the best touch-navigation surface on a small panel
+         (fixed, large targets, no hamburger), so it is NOT hidden here. It is
+         auto-enabled in kiosk mode by floating-nav.js. */
+    }
+    /* High-zoom small-panel nav reclaim (FoodAssistant-fuuj).
+       At large/xlarge UI scale on a small/kiosk panel (e.g. an 800x480 screen
+       zoomed 1.2-1.4x, leaving a short effective CSS viewport) BOTH the top
+       navbar and the bottom floating nav were showing, so navigation chrome ate
+       ~half the screen. When the floating nav is the active nav surface
+       (floating-nav.js sets data-floatnav-active on <html>), it already exposes
+       every destination plus Settings, so the top navbar's redundant primary
+       tab row and utility toggler are pure overhead here. Collapse the top bar
+       to just the brand and slim its height, leaving the floating nav as the one
+       navigation surface. Scoped to high scale + small viewport + active
+       floating nav, so normal scale, phones, and desktop are untouched, and a
+       panel WITHOUT the floating nav keeps its full top navbar. */
+    @media (max-width: 991.98px) {
+      html[data-floatnav-active="1"][data-ui-scale^="1.2"] .navbar.fixed-top .nav-primary,
+      html[data-floatnav-active="1"][data-ui-scale^="1.2"] .navbar.fixed-top .navbar-toggler,
+      html[data-floatnav-active="1"][data-ui-scale^="1.2"] .navbar.fixed-top .navbar-collapse,
+      html[data-floatnav-active="1"][data-ui-scale^="1.4"] .navbar.fixed-top .nav-primary,
+      html[data-floatnav-active="1"][data-ui-scale^="1.4"] .navbar.fixed-top .navbar-toggler,
+      html[data-floatnav-active="1"][data-ui-scale^="1.4"] .navbar.fixed-top .navbar-collapse {
+        display: none !important;
+      }
+      /* Slim the now brand-only bar and shrink the body's top offset to match so
+         the reclaimed row goes to content, not to empty padding. */
+      html[data-floatnav-active="1"][data-ui-scale^="1.2"] .navbar.fixed-top,
+      html[data-floatnav-active="1"][data-ui-scale^="1.4"] .navbar.fixed-top {
+        min-height: 0;
+        padding-top: 0.15rem;
+        padding-bottom: 0.15rem;
+      }
+      html[data-floatnav-active="1"][data-ui-scale^="1.2"] .navbar-brand,
+      html[data-floatnav-active="1"][data-ui-scale^="1.4"] .navbar-brand {
+        font-size: 0.95rem;
+        padding-top: 0;
+        padding-bottom: 0;
+        line-height: 1.4;
+      }
+      html[data-floatnav-active="1"][data-ui-scale^="1.2"] body,
+      html[data-floatnav-active="1"][data-ui-scale^="1.4"] body {
+        padding-top: 38px !important;
+      }
+    }
+    /* On-screen navigation bar (FoodAssistant-bzuu, -i181). A FIXED bar docked
+       to a screen edge. Unlike the old draggable overlay, it reserves layout
+       space (floating-nav.js pads the body on the docked side), so it never sits
+       on top of content. The handle is gone (it is fixed, not dragged). */
+    .float-nav {
+      position: fixed;
+      z-index: 1030;
+      display: flex;
+      gap: 0.4rem;
+      padding: 0.4rem;
+      background: var(--bs-tertiary-bg, rgba(33, 37, 41, 0.96));
+      box-shadow: 0 0 1rem rgba(0, 0, 0, 0.4);
+      user-select: none;
+    }
+    /* The grip handle from the draggable version is hidden in docked mode. */
+    .float-nav-handle { display: none; }
+    /* Bottom dock: a full-width horizontal bar. Icons wrap to extra rows when
+       the screen is narrower than the row (a portrait kiosk panel); a centered
+       flex row must never overflow, because the left half would hang past the
+       screen edge with no way to scroll to it. floating-nav.js re-measures the
+       bar height on resize, so the body padding tracks the wrapped rows. */
+    .float-nav-dock-bottom {
+      left: 0; right: 0; bottom: 0;
+      flex-direction: row;
+      flex-wrap: wrap;
+      justify-content: center;
+      align-items: center;
+      border-top: 1px solid var(--bs-border-color, rgba(255, 255, 255, 0.15));
+    }
+    /* Left/right docks: a full-height vertical bar below the top navbar that
+       scrolls if the icons exceed the screen height. */
+    .float-nav-dock-left, .float-nav-dock-right {
+      top: 56px; bottom: 0;
+      flex-direction: column;
+      align-items: center;
+      overflow-y: auto;
+    }
+    .float-nav-dock-left  { left: 0;  border-right: 1px solid var(--bs-border-color, rgba(255, 255, 255, 0.15)); }
+    .float-nav-dock-right { right: 0; border-left:  1px solid var(--bs-border-color, rgba(255, 255, 255, 0.15)); }
+    .float-nav-link {
+      flex: 0 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 3rem;
+      height: 3rem;
+      border-radius: 0.6rem;
+      color: var(--bs-body-color, #dee2e6);
+      font-size: 1.35rem;
+      text-decoration: none;
+    }
+    .float-nav-link:hover { background: var(--bs-secondary-bg, rgba(255, 255, 255, 0.1)); }
+    .float-nav-link.active { background: var(--bs-primary, #0d6efd); color: #fff; }
+    /* Floating timer chips (FoodAssistant-kfda). One compact pill per running
+       server-side timer, stacked bottom-right on every page; timer-chips.js
+       shows them only while a timer is running. Style matches the .float-nav
+       conventions above. */
+    .timer-chips {
+      position: fixed;
+      z-index: 1030;
+      /* Offset clear of a docked nav bar (floating-nav.js publishes its size as
+         these CSS vars) so the chips never sit on top of it. */
+      bottom: calc(0.75rem + var(--float-nav-bottom, 0px));
+      right: calc(0.75rem + var(--float-nav-right, 0px));
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 0.35rem;
+      max-width: 14rem;
+      user-select: none;
+    }
+    .timer-chip {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      max-width: 100%;
+      padding: 0.25rem 0.65rem;
+      border-radius: 1rem;
+      background: var(--bs-tertiary-bg, rgba(33, 37, 41, 0.92));
+      border: 1px solid var(--bs-border-color, rgba(255, 255, 255, 0.15));
+      box-shadow: 0 0.4rem 1rem rgba(0, 0, 0, 0.35);
+      opacity: 0.95;
+      color: var(--bs-body-color, #dee2e6);
+      text-decoration: none;
+    }
+    .timer-chip:hover { border-color: var(--bs-primary, #0d6efd); color: var(--bs-body-color, #dee2e6); }
+    .timer-chip-label {
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+      font-size: 0.85rem;
+    }
+    .timer-chip-clock {
+      font-variant-numeric: tabular-nums;
+      font-weight: 600;
+      font-size: 0.85rem;
+      white-space: nowrap;
+    }
+    .timer-chip-expired, .timer-chip-expired .timer-chip-clock { color: #ff6b6b; }
+
+    /* Contrast hardening (FoodAssistant-tjlm). These load after any theme
+       overlay, so they correct low-contrast spots the bundled themes leave on
+       shared chrome. Higher specificity than the overlays' rules so they win
+       even over an overlay's !important on .nav-link.active. */
+    /* Active side-menu / pill: the pill background is always a saturated
+       primary, so several light/neon overlays that retint .nav-link.active to
+       their accent made accent-on-blue (e.g. iOS Light). Force white text. */
+    .nav-pills .nav-link.active,
+    .nav-pills .show > .nav-link,
+    .side-menu .nav-link.active { color: #fff !important; }
+    /* Accent badges (success/info/warning) are medium-to-bright in every bundled
+       theme, where white text fails. Dark text reads on all of them; danger and
+       primary stay white (their backgrounds are dark enough). */
+    .badge.bg-success, .badge.bg-info, .badge.bg-warning,
+    .badge.text-bg-success, .badge.text-bg-info, .badge.text-bg-warning {
+      color: #000 !important;
+    }
+    /* Bootstrap's info cyan is unreadable as outline text on light surfaces and
+       some dark themes retint it to a low-contrast hue. Pin the Save buttons'
+       outline-info to a readable teal for the active colour mode. */
+    {% if theme_mode == 'light' %}
+    .btn-outline-info { color: #0a6e80 !important; border-color: #0a6e80 !important; }
+    .btn-outline-info:hover { background-color: #0a6e80 !important; border-color: #0a6e80 !important; color: #fff !important; }
+    /* On a light theme the muted secondary grey is too pale for white badge
+       text; dark text reads. (Dark themes keep white: their secondary is dark.) */
+    .badge.bg-secondary, .badge.text-bg-secondary { color: #000 !important; }
+    {% else %}
+    .btn-outline-info { color: #6ed5e8 !important; border-color: #6ed5e8 !important; }
+    .btn-outline-info:hover { background-color: #6ed5e8 !important; border-color: #6ed5e8 !important; color: #06222a !important; }
+    {% endif %}
+  </style>
+</head>
+<body>
+  {# Read-only DEMO MODE banner (FoodAssistant-pxp0), pinned above the navbar. #}
+  {% include "_demo_banner.html" %}
+  <nav class="navbar navbar-expand-lg bg-body-tertiary border-bottom fixed-top">
+    <div class="container-fluid">
+      <a class="navbar-brand d-flex align-items-center" href="ui/"><img src="static/icons/logo-mark.png" alt="" class="brand-logo me-2">{{ app_name }}</a>
+      {# Two-level navigation (FoodAssistant-gg33). The top row shows only
+         TOP-LEVEL pages as flat links; a page's sub-pages appear in the
+         in-header sub-pill row below the navbar. A heading top-level (no page of
+         its own, e.g. Time & Temp, Home Hub) links to its first child. The top
+         row lives OUTSIDE the collapse so it stays on the bar; it is hidden on a
+         phone (see the @media block) where the hamburger + sub-pill take over. #}
+      <ul class="navbar-nav nav-primary me-auto flex-row flex-nowrap">
+        {% for tab in nav_tree() if tab.key not in ['about', 'defaults'] %}
+        {%- set top_href = tab.href if tab.href else (tab.children[0].href if tab.children else '#') %}
+        {%- set is_active = (active == tab.key) or (tab.children | selectattr('key', 'equalto', active) | list) %}
+        <li class="nav-item">
+          <a class="nav-link {% if is_active %}active{% endif %}" href="{{ top_href }}"{% if tab.custom and '://' in top_href %} target="_blank" rel="noopener"{% endif %}>
+            <i class="bi {{ tab.icon }} me-1"></i>{{ tab.label }}
+            {%- if tab.key == 'pending' %}
+            {# Two overlaid counts on the Review tab: action items (red) and
+               pending scans (yellow), FoodAssistant-4se3. #}
+            <span class="badge rounded-pill text-bg-danger d-none" id="actions-nav-badge" title="Action items">0</span>
+            <span class="badge rounded-pill text-bg-warning d-none" id="pending-nav-badge" title="Pending scans">0</span>
+            {%- endif %}
+          </a>
+        </li>
+        {% endfor %}
+      </ul>
+      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#nav" aria-controls="nav" aria-expanded="false" aria-label="Toggle navigation">
+        <span class="navbar-toggler-icon"></span>
+      </button>
+      <div class="collapse navbar-collapse flex-grow-0" id="nav">
+        {# The hamburger holds every TOP-LEVEL page (FoodAssistant-gg33) so it is
+           the full navigation on a phone, where the top row is hidden. A heading
+           top-level links to its first child. Hidden on desktop (d-lg-none),
+           where the collapse expands inline and the top row already shows these.
+           Utility controls follow below. #}
+        <ul class="navbar-nav w-100 mb-2 hamburger-nav d-lg-none">
+          {% for tab in nav_tree() if tab.key not in ['about', 'defaults'] %}
+          {%- set h_href = tab.href if tab.href else (tab.children[0].href if tab.children else '#') %}
+          {%- set h_active = (active == tab.key) or (tab.children | selectattr('key', 'equalto', active) | list) %}
+          <li class="nav-item">
+            <a class="nav-link {% if h_active %}active{% endif %}" href="{{ h_href }}"{% if tab.custom and '://' in h_href %} target="_blank" rel="noopener"{% endif %}>
+              <i class="bi {{ tab.icon }} me-2"></i>{{ tab.label }}
+            </a>
+          </li>
+          {% endfor %}
+          <li><hr class="dropdown-divider"></li>
+        </ul>
+        <ul class="navbar-nav ms-auto">
+          {# Utility controls. Icon-only in the desktop bar to stay compact; in
+             the collapsed hamburger menu each carries a text label (d-lg-none)
+             so it is not a row of bare icons (FoodAssistant-2e0f, Dan). #}
+          <li class="nav-item">
+            <button class="nav-link btn btn-link text-start w-100" data-bs-toggle="modal" data-bs-target="#qrModal" title="Phone QR code">
+              <i class="bi bi-qr-code"></i><span class="d-lg-none ms-2">Phone QR code</span>
+            </button>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link" href="#" id="kioskToggle" title="Toggle kiosk (touch) mode"
+               onclick="toggleKioskMode(); return false;">
+              <i class="bi bi-tablet" id="kioskIcon"></i><span class="d-lg-none ms-2">Kiosk mode</span>
+            </a>
+          </li>
+          <!-- Dedicated Settings button, always visible in the bar (not only in
+               the overflow menu) so it is one tap away on a touch kiosk. -->
+          <li class="nav-item">
+            <a class="nav-link {% if active == 'setup' %}active{% endif %}" href="setup" title="Settings">
+              <i class="bi bi-gear"></i><span class="d-lg-none ms-2">Settings</span>
+            </a>
+          </li>
+          {% for g in auto_hidden_groups() %}
+          <li class="nav-item">
+            <a class="nav-link text-warning" href="{{ g.setup_href }}"
+               title="{{ g.tab_labels | join(', ') }}: configure {{ g.service | capitalize }} to unlock">
+              <i class="bi bi-lock-fill" style="font-size:0.85rem"></i>
+              <span class="d-none d-md-inline small ms-1">{{ g.service | capitalize }}</span>
+            </a>
+          </li>
+          {% endfor %}
+          <!-- System-health warning: hidden until the host bridge reports an
+               undervoltage/throttle/temp/disk condition on a Pi appliance. -->
+          <li class="nav-item d-none" id="sysHealthItem">
+            <a class="nav-link text-warning" href="setup" id="sysHealthLink" title="System warning">
+              <i class="bi bi-exclamation-triangle-fill"></i>
+            </a>
+          </li>
+          <!-- Overflow menu: less-used destinations live here to keep the bar
+               uncluttered, which matters most on the small pi_remote screen. -->
+          <li class="nav-item dropdown">
+            <a class="nav-link dropdown-toggle {% if active in ['setup', 'about', 'defaults'] %}active{% endif %}"
+               href="#" id="moreMenu" role="button" data-bs-toggle="dropdown" aria-expanded="false" title="More">
+              <i class="bi bi-three-dots-vertical"></i><span class="d-lg-none ms-2">More</span>
+            </a>
+            <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="moreMenu">
+              {# Every page tab is also listed here as a redundant way to reach it,
+                 in addition to the always-visible primary nav. #}
+              {# Headings (folders) have no page, so they are not reachable links
+                 and are skipped here; their children appear in their own right. #}
+              {% for tab in nav_tabs() if tab.key not in ['about', 'defaults'] and not tab.heading %}
+              <li>
+                <a class="dropdown-item {% if active == tab.key %}active{% endif %}" href="{{ tab.href }}"{% if tab.custom and '://' in tab.href %} target="_blank" rel="noopener"{% endif %}>
+                  <i class="bi {{ tab.icon }} me-2"></i>{{ tab.label }}
+                </a>
+              </li>
+              {% endfor %}
+              <li><hr class="dropdown-divider"></li>
+              <li><a class="dropdown-item {% if active == 'setup' %}active{% endif %}" href="setup"><i class="bi bi-gear me-2"></i>Settings</a></li>
+              <li class="kiosk-hide"><a class="dropdown-item {% if active == 'defaults' %}active{% endif %}" href="ui/defaults"><i class="bi bi-table me-2"></i>Defaults</a></li>
+              <li class="kiosk-hide"><a class="dropdown-item {% if active == 'about' %}active{% endif %}" href="ui/about"><i class="bi bi-info-circle me-2"></i>About</a></li>
+              <li class="kiosk-hide"><hr class="dropdown-divider"></li>
+              <li class="kiosk-hide"><a class="dropdown-item" href="https://docs.pantryraider.app" target="_blank" rel="noopener"><i class="bi bi-book me-2"></i>Documentation</a></li>
+              <li class="kiosk-hide"><a class="dropdown-item" href="docs" target="_blank"><i class="bi bi-code-square me-2"></i>API docs</a></li>
+              <li class="kiosk-hide"><a class="dropdown-item" href="#" onclick="if(window.__kbdNavHelp){window.__kbdNavHelp();}return false;"><i class="bi bi-keyboard me-2"></i>Keyboard shortcuts</a></li>
+            </ul>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link" href="ui/logout" title="Sign out">
+              <i class="bi bi-box-arrow-right"></i><span class="d-lg-none ms-2">Sign out</span>
+            </a>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </nav>
+
+  {# In-header sub-page pill row (FoodAssistant-gg33). For the active top-level
+     page, show its sub-pages as a full-width segmented pill row, so entering a
+     top-level page reveals its sub-selections (the pattern used by the Timers
+     view toggle). A PAGE parent (Inventory, Cook, Kitchen Guide) leads with its
+     own page; a HEADING parent (Time & Temp, Home Hub) shows just its children.
+     Hidden when the active top-level has no more than one sub-page. Full width,
+     directly under the top bar; hidden on the reference pages. #}
+  {%- set _subpill = namespace(node=none) %}
+  {%- for tab in nav_tree() if tab.key not in ['about', 'defaults'] %}
+    {%- if (active == tab.key) or (tab.children | selectattr('key', 'equalto', active) | list) %}
+      {%- set _subpill.node = tab %}
+    {%- endif %}
+  {%- endfor %}
+  {%- if _subpill.node %}
+    {%- set _node = _subpill.node %}
+    {# Build the pill list: parent's own page first (page parent only), then children. #}
+    {%- set _pills = [] %}
+    {%- if _node.href and not _node.heading %}
+      {%- set _ = _pills.append({'key': _node.key, 'label': _node.label, 'href': _node.href}) %}
+    {%- endif %}
+    {%- for c in _node.children %}
+      {%- set _ = _pills.append({'key': c.key, 'label': c.label, 'href': c.href}) %}
+    {%- endfor %}
+    {%- if _pills | length > 1 %}
+    <div class="subpill-bar" id="subPillBar">
+      <div class="subpill-inner" role="group" aria-label="{{ _node.label }} pages">
+        {%- for p in _pills %}
+        <a class="btn subpill-btn {% if active == p.key %}active{% endif %}"
+           data-key="{{ p.key }}" data-href="{{ p.href }}" href="{{ p.href }}">{{ p.label }}</a>
+        {%- endfor %}
+      </div>
+    </div>
+    {%- endif %}
+  {%- endif %}
+
+  <!-- On-screen navigation bar (FoodAssistant-bzuu, -i181). A FIXED bar docked
+       to a screen edge, placed by floating-nav.js from the saved position
+       (server default or per-device override). It reserves layout space so it
+       never overlaps content. Auto-hides when a Stream Deck is connected if the
+       option is set. -->
+  <div id="floatNav" class="float-nav d-none"
+       data-position="{{ floating_nav_position }}"
+       data-autohide-streamdeck="{{ '1' if floating_nav_autohide_streamdeck else '0' }}"
+       data-nav-hidden="{{ '1' if hide_nav_chrome else '0' }}"
+       data-has-streamdeck="{{ '1' if has_streamdeck else '0' }}">
+    {# Headings (folders) have no page, so they are skipped in the flat float nav. #}
+    {% for tab in nav_tabs() if tab.key not in ['about', 'defaults'] and not tab.heading %}
+    <a class="float-nav-link {% if active == tab.key %}active{% endif %}" href="{{ tab.href }}"
+       title="{{ tab.label }}"{% if tab.custom and '://' in tab.href %} target="_blank" rel="noopener"{% endif %}>
+      <i class="bi {{ tab.icon }}"></i>
+    </a>
+    {% endfor %}
+    <a class="float-nav-link" href="setup" title="Settings"><i class="bi bi-gear"></i></a>
+  </div>
+
+  <!-- Floating timer chips (FoodAssistant-kfda). Hidden until timer-chips.js
+       sees at least one running timer (GET /timers); a tap opens the Timers
+       page. data-chips-hidden is the server-resolved timer_chips setting
+       (auto keeps them off at large/xlarge scale), and when it is set the
+       script exits without polling anything. -->
+  <div id="timerChips" class="timer-chips d-none"
+       data-chips-hidden="{{ '1' if hide_timer_chips else '0' }}"></div>
+
+  <!-- QR deep-link modal: at body level so backdrop and focus work on all browsers -->
+  <div class="modal fade" id="qrModal" tabindex="-1" aria-labelledby="qrModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="qrModalLabel"><i class="bi bi-qr-code me-2"></i>Add items from your phone</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body text-center">
+          <img src="ui/qr" alt="QR code" class="img-fluid mb-3" style="max-width: 240px; background:#fff; padding:8px; border-radius:4px;">
+          <p class="mb-2">Scan with your phone to add items</p>
+          <code id="qr-url" class="user-select-all small text-muted"></code>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Dismiss</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <script>
+    (function () {
+      var urlEl = document.getElementById('qr-url');
+      if (!urlEl) return;
+      // Fallback first, then the server's answer: the kiosk browser reaches the
+      // app at localhost, so the server computes the phone-reachable address
+      // that matches what the QR code actually encodes.
+      urlEl.textContent = 'http://' + window.location.host + '/ui/add';
+      fetch('ui/qr/url').then(function (r) { return r.json(); }).then(function (d) {
+        if (d && d.url) { urlEl.textContent = d.url; }
+      }).catch(function () {});
+    })();
+  </script>
+
+  {% if pin_readonly %}
+  <div class="alert alert-warning alert-dismissible d-flex align-items-center mb-0 rounded-0 py-2 px-3" role="alert"
+       style="position:fixed;top:56px;left:0;right:0;z-index:1040;">
+    <i class="bi bi-lock-fill me-2"></i>
+    <span>Locked &mdash; viewing read-only.</span>
+    <a href="ui/pin" class="btn btn-sm btn-warning ms-3">Tap to log in</a>
+    <button type="button" class="btn-close ms-auto" data-bs-dismiss="alert"></button>
+  </div>
+  {% endif %}
+  <div class="container-fluid px-4" id="pageContent" {% if pin_readonly %}style="margin-top:3rem"{% endif %}>
+    {% if message %}
+    <div class="flash">
+      <div class="alert alert-{{ message_type or 'success' }} alert-dismissible fade show" role="alert">
+        {{ message }}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+      </div>
+    </div>
+    {% endif %}
+    {% block content %}{% endblock %}
+  </div>
+
+  <script src="static/vendor/bootstrap.bundle.min.js"></script>
+  <script>
+    // CSS zoom on <html> can confuse Bootstrap's backdrop cleanup. Force-remove
+    // any orphaned backdrops and body classes when any modal closes.
+    document.addEventListener('hidden.bs.modal', function () {
+      document.querySelectorAll('.modal-backdrop').forEach(function (el) { el.remove(); });
+      document.body.classList.remove('modal-open');
+      document.body.style.removeProperty('overflow');
+      document.body.style.removeProperty('padding-right');
+    });
+  </script>
+  <script>
+    // Kiosk mode toggle
+    (function() {
+      var active = localStorage.getItem('kioskMode') === 'true';
+      var icon = document.getElementById('kioskIcon');
+      if (active && icon) {
+        icon.className = 'bi bi-tablet-fill';
+        document.getElementById('kioskToggle').title = 'Kiosk mode ON, click to disable';
+      }
+    })();
+    function toggleKioskMode() {
+      var active = localStorage.getItem('kioskMode') === 'true';
+      // Turning kiosk mode ON hides the mouse cursor on this screen (kiosk.css
+      // sets cursor:none), which surprises anyone who flips it on from a normal
+      // browser. Warn at the moment of enabling and say how to get the cursor
+      // back. Only prompt on enable, never on disable, and never on the Pi's
+      // own auto-enable path (kiosk-auto.js latches the flag directly and does
+      // not call this), so it never nags on every page.
+      if (!active) {
+        var ok = window.confirm(
+          'Kiosk mode hides the mouse cursor on this screen and sizes everything for touch. '
+          + 'To bring the cursor back, click the tablet icon in the top bar again to turn kiosk mode off.\n\n'
+          + 'Turn kiosk mode on now?');
+        if (!ok) { return; }
+      }
+      localStorage.setItem('kioskMode', active ? 'false' : 'true');
+      // Mark this as an explicit user choice so the Pi display auto-enable
+      // (kiosk-auto.js, FoodAssistant-h437) never overrides it in either
+      // direction, and drop the auto marker since the user is now in control.
+      localStorage.setItem('kioskExplicit', 'true');
+      localStorage.removeItem('kioskAuto');
+      location.reload();
+    }
+  </script>
+  <script>
+    // Inbox badges in the navbar: pending scans (yellow) + action items (red).
+    fetch('pending/count').then(r => r.json()).then(d => {
+      const b = document.getElementById('pending-nav-badge');
+      if (b && d.count > 0) { b.textContent = d.count; b.classList.remove('d-none'); }
+    }).catch(() => {});
+    fetch('action-items/count').then(r => r.json()).then(d => {
+      const b = document.getElementById('actions-nav-badge');
+      if (b && d.count > 0) { b.textContent = d.count; b.classList.remove('d-none'); }
+    }).catch(() => {});
+  </script>
+  <script>
+    // System-health indicator. Polls the host bridge (via the app) for power,
+    // thermal, and disk warnings on a Pi appliance. Off a Pi the endpoint
+    // returns an empty warnings list, so the icon stays hidden everywhere else.
+    (function () {
+      var item = document.getElementById('sysHealthItem');
+      var link = document.getElementById('sysHealthLink');
+      if (!item || !link) return;
+      function refresh() {
+        fetch('setup/system/health', { cache: 'no-store' })
+          .then(function (r) { return r.json(); })
+          .then(function (d) {
+            var warnings = (d && d.warnings) || [];
+            if (warnings.length) {
+              link.setAttribute('title', warnings.map(function (w) { return w.message; }).join('\n'));
+              item.classList.remove('d-none');
+            } else {
+              item.classList.add('d-none');
+            }
+          })
+          .catch(function () { /* leave the icon as-is on a transient error */ });
+      }
+      refresh();
+      // Re-check every minute so the icon is not badly stale when a power or
+      // heat condition comes and goes; the on-screen toast (FoodAssistant-h28s)
+      // is the primary alert, this keeps the nav triangle roughly in step.
+      setInterval(refresh, 60000);
+    })();
+  </script>
+  <script>
+    // Touch-calibration launcher (kiosk only). A "Calibrate" click in any
+    // browser sets a server flag; the kiosk on the Pi polls for it and drives
+    // its own display to the fullscreen calibration page, so the person taps
+    // the physical screen with the crosshair visible in front of them.
+    (function () {
+      if (localStorage.getItem('kioskMode') !== 'true') return;
+      function poll() {
+        // The physical kiosk display is never hidden; this only spares a
+        // backgrounded browser tab that happens to have kiosk mode latched.
+        if (document.hidden) return;
+        fetch('../setup/calibrate/touch/pending', { cache: 'no-store' })
+          .then(r => r.json())
+          .then(d => {
+            if (d && d.pending) {
+              window.location.href = '../setup/calibrate/touch/page';
+            }
+          })
+          .catch(() => {});
+      }
+      setInterval(poll, 3000);
+      poll();
+    })();
+  </script>
+  <script>
+    // Setup-complete kiosk hand-off (kiosk only). The wizard is finished from a
+    // remote browser, so the Pi's attached display is left on the wizard page.
+    // The wizard sets a server flag; the kiosk polls for it and drives its own
+    // display to the dashboard. The flag is one-shot (cleared when served), so
+    // this fires once and does not loop. Re-latch kiosk mode via ?kiosk=1, like
+    // the calibration page does on its way back.
+    (function () {
+      if (localStorage.getItem('kioskMode') !== 'true') return;
+      function poll() {
+        if (document.hidden) return;
+        fetch('../setup/kiosk/navigate/pending', { cache: 'no-store' })
+          .then(r => r.json())
+          .then(d => {
+            if (d && d.pending) {
+              window.location.href = '../ui/?kiosk=1';
+            }
+          })
+          .catch(() => {});
+      }
+      setInterval(poll, 3000);
+      poll();
+    })();
+  </script>
+  {% if barcode_global_capture and active != 'add' %}
+  <script>
+    // Global barcode capture (any page except Add, which has its own handler).
+    // A USB/Bluetooth HID scanner types the code as a fast keystroke burst. When
+    // one is seen here, save it to the pending list and jump to the Manage Pantry
+    // page. Off when the "Scan from any page" setting is disabled. Only a rapid
+    // burst counts, and never while a field is focused, so typing is untouched.
+    (function () {
+      // Inter-keystroke gap that starts a fresh scan. A USB HID scanner types a
+      // burst, but on a slower box (a Pi Remote) keystrokes can jitter, and a
+      // tight gap split a single scan so only the tail survived ("035483" is the
+      // last 6 digits of "078000035483"), FoodAssistant-pmry. A generous window
+      // tolerates that jitter while still being faster than human typing, and
+      // Enter remains the real terminator, so genuine scans are not merged.
+      var buf = '', last = 0, GAP_MS = 300;
+      function submit(code) {
+        fetch('pending/scan', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ barcode: code, quantity: 1, source: 'scanner' }),
+        }).then(function () {
+          // Land on Manage Pantry, where the saved-to-Pending count is shown.
+          window.location.href = 'ui/add';
+        }).catch(function () {});
+      }
+      document.addEventListener('keydown', function (e) {
+        if (e.ctrlKey || e.altKey || e.metaKey) return;
+        var ae = document.activeElement;
+        if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.tagName === 'SELECT')) return;
+        var now = Date.now();
+        if (now - last > GAP_MS) buf = '';
+        last = now;
+        if (e.key === 'Enter') {
+          if (buf.length >= 6) { var c = buf; buf = ''; submit(c); e.preventDefault(); }
+          buf = '';
+          return;
+        }
+        if (e.key.length === 1) buf += e.key;
+      });
+    })();
+  </script>
+  {% endif %}
+  {% block scripts %}{% endblock %}
+</body>
+</html>
