@@ -1,0 +1,4 @@
+# Host-side Bluetooth thermometer reader. bleak talks to bluez over D-Bus,
+# so it works on a Raspberry Pi (or any Linux host) without native builds.
+bleak>=0.21
+httpx>=0.24
