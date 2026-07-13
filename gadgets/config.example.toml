@@ -1,0 +1,30 @@
+# Pantry Raider Bluetooth thermometer reader configuration.
+# Copy to /etc/foodassistant/gadgets.toml and edit as needed. Every value has
+# a working default: on the appliance itself an empty file is fine, because
+# which thermometers to read is configured in the web UI (Timers page), not
+# here.
+
+# Where the Pantry Raider app is. On the appliance leave this alone.
+#base_url = "http://127.0.0.1:9284"
+
+# API key, if your install requires one for LAN clients. Prefer putting it in
+# /etc/foodassistant/gadgets.env (FOODASSISTANT_API_KEY=...) so it stays out
+# of this file.
+#api_key = ""
+
+# How often readings are pushed to the app, in seconds.
+#push_seconds = 5
+
+# How often the enabled flag and device list are re-pulled from the app.
+#config_poll_seconds = 30
+
+# Keep a passive BLE scan running. The scan discovers new thermometers and
+# reads Combustion probes (their temperatures ride the advertisement).
+#scan = true
+
+# Optional static devices, merged with the app's list. Normally not needed:
+# add thermometers from the Timers page instead.
+#[[devices]]
+#id = "AA:BB:CC:DD:EE:FF"
+#protocol = "inkbird"   # inkbird | thermopro | combustion | bluedot
+#name = "Grill"

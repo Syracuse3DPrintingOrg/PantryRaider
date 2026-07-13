@@ -1,0 +1,239 @@
+{% extends "base.html" %}
+{% block title %}Expiring: Pantry Raider{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center my-3">
+  <h4 class="mb-0"><i class="bi bi-clock-history me-2"></i>Expiring Items</h4>
+  <div class="d-flex gap-2 align-items-center">
+    <button class="btn btn-sm btn-outline-success" id="btn-use-it-up" onclick="loadUseItUp()"
+            title="Recipe ideas and tips for food that is about to expire. Looking at ideas never changes your stock.">
+      <i class="bi bi-recycle me-1"></i>Use-it-up ideas
+    </button>
+    <label class="mb-0 text-muted small">Show items expiring within</label>
+    <select class="form-select form-select-sm w-auto" onchange="location='?days='+this.value">
+      {% for d in [3, 7, 14, 30] %}
+      <option value="{{ d }}" {% if d == days %}selected{% endif %}>{{ d }} days</option>
+      {% endfor %}
+    </select>
+  </div>
+</div>
+
+<!-- Use-it-up panel (FoodAssistant-m6wq). Hidden until requested. Shows AI recipe
+     ideas focused on the expiring items plus always-useful static tips. -->
+<div class="card mb-4 d-none" id="use-it-up-card">
+  <div class="card-header d-flex align-items-center">
+    <i class="bi bi-recycle me-2 text-success"></i>
+    <span class="fw-semibold">Use-it-up ideas</span>
+    <button type="button" class="btn-close ms-auto" aria-label="Close"
+            onclick="document.getElementById('use-it-up-card').classList.add('d-none')"></button>
+  </div>
+  <div class="card-body" id="use-it-up-body">
+    <div class="text-secondary"><span class="spinner-border spinner-border-sm me-2"></span>Thinking of ways to use these up…</div>
+  </div>
+</div>
+
+{% with upstream_down_message = grocy_error %}{% include "_upstream_down.html" %}{% endwith %}
+
+<!-- Summary badges -->
+<div class="row g-3 mb-4">
+  {% set expired  = items | selectattr('days_remaining', 'lt', 0) | list %}
+  {% set today    = items | selectattr('days_remaining', 'eq', 0) | list %}
+  {% set soon     = items | selectattr('days_remaining', 'gt', 0) | selectattr('days_remaining', 'le', 3) | list %}
+  {% set later    = items | selectattr('days_remaining', 'gt', 3) | list %}
+  <div class="col-6 col-md-3">
+    <div class="card text-center border-danger">
+      <div class="card-body py-2">
+        <div class="fs-3 fw-bold urgency-expired">{{ expired | length }}</div>
+        <div class="text-muted small">Expired</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card text-center border-warning">
+      <div class="card-body py-2">
+        <div class="fs-3 fw-bold urgency-today">{{ today | length }}</div>
+        <div class="text-muted small">Today</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card text-center">
+      <div class="card-body py-2">
+        <div class="fs-3 fw-bold urgency-3d">{{ soon | length }}</div>
+        <div class="text-muted small">Within 3 Days</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card text-center">
+      <div class="card-body py-2">
+        <div class="fs-3 fw-bold urgency-ok">{{ later | length }}</div>
+        <div class="text-muted small">Later</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% if items %}
+<div class="table-responsive">
+  <table class="table table-hover align-middle">
+    <thead>
+      <tr>
+        <th>Item</th>
+        <th>Amount</th>
+        <th>Location</th>
+        <th>Best By</th>
+        <th>Status</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for item in items %}
+      {% set d = item.days_remaining %}
+      <tr>
+        <td><strong>{{ item.product.name if item.product else 'Unknown' }}</strong></td>
+        <td>{{ item.amount | int }} {{ item.product.qu_unit_stock.name if item.product and item.product.qu_unit_stock else '' }}</td>
+        <td><span class="badge bg-secondary">{{ item.product.location.name if item.product and item.product.location else '—' }}</span></td>
+        <td>{{ item.best_before_date or '—' }}</td>
+        <td>
+          {% if d < 0 %}
+            <span class="badge text-bg-danger">EXPIRED ({{ d | abs }}d ago)</span>
+          {% elif d == 0 %}
+            <span class="badge text-bg-warning">Today</span>
+          {% elif d <= 3 %}
+            <span class="badge text-bg-warning">{{ d }}d left</span>
+          {% else %}
+            <span class="badge text-bg-success">{{ d }}d left</span>
+          {% endif %}
+        </td>
+        <td>
+          {% set pname = item.product.name if item.product else 'this item' %}
+          <form method="post" action="ui/consume/{{ item.product_id }}" class="d-inline"
+                onsubmit="return confirm({{ ('Mark all ' ~ pname ~ ' as consumed? This removes it from your stock.') | tojson }})">
+            <input type="hidden" name="amount" value="{{ item.amount }}">
+            <input type="hidden" name="name" value="{{ pname }}">
+            <button type="submit" class="btn btn-sm btn-outline-success btn-icon" title="Mark all {{ pname | e }} consumed (removes it from stock)">
+              <i class="bi bi-check-lg"></i>
+            </button>
+          </form>
+          {% if printing_enabled %}
+          <button type="button" class="btn btn-sm btn-outline-secondary btn-icon"
+                  title="Print label"
+                  onclick="printLabel({{ item.product_id }}, {{ pname | tojson }})">
+            <i class="bi bi-printer"></i>
+          </button>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% elif not grocy_error %}
+<div class="text-center py-5 text-muted">
+  <i class="bi bi-check-circle fs-1 d-block mb-2 text-success"></i>
+  Nothing expiring within {{ days }} days.
+</div>
+{% endif %}
+
+<!-- Print confirmation toast -->
+<div class="position-fixed bottom-0 end-0 p-3" style="z-index:9999">
+  <div id="expToast" class="toast align-items-center text-bg-success border-0" role="alert">
+    <div class="d-flex">
+      <div class="toast-body" id="expToastMsg"></div>
+      <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+function escHtml(s) {
+  return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+// Print a food label for one expiring item (FoodAssistant-fb8x). The server
+// pulls its name and dates from Grocy, so only the product id is sent.
+async function printLabel(productId, name) {
+  try {
+    const r = await fetch('/printing/label', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ product_id: productId }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok || !d.ok) throw new Error(d.detail || d.error || r.statusText);
+    showToast(`Label sent for ${name}.`);
+  } catch (e) {
+    showToast(`Print failed: ${e.message}`, true);
+  }
+}
+
+function showToast(msg, isError = false) {
+  const toast = document.getElementById('expToast');
+  toast.className = `toast align-items-center border-0 text-bg-${isError ? 'danger' : 'success'}`;
+  document.getElementById('expToastMsg').textContent = msg;
+  new bootstrap.Toast(toast, { delay: 3000 }).show();
+}
+
+// Whether a suggestion can be turned into a full recipe on the Cook page
+// (AI generates it; Mealie stores it).
+const CAN_COOK = {{ 'true' if ai_configured and mealie_configured else 'false' }};
+const AI_CONFIGURED = {{ 'true' if ai_configured else 'false' }};
+
+async function loadUseItUp() {
+  const card = document.getElementById('use-it-up-card');
+  const body = document.getElementById('use-it-up-body');
+  const btn = document.getElementById('btn-use-it-up');
+  card.classList.remove('d-none');
+  card.scrollIntoView({behavior: 'smooth', block: 'nearest'});
+  body.innerHTML = '<div class="text-secondary"><span class="spinner-border spinner-border-sm me-2"></span>Thinking of ways to use these up…</div>';
+  btn.disabled = true;
+  try {
+    const r = await fetch('mealie/use-it-up', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({days: {{ days }}}),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || r.statusText);
+    const sug = d.suggestions || [];
+    const tips = d.tips || [];
+    let htmlOut = '';
+    if (d.items && d.items.length) {
+      htmlOut += `<div class="small text-secondary mb-2">Recipe ideas for: ${d.items.map(escHtml).join(', ')}</div>`;
+    }
+    if (sug.length) {
+      htmlOut += '<div class="row g-2 row-cols-1 row-cols-md-2 row-cols-lg-3 mb-3">' + sug.map(s => `
+        <div class="col"><div class="card h-100"><div class="card-body py-2 d-flex flex-column">
+          <div class="fw-semibold">${escHtml(s.name)}</div>
+          ${s.description ? `<div class="small text-secondary mt-1">${escHtml(s.description)}</div>` : ''}
+          ${(s.uses||[]).length ? `<div class="small text-success mt-1"><i class="bi bi-check2 me-1"></i>${s.uses.map(escHtml).join(', ')}</div>` : ''}
+          ${CAN_COOK ? `<div class="mt-auto pt-2">
+            <a class="btn btn-sm btn-outline-primary" href="ui/cook?generate=${encodeURIComponent(s.name)}">
+              <i class="bi bi-stars me-1"></i>Cook this
+            </a>
+          </div>` : ''}
+        </div></div></div>`).join('') + '</div>';
+    } else if (d.message) {
+      htmlOut += `<div class="text-secondary mb-2">${escHtml(d.message)}</div>`;
+    } else if (!AI_CONFIGURED) {
+      htmlOut += '<div class="text-secondary mb-2">Recipe ideas need an AI provider (see Settings). The quick tips below always work.</div>';
+    } else {
+      htmlOut += '<div class="text-secondary mb-2">No recipe ideas came back this time. Try again in a moment.</div>';
+    }
+    if (tips.length) {
+      htmlOut += '<div class="small fw-semibold text-secondary mb-1"><i class="bi bi-lightbulb me-1"></i>Quick tips</div>'
+        + '<ul class="small mb-0">' + tips.map(t => `<li>${escHtml(t)}</li>`).join('') + '</ul>';
+    }
+    body.innerHTML = htmlOut || '<div class="text-secondary">No ideas right now.</div>';
+    card.scrollIntoView({behavior: 'smooth', block: 'nearest'});
+  } catch (e) {
+    body.innerHTML = `<div class="alert alert-danger mb-0">Could not load ideas: ${escHtml(e.message)}</div>`;
+  } finally {
+    btn.disabled = false;
+  }
+}
+</script>
+{% endblock %}
