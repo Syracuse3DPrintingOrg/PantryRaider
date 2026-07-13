@@ -1,0 +1,57 @@
+site_name: Pantry Raider
+site_description: Self-hosted food spoilage tracker built on Grocy, with optional Mealie and Ollama.
+site_url: https://docs.pantryraider.app
+repo_url: https://github.com/Syracuse3DPrintingOrg/PantryRaider
+repo_name: Syracuse3DPrintingOrg/PantryRaider
+docs_dir: docs
+
+# Keep internal working notes and the separately deployed browser demo out of
+# the published site (the demo's README also collides with its index.html).
+exclude_docs: |
+  demo/README.md
+  hardware-bead-drafts.md
+  design/
+
+theme:
+  name: material
+  palette:
+    scheme: slate
+  features:
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+
+nav:
+  - Home: index.md
+  - First run and setup: first-run.md
+  - Feature maturity: maturity.md
+  - Platforms and deployment: platforms.md
+  - Install on Unraid: unraid.md
+  - What needs the internet: what-needs-internet.md
+  - Recipes and cooking:
+      - "Recipes: built in, Mealie optional": recipe-backend-comparison.md
+      - Cook page and Cook wizard: cooking.md
+  - Personalization and on-screen features: personalization.md
+  - Bluetooth kitchen thermometers: thermometers.md
+  - ESP devices (sensors and buttons): esp-devices.md
+  - Printing labels and documents: printing.md
+  - Device resources: device-resources.md
+  - Settings matrix: settings-matrix.md
+  - API reference: api.md
+  - Hardware:
+      - Overview: hardware.md
+      - Supported hardware: hardware/supported-hardware.md
+      - SD-card image: hardware/sd-image.md
+      - Pi reliability and memory tiers: hardware/pi-reliability.md
+      - Waveshare barcode scanner: hardware/waveshare-barcode-scanner.md
+      - Label printing: hardware/label-printing.md
+      - EspControl wall panels: hardware/espcontrol.md
+  - AI declarations: AI_DECLARATIONS.md
+
+markdown_extensions:
+  - admonition
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.highlight
+  - pymdownx.superfences
