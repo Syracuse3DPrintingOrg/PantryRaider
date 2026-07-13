@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% import "_marketing.html" as m %}
+{% block title %}Forager: the easy button for Pantry Raider{% endblock %}
+{% block content %}
+
+<section class="hero">
+  <img class="hero-mark" src="/static/mark.svg" alt="Pantry Raider raccoon" width="96" height="96">
+  <span class="eyebrow">The cloud companion for Pantry Raider</span>
+  <h1>Know your kitchen. From anywhere.</h1>
+  <p class="lead">
+    Forager is the optional cloud companion for Pantry Raider. Snap a photo of
+    your groceries and it reads them for you, and it puts your kitchen a tap
+    away no matter where you are. No AI keys, no network setup, nothing to
+    configure.
+  </p>
+  <div class="hero-cta">
+    {% if signed_in %}
+    <a class="btn btn-lg" href="/account">Go to my account</a>
+    {% else %}
+    <a class="btn btn-lg" href="/signup">Start a free trial</a>
+    <a class="btn btn-outline btn-lg" href="/login">Log in</a>
+    {% endif %}
+  </div>
+  <p class="hero-note">30-day free trial. No card to start.</p>
+</section>
+
+<section class="section">
+  <div class="card" style="text-align:center; max-width: 60ch; margin: 0 auto;">
+    <h2>Pantry Raider is free and open source. Forager is the easy button.</h2>
+    <p class="muted">Run Pantry Raider at home with your own AI key and your own
+    network setup and it works forever, no account needed. Forager is for people
+    who would rather not fuss with any of that: it gives your kitchen a web
+    address you can reach from anywhere and handles the scanning for you, with
+    no keys to paste and nothing to configure.</p>
+    <p class="small" style="margin-top:1rem;">New here?
+      <a href="/signup">Sign up</a> in under a minute, then
+      <a href="/login">log in</a> from the app.</p>
+  </div>
+</section>
+
+{{ m.how_it_works() }}
+
+{{ m.features_grid() }}
+
+{{ m.pricing_section() }}
+
+<p class="muted small" style="text-align:center; max-width: 60ch; margin: -1rem auto 0;">
+  New to Pantry Raider? It is a free app you run at home that tracks what is in
+  your pantry and when it expires. Learn more and get it at
+  <a href="https://pantryraider.app">pantryraider.app</a>.
+</p>
+
+{{ m.closing_cta() }}
+
+{% endblock %}
