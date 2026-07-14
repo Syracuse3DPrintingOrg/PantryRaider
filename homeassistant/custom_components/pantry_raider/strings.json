@@ -1,0 +1,47 @@
+{
+  "config": {
+    "flow_title": "{name}",
+    "step": {
+      "user": {
+        "title": "Connect to Pantry Raider",
+        "description": "Point this at your Pantry Raider install. Leave the API key blank to pair from the kitchen screen instead of copying a key by hand.",
+        "data": {
+          "host": "Host",
+          "port": "Port",
+          "api_key": "API key (leave blank if your install has no password)"
+        }
+      },
+      "zeroconf_confirm": {
+        "title": "Add this Pantry Raider install?",
+        "description": "Home Assistant found {name} on your network. Add it now and, if it uses a password, you will be sent to approve pairing on the kitchen screen."
+      },
+      "pair": {
+        "title": "Approve on your kitchen",
+        "description": "Pantry Raider is showing pairing code {code}. Approve the request on the kitchen screen (or in Settings, Devices), then press Submit here."
+      }
+    },
+    "error": {
+      "cannot_connect": "Could not reach Pantry Raider at that address. Check the host and port, and that you used the LAN address.",
+      "invalid_auth": "Pantry Raider rejected the API key. Copy it from Settings, Security.",
+      "pairing_pending": "Not approved yet. Approve it on the kitchen, then try again.",
+      "pairing_unavailable": "Pairing is unavailable on this install (it may be turned off in Settings, Security & Access). Paste an API key instead."
+    },
+    "abort": {
+      "already_configured": "This Pantry Raider install is already set up.",
+      "pairing_denied": "The pairing request was denied on the kitchen.",
+      "pairing_expired": "The pairing request expired. Start again and approve it within a few minutes."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Pantry Raider options",
+        "description": "How often Home Assistant checks Pantry Raider for updates, and whether Pantry Raider is given a link back to Home Assistant for cameras and Stream Deck keys.",
+        "data": {
+          "scan_interval": "Update interval (seconds)",
+          "connect_back": "Let Pantry Raider connect back to Home Assistant"
+        }
+      }
+    }
+  }
+}
