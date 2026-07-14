@@ -1,0 +1,33 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to Pantry Raider",
+        "description": "Enter your Pantry Raider address. Use the LAN address (for example 192.168.1.170), not a public reverse-proxy URL, so Home Assistant can reach it directly.",
+        "data": {
+          "host": "Host",
+          "port": "Port",
+          "api_key": "API key (leave blank if your install has no password)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Could not reach Pantry Raider at that address. Check the host and port, and that you used the LAN address.",
+      "invalid_auth": "Pantry Raider rejected the API key. Copy it from Settings, Security."
+    },
+    "abort": {
+      "already_configured": "This Pantry Raider install is already set up."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Pantry Raider options",
+        "description": "How often Home Assistant checks Pantry Raider for updates.",
+        "data": {
+          "scan_interval": "Update interval (seconds)"
+        }
+      }
+    }
+  }
+}

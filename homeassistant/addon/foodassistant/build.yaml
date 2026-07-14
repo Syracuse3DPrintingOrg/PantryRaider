@@ -1,0 +1,6 @@
+# Build the add-on FROM the published multi-arch Pantry Raider image, adding
+# only the HA-specific defaults (see Dockerfile). The same image tag works for
+# every architecture because the GHCR image is a multi-arch manifest.
+build_from:
+  amd64: ghcr.io/syracuse3dprintingorg/pantryraider:latest
+  aarch64: ghcr.io/syracuse3dprintingorg/pantryraider:latest
