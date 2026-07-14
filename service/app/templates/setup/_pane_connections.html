@@ -1,0 +1,263 @@
+{% from "setup/_macros.html" import info, panel, srow, pill, toggle with context %}
+<!-- Cameras (FoodAssistant-jcnh): dense panel/row pattern around the existing
+             camera builder and list editors. The add-by-IP form, the camera list
+             editor, and the phone QR are separate panels; all ids and the classes
+             the camera JS queries (cam-ip-*, sd-camera-row, sd-cam-*, cam-scan-*,
+             qr_url_mode, qr_public_url) are unchanged. -->
+        <div class="tab-pane fade" id="pane-connections">
+          <p class="pane-intro">Camera feeds for the on-screen <a href="ui/camera" target="_blank">Camera page</a> and, when a Stream Deck is connected, a snapshot key or the full-deck overlay. The "add from your phone" QR code is set here too.</p>
+
+          {% if not features.satellite %}
+          {% call panel('Add a camera by IP', 'Build the stream and snapshot URLs for a network camera from its address.') %}
+            <p class="text-secondary small mt-1 mb-2">Pick the closest brand template, fill in the address and any login, then add it. You can edit the generated URLs in the list below before saving.{{ info('RTSP-only cameras cannot play in a browser or on the deck. Use a camera that also offers an MJPEG stream or a JPEG snapshot, or run an RTSP-to-HLS bridge and paste that .m3u8 URL by hand.') }}</p>
+            <div class="row g-2">
+              <div class="col-md-3">
+                <label class="form-label small mb-1">Brand template</label>
+                <select class="form-select form-select-sm" id="cam-ip-preset" onchange="_camPresetChanged()">
+                  <option value="generic_mjpeg">Generic MJPEG</option>
+                  <option value="generic_snapshot">Generic snapshot (JPEG)</option>
+                  <option value="reolink">Reolink</option>
+                  <option value="amcrest">Amcrest / Dahua</option>
+                  <option value="hikvision">Hikvision</option>
+                  <option value="onvif">ONVIF (snapshot)</option>
+                  <option value="custom">Custom path</option>
+                </select>
+              </div>
+              <div class="col-md-3">
+                <label class="form-label small mb-1">Name</label>
+                <input type="text" class="form-control form-control-sm" id="cam-ip-name" placeholder="Driveway">
+              </div>
+              <div class="col-md-4">
+                <label class="form-label small mb-1">IP or host</label>
+                <input type="text" class="form-control form-control-sm" id="cam-ip-host" placeholder="192.168.1.50">
+              </div>
+              <div class="col-md-2">
+                <label class="form-label small mb-1">Port</label>
+                <input type="text" class="form-control form-control-sm" id="cam-ip-port" placeholder="(default)">
+              </div>
+            </div>
+            <div class="row g-2 mt-1">
+              <div class="col-md-3">
+                <label class="form-label small mb-1">Username</label>
+                <input type="text" class="form-control form-control-sm" id="cam-ip-user" placeholder="(optional)" autocomplete="off">
+              </div>
+              <div class="col-md-3">
+                <label class="form-label small mb-1">Password</label>
+                <input type="password" class="form-control form-control-sm" id="cam-ip-pass" placeholder="(optional)" autocomplete="off">
+              </div>
+              <div class="col-md-6 sd-cam-ip-pathwrap d-none">
+                <label class="form-label small mb-1">Path</label>
+                <input type="text" class="form-control form-control-sm" id="cam-ip-path" placeholder="/video">
+                <div class="form-text">Stream path appended to the address. The snapshot path is derived where the brand has one.</div>
+              </div>
+            </div>
+            <div class="d-flex gap-2 mt-2 flex-wrap align-items-center">
+              <button type="button" class="btn btn-outline-info btn-sm" onclick="_camAddFromIp()">
+                <i class="bi bi-plus-lg me-1"></i>Add camera from IP
+              </button>
+              <!-- Scan the LAN for cameras, like the HA discovery (d9rx). -->
+              <button type="button" class="btn btn-outline-secondary btn-sm" id="cam-scan-btn" onclick="_camScanLan(this)">
+                <i class="bi bi-search me-1"></i>Scan network for cameras
+              </button>
+              <input type="text" class="form-control form-control-sm" id="cam-scan-cidr" style="max-width:200px"
+                     placeholder="192.168.1.0/24 (optional)" autocomplete="off" oninput="_camUpdateScanHint()">
+            </div>
+            <div id="cam-scan-hint" class="form-text text-warning mt-1 d-none"></div>
+            <div class="test-result mt-2" id="cam-ip-result"></div>
+            <div id="cam-scan-results" class="mt-2"></div>
+          {% endcall %}
+
+          {% call panel('Add from Frigate', 'List the cameras on a Frigate video recorder and pick the ones to add.') %}
+            <p class="text-secondary small mt-1 mb-2">Enter your Frigate address and search. Each camera it finds can be previewed and added with one tap.{{ info('Frigate is a self-hosted camera recorder. The address is where its web page lives, for example http://frigate.local:5000.') }}</p>
+            <div class="row g-2 align-items-end">
+              <div class="col-md-6">
+                <label class="form-label small mb-1">Frigate address</label>
+                <input type="text" class="form-control form-control-sm" id="cam-frigate-url" placeholder="http://frigate.local:5000" autocomplete="off">
+              </div>
+              <div class="col-md-3">
+                <button type="button" class="btn btn-outline-secondary btn-sm" onclick="_camFrigateDiscover(this)">
+                  <i class="bi bi-search me-1"></i>Find cameras
+                </button>
+              </div>
+            </div>
+            <div class="test-result mt-2" id="cam-frigate-result"></div>
+            <div id="cam-frigate-results" class="mt-2"></div>
+          {% endcall %}
+
+          {% call panel('Add a Reolink camera', 'For Reolink cameras and doorbells. The login is kept on the server and never shown on the page.') %}
+            <p class="text-secondary small mt-1 mb-2">Enter the camera address and its login. The live view and still image come through this app, so the username and password stay on the server.{{ info('Two-way talk on a Reolink doorbell is not supported yet; this adds the reliable camera picture and live feed.') }}</p>
+            <div class="row g-2">
+              <div class="col-md-3">
+                <label class="form-label small mb-1">Name</label>
+                <input type="text" class="form-control form-control-sm" id="cam-reo-name" placeholder="Front door">
+              </div>
+              <div class="col-md-4">
+                <label class="form-label small mb-1">IP or host</label>
+                <input type="text" class="form-control form-control-sm" id="cam-reo-host" placeholder="192.168.1.60">
+              </div>
+              <div class="col-md-2">
+                <label class="form-label small mb-1">Port</label>
+                <input type="text" class="form-control form-control-sm" id="cam-reo-port" placeholder="(default)">
+              </div>
+              <div class="col-md-3">
+                <label class="form-label small mb-1">Channel</label>
+                <input type="number" class="form-control form-control-sm" id="cam-reo-channel" value="0" min="0">
+                <div class="form-text">0 for a single camera or doorbell.</div>
+              </div>
+            </div>
+            <div class="row g-2 mt-1">
+              <div class="col-md-3">
+                <label class="form-label small mb-1">Username</label>
+                <input type="text" class="form-control form-control-sm" id="cam-reo-user" placeholder="admin" autocomplete="off">
+              </div>
+              <div class="col-md-3">
+                <label class="form-label small mb-1">Password</label>
+                <input type="password" class="form-control form-control-sm" id="cam-reo-pass" placeholder="camera password" autocomplete="new-password">
+              </div>
+              <div class="col-md-3">
+                <label class="form-label small mb-1">Video quality</label>
+                <select class="form-select form-select-sm" id="cam-reo-quality">
+                  <option value="main">Full quality</option>
+                  <option value="sub">Lighter (sub stream)</option>
+                </select>
+              </div>
+            </div>
+            <div class="d-flex gap-2 mt-2 flex-wrap align-items-center">
+              <button type="button" class="btn btn-outline-secondary btn-sm" onclick="_camPreviewReolink()">
+                <i class="bi bi-eye me-1"></i>Preview
+              </button>
+              <button type="button" class="btn btn-outline-info btn-sm" onclick="_camAddReolink(this)">
+                <i class="bi bi-plus-lg me-1"></i>Add Reolink camera
+              </button>
+            </div>
+            <div class="test-result mt-2" id="cam-reo-result"></div>
+          {% endcall %}
+          {% endif %}
+
+          {% call panel('Cameras', 'The saved feeds shown on the Camera page and pushed to the Stream Deck.') %}
+            <p class="text-secondary small mt-1 mb-2">Stream URL is the live feed (an .m3u8 HLS or an MJPEG URL); Snapshot URL is a still image. The house button on a row fills both from its Home Assistant entity.{{ info('Use "Discover from Home Assistant" to pull cameras from the connected instance, add one by IP above, or fill a row by hand.') }}</p>
+            <div id="streamdeck-cameras" class="d-flex flex-column gap-2 mb-2">
+              {% for cam in s.streamdeck_cameras %}
+              {% if cam.source == 'reolink' %}
+              <!-- Reolink camera: the login stays on the server, so only the name
+                   is editable here. Host, channel, and user ride hidden fields so
+                   a Save cameras keeps the entry; the server restores the stored
+                   password. -->
+              <div class="row g-2 align-items-end sd-camera-row" data-source="reolink">
+                <input type="hidden" class="sd-cam-source" value="reolink">
+                <input type="hidden" class="sd-cam-host" value="{{ cam.host or '' }}">
+                <input type="hidden" class="sd-cam-port" value="{{ cam.port or '' }}">
+                <input type="hidden" class="sd-cam-channel" value="{{ cam.channel if cam.channel is not none else 0 }}">
+                <input type="hidden" class="sd-cam-username" value="{{ cam.username or '' }}">
+                <input type="hidden" class="sd-cam-quality" value="{{ cam.stream_quality or 'main' }}">
+                <input type="hidden" class="sd-cam-device-type" value="{{ cam.device_type or '' }}">
+                <input type="hidden" class="sd-cam-two-way-talk" value="{{ '1' if cam.two_way_talk else '' }}">
+                <div class="col-md-3">
+                  <label class="form-label small mb-1">Name</label>
+                  <input type="text" class="form-control form-control-sm sd-cam-name" placeholder="Front door" value="{{ cam.name or '' }}" {% if features.satellite %}readonly{% endif %}>
+                </div>
+                <div class="col-md-8">
+                  <label class="form-label small mb-1">Reolink camera</label>
+                  <div class="form-control form-control-sm bg-body-tertiary text-secondary">
+                    <i class="bi bi-camera-video me-1"></i>{{ cam.host }}{% if cam.port %}:{{ cam.port }}{% endif %} · channel {{ cam.channel if cam.channel is not none else 0 }}{% if cam.username %} · {{ cam.username }}{% endif %} · login kept on the server
+                    {% if cam.device_type == 'doorbell' %}<span class="badge bg-secondary ms-1">Doorbell</span>{% endif %}
+                    {% if cam.two_way_talk %}<span class="badge bg-secondary ms-1">Two-way talk capable{{ info('This camera supports two-way audio; Pantry Raider does not open a talk session yet, only the picture and live feed.') }}</span>{% endif %}
+                  </div>
+                </div>
+                {% if not features.satellite %}
+                <div class="col-md-1 d-flex gap-1">
+                  <button type="button" class="btn btn-outline-danger btn-sm" title="Remove" onclick="this.closest('.sd-camera-row').remove()"><i class="bi bi-trash"></i></button>
+                </div>
+                {% endif %}
+                {% if not features.satellite %}
+                <div class="col-12 mt-1">
+                  <label class="form-label small mb-1">Pop up this camera on{{ info('When this camera reports one of these (a Reolink AI detection, or a Home Assistant automation posting to /events/camera-detect), it pops up on screen the same way a manual camera pop-up does.') }}</label>
+                  <div class="d-flex gap-3 flex-wrap">
+                    {% for t, label in [('person','Person'), ('vehicle','Vehicle'), ('animal','Animal'), ('visitor','Doorbell visitor')] %}
+                    <div class="form-check form-check-inline mb-0">
+                      <input class="form-check-input sd-cam-popup-type" type="checkbox" value="{{ t }}" {% if t in (cam.popup_types or []) %}checked{% endif %}>
+                      <label class="form-check-label small">{{ label }}</label>
+                    </div>
+                    {% endfor %}
+                  </div>
+                </div>
+                {% endif %}
+              </div>
+              {% else %}
+              <div class="row g-2 align-items-end sd-camera-row">
+                <div class="col-md-2">
+                  <label class="form-label small mb-1">Name</label>
+                  <input type="text" class="form-control form-control-sm sd-cam-name" placeholder="Front door" value="{{ cam.name or '' }}" {% if features.satellite %}readonly{% endif %}>
+                </div>
+                <div class="col-md-3">
+                  <label class="form-label small mb-1">Stream URL</label>
+                  <input type="text" class="form-control form-control-sm sd-cam-stream" placeholder="http://.../stream.m3u8" value="{{ cam.stream_url or '' }}" {% if features.satellite %}readonly{% endif %}>
+                </div>
+                <div class="col-md-3">
+                  <label class="form-label small mb-1">Snapshot URL</label>
+                  <input type="text" class="form-control form-control-sm sd-cam-snapshot" placeholder="http://.../snapshot.jpg" value="{{ cam.snapshot_url or '' }}" {% if features.satellite %}readonly{% endif %}>
+                </div>
+                {% if not features.satellite %}
+                <div class="col-md-3">
+                  <label class="form-label small mb-1">HA entity</label>
+                  <input type="text" class="form-control form-control-sm sd-cam-entity" placeholder="camera.front_door">
+                </div>
+                <div class="col-md-1 d-flex gap-1">
+                  <button type="button" class="btn btn-outline-secondary btn-sm" title="From Home Assistant" onclick="_sdCameraFromHa(this)"><i class="bi bi-house"></i></button>
+                  <button type="button" class="btn btn-outline-danger btn-sm" title="Remove" onclick="this.closest('.sd-camera-row').remove()"><i class="bi bi-trash"></i></button>
+                </div>
+                <div class="col-12 mt-1">
+                  <label class="form-label small mb-1">Pop up this camera on{{ info('A Home Assistant automation posts the detection type to /events/camera-detect; it only pops up here when the type is checked.') }}</label>
+                  <div class="d-flex gap-3 flex-wrap">
+                    {% for t, label in [('person','Person'), ('vehicle','Vehicle'), ('animal','Animal'), ('visitor','Doorbell visitor')] %}
+                    <div class="form-check form-check-inline mb-0">
+                      <input class="form-check-input sd-cam-popup-type" type="checkbox" value="{{ t }}" {% if t in (cam.popup_types or []) %}checked{% endif %}>
+                      <label class="form-check-label small">{{ label }}</label>
+                    </div>
+                    {% endfor %}
+                  </div>
+                </div>
+                {% endif %}
+              </div>
+              {% endif %}
+              {% endfor %}
+            </div>
+            {% if features.satellite %}
+            <div class="form-text"><i class="bi bi-hdd-network me-1"></i>Cameras are configured on the main server and sync here automatically. Change them there.</div>
+            {% else %}
+            <div class="d-flex gap-2 flex-wrap">
+              <button type="button" class="btn btn-outline-secondary btn-sm" onclick="_sdAddCameraRow()">
+                <i class="bi bi-plus-lg me-1"></i>Add camera
+              </button>
+              <button type="button" class="btn btn-outline-secondary btn-sm" onclick="_sdDiscoverCameras(this)">
+                <i class="bi bi-search me-1"></i>Discover from Home Assistant
+              </button>
+              <button type="button" class="btn btn-outline-info btn-sm" onclick="savePaneCameras(this)">
+                <i class="bi bi-check-lg me-1"></i>Save cameras
+              </button>
+            </div>
+            <div id="cameras-discovered" class="mt-2"></div>
+            <div class="test-result mt-2" id="cameras-result"></div>
+            {% endif %}
+          {% endcall %}
+
+          {% call panel('Phone QR code', 'The "Add items from your phone" QR code on the Manage Pantry page.') %}
+            {% call srow('QR code address', 'Which address it encodes.',
+                         'Auto uses this device\'s network address, so a phone on the same network can open it even when the kiosk browses at localhost. Public URL encodes the external address below, for phones that reach this app through a reverse proxy or tunnel.') %}
+              <select class="form-select form-select-sm" id="qr_url_mode" style="max-width:320px">
+                <option value="auto"   {{ 'selected' if (s.qr_url_mode or 'auto') == 'auto' else '' }}>Auto (this device's network address)</option>
+                <option value="public" {{ 'selected' if s.qr_url_mode == 'public' else '' }}>Public URL</option>
+              </select>
+              <input type="url" class="form-control form-control-sm mt-2" id="qr_public_url"
+                     placeholder="https://pantry.yourdomain.com" style="max-width:420px"
+                     value="{{ s.qr_public_url }}">
+              <div class="form-text">Public URL to encode when the mode above is Public URL. Leave it empty to use the remote-access tunnel address when one is active.</div>
+            {% endcall %}
+            {% call srow('Address', 'Save the QR setting.') %}
+              <button type="button" class="btn btn-outline-info btn-sm" onclick="saveQrSettings(this)">
+                <i class="bi bi-check-lg me-1"></i>Save QR address
+              </button>
+              <div class="test-result mt-2" id="qr-save-result"></div>
+            {% endcall %}
+          {% endcall %}
+        </div>

@@ -1,0 +1,101 @@
+{% from "setup/_macros.html" import info, panel, srow, pill, upstream_cards with context %}
+<!-- Fleet & Remote Access (FoodAssistant-jcnh): dense panel/row pattern. On a
+             main install this is the satellite registry plus a LAN scan; on a
+             satellite it is the main-server link (upstream_cards, converted in
+             _macros.html). Control ids (devices-list, scan_cidr, scan-result)
+             and the loadDevices()/scanLan() hooks are unchanged. -->
+        <div class="tab-pane fade" id="pane-devices">
+          {% if features.satellite %}
+          <p class="pane-intro">This device is a satellite: it runs the full app but pulls its backend config (Grocy, Mealie, AI keys, and expiry defaults) from your main Pantry Raider server.</p>
+          {{ upstream_cards() }}
+          {% else %}
+          <p class="pane-intro">Any Pi Remote satellites that pull their config from this server. Each satellite checks in on every config sync, so the list updates itself.</p>
+
+          {% call panel('Known devices', 'Satellites that have checked in with this server.') %}
+            {% call srow('Devices', 'Refresh to check in the latest.') %}
+              <div id="devices-list">
+                <span class="text-secondary small"><span class="spinner-border spinner-border-sm me-2"></span>Loading...</span>
+              </div>
+              <button class="btn btn-outline-secondary btn-sm mt-2" onclick="loadDevices()" title="Refresh">
+                <i class="bi bi-arrow-clockwise me-1"></i>Refresh
+              </button>
+            {% endcall %}
+          {% endcall %}
+
+          {# Pairing requests (FoodAssistant-4box): a new satellite on the LAN
+             can ask this server for its own API key; the request shows here
+             (and as a toast) with the code the device is displaying, so the
+             user can confirm they match before approving. #}
+          {% call panel('Pairing requests', 'Devices on your network asking to join. Approve one only when the code below matches the code on its screen.') %}
+            {% call srow('Waiting', 'Requests expire after 5 minutes.') %}
+              <div id="pairing-requests">
+                <span class="text-secondary small">No devices are asking to join right now.</span>
+              </div>
+            {% endcall %}
+          {% endcall %}
+
+          {% call panel('Find devices on the LAN', 'Scan your local network for Pantry Raider instances that have not checked in yet.') %}
+            {% call srow('Scan', 'Leave the range blank for this server\'s subnet.') %}
+              <div class="input-group" style="max-width:420px">
+                <input type="text" class="form-control" id="scan_cidr" placeholder="192.168.1.0/24 (optional)" autocomplete="off">
+                <button class="btn btn-outline-info" type="button" onclick="scanLan()" id="scan-lan-btn">
+                  <i class="bi bi-search me-1"></i>Scan LAN
+                </button>
+              </div>
+              <div class="test-result mt-1" id="scan-result"></div>
+            {% endcall %}
+          {% endcall %}
+
+          {# Bandit Cubs (docs/design/bandit-cub.md): small ESP32 companion
+             displays that poll this server for what to show. The content
+             policy lives here, fleet-wide, with a per-Cub default-view
+             override on each card; a Cub registers itself on its first poll,
+             so the list updates on its own like the satellites above. #}
+          {% call panel('Bandit Cubs', 'Small companion displays that show expiring items, timers, and thermometer probes. What they display is decided here, not on the device.') %}
+            {% call srow('What Cubs show', 'Applies to every Cub; each Cub\'s card below can pick its own idle view.') %}
+              <div class="d-flex flex-wrap align-items-end gap-3">
+                <div>
+                  <label class="form-label small mb-1" for="cub_default_view">Idle view</label>
+                  <select class="form-select form-select-sm" id="cub_default_view" style="max-width:220px">
+                    <option value="expiring" {% if s.cub_default_view == 'expiring' %}selected{% endif %}>Expiring items</option>
+                    <option value="rotation" {% if s.cub_default_view == 'rotation' %}selected{% endif %}>Rotate through views</option>
+                    <option value="clock" {% if s.cub_default_view == 'clock' %}selected{% endif %}>Clock</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="form-label small mb-1" for="cub_rotate_seconds">Seconds per view</label>
+                  <input type="number" class="form-control form-control-sm" id="cub_rotate_seconds" min="3" max="120" style="max-width:120px" value="{{ s.cub_rotate_seconds }}">
+                </div>
+                <div>
+                  <label class="form-label small mb-1" for="cub_poll_seconds">Refresh every (seconds)</label>
+                  <input type="number" class="form-control form-control-sm" id="cub_poll_seconds" min="5" max="300" style="max-width:120px" value="{{ s.cub_poll_seconds }}">
+                </div>
+              </div>
+              <div class="form-check form-switch mt-2">
+                <input class="form-check-input" type="checkbox" id="cub_timers_take_over" {% if s.cub_timers_take_over %}checked{% endif %}>
+                <label class="form-check-label small" for="cub_timers_take_over">Running timers take over the display</label>
+              </div>
+              <div class="form-check form-switch">
+                <input class="form-check-input" type="checkbox" id="cub_probes_take_over" {% if s.cub_probes_take_over %}checked{% endif %}>
+                <label class="form-check-label small" for="cub_probes_take_over">A thermometer probe with a target takes over when no timer is running</label>
+              </div>
+              <div class="form-check form-switch">
+                <input class="form-check-input" type="checkbox" id="cub_alerts_take_over" {% if s.cub_alerts_take_over %}checked{% endif %}>
+                <label class="form-check-label small" for="cub_alerts_take_over">A fridge or door alarm takes over everything until it clears</label>
+              </div>
+              <button type="button" class="btn btn-outline-info btn-sm mt-2" onclick="saveCubSettings(this)">
+                <i class="bi bi-check2 me-1"></i>Save
+              </button>
+              <span class="test-result" id="cub-settings-result"></span>
+            {% endcall %}
+            {% call srow('Paired Cubs', 'A Cub appears here after its first check-in.') %}
+              <div id="cubs-list">
+                <span class="text-secondary small"><span class="spinner-border spinner-border-sm me-2"></span>Loading...</span>
+              </div>
+              <button class="btn btn-outline-secondary btn-sm mt-2" onclick="loadCubs()" title="Refresh">
+                <i class="bi bi-arrow-clockwise me-1"></i>Refresh
+              </button>
+            {% endcall %}
+          {% endcall %}
+          {% endif %}
+        </div>

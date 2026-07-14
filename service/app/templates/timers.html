@@ -1,0 +1,904 @@
+{% extends "base.html" %}
+{% block title %}Timers &amp; Temps: Pantry Raider{% endblock %}
+
+{% block content %}
+{# Timers / Thermometers / Both is now chosen from the header sub-pill row
+   (Time & Temp), which drives the view through ?view= (initial_view). The old
+   in-page toggle was removed as a duplicate (FoodAssistant-2e0f, Dan). #}
+<div id="timersSection">
+<div class="mt-3 mb-3 d-flex align-items-center justify-content-between gap-2">
+  <h4 class="mb-0"><i class="bi bi-stopwatch me-2"></i>Timers</h4>
+  <div class="d-flex align-items-center gap-2">
+    {# Hidden until at least one timer exists; the confirm names the count so
+       a stray tap mid-cook cannot silently wipe the kitchen. Lives here in the
+       header so it sits with the running timers it clears, not with the
+       start controls below. #}
+    <button type="button" id="timersClearAll" class="btn btn-outline-danger btn-sm timer-clear-all d-none">
+      <i class="bi bi-x-lg me-1"></i>Clear all
+    </button>
+    {# Only shown when the screensaver script is on this page: mid-cook you can
+       set the timers going, then send the display straight to the saver where
+       they float. Works even with the idle timeout set to off. #}
+    <button type="button" id="startScreensaver" class="btn btn-outline-secondary btn-sm d-none">
+      <i class="bi bi-moon-stars me-1"></i>Screensaver
+    </button>
+  </div>
+</div>
+
+{# Compact idle hint: one quiet line when nothing is running, so the
+   start-a-timer controls below own the screen. It swaps out for the timer
+   cards the moment a countdown starts. #}
+<div id="timersEmpty" class="text-secondary small d-flex align-items-center gap-2 py-2">
+  <i class="bi bi-stopwatch"></i>
+  <span>No timers running. Start one below; it shows here, on the Stream Deck, and on every screen.</span>
+</div>
+
+<div id="timersGrid" class="row g-3 d-none"></div>
+</div><!-- /timersSection -->
+
+{# Bluetooth thermometer probes. Hidden until the host-side reader has
+   reported something: an install without thermometers never sees this. #}
+<div id="probesSection" class="d-none mt-4 pt-3 border-top">
+  <h4 class="mb-3"><i class="bi bi-thermometer-half me-2"></i>Temperatures</h4>
+  <div id="probesGrid" class="row g-3"></div>
+  <div id="probesDiscovered" class="d-none mt-3">
+    <div class="text-secondary mb-2">Thermometers in range, ready to add:</div>
+    <div id="probesDiscoveredList" class="d-flex flex-wrap gap-2"></div>
+  </div>
+</div>
+
+{# Hygrometers (FoodAssistant-q97i): fridge, freezer, pantry, and room
+   temperature + humidity sensors, a separate class from the cooking probes.
+   Hidden until at least one is added; they are added and managed from
+   Settings, Thermometers. #}
+<div id="hygroSection" class="d-none mt-4 pt-3 border-top">
+  <h4 class="mb-3"><i class="bi bi-moisture me-2"></i>Fridge &amp; room sensors</h4>
+  <div id="hygroGrid" class="row g-3"></div>
+</div>
+
+{# The start-a-timer controls sit below the live content on purpose: on a
+   kitchen glance the running timers and temperatures matter most, so they own
+   the top of the page and these controls are one flick away. Shown and hidden
+   together with the timers section, so the thermometers-only view hides both. #}
+<div id="timersStartSection" class="mt-3">
+<div class="card timer-start-card mb-3">
+  <div class="card-body">
+    <div class="timer-start-head mb-3"><i class="bi bi-plus-circle me-2"></i>Start a timer</div>
+
+    {# Quick minute presets: one tap starts an unnamed countdown (the server
+       numbers it). A tidy grid so the choices read at a glance: two rows on a
+       phone, a single row on the kiosk panel. #}
+    <div class="timer-group">
+      <div class="timer-group-label">Quick minutes</div>
+      <div class="timer-preset-grid">
+        <button type="button" class="timer-preset timer-minute" data-minutes="1">1 min</button>
+        <button type="button" class="timer-preset timer-minute" data-minutes="5">5 min</button>
+        <button type="button" class="timer-preset timer-minute" data-minutes="10">10 min</button>
+        <button type="button" class="timer-preset timer-minute" data-minutes="15">15 min</button>
+        <button type="button" class="timer-preset timer-minute" data-minutes="30">30 min</button>
+        <button type="button" class="timer-preset timer-minute" data-minutes="60">60 min</button>
+      </div>
+    </div>
+
+    {# Custom timer: name it (optional) and set the minutes yourself. Grouped
+       so the fields and the Start button read as one control. #}
+    <div class="timer-group">
+      <div class="timer-group-label">Custom timer</div>
+      <form id="timerCustomForm" class="timer-custom-row">
+        <input type="text" id="timerCustomLabel" class="form-control timer-custom-name"
+               maxlength="40" placeholder="Name (optional)" autocomplete="off">
+        <input type="number" id="timerCustomMinutes" class="form-control timer-custom-min"
+               min="1" max="1440" step="1" placeholder="Minutes" required>
+        <button type="submit" class="btn btn-primary timer-custom-start">
+          <i class="bi bi-play-fill me-1"></i>Start
+        </button>
+      </form>
+    </div>
+
+    {# Named staple-food timers: one tap starts a labeled countdown for the
+       common kitchen jobs. Durations are sensible starting points. Laid out as
+       their own tile grid so they read as quick presets, not stray buttons. #}
+    <div class="timer-group mb-0">
+      <div class="timer-group-label">Common foods</div>
+      <div class="timer-food-grid">
+        <button type="button" class="timer-preset timer-food-tile" data-name="Soft egg" data-minutes="6">
+          <span class="timer-food-name">Soft egg</span><span class="timer-food-time">6 min</span>
+        </button>
+        <button type="button" class="timer-preset timer-food-tile" data-name="Hard egg" data-minutes="10">
+          <span class="timer-food-name">Hard egg</span><span class="timer-food-time">10 min</span>
+        </button>
+        <button type="button" class="timer-preset timer-food-tile" data-name="Pasta" data-minutes="10">
+          <span class="timer-food-name">Pasta</span><span class="timer-food-time">10 min</span>
+        </button>
+        <button type="button" class="timer-preset timer-food-tile" data-name="Rice" data-minutes="18">
+          <span class="timer-food-name">Rice</span><span class="timer-food-time">18 min</span>
+        </button>
+        <button type="button" class="timer-preset timer-food-tile" data-name="Steamed veg" data-minutes="7">
+          <span class="timer-food-name">Steamed veg</span><span class="timer-food-time">7 min</span>
+        </button>
+        <button type="button" class="timer-preset timer-food-tile" data-name="Baked potato" data-minutes="45">
+          <span class="timer-food-name">Baked potato</span><span class="timer-food-time">45 min</span>
+        </button>
+        <button type="button" class="timer-preset timer-food-tile" data-name="Tea steep" data-minutes="4">
+          <span class="timer-food-name">Tea steep</span><span class="timer-food-time">4 min</span>
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+</div><!-- /timersStartSection -->
+
+<style>
+  /* Scoped to the Timers page. kiosk.css and the shared theme are owned
+     elsewhere; the start-a-timer redesign lives here so it looks right with
+     and without kiosk.css, and stays consistent with the Manage Pantry tiles. */
+  .timer-start-head { font-size: 1.15rem; font-weight: 600; }
+  .timer-group + .timer-group { margin-top: 1rem; }
+  .timer-group-label {
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--bs-secondary-color);
+    margin-bottom: 0.45rem;
+  }
+
+  /* Quick-minute presets: a tidy responsive grid, three across on a phone,
+     all six on one row from the small breakpoint up. */
+  .timer-preset-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.5rem;
+  }
+  @media (min-width: 576px) {
+    .timer-preset-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  }
+  .timer-minute {
+    border: 1px solid var(--bs-border-color);
+    background: var(--bs-tertiary-bg, rgba(255, 255, 255, 0.03));
+    color: var(--bs-body-color);
+    font-weight: 600;
+    border-radius: 0.6rem;
+    padding: 0.6rem 0.5rem;
+    transition: border-color 0.15s, background 0.15s, transform 0.05s;
+    cursor: pointer;
+  }
+  .timer-minute:hover { border-color: var(--bs-primary); }
+  .timer-minute:active { transform: scale(0.97); }
+  .timer-minute:focus-visible { outline: 2px solid var(--bs-primary); outline-offset: 2px; }
+
+  /* Custom timer: name + minutes + Start read as one control; the fields grow
+     to fill the row and wrap cleanly on a narrow phone. */
+  .timer-custom-row { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+  .timer-custom-name { flex: 1 1 12rem; min-width: 0; }
+  .timer-custom-min { flex: 1 1 7rem; min-width: 0; }
+  .timer-custom-start { flex: 0 0 auto; }
+
+  /* Common-food quick presets as a tile grid: name over duration, two across
+     on a phone, four across from the small breakpoint up. */
+  .timer-food-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.5rem;
+  }
+  @media (min-width: 576px) {
+    .timer-food-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  }
+  .timer-food-tile {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.1rem;
+    border: 1px solid var(--bs-border-color);
+    background: var(--bs-tertiary-bg, rgba(255, 255, 255, 0.03));
+    color: var(--bs-body-color);
+    border-radius: 0.6rem;
+    padding: 0.55rem 0.4rem;
+    transition: border-color 0.15s, background 0.15s, transform 0.05s;
+    cursor: pointer;
+  }
+  .timer-food-tile:hover { border-color: var(--bs-primary); }
+  .timer-food-tile:active { transform: scale(0.97); }
+  .timer-food-tile:focus-visible { outline: 2px solid var(--bs-primary); outline-offset: 2px; }
+  .timer-food-name { font-weight: 600; font-size: 0.95rem; line-height: 1.15; text-align: center; }
+  .timer-food-time { font-size: 0.8rem; color: var(--bs-secondary-color); }
+
+  .timer-card .timer-label {
+    font-size: 1.6rem;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .timer-card .timer-count {
+    font-size: 5.5rem;
+    font-weight: 700;
+    line-height: 1.05;
+    font-variant-numeric: tabular-nums;
+  }
+  .timer-card.timer-expired {
+    border-color: var(--bs-danger);
+    background-color: rgba(var(--bs-danger-rgb), 0.15);
+  }
+  .timer-card.timer-expired .timer-count { color: var(--bs-danger); }
+  /* Compact per-device probe card (FoodAssistant-ypju): a device's probes are
+     stacked as rows inside ONE card instead of a big card each. The internal
+     (food) probe reads large and bold; the ambient probe is smaller and muted,
+     so the important temperature stands out and the pair takes far less height. */
+  .probe-card .probe-row {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 0.5rem 0.75rem; flex-wrap: wrap; padding: 0.35rem 0;
+    border-top: 1px solid var(--bs-border-color, rgba(255, 255, 255, 0.08));
+  }
+  .probe-card .probe-row:first-of-type { border-top: 0; padding-top: 0; }
+  .probe-card .probe-row-main { display: flex; align-items: baseline; gap: 0.6rem; min-width: 0; }
+  .probe-card .probe-row-label { font-weight: 600; white-space: nowrap; }
+  .probe-card .probe-row-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 0.4rem; }
+  .probe-card .probe-temp {
+    font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums;
+  }
+  .probe-card .probe-temp-lg { font-size: 2.4rem; }
+  .probe-card .probe-temp-sm { font-size: 1.4rem; font-weight: 600; color: var(--bs-secondary-color, #adb5bd); }
+  .probe-card .probe-temp.probe-reached { color: var(--bs-danger); }
+  /* Ambient row: muted so the internal reading is the one that draws the eye. */
+  .probe-card .probe-row-ambient { opacity: 0.9; }
+  .probe-card .probe-row-ambient .probe-row-label { color: var(--bs-secondary-color, #adb5bd); font-weight: 500; }
+  .probe-card.probe-stale { opacity: 0.55; }
+  .probe-card .probe-battery-low { color: var(--bs-danger); }
+  /* Hygrometer cards (FoodAssistant-q97i) share the probe typography: the
+     temperature reads big, humidity beside it a size down and muted. */
+  .hygro-card .probe-temp { font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; font-size: 2.4rem; }
+  .hygro-card .hygro-humidity { font-size: 1.4rem; font-weight: 600; color: var(--bs-secondary-color, #adb5bd); }
+  .hygro-card.probe-stale { opacity: 0.55; }
+</style>
+
+<script>
+// View controller (FoodAssistant-42ja): timers only, thermometers only, or
+// both. Remembered per browser. The probes script tells us when at least one
+// thermometer exists, and only then does the toggle appear.
+(function () {
+  "use strict";
+  var KEY = "timersView";
+  var timersSection = document.getElementById("timersSection");
+  var startSection = document.getElementById("timersStartSection");
+  var probesSection = document.getElementById("probesSection");
+  var hygroSection = document.getElementById("hygroSection");
+  // The header sub-pill (Time & Temp) drives the view via ?view=; the server
+  // passes it as initial_view. A present view param wins over the remembered
+  // one so a sub-pill tap always lands on the intended view (FoodAssistant-gg33).
+  var view = "{{ initial_view or '' }}";
+  if (["timers", "thermometers", "both"].indexOf(view) === -1) {
+    try { view = window.localStorage.getItem(KEY) || "both"; } catch (e) { view = "both"; }
+  }
+  if (["timers", "thermometers", "both"].indexOf(view) === -1) view = "both";
+  // Whether any thermometer is known (set by the probes script). The toggle is
+  // pointless without one, so it stays hidden and the view falls back to timers.
+  var thermoPresent = false;
+  // Whether any timer is running (set by the timers script), so the combo view
+  // can collapse the empty timers area and let the temperatures own the screen.
+  var hasTimers = false;
+
+  function apply() {
+    var effective = (!thermoPresent) ? "timers" : view;
+    // Collapse the running-timers display when there is nothing to show and the
+    // thermometers own the view: no point giving empty timers space above live
+    // temperatures in the thermometers or combo view (FoodAssistant-bebg). The
+    // start-a-timer controls stay, so a timer is still one tap away.
+    var collapseTimers = (effective === "thermometers") ||
+      (effective === "both" && thermoPresent && !hasTimers);
+    if (timersSection) timersSection.classList.toggle("d-none", collapseTimers);
+    if (startSection) startSection.classList.toggle("d-none", effective === "thermometers");
+    if (probesSection) {
+      // The probes script decides whether the section has anything to show; we
+      // only additionally hide it in the timers-only view.
+      var wantProbes = effective !== "timers" && !!window.__thermoHasContent;
+      probesSection.classList.toggle("d-none", !wantProbes);
+    }
+    if (hygroSection) {
+      // Fridge/room hygrometers ride the thermometers views: shown whenever
+      // at least one exists and the view is not timers-only.
+      var wantHygro = effective !== "timers" && !!window.__hygroHasContent;
+      hygroSection.classList.toggle("d-none", !wantHygro);
+    }
+  }
+
+  // Called by the probes script after each poll so the probes section
+  // shows/hides in step with the live thermometer list.
+  window.__timersSetThermoPresent = function (present, hasContent) {
+    thermoPresent = !!present;
+    window.__thermoHasContent = !!hasContent;
+    apply();
+  };
+  // Called by the timers script whenever the running-timer count changes.
+  window.__timersSetHasTimers = function (has) {
+    hasTimers = !!has;
+    apply();
+  };
+  apply();
+})();
+
+(function () {
+  "use strict";
+
+  var grid = document.getElementById("timersGrid");
+  var empty = document.getElementById("timersEmpty");
+  var customForm = document.getElementById("timerCustomForm");
+  var customLabel = document.getElementById("timerCustomLabel");
+  var customMinutes = document.getElementById("timerCustomMinutes");
+  var clearAllBtn = document.getElementById("timersClearAll");
+  var saverBtn = document.getElementById("startScreensaver");
+
+  // Latest snapshot from the server. Each entry carries deadline_epoch so we can
+  // tick locally between polls (the timers API publishes an absolute wall-clock
+  // deadline for exactly this cross-surface use).
+  var timers = [];
+
+  function pad(n) { return n < 10 ? "0" + n : String(n); }
+
+  function fmt(totalSeconds) {
+    var s = Math.max(0, Math.floor(totalSeconds));
+    var m = Math.floor(s / 60);
+    var sec = s % 60;
+    if (m >= 60) {
+      var h = Math.floor(m / 60);
+      m = m % 60;
+      return h + ":" + pad(m) + ":" + pad(sec);
+    }
+    return pad(m) + ":" + pad(sec);
+  }
+
+  function render() {
+    // Clear all only makes sense once something is running (or done).
+    if (clearAllBtn) clearAllBtn.classList.toggle("d-none", !timers.length);
+    // Let the view controller collapse the empty timers area in the combo view.
+    if (typeof window.__timersSetHasTimers === "function") {
+      window.__timersSetHasTimers(timers.length > 0);
+    }
+    if (!timers.length) {
+      grid.classList.add("d-none");
+      grid.innerHTML = "";
+      empty.classList.remove("d-none");
+      return;
+    }
+    empty.classList.add("d-none");
+    grid.classList.remove("d-none");
+
+    var nowEpoch = Date.now() / 1000;
+    var html = "";
+    for (var i = 0; i < timers.length; i++) {
+      var t = timers[i];
+      // Prefer the shared epoch deadline; fall back to the server remaining.
+      var remaining;
+      if (typeof t.deadline_epoch === "number") {
+        remaining = t.deadline_epoch - nowEpoch;
+      } else {
+        remaining = t.remaining_seconds;
+      }
+      var expired = remaining <= 0;
+      var label = (t.label || "Timer").toString();
+      // Escape the label for safe insertion as text.
+      var safe = label.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      var cls = expired ? "timer-card timer-expired" : "timer-card";
+      var badge = expired
+        ? '<span class="badge bg-danger fs-5">Done</span>'
+        : '<span class="badge bg-success fs-5">Running</span>';
+      var cancel = '<button type="button" class="btn btn-outline-danger timer-cancel" data-id="' +
+        t.id + '">' + (expired ? "Dismiss" : "Cancel") + '</button>';
+      // A running timer offers a one-tap nudge; a finished one has nothing to
+      // extend (the server refuses too), so the button disappears with it.
+      var extend = expired ? '' :
+        '<button type="button" class="btn btn-outline-light timer-extend me-2" data-id="' +
+        t.id + '"><i class="bi bi-plus-lg me-1"></i>1 min</button>';
+      html += '<div class="col-12 col-md-6 col-xl-4">' +
+        '<div class="card h-100 ' + cls + '">' +
+        '<div class="card-body text-center">' +
+        '<div class="d-flex align-items-center justify-content-between mb-2">' +
+        '<span class="timer-label">' + safe + '</span>' + badge +
+        '</div>' +
+        '<div class="timer-count">' + fmt(remaining) + '</div>' +
+        '<div class="mt-2">' + extend + cancel + '</div>' +
+        '</div></div></div>';
+    }
+    grid.innerHTML = html;
+  }
+
+  async function poll() {
+    // A hidden tab (or a browser window behind others) skips the network
+    // trip; the local render tick keeps the countdown correct from
+    // deadline_epoch, and the next visible poll resyncs the list.
+    if (document.hidden) return;
+    try {
+      var resp = await fetch("timers", { headers: { "Accept": "application/json" } });
+      if (resp.ok) {
+        var data = await resp.json();
+        timers = (data && data.timers) || [];
+      }
+    } catch (e) {
+      // Network hiccup or /timers unreachable: keep the last snapshot and let
+      // the local tick keep counting down. Never surface an error on the kiosk.
+    }
+    render();
+  }
+
+  async function startTimer(label, minutes) {
+    var m = parseFloat(minutes);
+    if (!isFinite(m) || m <= 0) return;
+    try {
+      await fetch("timers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ label: label || "", seconds: Math.round(m * 60) })
+      });
+    } catch (e) {
+      // Unreachable: the next poll shows whatever the server actually has.
+    }
+    await poll();
+  }
+
+  async function cancelTimer(id) {
+    try {
+      await fetch("timers/" + encodeURIComponent(id), { method: "DELETE" });
+    } catch (e) { }
+    await poll();
+  }
+
+  async function extendTimer(id, seconds) {
+    try {
+      await fetch("timers/" + encodeURIComponent(id) + "/extend", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ seconds: seconds })
+      });
+    } catch (e) { }
+    await poll();
+  }
+
+  // Preset buttons start unnamed timers (the server numbers them). The custom
+  // form takes an optional name and a minute count.
+  document.querySelectorAll(".timer-preset").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      // Named staples carry a data-name; the plain minute presets do not.
+      startTimer(btn.getAttribute("data-name") || "", btn.getAttribute("data-minutes"));
+    });
+  });
+
+  // Clear all stops every timer at once, finished ones included. The confirm
+  // names the count so the tap is deliberate.
+  clearAllBtn.addEventListener("click", async function () {
+    var n = timers.length;
+    if (!n) return;
+    var msg = n === 1 ? "Stop and clear the timer?"
+                      : "Stop and clear all " + n + " timers?";
+    if (!window.confirm(msg)) return;
+    try {
+      await fetch("timers", { method: "DELETE" });
+    } catch (e) { }
+    await poll();
+  });
+
+  // Start the screensaver right away: nice mid-cook, with the timers floating
+  // across the dimmed screen. The button only appears when the screensaver
+  // script is on this page; its hook works even with the idle timeout off.
+  if (saverBtn && typeof window.__screensaverTest === "function") {
+    saverBtn.classList.remove("d-none");
+    saverBtn.addEventListener("click", function () {
+      window.__screensaverTest();
+    });
+  }
+
+  customForm.addEventListener("submit", function (ev) {
+    ev.preventDefault();
+    startTimer(customLabel.value.trim(), customMinutes.value);
+    customLabel.value = "";
+    customMinutes.value = "";
+  });
+
+  // The per-timer buttons are re-rendered every tick, so delegate the clicks.
+  grid.addEventListener("click", function (ev) {
+    var btn = ev.target.closest ? ev.target.closest(".timer-cancel") : null;
+    if (btn && btn.getAttribute("data-id")) {
+      cancelTimer(btn.getAttribute("data-id"));
+      return;
+    }
+    var ext = ev.target.closest ? ev.target.closest(".timer-extend") : null;
+    if (ext && ext.getAttribute("data-id")) extendTimer(ext.getAttribute("data-id"), 60);
+  });
+
+  // Tick locally every second for a smooth countdown (each timer carries
+  // deadline_epoch, so no network is needed between polls). The server
+  // snapshot refreshes every few seconds to pick up timers started or
+  // cancelled elsewhere; local button presses call poll() directly, so their
+  // feedback is immediate either way. On a satellite each poll is a round
+  // trip to the main server, which is why this is not once a second.
+  poll();
+  setInterval(poll, 3000);
+  setInterval(render, 1000);
+  // Coming back to the tab resyncs right away instead of waiting a cycle.
+  document.addEventListener("visibilitychange", function () {
+    if (!document.hidden) poll();
+  });
+})();
+
+(function () {
+  "use strict";
+  // Bluetooth thermometer probes (FoodAssistant-6ivl). Polls gadgets/state
+  // alongside the timers poll. The whole section stays hidden until the
+  // host-side reader has reported a configured or discoverable thermometer,
+  // so kitchens without one see nothing here.
+
+  var section = document.getElementById("probesSection");
+  var grid = document.getElementById("probesGrid");
+  var discoverWrap = document.getElementById("probesDiscovered");
+  var discoverList = document.getElementById("probesDiscoveredList");
+  var hygroGrid = document.getElementById("hygroGrid");
+  if (!section) return;
+
+  var state = { enabled: false, unit: "f", devices: [], discovered: [],
+                recipe_suggestion: null, hygrometers: [] };
+  // Device id + probe index of the target editor currently open, or null.
+  var editing = null;
+  // A device that has gone quiet for longer than this collapses to just its
+  // name and a No signal badge, hiding stale temperatures until the user
+  // expands it (FoodAssistant-ebl4, Dan). Distinct from the 60s stale dim.
+  var LONG_STALE_SECONDS = 300;
+  // Device ids the user has manually expanded while they show No signal.
+  var expanded = {};
+  // Curated doneness presets (name -> Celsius) and the low-battery threshold,
+  // fetched once. Empty until loaded; the editor just omits the picker then.
+  var presets = [];
+  var lowBatteryPct = 20;
+  (async function loadPresets() {
+    try {
+      var r = await fetch("gadgets/presets", { headers: { "Accept": "application/json" } });
+      if (r.ok) {
+        var d = await r.json();
+        presets = (d && d.presets) || [];
+        if (d && typeof d.low_battery_pct === "number") lowBatteryPct = d.low_battery_pct;
+      }
+    } catch (e) { /* the editor degrades to a plain custom temp field */ }
+  })();
+
+  function esc(s) {
+    return String(s == null ? "" : s)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  function toDisplay(c) {
+    return state.unit === "c" ? c : c * 9 / 5 + 32;
+  }
+
+  function toCelsius(d) {
+    return state.unit === "c" ? d : (d - 32) * 5 / 9;
+  }
+
+  function fmt(c) {
+    if (c == null || !isFinite(c)) return "";
+    return Math.round(toDisplay(c)) + "°" + state.unit.toUpperCase();
+  }
+
+  function fmtDuration(seconds) {
+    // A friendly "ready in" span: under a minute rounds up to 1 min, under an
+    // hour is whole minutes, longer is "1 hr 5 min".
+    var total = Math.max(1, Math.round(seconds / 60));
+    if (total < 60) return total + " min";
+    var hrs = Math.floor(total / 60);
+    var mins = total % 60;
+    return hrs + " hr" + (mins ? " " + mins + " min" : "");
+  }
+
+  function batteryIcon(pct) {
+    if (pct == null) return "";
+    var low = pct <= lowBatteryPct;
+    var icon = low ? "bi-battery" : (pct >= 85 ? "bi-battery-full" : "bi-battery-half");
+    var cls = low ? "text-danger" : "text-secondary";
+    var lowTag = low ? ' <span class="badge bg-danger ms-1">Low</span>' : "";
+    return '<span class="' + cls + ' ms-2 text-nowrap"><i class="bi ' + icon + ' me-1"></i>' + pct + '%</span>' + lowTag;
+  }
+
+  // Sort a device's probes so the internal (food) reading leads and the ambient
+  // one trails; plain numbered probes sit between (FoodAssistant-ypju).
+  function roleRank(p) {
+    var r = p.role || "";
+    if (r === "internal" || r === "food") return 0;
+    if (r === "ambient") return 2;
+    return 1;
+  }
+
+  // The target editor markup for one probe (doneness presets, recipe fill, a
+  // temp + direction, Set/Clear/Back). Shown inline in the probe row while that
+  // probe is being edited. Only one probe edits at a time, so the row's parent
+  // .probe-card holds exactly one of these for the click handlers to read.
+  function editorHtml(dev, p) {
+    var val = p.target_c != null ? Math.round(toDisplay(p.target_c)) : "";
+    var presetSel = "";
+    if (presets.length) {
+      var opts = '<option value="">Doneness preset…</option>';
+      for (var pi = 0; pi < presets.length; pi++) {
+        var pr = presets[pi];
+        var lbl = pr.category + " · " + pr.name + " (" + fmt(pr.temp_c) + ")";
+        opts += '<option value="' + pr.temp_c + '">' + esc(lbl) + '</option>';
+      }
+      presetSel = '<select class="form-select form-select-sm probe-target-preset" style="max-width:13rem;" ' +
+        'aria-label="Doneness preset">' + opts + '</select>';
+    }
+    var recipeBtn = "";
+    var rs = state.recipe_suggestion;
+    if (rs && rs.temp_c != null) {
+      recipeBtn = '<button type="button" class="btn btn-sm btn-outline-info probe-target-recipe" ' +
+        'data-c="' + rs.temp_c + '" title="From the active recipe">' +
+        '<i class="bi bi-journal-text me-1"></i>Recipe: ' + esc(rs.label || "target") +
+        ' ' + fmt(rs.temp_c) + '</button>';
+    }
+    var html = "";
+    if (presetSel || recipeBtn) {
+      html += '<div class="d-flex flex-wrap gap-2 mt-2 w-100">' + presetSel + recipeBtn + '</div>';
+    }
+    html += '<div class="d-flex flex-wrap gap-2 mt-2 w-100">' +
+      '<input type="number" class="form-control form-control-sm probe-target-input" style="max-width:6rem;" ' +
+      'value="' + val + '" min="-40" max="999" step="1" aria-label="Target temperature">' +
+      '<select class="form-select form-select-sm probe-target-dir" style="max-width:6.5rem;" aria-label="Alert direction">' +
+      '<option value="above"' + (p.direction !== "below" ? " selected" : "") + '>Above</option>' +
+      '<option value="below"' + (p.direction === "below" ? " selected" : "") + '>Below</option></select>' +
+      '<button type="button" class="btn btn-sm btn-primary probe-target-set" data-id="' + esc(dev.id) +
+      '" data-probe="' + p.index + '">Set</button>' +
+      (p.target_c != null
+        ? '<button type="button" class="btn btn-sm btn-outline-danger probe-target-clear" data-id="' + esc(dev.id) +
+          '" data-probe="' + p.index + '">Clear</button>'
+        : '') +
+      '<button type="button" class="btn btn-sm btn-outline-secondary probe-target-cancel">Back</button>' +
+      '</div>';
+    return html;
+  }
+
+  // One compact probe row inside a device card. Internal/food probes read big;
+  // ambient reads small and muted (FoodAssistant-ypju).
+  function probeRowHtml(dev, p) {
+    var role = p.role || "";
+    var ambient = role === "ambient";
+    var reached = p.target_c != null && p.temp_c != null &&
+      (p.direction === "below" ? p.temp_c <= p.target_c : p.temp_c >= p.target_c);
+    var label = p.role_label || ("Probe " + p.index);
+    var icon = ambient ? "bi-thermometer-low"
+      : (role === "internal" || role === "food") ? "bi-thermometer-half" : "bi-thermometer";
+    var tempCls = "probe-temp " + (ambient ? "probe-temp-sm" : "probe-temp-lg") +
+      (reached ? " probe-reached" : "");
+    var tempStr = p.temp_c == null ? "--" : fmt(p.temp_c);
+    var targetLabel = p.target_c == null
+      ? '<i class="bi bi-bullseye me-1"></i>Target'
+      : '<i class="bi bi-bullseye me-1"></i>' + (p.direction === "below" ? "≤ " : "≥ ") + fmt(p.target_c);
+
+    var meta = "";
+    // Ready-in estimate: only while still climbing to an unmet target
+    // (FoodAssistant-1d1g). The server omits it when it is not meaningful.
+    if (!reached && p.ready_in_seconds != null && p.ready_in_seconds > 0) {
+      meta += '<span class="probe-ready text-info small me-1"><i class="bi bi-hourglass-split me-1"></i>~' +
+        fmtDuration(p.ready_in_seconds) + '</span>';
+    }
+    // With no user target, show the setpoint the device itself broadcasts.
+    if (p.target_c == null && p.device_target_c != null) {
+      meta += '<span class="text-secondary small me-1">dev ' + fmt(p.device_target_c) + '</span>';
+    }
+
+    var controls;
+    if (editing && editing.id === dev.id && editing.probe === p.index) {
+      controls = editorHtml(dev, p);
+    } else {
+      controls = '<button type="button" class="btn btn-sm btn-outline-light probe-target-edit" ' +
+        'data-id="' + esc(dev.id) + '" data-probe="' + p.index + '">' + targetLabel + '</button>';
+    }
+    return '<div class="probe-row' + (ambient ? " probe-row-ambient" : "") + '">' +
+      '<div class="probe-row-main">' +
+        '<span class="probe-row-label"><i class="bi ' + icon + ' me-1"></i>' + esc(label) + '</span>' +
+        '<span class="' + tempCls + '">' + tempStr + '</span>' +
+      '</div>' +
+      '<div class="probe-row-controls">' + meta + controls + '</div>' +
+      '</div>';
+  }
+
+  // One hygrometer card: location label over the name, temperature big,
+  // humidity beside it, battery, and a No signal badge when stale
+  // (FoodAssistant-q97i). Read-only here; manage them in Settings.
+  function hygroCardHtml(dev) {
+    var title = esc(dev.name || dev.id);
+    var location = dev.location ? '<span class="badge bg-info-subtle text-info-emphasis me-2">' +
+      esc(dev.location) + '</span>' : "";
+    var status = dev.stale
+      ? '<span class="badge bg-secondary ms-auto">No signal</span>'
+      : batteryIcon(dev.battery);
+    // A live protection alarm (out of range too long, or stopped
+    // reporting; FoodAssistant-5c61) turns the card red with its message.
+    var alarm = dev.alarming
+      ? '<div class="text-danger small mt-2"><i class="bi bi-exclamation-triangle-fill me-1"></i>' +
+        esc(dev.alarm_message || "Needs attention") + '</div>'
+      : "";
+    if (dev.alarming) {
+      status = '<span class="badge bg-danger ms-auto">Alarm</span>';
+    }
+    var temp = dev.temp_c == null ? "--" : fmt(dev.temp_c);
+    var humidity = dev.humidity == null ? ""
+      : '<span class="hygro-humidity"><i class="bi bi-droplet me-1"></i>' +
+        Math.round(dev.humidity) + '%</span>';
+    return '<div class="col-12 col-md-6 col-xl-4"><div class="card h-100 hygro-card' +
+      (dev.stale && !dev.alarming ? " probe-stale" : "") +
+      (dev.alarming ? " border-danger" : "") + '"><div class="card-body">' +
+      '<div class="d-flex align-items-center mb-2">' + location +
+      '<span class="fw-semibold text-truncate">' + title + '</span>' + status + '</div>' +
+      '<div class="d-flex align-items-baseline gap-3">' +
+      '<span class="probe-temp probe-temp-lg">' + temp + '</span>' + humidity +
+      '</div>' + alarm + '</div></div></div>';
+  }
+
+  function renderHygro() {
+    if (!hygroGrid) return false;
+    var hygros = state.hygrometers || [];
+    hygroGrid.innerHTML = hygros.map(hygroCardHtml).join("");
+    return hygros.length > 0;
+  }
+
+  function render() {
+    var hasDevices = state.devices.length > 0;
+    var hasDiscovered = state.discovered.length > 0;
+    var hasContent = hasDevices || hasDiscovered;
+    var hasHygros = renderHygro();
+    window.__hygroHasContent = hasHygros;
+    // The view controller (not this function) owns the section's visibility, so
+    // the timers/thermometers/both toggle can override it. Tell it whether a
+    // thermometer (or hygrometer) exists at all (reveals the toggle) and
+    // whether the probes section has anything to draw right now.
+    if (typeof window.__timersSetThermoPresent === "function") {
+      window.__timersSetThermoPresent(hasContent || hasHygros, hasContent);
+    }
+    if (!hasContent) return;
+
+    var html = "";
+    state.devices.forEach(function (dev) {
+      var title = esc(dev.name || dev.id);
+      // No signal for over five minutes: collapse to just the name and a No
+      // signal badge with an expand chevron, hiding the stale readings until the
+      // user opens it (FoodAssistant-ebl4). age_seconds is null when nothing has
+      // been read yet. Between one and five minutes the card stays open, dimmed.
+      var noSignal = dev.age_seconds == null || dev.age_seconds > LONG_STALE_SECONDS;
+      var open = !noSignal || !!expanded[dev.id];
+      var status;
+      if (noSignal) {
+        status = '<span class="badge bg-secondary ms-2">No signal</span>' +
+          '<button type="button" class="btn btn-sm btn-outline-secondary ms-auto probe-device-expand" ' +
+          'data-id="' + esc(dev.id) + '" title="' + (open ? "Hide last reading" : "Show last reading") + '">' +
+          '<i class="bi bi-chevron-' + (open ? "up" : "down") + '"></i></button>';
+      } else {
+        status = dev.stale
+          ? '<span class="badge bg-secondary ms-2">No signal</span>'
+          : batteryIcon(dev.battery);
+      }
+      // A device's probes share one compact card, internal first / ambient last.
+      // The old per-device "remove this thermometer" button is gone: a
+      // thermometer is removed from Settings only, so a stray tap at the counter
+      // cannot drop it mid-cook (FoodAssistant-bebg).
+      var body = "";
+      if (open) {
+        var probes = (dev.probes || []).slice().sort(function (a, b) {
+          return roleRank(a) - roleRank(b) || (a.index - b.index);
+        });
+        body = probes.map(function (p) { return probeRowHtml(dev, p); }).join("");
+        if (!probes.length) {
+          body = '<div class="text-secondary small">Waiting for a reading…</div>';
+        }
+      }
+      html += '<div class="col-12 col-md-6 col-xl-4"><div class="card h-100 probe-card' +
+        (dev.stale ? " probe-stale" : "") + '"><div class="card-body">' +
+        '<div class="d-flex align-items-center' + (body ? " mb-2" : "") + '">' +
+        '<span class="fw-semibold text-truncate">' + title + '</span>' + status + '</div>' +
+        body + '</div></div></div>';
+    });
+    grid.innerHTML = html;
+
+    discoverWrap.classList.toggle("d-none", !hasDiscovered);
+    discoverList.innerHTML = state.discovered.map(function (d) {
+      return '<button type="button" class="btn btn-outline-success probe-device-add" ' +
+        'data-id="' + esc(d.id) + '" data-name="' + esc(d.name) + '" data-protocol="' + esc(d.protocol) + '">' +
+        '<i class="bi bi-plus-lg me-1"></i>' + esc(d.name || d.id) + '</button>';
+    }).join("");
+  }
+
+  async function poll() {
+    if (document.hidden) return;
+    try {
+      var resp = await fetch("gadgets/state", { headers: { "Accept": "application/json" } });
+      if (resp.ok) {
+        var data = await resp.json();
+        state.enabled = !!data.enabled;
+        state.unit = data.unit === "c" ? "c" : "f";
+        state.devices = data.devices || [];
+        state.discovered = data.discovered || [];
+        state.recipe_suggestion = data.recipe_suggestion || null;
+        state.hygrometers = data.hygrometers || [];
+      }
+    } catch (e) {
+      // Reader or app unreachable: keep the last snapshot; never surface an
+      // error on the kiosk.
+    }
+    // An open target editor is left alone: re-rendering mid-typing would
+    // steal focus and drop the digits already entered.
+    if (!editing) render();
+  }
+
+  async function post(path, body) {
+    try {
+      await fetch(path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      });
+    } catch (e) { }
+    await poll();
+  }
+
+  section.addEventListener("click", async function (ev) {
+    var t = function (sel) { return ev.target.closest ? ev.target.closest(sel) : null; };
+    var btn;
+    if ((btn = t(".probe-device-add"))) {
+      post("gadgets/devices", {
+        id: btn.getAttribute("data-id"),
+        name: btn.getAttribute("data-name") || "",
+        protocol: btn.getAttribute("data-protocol") || ""
+      });
+    } else if ((btn = t(".probe-device-expand"))) {
+      // Toggle a No signal card open/closed to peek at its last readings.
+      var did = btn.getAttribute("data-id");
+      expanded[did] = !expanded[did];
+      render();
+    } else if ((btn = t(".probe-target-edit"))) {
+      editing = { id: btn.getAttribute("data-id"), probe: parseInt(btn.getAttribute("data-probe"), 10) };
+      render();
+    } else if ((btn = t(".probe-target-cancel"))) {
+      editing = null;
+      render();
+    } else if ((btn = t(".probe-target-recipe"))) {
+      // Fill the temp field from the active recipe's implied target.
+      var rcard = btn.closest(".probe-card");
+      var rin = rcard && rcard.querySelector(".probe-target-input");
+      var rc = parseFloat(btn.getAttribute("data-c"));
+      if (rin && isFinite(rc)) rin.value = Math.round(toDisplay(rc));
+    } else if ((btn = t(".probe-target-set"))) {
+      var card = btn.closest(".probe-card");
+      var input = card && card.querySelector(".probe-target-input");
+      var dir = card && card.querySelector(".probe-target-dir");
+      var val = input ? parseFloat(input.value) : NaN;
+      if (!isFinite(val)) return;
+      editing = null;
+      post("gadgets/target", {
+        device_id: btn.getAttribute("data-id"),
+        probe: parseInt(btn.getAttribute("data-probe"), 10),
+        temp_c: Math.round(toCelsius(val) * 10) / 10,
+        direction: dir ? dir.value : "above"
+      });
+    } else if ((btn = t(".probe-target-clear"))) {
+      editing = null;
+      post("gadgets/target", {
+        device_id: btn.getAttribute("data-id"),
+        probe: parseInt(btn.getAttribute("data-probe"), 10),
+        temp_c: null
+      });
+    }
+  });
+
+  // Picking a doneness preset fills the temp field with its target (converted
+  // to the display unit); the user can still adjust it before saving.
+  section.addEventListener("change", function (ev) {
+    var sel = ev.target && ev.target.closest ? ev.target.closest(".probe-target-preset") : null;
+    if (!sel) return;
+    var c = parseFloat(sel.value);
+    var card = sel.closest(".probe-card");
+    var input = card && card.querySelector(".probe-target-input");
+    if (input && isFinite(c)) input.value = Math.round(toDisplay(c));
+  });
+
+  poll();
+  setInterval(poll, 5000);
+  document.addEventListener("visibilitychange", function () {
+    if (!document.hidden) poll();
+  });
+})();
+</script>
+{% endblock %}
