@@ -1,0 +1,137 @@
+# Pantry Raider controls for EspControl touch panels (FoodAssistant-l697 follow-on).
+#
+# EspControl (https://github.com/jtenniswood/espcontrol) is a no-code ESP32
+# touch panel that puts Home Assistant entities on a wall screen. It talks
+# ONLY to Home Assistant, so this file is the whole connector: a Home
+# Assistant "package" that turns Pantry Raider's kitchen actions and counts
+# into plain HA scripts and sensors, which EspControl can then place on a
+# panel like any other button or reading. Nothing from EspControl is bundled
+# here (it is PolyForm Noncommercial licensed); this package only makes
+# Pantry Raider a good citizen on the panel.
+#
+# Install:
+#   1. Copy this file to config/packages/pantry_raider_espcontrol.yaml
+#      (enable packages once in configuration.yaml:
+#        homeassistant:
+#          packages: !include_dir_named packages).
+#   2. Replace 192.168.1.170:9284 with your Pantry Raider LAN address. Use the
+#      LAN URL, never a public/proxied URL (headless calls get a redirect).
+#   3. If Pantry Raider has a password set, uncomment every headers: block and
+#      put the API key (Settings, Security) in secrets.yaml as
+#      pantry_raider_api_key.
+#   4. Restart Home Assistant, then open the EspControl screen's setup page
+#      and add the script.pantry_raider_* buttons and sensor.pantry_raider_*
+#      readings to your layout.
+
+rest_command:
+  pantry_raider_timer:
+    url: http://192.168.1.170:9284/timers
+    method: POST
+    content_type: "application/json"
+    # headers:
+    #   X-API-Key: !secret pantry_raider_api_key
+    payload: '{"label": "{{ label }}", "seconds": {{ seconds }}}'
+  pantry_raider_clear_timers:
+    url: http://192.168.1.170:9284/timers
+    method: DELETE
+    # headers:
+    #   X-API-Key: !secret pantry_raider_api_key
+  pantry_raider_scanner_mode_cycle:
+    url: http://192.168.1.170:9284/pending/scanner-mode/cycle
+    method: POST
+    # headers:
+    #   X-API-Key: !secret pantry_raider_api_key
+  pantry_raider_notify:
+    url: http://192.168.1.170:9284/events/notify
+    method: POST
+    content_type: "application/json"
+    # headers:
+    #   X-API-Key: !secret pantry_raider_api_key
+    payload: '{"message": "{{ message }}", "title": "{{ title | default(''Home Assistant'') }}"}'
+
+# Buttons for the panel. EspControl lists scripts as tappable controls, so
+# each common kitchen action gets its own script with a friendly name and
+# icon. Timers use the same durations as the app's quick presets.
+script:
+  pantry_raider_timer_5:
+    alias: "Kitchen timer: 5 min"
+    icon: mdi:timer-outline
+    sequence:
+      - service: rest_command.pantry_raider_timer
+        data: { label: "5 min", seconds: 300 }
+  pantry_raider_timer_10:
+    alias: "Kitchen timer: 10 min"
+    icon: mdi:timer-outline
+    sequence:
+      - service: rest_command.pantry_raider_timer
+        data: { label: "10 min", seconds: 600 }
+  pantry_raider_timer_pasta:
+    alias: "Kitchen timer: pasta"
+    icon: mdi:pasta
+    sequence:
+      - service: rest_command.pantry_raider_timer
+        data: { label: "Pasta", seconds: 600 }
+  pantry_raider_timer_eggs:
+    alias: "Kitchen timer: soft egg"
+    icon: mdi:egg-outline
+    sequence:
+      - service: rest_command.pantry_raider_timer
+        data: { label: "Soft egg", seconds: 360 }
+  pantry_raider_clear_timers:
+    alias: "Clear kitchen timers"
+    icon: mdi:timer-off-outline
+    sequence:
+      - service: rest_command.pantry_raider_clear_timers
+  pantry_raider_scanner_next_mode:
+    alias: "Scanner: next mode"
+    icon: mdi:barcode-scan
+    sequence:
+      - service: rest_command.pantry_raider_scanner_mode_cycle
+  pantry_raider_ping_kitchen:
+    alias: "Ping the kitchen screen"
+    icon: mdi:bell-ring-outline
+    sequence:
+      - service: rest_command.pantry_raider_notify
+        data: { message: "Dinner time!", title: "From the wall panel" }
+
+# Readings for the panel. Kept lean: one resource per endpoint the panel is
+# likely to show, on gentle poll intervals so a small kitchen box is never
+# hammered by a wall of screens.
+rest:
+  - resource: http://192.168.1.170:9284/timers
+    scan_interval: 15
+    # headers:
+    #   X-API-Key: !secret pantry_raider_api_key
+    sensor:
+      - name: "Pantry Raider timers running"
+        unique_id: pantry_raider_timers_running
+        value_template: "{{ value_json.timers | length }}"
+        unit_of_measurement: "timers"
+        icon: mdi:timer-outline
+      - name: "Pantry Raider next timer"
+        unique_id: pantry_raider_next_timer
+        icon: mdi:timer-sand
+        value_template: >-
+          {% set t = (value_json.timers | sort(attribute='remaining_seconds') | first) if value_json.timers else none %}
+          {% if t %}{{ t.label }}: {{ (t.remaining_seconds // 60) | int }}:{{ '%02d' % ((t.remaining_seconds % 60) | int) }}{% else %}none{% endif %}
+  - resource: http://192.168.1.170:9284/expiring/summary
+    scan_interval: 300
+    # headers:
+    #   X-API-Key: !secret pantry_raider_api_key
+    sensor:
+      - name: "Pantry Raider expiring soon"
+        unique_id: pantry_raider_expiring_soon
+        # Everything needing attention within a week: expired + today + 3d + 7d.
+        value_template: "{{ value_json.expired + value_json.today + value_json.within_3_days + value_json.within_7_days }}"
+        unit_of_measurement: "items"
+        icon: mdi:clock-alert-outline
+  - resource: http://192.168.1.170:9284/pending/count
+    scan_interval: 120
+    # headers:
+    #   X-API-Key: !secret pantry_raider_api_key
+    sensor:
+      - name: "Pantry Raider items to review"
+        unique_id: pantry_raider_review_count
+        value_template: "{{ value_json.count }}"
+        unit_of_measurement: "items"
+        icon: mdi:inbox-outline

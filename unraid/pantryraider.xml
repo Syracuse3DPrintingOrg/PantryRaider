@@ -1,0 +1,39 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>PantryRaider</Name>
+  <Repository>ghcr.io/syracuse3dprintingorg/pantryraider:latest</Repository>
+  <Registry>https://github.com/Syracuse3DPrintingOrg/PantryRaider/pkgs/container/pantryraider</Registry>
+  <Network>bridge</Network>
+  <MyIP/>
+  <Shell>sh</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/Syracuse3DPrintingOrg/PantryRaider/issues</Support>
+  <Project>https://github.com/Syracuse3DPrintingOrg/PantryRaider</Project>
+  <Overview>Pantry Raider keeps track of the food in your kitchen so nothing gets forgotten at the back of the fridge. Snap a photo or scan a barcode and it adds the item, sorts out where it lives, and estimates when it goes bad. It then suggests recipes you can cook from what you already have, so you shop less and waste less.
+
+Pantry Raider stores your inventory in Grocy, and can pull in recipes and meal plans from Mealie. This is the app itself. Point it at a Grocy instance you already run (or install Grocy from Community Applications first), and add Mealie the same way if you want the recipe and meal plan features. If you would rather run the whole set together, the project's Docker Compose file installs Pantry Raider, Grocy, and Mealie in one go through the Compose Manager plugin.
+
+After it starts, open the WebUI and finish the short setup on the /setup page: choose a vision provider (a free Google Gemini key works well), paste in your Grocy address and key, and set a password.</Overview>
+  <Category>HomeAutomation: Tools: Productivity:</Category>
+  <WebUI>http://[IP]:[PORT:8000]/</WebUI>
+  <TemplateURL>https://raw.githubusercontent.com/Syracuse3DPrintingOrg/PantryRaider/main/unraid/pantryraider.xml</TemplateURL>
+  <Icon>https://raw.githubusercontent.com/Syracuse3DPrintingOrg/PantryRaider/main/service/app/static/icons/icon-512.png</Icon>
+  <ExtraParams></ExtraParams>
+  <PostArgs></PostArgs>
+  <ExtraSearchTerms>grocy mealie pantry inventory food spoilage expiry recipes barcode kitchen</ExtraSearchTerms>
+  <Requires>Pantry Raider stores your inventory in Grocy. Install the Grocy Community Applications template first (or point at a Grocy you already run) and paste its address and API key into the setup page. Mealie is optional and adds recipes, a meal plan, and shopping lists.</Requires>
+  <Config Name="WebUI Port" Target="8000" Default="9284" Mode="tcp" Description="Host port for the Pantry Raider web interface. The app listens on 8000 inside the container; this maps it to a port on your Unraid server (default 9284)." Type="Port" Display="always" Required="true" Mask="false">9284</Config>
+  <Config Name="App Data" Target="/app/data" Default="/mnt/user/appdata/pantryraider" Mode="rw" Description="Where Pantry Raider keeps its settings and saved data. Leave the default so your setup survives updates and restarts." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/pantryraider</Config>
+  <Config Name="Grocy Address" Target="GROCY_BASE_URL" Default="" Mode="" Description="Full address of your Grocy instance, no trailing slash, for example http://192.168.1.170:9383 . You can also set this later on the setup page." Type="Variable" Display="always" Required="false" Mask="false"></Config>
+  <Config Name="Grocy API Key" Target="GROCY_API_KEY" Default="" Mode="" Description="Grocy API key. In Grocy, open Manage API keys and create one. You can also set this later on the setup page." Type="Variable" Display="always" Required="false" Mask="true"></Config>
+  <Config Name="Vision Provider" Target="VISION_PROVIDER" Default="gemini" Mode="" Description="Which AI reads your photos: gemini, openai, or anthropic (cloud), or ollama (local). A free Google Gemini key is the easiest start." Type="Variable" Display="always" Required="false" Mask="false">gemini</Config>
+  <Config Name="Gemini API Key" Target="GEMINI_API_KEY" Default="" Mode="" Description="Google Gemini API key (free at aistudio.google.com). Only needed when the vision provider is gemini. You can also set this on the setup page." Type="Variable" Display="always" Required="false" Mask="true"></Config>
+  <Config Name="UI Password" Target="AUTH_PASSWORD" Default="" Mode="" Description="Password for the web interface. If you leave this blank, you set it during the on-screen setup. Keep Require Login on unless another login layer sits in front." Type="Variable" Display="always" Required="false" Mask="true"></Config>
+  <Config Name="Mealie Address" Target="MEALIE_BASE_URL" Default="" Mode="" Description="Optional. Address of your Mealie instance for recipes and meal plans, for example http://192.168.1.170:9285 . Leave blank to skip Mealie." Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
+  <Config Name="Mealie API Key" Target="MEALIE_API_KEY" Default="" Mode="" Description="Optional. Mealie API token (User Profile then API Tokens in Mealie). Only needed if you set a Mealie address." Type="Variable" Display="advanced" Required="false" Mask="true"></Config>
+  <Config Name="Require Login" Target="AUTH_REQUIRED" Default="true" Mode="" Description="Keep true so the app is password protected. Set false only when a reverse proxy or other layer already handles login." Type="Variable" Display="advanced" Required="false" Mask="false">true</Config>
+  <Config Name="API Key" Target="API_KEY" Default="" Mode="" Description="Optional. Lets headless clients (Home Assistant, scripts) authenticate with an X-API-Key header. Generate one with: openssl rand -hex 24" Type="Variable" Display="advanced" Required="false" Mask="true"></Config>
+  <Config Name="Deployment Mode" Target="DEPLOYMENT_MODE" Default="server" Mode="" Description="Leave as server for an Unraid install. The pi_hosted and pi_remote modes are for the Raspberry Pi appliance." Type="Variable" Display="advanced" Required="false" Mask="false">server</Config>
+  <Config Name="Timezone" Target="TZ" Default="America/New_York" Mode="" Description="Your IANA timezone, for example America/Chicago, Europe/London, Asia/Tokyo. Keeps expiry dates and timers correct." Type="Variable" Display="advanced" Required="false" Mask="false">America/New_York</Config>
+  <Config Name="Secret Key" Target="SECRET_KEY" Default="" Mode="" Description="Optional. Signs login sessions. Left blank, the app generates and saves one on first run. You normally do not need to set this." Type="Variable" Display="advanced" Required="false" Mask="true"></Config>
+</Container>
