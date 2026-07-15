@@ -1,0 +1,180 @@
+# Profile: tdisplay (LilyGo T-Display, classic ESP32, ST7789 135x240, no touch)
+#
+# Two hardware buttons: the top button (GPIO35, next to the reset button)
+# cycles what the screen shows (auto, expiring, timers, probe, clock); the
+# bottom button (GPIO0) is a general timer key (press to start/add a minute,
+# hold to cancel).
+
+substitutions:
+  cub_profile: tdisplay
+
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+
+spi:
+  clk_pin: GPIO18
+  mosi_pin: GPIO19
+
+output:
+  - platform: ledc
+    pin: GPIO4
+    id: backlight_pwm
+
+light:
+  - platform: monochromatic
+    output: backlight_pwm
+    name: Backlight
+    restore_mode: ALWAYS_ON
+    entity_category: config
+
+font:
+  - file: gfonts://Roboto
+    id: font_small
+    size: 14
+  - file: gfonts://Roboto@700
+    id: font_med
+    size: 20
+  - file: gfonts://Roboto@700
+    id: font_big
+    size: 44
+
+globals:
+  # A button-selected view; empty string means "follow the server".
+  - id: g_view_override
+    type: std::string
+    restore_value: no
+
+binary_sensor:
+  - platform: gpio
+    id: btn_view
+    pin:
+      number: GPIO35
+      inverted: true
+    on_multi_click:
+      - timing:
+          - ON for at most 0.6s
+          - OFF for at least 0.1s
+        then:
+          - lambda: |-
+              static const std::vector<std::string> ORDER = {"", "expiring", "timers", "probe", "clock"};
+              size_t i = 0;
+              for (; i < ORDER.size(); i++) {
+                if (ORDER[i] == id(g_view_override))
+                  break;
+              }
+              id(g_view_override) = ORDER[(i + 1) % ORDER.size()];
+  - platform: gpio
+    id: btn_timer
+    pin:
+      number: GPIO0
+      inverted: true
+      mode:
+        input: true
+        pullup: true
+      ignore_strapping_warning: true
+    on_multi_click:
+      - timing:
+          - ON for at most 0.6s
+          - OFF for at least 0.1s
+        then:
+          - pantry_raider.press:
+              button: timer_1
+      - timing:
+          - ON for at least 1s
+        then:
+          - pantry_raider.press:
+              button: timer_1
+              long: true
+
+display:
+  - platform: mipi_spi
+    id: cub_display
+    model: T-DISPLAY
+    rotation: 90
+    update_interval: 1s
+    lambda: |-
+      auto *hub = id(pantry);
+      const auto &st = hub->state();
+      const int W = it.get_width(), H = it.get_height();
+      const Color PINK(0xF2, 0x00, 0x6E);
+      const Color WHITE(255, 255, 255);
+      const Color GRAY(150, 150, 150);
+      const Color RED(255, 80, 80);
+      std::string view = id(g_view_override);
+      if (view.empty())
+        view = hub->effective_view();
+      if (view == "rotation") {
+        int dwell = st.settings.rotate_seconds > 0 ? st.settings.rotate_seconds : 12;
+        if (st.rotation.empty())
+          view = "clock";
+        else
+          view = st.rotation[(millis() / 1000 / dwell) % st.rotation.size()];
+      }
+      if (view == "pairing") {
+        it.print(W / 2, 4, id(font_small), PINK, TextAlign::TOP_CENTER, "PANTRY RAIDER");
+        if (hub->pairing_state() == esphome::pantry_raider::PAIRING_WAITING) {
+          it.print(W / 2, H / 2, id(font_big), WHITE, TextAlign::CENTER, hub->pairing_code().c_str());
+          it.print(W / 2, H - 4, id(font_small), GRAY, TextAlign::BOTTOM_CENTER, "Approve in Settings, Devices");
+        } else {
+          it.print(W / 2, H / 2, id(font_small), WHITE, TextAlign::CENTER, hub->pairing_line().c_str());
+        }
+      } else if (view == "offline") {
+        it.print(W / 2, H / 2, id(font_med), GRAY, TextAlign::CENTER, "Server unreachable");
+      } else if (view == "timers") {
+        int idx = hub->featured_timer();
+        if (idx < 0) {
+          it.print(W / 2, H / 2, id(font_med), GRAY, TextAlign::CENTER, "No timers");
+        } else {
+          const auto &t = st.timers[idx];
+          it.print(W / 2, 4, id(font_med), t.expired ? RED : WHITE, TextAlign::TOP_CENTER, t.label.c_str());
+          it.print(W / 2, H / 2 + 8, id(font_big), t.expired ? RED : PINK, TextAlign::CENTER,
+                   hub->format_remaining(t).c_str());
+          std::string more;
+          for (size_t i = 0; i < st.timers.size(); i++) {
+            if ((int) i == idx)
+              continue;
+            if (!more.empty())
+              more += "   ";
+            more += st.timers[i].label + " " + hub->format_remaining(st.timers[i]);
+          }
+          if (!more.empty())
+            it.print(W / 2, H - 4, id(font_small), GRAY, TextAlign::BOTTOM_CENTER, more.c_str());
+        }
+      } else if (view == "probe") {
+        if (st.probes.empty()) {
+          it.print(W / 2, H / 2, id(font_med), GRAY, TextAlign::CENTER, "No probes");
+        } else {
+          const auto &p = st.probes[0];
+          it.print(W / 2, 4, id(font_med), WHITE, TextAlign::TOP_CENTER, p.name.c_str());
+          it.printf(W / 2, H / 2 + 8, id(font_big), p.stale ? GRAY : PINK, TextAlign::CENTER, "%.0f%s",
+                    hub->probe_display_temp(p), hub->units_suffix());
+          if (!std::isnan(p.target_c)) {
+            float target = st.settings.units == "c" ? p.target_c : p.target_c * 9.0f / 5.0f + 32.0f;
+            it.printf(W / 2, H - 4, id(font_small), GRAY, TextAlign::BOTTOM_CENTER, "target %.0f%s", target,
+                      hub->units_suffix());
+          }
+        }
+      } else if (view == "pending") {
+        it.print(W / 2, 4, id(font_small), PINK, TextAlign::TOP_CENTER, "PENDING SCANS");
+        it.printf(W / 2, H / 2 + 8, id(font_big), WHITE, TextAlign::CENTER, "%d", st.pending);
+      } else if (view == "clock") {
+        it.print(W / 2, H / 2, id(font_big), WHITE, TextAlign::CENTER, hub->clock_text().c_str());
+      } else {  // expiring
+        it.print(W / 2, 2, id(font_small), PINK, TextAlign::TOP_CENTER, "EXPIRING");
+        it.printf(W / 2, 18, id(font_small), WHITE, TextAlign::TOP_CENTER, "%d past   %d today   %d soon",
+                  st.expired, st.today, st.soon);
+        int y = 38;
+        for (const auto &item : st.top) {
+          if (y > H - 16)
+            break;
+          Color c = item.days < 0 ? RED : (item.days == 0 ? PINK : WHITE);
+          it.print(4, y, id(font_small), c, TextAlign::TOP_LEFT, item.name.c_str());
+          std::string days = item.days < 0 ? "past" : (item.days == 0 ? "today" : (to_string(item.days) + "d"));
+          it.print(W - 4, y, id(font_small), c, TextAlign::TOP_RIGHT, days.c_str());
+          y += 18;
+        }
+        if (st.top.empty())
+          it.print(W / 2, H / 2 + 10, id(font_med), GRAY, TextAlign::CENTER, "Nothing expiring");
+      }

@@ -1,0 +1,141 @@
+{% from "setup/_macros.html" import info, secret_input, panel, srow, pill, toggle with context %}
+<!-- Inventory & Storage (FoodAssistant-jcnh): dense panel/row pattern.
+             The Grocy backend and the custom storage categories are the two
+             panels. Field ids (grocy_base_url, grocy_api_key, grocy_public_url)
+             and the storage-cat-editor container + its classes are unchanged so
+             the save path and category editor JS keep working. -->
+        <div class="tab-pane fade" id="pane-inventory">
+          <p class="pane-intro">Where your stock lives: the Grocy backend and the storage buckets it's grouped into.</p>
+
+          {% call panel('Grocy inventory backend',
+                        'Grocy stores your stock, locations, and consumption history. Pantry Raider reads and updates it through its API.',
+                        pill_text=('Set' if s.grocy_api_key else 'Not set'),
+                        pill_kind=('good' if s.grocy_api_key else 'neutral')) %}
+            {% call srow('Server address', 'Full URL, no trailing slash.',
+                         'Where Grocy runs on your network.' ~ (' On this appliance Grocy runs alongside the app, so the pre-filled default works as is.' if (is_pi and not features.satellite) else ' Connect to a Grocy instance running on your network or server.')) %}
+              <input type="url" class="form-control" id="grocy_base_url"
+                     placeholder="http://192.168.1.10:9383" style="max-width:420px"
+                     value="{{ s.grocy_base_url if (s.grocy_base_url and s.grocy_base_url != 'http://grocy:80') else suggested_grocy_url }}">
+              {% if suggested_grocy_url and not s.grocy_base_url %}
+              <div class="form-text text-success"><i class="bi bi-check-circle me-1"></i>Grocy detected locally, address pre-filled.</div>
+              {% endif %}
+            {% endcall %}
+            {% if not s.grocy_api_key and not features.satellite %}
+            {% call srow('Automatic setup', 'Let Pantry Raider connect itself.',
+                         'If this Grocy is freshly installed and still on its stock sign-in, Pantry Raider signs in, creates its own API key, and secures the admin account. Nothing to copy or paste.') %}
+              <div class="set-row-actions">
+                <button class="btn btn-outline-info btn-sm" onclick="firstRunGrocy(this)">
+                  <i class="bi bi-stars me-1"></i>Set up for me
+                </button>
+              </div>
+              <div class="test-result mt-1" id="grocy-firstrun-result"></div>
+            {% endcall %}
+            {% endif %}
+            {% call srow('API key', 'From Grocy.',
+                         'In Grocy, open Settings then Manage API keys and add one. Paste it here so Pantry Raider can read and update your stock.') %}
+              <div style="max-width:420px">{{ secret_input('grocy_api_key', 'Grocy → Manage API Keys') }}</div>
+            {% endcall %}
+            {% if s.grocy_admin_password %}
+            {% call srow('Grocy sign-in', 'Saved when Pantry Raider set Grocy up.',
+                         'Pantry Raider secured the Grocy admin account with its own password. You never need it day to day; reveal it here if you ever want to sign in to Grocy directly.') %}
+              <div class="set-row-actions">
+                <button class="btn btn-outline-secondary btn-sm" onclick="revealFirstRunLogin('grocy', 'grocy-login-reveal')">
+                  <i class="bi bi-eye me-1"></i>Show sign-in
+                </button>
+              </div>
+              <div class="test-result mt-1" id="grocy-login-reveal"></div>
+            {% endcall %}
+            {% endif %}
+            {% call srow('Public address', 'Optional, for browser links.',
+                         'External address used when the UI links you to Grocy through a reverse proxy. Leave empty to use the internal address above.') %}
+              <input type="url" class="form-control" id="grocy_public_url" name="grocy_public_url"
+                     placeholder="https://grocy.yourdomain.com" style="max-width:420px"
+                     value="{{ s.grocy_public_url }}">
+            {% endcall %}
+            {% call srow('Connection', 'Check the address and key work.') %}
+              <div class="set-row-actions">
+                <button class="btn btn-outline-info btn-sm" onclick="testGrocy()">
+                  <i class="bi bi-plug me-1"></i>Test Grocy
+                </button>
+              </div>
+              <div class="test-result mt-1" id="grocy-result"></div>
+            {% endcall %}
+          {% endcall %}
+
+          <button type="button" class="btn btn-outline-info btn-sm" onclick="savePaneGrocy(this)">
+            <i class="bi bi-check-lg me-1"></i>Save Grocy
+          </button>
+          <div class="test-result mt-2 mb-3" id="grocy-save-result"></div>
+
+          {# Community shelf life (FoodAssistant-ezkh): better best-by estimates
+             from real kitchens, plus the anonymous opt-in to contribute your
+             own corrections back. Main installs only: a satellite forwards
+             scans and commits to its server, so these switches live there. #}
+          {% if not features.satellite %}
+          {% call panel('Community shelf life',
+                        'Best-by estimates learned from real kitchens, and an optional anonymous way to contribute yours.') %}
+            {% call srow('Use community estimates', 'Better shelf-life guesses for new items.',
+                         'Once a day the app downloads a small table of shelf lives learned from other Pantry Raider kitchens and uses it when suggesting a best-by date for a new item. Your own expiry rules always win over a community value. This only downloads; it sends nothing about you or your pantry.') %}
+              {{ toggle('use_community_expiry', checked=s.use_community_expiry, label='Use community shelf-life estimates') }}
+            {% endcall %}
+            {% call srow('Share your corrections', 'Anonymous. Off unless you turn it on.',
+                         'When you change a suggested best-by date while reviewing a scanned item, share that one correction so everyone gets better estimates. Each shared point contains only the product barcode (when it has one), the product name, whether it went in the fridge, freezer, or pantry, the shelf life you chose in days, and what the app had suggested. It never includes your account, your device, your location, your other inventory, or any times or dates. With this off, nothing is collected at all.') %}
+              {{ toggle('share_expiry_learning', checked=s.share_expiry_learning, label='Share anonymous expiry corrections') }}
+            {% endcall %}
+            <p class="text-secondary small mt-2 mb-0">Exactly what is and is not shared:
+              <a href="https://docs.pantryraider.app/community-shelf-life/" target="_blank" rel="noopener">Community shelf life and privacy</a>.
+              Sharing works with or without a Forager account.</p>
+          {% endcall %}
+
+          <button type="button" class="btn btn-outline-info btn-sm" onclick="savePaneCommunityShelfLife(this)">
+            <i class="bi bi-check-lg me-1"></i>Save community shelf life
+          </button>
+          <div class="test-result mt-2 mb-3" id="community-shelflife-save-result"></div>
+          {% endif %}
+
+          {# Custom Storage Categories share the pane with the Grocy backend:
+             both describe where stock lives. A satellite pulls categories from
+             the main server, so the panel is gated out for it. #}
+          {% if not features.satellite %}
+          {% call panel('Custom storage categories',
+                        'Add storage buckets beyond the four built-ins (Refrigerated, Frozen, Room Temp, Pantry).') %}
+            <p class="text-secondary small mt-2 mb-2">Each maps to a Grocy location; assign items to it from the <strong>Move</strong> button on the Inventory page. Saved separately with the button below.</p>
+            <div class="vstack gap-2" id="storage-cat-editor">
+              {% for c in custom_categories %}
+              <div class="cat-row border rounded p-2">
+                <div class="row g-2 align-items-end">
+                  <div class="col-6 col-md-3">
+                    <label class="form-label small mb-1">Name</label>
+                    <input class="form-control form-control-sm cat-label" value="{{ c.label }}" placeholder="Wine Cellar">
+                  </div>
+                  <div class="col-6 col-md-2">
+                    <label class="form-label small mb-1">Icon <a href="https://icons.getbootstrap.com/" target="_blank" class="text-secondary" title="Browse icons"><i class="bi bi-box-arrow-up-right"></i></a></label>
+                    <input class="form-control form-control-sm cat-icon" value="{{ c.icon }}" placeholder="bi-database">
+                  </div>
+                  <div class="col-4 col-md-1">
+                    <label class="form-label small mb-1">Color</label>
+                    <input type="color" class="form-control form-control-sm form-control-color cat-color" value="{{ c.color }}">
+                  </div>
+                  <div class="col-8 col-md-3">
+                    <label class="form-label small mb-1">Grocy location</label>
+                    <input class="form-control form-control-sm cat-location" value="{{ c.location }}" placeholder="Wine Cellar">
+                  </div>
+                  <div class="col-9 col-md-2">
+                    <label class="form-label small mb-1">Match <span class="text-secondary">keywords</span></label>
+                    <input class="form-control form-control-sm cat-match" value="{{ c.match | join(', ') }}" placeholder="wine, cellar">
+                  </div>
+                  <div class="col-3 col-md-1 d-grid">
+                    <button class="btn btn-outline-danger btn-sm" onclick="this.closest('.cat-row').remove()" title="Remove"><i class="bi bi-trash"></i></button>
+                  </div>
+                </div>
+              </div>
+              {% endfor %}
+            </div>
+            <div class="d-flex flex-wrap gap-2 mt-2 align-items-center">
+              <button class="btn btn-outline-secondary btn-sm" onclick="addCatRow()"><i class="bi bi-plus-lg me-1"></i>Add category</button>
+              <button class="btn btn-primary btn-sm" onclick="saveStorageCategories()" id="catSaveBtn"><i class="bi bi-check2 me-1"></i>Save categories</button>
+              <span id="catSaveResult" class="small"></span>
+            </div>
+          {% endcall %}
+          {% endif %}
+        </div>

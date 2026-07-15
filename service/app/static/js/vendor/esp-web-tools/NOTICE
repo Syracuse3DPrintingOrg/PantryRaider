@@ -1,0 +1,14 @@
+ESP Web Tools
+Version: 10.3.0
+Upstream: https://github.com/esphome/esp-web-tools
+Source of these files: https://unpkg.com/esp-web-tools@10.3.0/dist/web/
+License: Apache License 2.0
+
+These files are the upstream `dist/web/` browser build, vendored unmodified
+(apart from a one-time license header comment prepended to install-button.js)
+and served from Pantry Raider's own origin. The Web Serial flasher on the
+Bandit Cubs page must run with no external network requests, so the whole
+code-split bundle is co-located here; install-button.js dynamically imports
+the sibling chunks by their relative (./) paths.
+
+Full license text: https://www.apache.org/licenses/LICENSE-2.0

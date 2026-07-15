@@ -1,0 +1,18 @@
+# Bandit Cub build: LilyGo T-Display S3 (tdisplay-s3 profile).
+#   esphome run esphome/cub-tdisplay-s3.yaml
+# Override any substitution from packages/cub-base.yaml here (server address,
+# names, poll interval).
+
+substitutions:
+  name: bandit-cub
+  friendly_name: Bandit Cub
+
+external_components:
+  - source:
+      type: local
+      path: components
+    components: [pantry_raider]
+
+packages:
+  base: !include packages/cub-base.yaml
+  profile: !include packages/tdisplay-s3.yaml

@@ -1,0 +1,75 @@
+name: Sync wiki
+
+# Republish the GitHub wiki from the repository docs whenever a doc source
+# changes on main. The wiki is a generated mirror (see scripts/build-wiki.py);
+# editing it directly is overwritten on the next run, so docs stay the single
+# source of truth.
+#
+# One-time setup: the wiki repository only exists after its first page is
+# created in the GitHub UI. Open the repo's Wiki tab, click "Create the first
+# page", and Save once. After that this workflow keeps it in sync; until then
+# the push step reports that the wiki is not initialized yet.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "README.md"
+      - "CHANGELOG.md"
+      - "CONTRIBUTING.md"
+      - "SECURITY.md"
+      - "CODE_OF_CONDUCT.md"
+      - "docs/**"
+      - "scripts/build-wiki.py"
+      - ".github/workflows/wiki-sync.yml"
+  workflow_dispatch:
+
+# Needed to push to the <repo>.wiki.git repository with the default token.
+permissions:
+  contents: write
+
+# Never let two syncs race on the wiki remote.
+concurrency:
+  group: wiki-sync
+  cancel-in-progress: true
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
+        with:
+          python-version: "3.11"
+
+      - name: Build wiki pages from docs
+        run: python scripts/build-wiki.py --out _wiki --repo "${{ github.repository }}" --branch main
+
+      - name: Publish to the wiki repository
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          WIKI_URL="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.wiki.git"
+          if ! git clone --depth 1 "$WIKI_URL" wiki-repo 2>/dev/null; then
+            echo "::warning::The wiki is not initialized yet. Open the repo Wiki tab, click 'Create the first page' and Save once, then re-run this workflow."
+            exit 0
+          fi
+          # Replace the wiki contents with the freshly generated pages. Keep the
+          # wiki's own .git directory; drop everything else so removed docs do
+          # not linger as stale pages.
+          find wiki-repo -mindepth 1 -maxdepth 1 -not -name ".git" -exec rm -rf {} +
+          cp _wiki/*.md wiki-repo/
+          cd wiki-repo
+          WIKI_BRANCH="$(git rev-parse --abbrev-ref HEAD)"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "Wiki already up to date."
+          else
+            git commit -m "Sync wiki from docs (${GITHUB_SHA::7})"
+            git push origin "HEAD:${WIKI_BRANCH}"
+            echo "Wiki updated."
+          fi

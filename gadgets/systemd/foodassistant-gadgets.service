@@ -1,0 +1,29 @@
+[Unit]
+Description=FoodAssistant Bluetooth thermometer reader
+After=network-online.target bluetooth.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Runs as a normal user; bluez access goes through D-Bus, which the default
+# bluez policy allows for local users. If your distribution restricts it,
+# add the user to the "bluetooth" group.
+User=foodassistant
+WorkingDirectory=/opt/foodassistant
+Environment=FOODASSISTANT_BASE_URL=http://localhost:9284
+# Keep the API key out of the repo and the config file. Point this at a file
+# holding a single line: FOODASSISTANT_API_KEY=...
+EnvironmentFile=-/etc/foodassistant/gadgets.env
+# Make sure the radio is on before the reader starts: on the Bandit Pi the
+# adapter came up rfkill-soft-blocked and powered off, so the scan saw nothing.
+# The leading "+" runs this as root regardless of User=; every step is
+# best-effort (|| true) so a box without rfkill or bluetoothctl still starts.
+ExecStartPre=+/bin/sh -c 'rfkill unblock bluetooth 2>/dev/null || true; bluetoothctl power on 2>/dev/null || true'
+ExecStart=/opt/foodassistant/venv/bin/python -m foodassistant_gadgets --config /etc/foodassistant/gadgets.toml
+# The reader recovers lost thermometers and a restarting app in-process;
+# systemd is only the backstop for a hard crash.
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
