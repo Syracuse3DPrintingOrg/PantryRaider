@@ -1,0 +1,115 @@
+# Bandit Cub common package: everything every Cub profile shares.
+#
+# Stacked under a profile package (tdisplay.yaml, tdisplay-s3.yaml,
+# touch7.yaml) by the top-level cub-<profile>.yaml build files. Substitutions
+# here are defaults; the build file (or your own YAML) overrides them.
+
+substitutions:
+  name: bandit-cub
+  friendly_name: Bandit Cub
+  cub_profile: custom
+  cub_version: "0.18.36"
+  # Server address ("192.168.1.170", "192.168.1.170:9284", or a full
+  # http:// URL). Leave empty to find the server automatically: the Cub tries
+  # a server it remembered from a past run, then mDNS, then a LAN sweep. The
+  # sweep is what finds a bridge-networked Docker server, which cannot
+  # advertise itself over mDNS. Set this only to pin a fixed address.
+  pr_server: ""
+  pr_port: "9284"
+  # Leave empty on a normal Cub: the pairing flow mints a key and stores it
+  # in flash. Fill it in only if you minted a key by hand on the server.
+  pr_api_key: ""
+  # Starting poll interval; the server's cub_poll_seconds setting takes over
+  # after the first successful poll.
+  pr_poll: 15s
+  # Where the update entity checks for new firmware. Point this at your
+  # server if it is not reachable as pr.local.
+  ota_manifest_url: http://pr.local:9284/cub/firmware/manifest.json
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+  # Every Cub gets a unique hostname out of the same factory image.
+  name_add_mac_suffix: true
+  min_version: 2026.6.0
+
+logger:
+
+# First-boot Wi-Fi: Improv over the USB cable used for flashing, Improv over
+# BLE from a phone, and a captive-portal fallback AP.
+wifi:
+  ap: {}
+
+captive_portal:
+
+improv_serial:
+
+esp32_improv:
+  authorizer: none
+
+# The stock native API block is what makes every pantry_raider sensor below a
+# Home Assistant entity too. A Cub works fine without HA; never reboot just
+# because no API client is connected.
+api:
+  reboot_timeout: 0s
+
+ota:
+  - platform: esphome
+  - platform: http_request
+
+update:
+  - platform: http_request
+    id: cub_firmware
+    name: Cub Firmware
+    source: ${ota_manifest_url}
+
+# Timers tick locally between polls: remaining time is computed from each
+# timer's deadline_epoch against real (SNTP) time.
+time:
+  - platform: sntp
+    id: sntp_time
+
+mdns:
+
+http_request:
+  id: pr_http
+  timeout: 10s
+  verify_ssl: false
+
+# The hub: polls GET /cub/summary with the X-API-Key and X-Cub-* headers,
+# runs the pairing flow when there is no key yet, and feeds the display.
+pantry_raider:
+  id: pantry
+  server: ${pr_server}
+  port: ${pr_port}
+  api_key: ${pr_api_key}
+  profile: ${cub_profile}
+  device_name: ${friendly_name}
+  firmware_version: ${cub_version}
+  update_interval: ${pr_poll}
+
+sensor:
+  - platform: pantry_raider
+    expired:
+      name: Expired items
+    expiring_today:
+      name: Expiring today
+    expiring_soon:
+      name: Expiring soon
+    pending:
+      name: Pending scans
+    active_timers:
+      name: Active timers
+    next_timer_seconds:
+      name: Next timer remaining
+    probe_temperature:
+      name: Probe temperature
+
+text_sensor:
+  - platform: pantry_raider
+    view:
+      name: View
+    next_timer:
+      name: Next timer
+    pairing_code:
+      name: Pairing code
