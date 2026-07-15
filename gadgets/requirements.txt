@@ -1,0 +1,8 @@
+# Host-side Bluetooth thermometer reader. bleak talks to bluez over D-Bus,
+# so it works on a Raspberry Pi (or any Linux host) without native builds.
+bleak>=0.21
+httpx>=0.24
+# The Cub status broadcast (advertiser.py) drives bluez advertising over
+# D-Bus with dbus-fast, which bleak already pulls in on Linux; pinned here
+# explicitly so the dependency is stated, not inherited by accident.
+dbus-fast>=1.83; platform_system == "Linux"
