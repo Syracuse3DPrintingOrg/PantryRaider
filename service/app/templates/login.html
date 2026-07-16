@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="{{ theme_mode }}"
+      data-ui-scale="{{ ui_scale_factor | default(1.0) }}"
+      data-display-rotation="{{ display_rotation | default(0) }}"
+      data-rotation-mode="{{ 'compositor' if is_pi else 'css' }}"
+      data-is-pi="{{ '1' if is_pi else '0' }}">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- Resolve all relative links against the app root (or the HA Ingress prefix) -->
+  <base href="{{ ingress_path }}/">
+  <title>Sign In: Pantry Raider</title>
+  {% if theme_css %}
+  <link href="{{ theme_css }}" rel="stylesheet">
+  {% else %}
+  <link href="static/vendor/bootstrap.min.css" rel="stylesheet">
+  {% endif %}
+  {% if theme_overlay %}
+  <link href="{{ theme_overlay }}" rel="stylesheet">
+  {% endif %}
+  <link href="static/vendor/bootstrap-icons.min.css" rel="stylesheet">
+  <link rel="icon" type="image/svg+xml" href="static/icons/favicon.svg">
+  <link rel="icon" type="image/png" sizes="32x32" href="static/icons/favicon-32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="static/icons/favicon-16.png">
+  <link rel="icon" type="image/x-icon" href="static/icons/favicon.ico">
+  <link rel="apple-touch-icon" href="static/pwa/apple-touch-icon-180.png">
+  {# PWA install from the login screen (FoodAssistant-fd3z): manifest + worker are
+     served from the origin root so the app installs with scope "/". The worker
+     only registers in a secure context or on localhost, a no-op over plain-http. #}
+  <link rel="manifest" href="/manifest.webmanifest">
+  <meta name="theme-color" content="#212529">
+  <script>
+    if ('serviceWorker' in navigator &&
+        (window.isSecureContext ||
+         location.hostname === 'localhost' ||
+         location.hostname === '127.0.0.1')) {
+      window.addEventListener('load', function () {
+        navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(function () {});
+      });
+    }
+  </script>
+  {# ?v= is not optional (FoodAssistant-9k2v): a kiosk caches this file and
+   keeps running the copy it first saw, so panel scale, rotation, and
+   safe-area fixes never reach a page that omits it. #}
+  <script src="static/js/kiosk-display.js?v={{ app_version }}"></script>
+  <style>
+    /* Panel safe-area insets (FoodAssistant-t9lj): kiosk-display.js publishes
+       --kiosk-inset-* on <html> for panels that clip an edge. This page is
+       standalone (no kiosk.css), so it must apply the insets itself or its
+       right edge is cut off on such panels. */
+    html, body { overflow-x: hidden; }
+    body { box-sizing: border-box;
+           padding-top: var(--kiosk-inset-top, 0px);
+           padding-right: var(--kiosk-inset-right, 0px);
+           padding-bottom: var(--kiosk-inset-bottom, 0px);
+           padding-left: var(--kiosk-inset-left, 0px); }
+  </style>
+  {# Kiosk boot intro: pre-paint blackout guard + intro.js (FoodAssistant-a8xy) #}
+  {% include "_intro.html" %}
+  {# On-screen keyboard for kiosk touchscreens (FoodAssistant-wo9j) #}
+  {% include "_osk.html" %}
+</head>
+<body class="d-flex align-items-center justify-content-center" style="min-height:100vh">
+  <div class="card" style="width: 100%; max-width: 360px;">
+    <div class="card-body p-4">
+      <h5 class="card-title text-center mb-4">
+        <i class="bi bi-fridge me-2"></i>Pantry Raider
+      </h5>
+      {% if error %}
+      <div class="alert alert-danger py-2">{{ error }}</div>
+      {% endif %}
+
+      {% if step == 'totp' %}
+      <p class="text-secondary small text-center mb-3">Enter the 6-digit code from your authenticator app,
+        or one of your recovery codes.</p>
+      <form method="post" action="ui/login">
+        <div class="mb-3">
+          <label for="login-totp-code" class="visually-hidden">Authentication code</label>
+          <input type="text" class="form-control text-center fs-4 font-monospace"
+                 id="login-totp-code" name="totp_code" placeholder="000000"
+                 inputmode="numeric" autocomplete="one-time-code"
+                 autofocus required>
+        </div>
+        <button type="submit" class="btn btn-primary w-100">
+          <i class="bi bi-shield-check me-1"></i>Verify
+        </button>
+      </form>
+      {% else %}
+      <form method="post" action="ui/login">
+        <input type="hidden" name="mode" value="local">
+        <div class="mb-3">
+          <label for="login-password" class="visually-hidden">Password</label>
+          <input type="password" class="form-control" id="login-password" name="password"
+                 placeholder="Password" autofocus required>
+        </div>
+        <button type="submit" class="btn btn-primary w-100">
+          <i class="bi bi-unlock me-1"></i>Sign In
+        </button>
+      </form>
+
+      {% if cloud_linked %}
+      <div class="d-flex align-items-center my-3 text-secondary small">
+        <hr class="flex-grow-1"><span class="px-2">or</span><hr class="flex-grow-1">
+      </div>
+
+      {# These two ways to sign in are separate. The device password above works
+         offline; the Forager sign-in below is a convenience that needs the
+         Forager server (FoodAssistant-vg1f). #}
+      <p class="text-secondary small mb-3">Your device password above always works,
+        even if Forager is offline. Sign in with Forager is an added convenience,
+        using your Forager account.</p>
+
+      {% if forager_error %}
+      <div class="alert alert-danger py-2 small">{{ forager_error }}</div>
+      {% endif %}
+      {% if forager_notice %}
+      <div class="alert alert-info py-2 small">{{ forager_notice }}</div>
+      {% endif %}
+
+      <form method="post" action="ui/login">
+        <input type="hidden" name="mode" value="forager">
+        <p class="text-secondary small mb-2">Sign in with your Forager email and
+          password. Created your Forager account with Google? Set a password on
+          the Forager site first (under your account), or use your device
+          password above; Google sign-in is not available on this screen.</p>
+        <div class="mb-2">
+          <label for="forager-email" class="visually-hidden">Forager email</label>
+          <input type="email" class="form-control" id="forager-email" name="email"
+                 placeholder="Forager email" autocomplete="username"
+                 value="{{ forager_email }}"
+                 {% if forager_need_code %}readonly{% endif %} required>
+        </div>
+        <div class="mb-2">
+          <label for="forager-password" class="visually-hidden">Forager password</label>
+          <input type="password" class="form-control" id="forager-password" name="fpass"
+                 placeholder="Forager password" autocomplete="current-password"
+                 {% if forager_need_code %}value="{{ forager_password }}"{% endif %} required>
+        </div>
+        {% if forager_need_code %}
+        <div class="mb-2">
+          <label for="forager-code" class="visually-hidden">Forager verification code</label>
+          <input type="text" class="form-control text-center font-monospace"
+                 id="forager-code" name="fcode" placeholder="000000"
+                 inputmode="numeric" autocomplete="one-time-code" autofocus required>
+        </div>
+        {% endif %}
+        <button type="submit" class="btn btn-outline-primary w-100">
+          <i class="bi bi-box-arrow-in-right me-1"></i>Sign in with Forager
+        </button>
+      </form>
+      {% endif %}
+      {% endif %}
+    </div>
+  </div>
+</body>
+</html>

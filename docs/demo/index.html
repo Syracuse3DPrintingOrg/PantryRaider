@@ -1,0 +1,989 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pantry Raider - Interactive Demo</title>
+<!--
+  Self-contained, no-backend interactive demo of Pantry Raider. It uses the same
+  Bootstrap 5.3 dark theme, Bootstrap Icons, and component markup as the real app
+  (vendored under ./vendor), with sample data baked in, so it looks like the
+  product. The real app is self-hosted and backed by Grocy (plus optional Mealie,
+  a vision LLM, and Home Assistant). Source: https://github.com/Syracuse3DPrintingOrg/PantryRaider
+-->
+<link href="vendor/bootstrap.min.css" rel="stylesheet">
+<link href="vendor/bootstrap-icons.min.css" rel="stylesheet">
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<style>
+  /* Pink brand accent (#F2006E), same as the real app. */
+  :root { --bs-primary:#F2006E; --bs-primary-rgb:242,0,110;
+    --bs-primary-text-emphasis:#ff5ba0; --bs-primary-border-subtle:#5a0a2c; --bs-primary-bg-subtle:#2a0616; }
+  .btn-primary { --bs-btn-bg:#F2006E; --bs-btn-border-color:#F2006E;
+    --bs-btn-hover-bg:#c80059; --bs-btn-hover-border-color:#c80059;
+    --bs-btn-active-bg:#c80059; --bs-btn-active-border-color:#c80059;
+    --bs-btn-disabled-bg:#F2006E; --bs-btn-disabled-border-color:#F2006E; }
+  .btn-outline-primary { --bs-btn-color:#ff5ba0; --bs-btn-border-color:#F2006E;
+    --bs-btn-hover-bg:#F2006E; --bs-btn-hover-border-color:#F2006E;
+    --bs-btn-active-bg:#F2006E; --bs-btn-active-border-color:#F2006E; }
+  .text-brand { color:#F2006E !important; }
+  /* Faint ghosted brand mark behind the app, same as the real UI. */
+  body::before { content:""; position:fixed; inset:0; z-index:-1;
+    background:url("logo-mark.png") center center / min(58vmin, 460px) no-repeat;
+    opacity:.06; pointer-events:none; }
+  .navbar-brand { font-weight: 700; letter-spacing: -0.5px; }
+  .brand-logo { height: 30px; width: auto; }
+  .navbar .nav-link.active { color:#ff5ba0 !important; font-weight:600; }
+  .screen { display: none; }
+  .screen.active { display: block; }
+  /* Two-level nav: full-width segmented sub-pill row under the top nav. */
+  .subnav { background:var(--bs-tertiary-bg); border-bottom:1px solid var(--bs-border-color); }
+  .subnav-inner { display:flex; gap:6px; padding:.5rem 0; }
+  .subtab { flex:1 1 0; min-width:0; border:1px solid var(--bs-border-color); border-radius:8px;
+    padding:.45rem .5rem; font-size:.85rem; font-weight:500; background:rgba(255,255,255,.04);
+    color:var(--bs-secondary-color); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .subtab:hover { color:var(--bs-body-color); }
+  .subtab.active { background:var(--bs-primary); border-color:var(--bs-primary); color:#fff; }
+  /* Glance home: large square launcher tiles + notification pills. */
+  .glance-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(150px,1fr)); gap:12px; }
+  .glance-tile { aspect-ratio:1/1; border-radius:14px; border:2px solid rgba(255,255,255,.12);
+    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px;
+    cursor:pointer; color:#fff; text-align:center; user-select:none; }
+  .glance-tile:hover { filter:brightness(1.15); }
+  .glance-tile:active { transform:scale(.97); }
+  .glance-tile i { font-size:2.3rem; }
+  .glance-tile span { font-weight:600; font-size:.95rem; padding:0 .4rem; }
+  .glance-pills { display:flex; flex-wrap:wrap; gap:10px; margin-top:18px; }
+  .glance-pill { display:flex; align-items:center; gap:.5rem; padding:.5rem .9rem; border-radius:10px;
+    border:1px solid var(--bs-border-color); background:var(--bs-tertiary-bg); cursor:pointer; }
+  .glance-pill:hover { border-color:var(--bs-secondary-color); }
+  .glance-pill .pill-count { font-weight:700; }
+  /* Inventory panels (from the app's inventory.html) */
+  .panel-header { font-size:.95rem; font-weight:600; letter-spacing:.02em; padding:.6rem 1rem;
+    display:flex; align-items:center; gap:.5rem; border-radius:.5rem .5rem 0 0; }
+  .panel-count { font-size:.75rem; font-weight:500; margin-left:auto; padding:.15rem .5rem;
+    border-radius:999px; background:rgba(255,255,255,.15); }
+  .panel-body { max-height:60vh; overflow-y:auto; }
+  .item-row { display:flex; align-items:center; gap:.5rem; padding:.45rem .75rem;
+    border-bottom:1px solid rgba(255,255,255,.06); font-size:.875rem; }
+  .item-row:last-child { border-bottom:none; }
+  .item-name { flex:1; min-width:0; }
+  .item-name-text { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .item-qty { font-size:.78rem; color:var(--bs-secondary-color); white-space:nowrap; }
+  .expiry-badge { font-size:.72rem; padding:.15rem .45rem; border-radius:999px; white-space:nowrap; font-weight:500; }
+  .badge-expired { background:#4d1010; color:#ff6b6b; }
+  .badge-today { background:#4d2a0a; color:#ffa94d; }
+  .badge-3d { background:#3d3000; color:#ffd43b; }
+  .badge-7d { background:#1a2e10; color:#69db7c; }
+  .badge-ok { background:#0f2010; color:#69db7c; }
+  .panel-refrigerated .panel-header { background:#0d3b5e; color:#74c0fc; }
+  .panel-frozen .panel-header { background:#1a1a4d; color:#a5b4fc; }
+  .panel-room_temp .panel-header { background:#3b2100; color:#ffa94d; }
+  .panel-pantry .panel-header { background:#1a2e10; color:#69db7c; }
+  .panel-refrigerated { border-color:#0d3b5e !important; }
+  .panel-frozen { border-color:#1a1a4d !important; }
+  .panel-room_temp { border-color:#3b2100 !important; }
+  .panel-pantry { border-color:#1a2e10 !important; }
+  .min-width-0 { min-width:0; }
+  .urgency-3d { color:#ffd43b; }
+  /* Thermometers: compact per-device probe cards */
+  .thermo-card { border:1px solid var(--bs-border-color); border-radius:.6rem; background:var(--bs-tertiary-bg);
+    padding:.7rem .9rem; height:100%; }
+  .thermo-head { display:flex; align-items:center; gap:.5rem; }
+  .thermo-name { font-weight:600; }
+  .thermo-batt { margin-left:auto; font-size:.8rem; color:var(--bs-secondary-color);
+    display:inline-flex; align-items:center; gap:.3rem; }
+  .thermo-probe { display:flex; align-items:baseline; gap:.6rem; padding-top:.55rem; flex-wrap:wrap; }
+  .thermo-probe:not(:first-of-type) { border-top:1px solid rgba(255,255,255,.06); margin-top:.4rem; }
+  .thermo-probe-label { font-size:.85rem; color:var(--bs-secondary-color); min-width:64px; }
+  .thermo-internal { font-size:1.9rem; font-weight:700; line-height:1; }
+  .thermo-ambient { font-size:.95rem; color:var(--bs-secondary-color); }
+  .thermo-target { margin-left:auto; font-size:.8rem; color:var(--bs-secondary-color); white-space:nowrap; }
+  .thermo-stale { cursor:pointer; }
+  .thermo-stale-body { display:none; }
+  .thermo-stale.open .thermo-stale-body { display:block; }
+  .thermo-chev { transition:transform .15s ease; }
+  .thermo-stale.open .thermo-chev { transform:rotate(180deg); }
+  /* Camera */
+  .cam-stage { aspect-ratio:16/9; background:#000; border-radius:.5rem; overflow:hidden; position:relative;
+    display:flex; align-items:center; justify-content:center; }
+  .cam-feed { position:absolute; inset:0; }
+  .cam-dot { position:absolute; right:12px; top:12px; width:9px; height:9px; border-radius:50%;
+    background:#f55; box-shadow:0 0 8px #f55; animation:blink 1.2s infinite; }
+  @keyframes blink { 50% { opacity:.25; } }
+  /* Stream Deck */
+  .deck { display:grid; grid-template-columns:repeat(5,1fr); gap:8px; max-width:540px; }
+  .deck-start { max-width:760px; }
+  .deck-start .key { font-size:.85rem; }
+  .deck-start .key i { font-size:1.7rem; }
+  .key { aspect-ratio:1/1; border-radius:10px; display:flex; flex-direction:column; align-items:center;
+    justify-content:center; gap:3px; cursor:pointer; user-select:none; border:2px solid rgba(255,255,255,.12);
+    font-size:.72rem; text-align:center; color:#fff; }
+  .key:hover { filter:brightness(1.18); }
+  .key:active { transform:scale(.96); }
+  .key i { font-size:1.25rem; }
+  .keypad button { font-size:1.5rem; min-height:58px; }
+</style>
+</head>
+<body>
+<nav class="navbar navbar-expand-lg bg-body-tertiary border-bottom sticky-top">
+  <div class="container-fluid">
+    <span class="navbar-brand d-flex align-items-center"><img src="logo-mark.png" alt="" class="brand-logo me-2">Pantry Raider</span>
+    <ul class="navbar-nav flex-row flex-wrap gap-1" id="nav"></ul>
+  </div>
+</nav>
+<div class="subnav" id="subnav" style="display:none">
+  <div class="container-fluid px-3 px-lg-4" style="max-width:1140px">
+    <div class="subnav-inner" id="subnav-inner"></div>
+  </div>
+</div>
+
+<div class="container-fluid px-3 px-lg-4 pb-5" style="max-width:1140px">
+  <div class="alert alert-info d-flex align-items-center gap-2 mt-3" role="alert">
+    <i class="bi bi-info-circle-fill"></i>
+    <div><strong>Interactive demo.</strong> Sample data, runs entirely in your browser. The real app is self-hosted, backed by Grocy
+      (plus optional Mealie, a vision LLM, and Home Assistant).
+      <a href="https://github.com/Syracuse3DPrintingOrg/PantryRaider" class="alert-link" target="_blank" rel="noopener">View the project &rarr;</a></div>
+  </div>
+
+  <!-- GLANCE (home) -->
+  <section class="screen active" id="screen-glance">
+    <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 my-3">
+      <h4 class="mb-0"><i class="bi bi-house-door me-2"></i>Glance</h4>
+      <span class="text-secondary small">Your kitchen at a glance. Tap a tile to jump in.</span>
+    </div>
+    <div class="glance-grid" id="glance-grid"></div>
+    <div class="glance-pills" id="glance-pills"></div>
+  </section>
+
+  <!-- INVENTORY -->
+  <section class="screen" id="screen-inventory">
+    <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 my-3">
+      <h4 class="mb-0"><i class="bi bi-grid me-2"></i>Inventory</h4>
+      <span class="text-secondary small">Stock grouped by storage. Items expiring soon are flagged.</span>
+    </div>
+    <div class="row g-3" id="inv-panels"></div>
+  </section>
+
+  <!-- EXPIRING -->
+  <section class="screen" id="screen-expiring">
+    <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 my-3">
+      <h4 class="mb-0"><i class="bi bi-clock-history me-2"></i>Expiring items</h4>
+      <span class="text-secondary small">What needs using up, soonest first.</span>
+    </div>
+    <div class="row g-3 mb-4" id="exp-summary"></div>
+    <div class="table-responsive">
+      <table class="table table-hover align-middle">
+        <thead><tr><th>Item</th><th>Amount</th><th>Location</th><th>Status</th><th></th></tr></thead>
+        <tbody id="exp-rows"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- MANAGE (scan / pending) -->
+  <section class="screen" id="screen-manage">
+    <h4 class="my-3"><i class="bi bi-plus-circle me-2"></i>Manage</h4>
+    <p class="text-secondary">Add and adjust stock. Scan a barcode (camera or USB scanner); Open Food Facts fills in the details. Try it:</p>
+    <div class="d-flex gap-2 mb-3 flex-wrap">
+      <button class="btn btn-primary" onclick="demoScan()"><i class="bi bi-upc-scan me-1"></i>Scan a barcode</button>
+      <button class="btn btn-outline-success" onclick="commitPending()"><i class="bi bi-cloud-upload me-1"></i>Commit all to inventory</button>
+    </div>
+    <div class="card">
+      <div class="card-header d-flex align-items-center"><i class="bi bi-hourglass-split me-2"></i>Pending review
+        <span class="badge text-bg-warning ms-2" id="pending-count">0</span></div>
+      <div class="list-group list-group-flush" id="pending-list">
+        <div class="list-group-item text-secondary">Nothing scanned yet. Hit &ldquo;Scan a barcode&rdquo; above.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- REVIEW (action inbox) -->
+  <section class="screen" id="screen-review">
+    <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 my-3">
+      <h4 class="mb-0"><i class="bi bi-inbox me-2"></i>Review</h4>
+      <span class="text-secondary small">Things the app noticed that need a quick decision.</span>
+    </div>
+    <div class="list-group" id="review-list"></div>
+  </section>
+
+  <!-- COOK -->
+  <section class="screen" id="screen-cook">
+    <h4 class="my-3"><i class="bi bi-fire me-2"></i>What can I cook?</h4>
+    <p class="text-secondary">Recipes ranked by how much is already in stock. Items expiring soon nudge a recipe up.</p>
+    <div id="cook-tiers"></div>
+  </section>
+
+  <!-- RECIPES -->
+  <section class="screen" id="screen-recipes">
+    <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 my-3">
+      <h4 class="mb-0"><i class="bi bi-journal-richtext me-2"></i>Recipes</h4>
+      <span class="text-secondary small">Your recipe library. Native storage, or synced from Mealie.</span>
+    </div>
+    <div class="row g-3 row-cols-1 row-cols-md-2 row-cols-lg-3" id="recipe-grid"></div>
+  </section>
+
+  <!-- ON THE LINE -->
+  <section class="screen" id="screen-ontheline">
+    <h4 class="my-3"><i class="bi bi-list-check me-2"></i>On the Line</h4>
+    <p class="text-secondary">The recipe you are actively cooking, shared across every screen and the Stream Deck.</p>
+    <div class="card">
+      <div class="card-body">
+        <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-2">
+          <h5 class="mb-0">Garlic butter chicken</h5>
+          <span class="badge text-bg-info">Serves 4 &middot; 25 min</span>
+        </div>
+        <div class="d-flex gap-1 flex-wrap mb-3">
+          <span class="badge rounded-pill text-bg-secondary">Main</span>
+          <span class="badge rounded-pill text-bg-secondary">Side: Creamed spinach</span>
+        </div>
+        <ol class="mb-3 ps-3">
+          <li class="mb-2">Pat chicken dry and season both sides.</li>
+          <li class="mb-2">Sear 6 minutes per side until golden. <span class="badge text-bg-primary ms-1"><i class="bi bi-stopwatch me-1"></i>6:00</span></li>
+          <li class="mb-2">Add garlic and butter, baste for 2 minutes. <span class="badge text-bg-primary ms-1"><i class="bi bi-stopwatch me-1"></i>2:00</span></li>
+          <li class="mb-0">Rest 5 minutes, then slice and serve. <span class="badge text-bg-primary ms-1"><i class="bi bi-stopwatch me-1"></i>5:00</span></li>
+        </ol>
+        <div class="d-flex gap-2 flex-wrap">
+          <button class="btn btn-sm btn-outline-primary"><i class="bi bi-stopwatch me-1"></i>Start all step timers</button>
+          <button class="btn btn-sm btn-outline-success"><i class="bi bi-check2-circle me-1"></i>Cooked it</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- MEAL PLAN -->
+  <section class="screen" id="screen-mealplan">
+    <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 my-3">
+      <h4 class="mb-0"><i class="bi bi-calendar-week me-2"></i>Meal plan</h4>
+      <span class="text-secondary small">This week. Drag recipes onto a slot in the real app.</span>
+    </div>
+    <div class="table-responsive">
+      <table class="table table-bordered align-middle text-center mb-0" id="plan-table"></table>
+    </div>
+  </section>
+
+  <!-- SHOPPING -->
+  <section class="screen" id="screen-shopping">
+    <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 my-3">
+      <h4 class="mb-0"><i class="bi bi-cart me-2"></i>Shopping list</h4>
+      <span class="text-secondary small">Grouped by aisle. Missing recipe ingredients land here.</span>
+    </div>
+    <div class="row g-3" id="shopping-cols"></div>
+  </section>
+
+  <!-- KITCHEN GUIDE -->
+  <section class="screen" id="screen-guide">
+    <h4 class="my-3"><i class="bi bi-book me-2"></i>Kitchen guide</h4>
+    <p class="text-secondary">Quick reference for the questions that come up mid-cook.</p>
+    <div class="row g-3">
+      <div class="col-md-6">
+        <div class="card h-100">
+          <div class="card-header"><i class="bi bi-thermometer-half me-2"></i>Safe internal temperatures</div>
+          <table class="table table-sm table-borderless align-middle mb-0">
+            <tbody>
+              <tr><td class="ps-3">Poultry (chicken, turkey)</td><td class="text-end pe-3 fw-semibold">165&deg;F</td></tr>
+              <tr><td class="ps-3">Ground meat</td><td class="text-end pe-3 fw-semibold">160&deg;F</td></tr>
+              <tr><td class="ps-3">Pork, beef, lamb (medium)</td><td class="text-end pe-3 fw-semibold">145&deg;F</td></tr>
+              <tr><td class="ps-3">Fish</td><td class="text-end pe-3 fw-semibold">145&deg;F</td></tr>
+              <tr><td class="ps-3">Reheated leftovers</td><td class="text-end pe-3 fw-semibold">165&deg;F</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div class="col-md-6">
+        <div class="card h-100">
+          <div class="card-header"><i class="bi bi-arrow-left-right me-2"></i>Common substitutions</div>
+          <table class="table table-sm table-borderless align-middle mb-0">
+            <tbody>
+              <tr><td class="ps-3">1 cup buttermilk</td><td class="text-end pe-3">1 cup milk + 1 tbsp lemon</td></tr>
+              <tr><td class="ps-3">1 egg</td><td class="text-end pe-3">1 tbsp flax + 3 tbsp water</td></tr>
+              <tr><td class="ps-3">1 tsp baking powder</td><td class="text-end pe-3">1/4 tsp soda + 1/2 tsp cream of tartar</td></tr>
+              <tr><td class="ps-3">1 cup sour cream</td><td class="text-end pe-3">1 cup plain yogurt</td></tr>
+              <tr><td class="ps-3">Fresh herbs</td><td class="text-end pe-3">1/3 the amount, dried</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- NUTRITION -->
+  <section class="screen" id="screen-nutrition">
+    <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 my-3">
+      <h4 class="mb-0"><i class="bi bi-heart-pulse me-2"></i>Nutrition</h4>
+      <span class="text-secondary small">Today's intake log, totalled from what you cooked and ate.</span>
+    </div>
+    <div class="row g-3 mb-3" id="nutrition-totals"></div>
+    <div class="card">
+      <div class="card-header"><i class="bi bi-journal-text me-2"></i>Logged today</div>
+      <div class="list-group list-group-flush" id="nutrition-log"></div>
+    </div>
+  </section>
+
+  <!-- CONVERT -->
+  <section class="screen" id="screen-convert">
+    <h4 class="my-3"><i class="bi bi-rulers me-2"></i>Kitchen conversions</h4>
+    <div class="row g-3">
+      <div class="col-md-7">
+        <div class="card">
+          <div class="card-header"><i class="bi bi-calculator me-2"></i>Custom conversion</div>
+          <div class="card-body">
+            <div class="row g-2 align-items-end">
+              <div class="col-12 col-md-4">
+                <label class="form-label">Value</label>
+                <input id="cv-val" class="form-control form-control-lg text-end" value="2" readonly
+                       data-bs-toggle="modal" data-bs-target="#padModal" style="cursor:pointer">
+              </div>
+              <div class="col-6 col-md-4"><label class="form-label">From</label><select id="cv-from" class="form-select form-select-lg" onchange="convert()"></select></div>
+              <div class="col-6 col-md-4"><label class="form-label">To</label><select id="cv-to" class="form-select form-select-lg" onchange="convert()"></select></div>
+            </div>
+            <div class="display-6 mt-3 text-info" id="cv-result">&mdash;</div>
+          </div>
+        </div>
+      </div>
+      <div class="col-md-5">
+        <div class="card">
+          <div class="card-header"><i class="bi bi-list-check me-2"></i>Handy equivalents</div>
+          <table class="table table-sm table-borderless align-middle mb-0 fs-6">
+            <tbody>
+              <tr><td class="ps-3">1 cup</td><td class="text-end pe-3">16 tbsp = 240 ml</td></tr>
+              <tr><td class="ps-3">1 stick of butter</td><td class="text-end pe-3">8 tbsp = 113 g</td></tr>
+              <tr><td class="ps-3">1 cup flour</td><td class="text-end pe-3">125 g</td></tr>
+              <tr><td class="ps-3">1 large egg</td><td class="text-end pe-3">about 50 g</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- SHOP (gear storefront) -->
+  <section class="screen" id="screen-shop">
+    <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 my-3">
+      <h4 class="mb-0"><i class="bi bi-bag me-2"></i>Shop the kit</h4>
+      <span class="text-secondary small">The kitchen gear this build is designed around.</span>
+    </div>
+    <div class="row g-3 row-cols-1 row-cols-md-2 row-cols-lg-3" id="shop-grid"></div>
+    <p class="text-secondary small mt-3 mb-0">
+      Browse the full list at
+      <a href="https://www.amazon.com/shop/improvisedeng" target="_blank" rel="noopener" class="link-info">amazon.com/shop/improvisedeng</a>.
+    </p>
+  </section>
+
+  <!-- TIMERS -->
+  <section class="screen" id="screen-timers">
+    <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 my-3">
+      <h4 class="mb-0"><i class="bi bi-stopwatch me-2"></i>Timers</h4>
+      <span class="text-secondary small">Server-side countdowns, shared across the screen and the Stream Deck.</span>
+    </div>
+    <div class="d-flex gap-2 flex-wrap mb-3" id="timer-presets"></div>
+    <div class="row g-3" id="timer-cards"></div>
+  </section>
+
+  <!-- THERMOMETERS -->
+  <section class="screen" id="screen-thermometers">
+    <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 my-3">
+      <h4 class="mb-0"><i class="bi bi-thermometer-half me-2"></i>Thermometers</h4>
+      <span class="text-secondary small">Wireless probes. Internal is the food; ambient is the pit or oven.</span>
+    </div>
+    <div class="row g-3" id="thermo-list"></div>
+  </section>
+
+  <!-- WEATHER -->
+  <section class="screen" id="screen-weather">
+    <h4 class="my-3"><i class="bi bi-cloud-sun me-2"></i>Weather</h4>
+    <p class="text-secondary">The kiosk forecast, from Open-Meteo. Handy when the pantry doubles as a home dashboard.</p>
+    <div class="row g-3 align-items-stretch">
+      <div class="col-md-4">
+        <div class="card h-100 text-center">
+          <div class="card-body">
+            <i class="bi bi-cloud-sun display-3 text-info"></i>
+            <div class="display-4 fw-bold mt-2">72&deg;F</div>
+            <div class="text-secondary">Partly cloudy &middot; feels 70&deg;F</div>
+            <div class="small text-secondary mt-2">Wind 6 mph &middot; Humidity 48%</div>
+          </div>
+        </div>
+      </div>
+      <div class="col-md-8">
+        <div class="card h-100">
+          <div class="card-header"><i class="bi bi-calendar3 me-2"></i>Next 5 days</div>
+          <div class="card-body"><div class="row row-cols-5 g-2 text-center" id="forecast-row"></div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- CAMERA -->
+  <section class="screen" id="screen-camera">
+    <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 my-3">
+      <h4 class="mb-0"><i class="bi bi-camera-video me-2"></i>Cameras</h4>
+      <div class="btn-group btn-group-sm" id="cam-switch"></div>
+    </div>
+    <div class="cam-stage">
+      <div class="cam-feed" id="cam-feed"></div>
+      <span class="cam-dot"></span>
+      <span class="position-absolute bottom-0 start-0 m-2 badge bg-dark bg-opacity-75" id="cam-label">Front Door</span>
+    </div>
+    <p class="text-secondary small mt-2">Network cameras (from Home Assistant or by IP) on the screen and the Stream Deck.</p>
+  </section>
+
+  <!-- START PAGE -->
+  <section class="screen" id="screen-start">
+    <h4 class="my-3"><i class="bi bi-grid-1x2 me-2"></i>Start Page</h4>
+    <p class="text-secondary">An optional full-screen launcher that works like an on-screen Stream Deck: same key catalog,
+      same shared custom keys. Home Assistant, media, and macro keys fire right from the screen, no deck required.</p>
+    <div class="deck deck-start" id="start-grid"></div>
+    <div class="alert alert-secondary mt-3 mb-0" id="start-msg">Tap a key&hellip;</div>
+  </section>
+
+  <!-- STREAM DECK -->
+  <section class="screen" id="screen-deck">
+    <h4 class="my-3"><i class="bi bi-grid-3x3-gap me-2"></i>Stream Deck kiosk</h4>
+    <p class="text-secondary">A kitchen control surface. Tap a key to see what it does. The real editor lets you drag your own custom keys onto the grid.</p>
+    <div class="deck" id="deck"></div>
+    <div class="alert alert-secondary mt-3 mb-0" id="deck-msg">Tap a key&hellip;</div>
+  </section>
+
+  <!-- SETTINGS -->
+  <section class="screen" id="screen-settings">
+    <h4 class="my-3"><i class="bi bi-gear me-2"></i>Settings</h4>
+    <p class="text-secondary">A guided setup wizard connects each service. Everything is optional except Grocy, the inventory backend.</p>
+    <div class="row g-3" id="settings-cards"></div>
+  </section>
+
+  <footer class="text-secondary small text-center pt-4 mt-4 border-top">
+    Pantry Raider v0.18.8 &middot; self-hosted food spoilage tracker &middot;
+    <a href="https://github.com/Syracuse3DPrintingOrg/PantryRaider" target="_blank" rel="noopener">github.com/Syracuse3DPrintingOrg/PantryRaider</a>
+  </footer>
+</div>
+
+<!-- Keypad modal (Convert) -->
+<div class="modal fade" id="padModal" tabindex="-1"><div class="modal-dialog modal-sm modal-dialog-centered"><div class="modal-content">
+  <div class="modal-header py-2"><h6 class="modal-title">Enter value</h6><button class="btn-close" data-bs-dismiss="modal"></button></div>
+  <div class="modal-body">
+    <input id="pad-display" class="form-control form-control-lg text-end mb-2" value="2" readonly>
+    <div class="row row-cols-3 g-2 keypad" id="keypad"></div>
+  </div>
+  <div class="modal-footer py-2"><button class="btn btn-primary" data-bs-dismiss="modal">Done</button></div>
+</div></div></div>
+
+<script src="vendor/bootstrap.bundle.min.js"></script>
+<script>
+function esc(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+
+// ---- Two-level navigation -------------------------------------------------
+// Top-level items each land on a primary page; a full-width sub-pill row shows
+// the active section's sub-pages (hidden when a section has only one page).
+const NAV = [
+  {id:'glance',    label:'Glance',        icon:'bi-house-door',    pages:[
+    {screen:'glance', label:'Glance', icon:'bi-house-door'}]},
+  {id:'inventory', label:'Inventory',     icon:'bi-grid',          pages:[
+    {screen:'inventory', label:'Inventory', icon:'bi-grid'},
+    {screen:'expiring',  label:'Expiring',  icon:'bi-clock-history'}]},
+  {id:'manage',    label:'Manage',        icon:'bi-plus-circle',   pages:[
+    {screen:'manage', label:'Manage', icon:'bi-plus-circle'}]},
+  {id:'review',    label:'Review',        icon:'bi-inbox',         pages:[
+    {screen:'review', label:'Review', icon:'bi-inbox'}]},
+  {id:'cook',      label:'Cook',          icon:'bi-fire',          pages:[
+    {screen:'cook',      label:'Cook',        icon:'bi-fire'},
+    {screen:'recipes',   label:'Recipes',     icon:'bi-journal-richtext'},
+    {screen:'ontheline', label:'On the Line', icon:'bi-list-check'},
+    {screen:'mealplan',  label:'Meal Plan',   icon:'bi-calendar-week'}]},
+  {id:'shopping',  label:'Shopping',      icon:'bi-cart',          pages:[
+    {screen:'shopping', label:'Shopping', icon:'bi-cart'}]},
+  {id:'guide',     label:'Kitchen Guide', icon:'bi-book',          pages:[
+    {screen:'guide',     label:'Kitchen Guide', icon:'bi-book'},
+    {screen:'nutrition', label:'Nutrition',     icon:'bi-heart-pulse'},
+    {screen:'convert',   label:'Convert',       icon:'bi-rulers'},
+    {screen:'shop',      label:'Shop',          icon:'bi-bag'}]},
+  {id:'timetemp',  label:'Time & Temp',   icon:'bi-thermometer-half', pages:[
+    {screen:'timers',       label:'Timers',       icon:'bi-stopwatch'},
+    {screen:'thermometers', label:'Thermometers', icon:'bi-thermometer-half'}]},
+  {id:'homehub',   label:'Home Hub',      icon:'bi-house',         pages:[
+    {screen:'weather', label:'Weather', icon:'bi-cloud-sun'},
+    {screen:'camera',  label:'Cameras', icon:'bi-camera-video'}]},
+  {id:'start',     label:'Start Page',    icon:'bi-grid-1x2',      pages:[
+    {screen:'start', label:'Start Page', icon:'bi-grid-1x2'}]},
+  {id:'deck',      label:'Stream Deck',   icon:'bi-grid-3x3-gap',  pages:[
+    {screen:'deck', label:'Stream Deck', icon:'bi-grid-3x3-gap'}]},
+  {id:'settings',  label:'Settings',      icon:'bi-gear',          pages:[
+    {screen:'settings', label:'Settings', icon:'bi-gear'}]},
+];
+function renderNav(){
+  document.getElementById('nav').innerHTML = NAV.map(t =>
+    `<li class="nav-item"><button class="nav-link px-2" data-top="${t.id}"><i class="bi ${t.icon} me-1"></i>${esc(t.label)}</button></li>`).join('');
+}
+function topFor(screen){ return NAV.find(t => t.pages.some(p => p.screen === screen)) || NAV[0]; }
+function renderSubnav(top, active){
+  const bar = document.getElementById('subnav');
+  if (top.pages.length <= 1){ bar.style.display = 'none'; document.getElementById('subnav-inner').innerHTML = ''; return; }
+  bar.style.display = 'block';
+  document.getElementById('subnav-inner').innerHTML = top.pages.map(p =>
+    `<button class="subtab${p.screen===active?' active':''}" data-screen="${p.screen}"><i class="bi ${p.icon} me-1"></i>${esc(p.label)}</button>`).join('');
+}
+function goto(screen){
+  const top = topFor(screen);
+  document.querySelectorAll('.screen').forEach(s => s.classList.toggle('active', s.id === 'screen-' + screen));
+  document.querySelectorAll('#nav .nav-link').forEach(b => b.classList.toggle('active', b.dataset.top === top.id));
+  renderSubnav(top, screen);
+  window.scrollTo(0, 0);
+}
+document.getElementById('nav').addEventListener('click', e => {
+  const b = e.target.closest('button[data-top]'); if (!b) return;
+  goto(NAV.find(t => t.id === b.dataset.top).pages[0].screen);
+});
+// Any element carrying data-screen (sub-pills, glance tiles, glance pills) navigates.
+document.addEventListener('click', e => {
+  const b = e.target.closest('[data-screen]'); if (!b) return;
+  goto(b.dataset.screen);
+});
+
+// ---- Glance ---------------------------------------------------------------
+const GLANCE_TILES = [
+  {screen:'inventory', label:'Inventory',     icon:'bi-grid',             c:'#1f6feb'},
+  {screen:'manage',    label:'Manage',        icon:'bi-plus-circle',      c:'#238636'},
+  {screen:'review',    label:'Review',        icon:'bi-inbox',            c:'#8957e5'},
+  {screen:'cook',      label:'Cook',          icon:'bi-fire',             c:'#bc4c00'},
+  {screen:'shopping',  label:'Shopping',      icon:'bi-cart',             c:'#0f766e'},
+  {screen:'guide',     label:'Kitchen Guide', icon:'bi-book',             c:'#b45309'},
+  {screen:'timers',    label:'Time & Temp',   icon:'bi-thermometer-half', c:'#be123c'},
+  {screen:'weather',   label:'Home Hub',      icon:'bi-house',            c:'#0369a1'},
+];
+const GLANCE_PILLS = [
+  {screen:'review',   label:'Review',   count:2, kind:'warning'},
+  {screen:'review',   label:'Alerts',   count:0, kind:'success'},
+  {screen:'expiring', label:'Expiring', count:3, kind:'danger'},
+];
+function renderGlance(){
+  document.getElementById('glance-grid').innerHTML = GLANCE_TILES.map(t =>
+    `<div class="glance-tile" style="background:${t.c}" data-screen="${t.screen}"><i class="bi ${t.icon}"></i><span>${esc(t.label)}</span></div>`).join('');
+  document.getElementById('glance-pills').innerHTML = GLANCE_PILLS.map(p => {
+    if (p.count === 0) return `<div class="glance-pill" data-screen="${p.screen}">
+      <i class="bi bi-check-circle-fill text-success"></i><span>${esc(p.label)}</span>
+      <span class="text-secondary small">All clear</span></div>`;
+    return `<div class="glance-pill" data-screen="${p.screen}">
+      <i class="bi bi-bell-fill text-${p.kind}"></i><span>${esc(p.label)}</span>
+      <span class="badge text-bg-${p.kind} pill-count">${p.count}</span></div>`;
+  }).join('');
+}
+
+// ---- Inventory ------------------------------------------------------------
+const PANELS = [
+  {key:'refrigerated', label:'Refrigerated', icon:'bi-thermometer-low', items:[
+    {n:'Whole milk', q:'1 gal', d:3}, {n:'Greek yogurt', q:'4 cups', d:9},
+    {n:'Cheddar cheese', q:'250 g', d:21}, {n:'Spinach', q:'1 bag', d:1},
+    {n:'Chicken breast', q:'1.5 kg', d:2}, {n:'Parmesan', q:'200 g', d:25}]},
+  {key:'frozen', label:'Frozen', icon:'bi-snow', items:[
+    {n:'Blueberries', q:'2 lb', d:120}, {n:'Peas', q:'1 bag', d:200}, {n:'Pizza dough', q:'3 balls', d:60}]},
+  {key:'room_temp', label:'Room Temp / Counter', icon:'bi-sun', items:[
+    {n:'Bananas', q:'5', d:2}, {n:'Tomatoes', q:'6', d:4}, {n:'Garlic', q:'1 bulb', d:60}, {n:'Onions', q:'4', d:40}]},
+  {key:'pantry', label:'Pantry / Dry Storage', icon:'bi-box-seam', items:[
+    {n:'Spaghetti', q:'500 g', d:400}, {n:'Olive oil', q:'750 ml', d:300},
+    {n:'Canned tomatoes', q:'3 cans', d:500}, {n:'Rice', q:'2 kg', d:400}]},
+];
+function expiryBadge(d){
+  if (d<=0) return '<span class="expiry-badge badge-expired">Today</span>';
+  if (d<=2) return `<span class="expiry-badge badge-today">${d}d</span>`;
+  if (d<=5) return `<span class="expiry-badge badge-3d">${d}d</span>`;
+  if (d<=14) return `<span class="expiry-badge badge-7d">${d}d</span>`;
+  return '<span class="expiry-badge badge-ok">Fresh</span>';
+}
+function itemRow(it){
+  return `<div class="item-row"><div class="item-name"><div class="item-name-text">${esc(it.n)}</div></div>
+    <span class="item-qty">${esc(it.q)}</span>${expiryBadge(it.d)}
+    <button class="btn btn-outline-secondary btn-sm py-0 px-1 ms-1"><i class="bi bi-pencil"></i></button>
+    <button class="btn btn-outline-secondary btn-sm py-0 px-1"><i class="bi bi-arrows-move"></i></button></div>`;
+}
+function renderInventory(){
+  document.getElementById('inv-panels').innerHTML = PANELS.map(p => `
+    <div class="col-md-6"><div class="border rounded panel-${p.key}" style="border-width:1px !important">
+      <div class="panel-header"><i class="bi ${p.icon}"></i>${esc(p.label)}<span class="panel-count">${p.items.length}</span></div>
+      <div class="panel-body">${p.items.map(itemRow).join('')}</div>
+    </div></div>`).join('');
+}
+
+// ---- Manage / Scan --------------------------------------------------------
+const SCAN = [
+  {n:'Sparkling water', q:'12 pack', loc:'Pantry'}, {n:'Peanut butter', q:'1 jar', loc:'Pantry'},
+  {n:'Butter', q:'250 g', loc:'Refrigerated'}, {n:'Salsa', q:'1 jar', loc:'Refrigerated'},
+  {n:'Sourdough loaf', q:'1', loc:'Room Temp'}, {n:'Maple syrup', q:'500 ml', loc:'Pantry'},
+];
+let pending = [];
+function demoScan(){ pending.push(SCAN[Math.floor(Math.random()*SCAN.length)]); renderPending(); }
+function renderPending(){
+  document.getElementById('pending-count').textContent = pending.length;
+  const el = document.getElementById('pending-list');
+  if (!pending.length){ el.innerHTML = '<div class="list-group-item text-secondary">Nothing scanned yet. Hit &ldquo;Scan a barcode&rdquo; above.</div>'; return; }
+  el.innerHTML = pending.map((it,i) => `<div class="list-group-item d-flex align-items-center gap-2">
+    <span class="flex-grow-1">${esc(it.n)} <span class="text-secondary small">&middot; ${esc(it.q)} &rarr; ${esc(it.loc)}</span></span>
+    <button class="btn btn-outline-danger btn-sm" onclick="pending.splice(${i},1);renderPending()"><i class="bi bi-x"></i></button></div>`).join('');
+}
+function commitPending(){ pending = []; renderPending(); }
+
+// ---- Review (action inbox) ------------------------------------------------
+const REVIEW = [
+  {icon:'bi-upc-scan', color:'info', title:'2 scanned items need a location', body:'Butter and Salsa were added without a storage area.', action:'Assign', act:'bi-geo-alt'},
+  {icon:'bi-clock-history', color:'warning', title:'Spinach expires tomorrow', body:'Cook it now or move it to the freezer to buy time.', action:'Plan a meal', act:'bi-fire'},
+];
+function renderReview(){
+  const el = document.getElementById('review-list');
+  if (!REVIEW.length){ el.innerHTML = '<div class="list-group-item text-secondary">Inbox zero. Nothing needs your attention.</div>'; return; }
+  el.innerHTML = REVIEW.map(r => `<div class="list-group-item d-flex align-items-start gap-3">
+    <i class="bi ${r.icon} fs-4 text-${r.color}"></i>
+    <div class="flex-grow-1">
+      <div class="fw-semibold">${esc(r.title)}</div>
+      <div class="text-secondary small">${esc(r.body)}</div>
+    </div>
+    <button class="btn btn-sm btn-outline-${r.color} flex-shrink-0"><i class="bi ${r.act} me-1"></i>${esc(r.action)}</button>
+  </div>`).join('');
+}
+
+// ---- Cook -----------------------------------------------------------------
+const TIERS = {
+  ready:   {label:'Ready to Cook', icon:'bi-check-circle', color:'success'},
+  staples: {label:'With Pantry Staples', icon:'bi-egg-fried', color:'info'},
+  shopping:{label:'Worth a Shop Run', icon:'bi-cart', color:'warning'},
+};
+const RECIPES = {
+  ready: [
+    {name:'Spaghetti aglio e olio', m:6, t:6, exp:['Garlic'], desc:'Garlic, olive oil, chili, parsley over pasta.'},
+    {name:'Cheesy scrambled eggs', m:4, t:4, exp:[], desc:'Soft scramble with cheddar.'}],
+  staples: [
+    {name:'Garlic butter chicken', m:5, t:7, exp:['Chicken breast','Spinach'], desc:'Pan-seared chicken in garlic butter.'},
+    {name:'Creamed spinach', m:4, t:6, exp:['Spinach'], desc:'Spinach, parmesan, a little cream.'},
+    {name:'Tomato pasta', m:5, t:6, exp:['Tomatoes'], desc:'Fresh tomato sauce over spaghetti.'}],
+  shopping: [
+    {name:'Chicken parmesan', m:5, t:9, exp:['Chicken breast'], desc:'Breaded chicken, marinara, mozzarella.', missing:2},
+    {name:'Banana oat pancakes', m:4, t:7, exp:['Bananas'], desc:'Quick weekend pancakes.', missing:2}],
+};
+function recipeCard(s, tier){
+  return `<div class="col"><div class="card h-100"><div class="card-body py-2 d-flex flex-column">
+    <div class="d-flex justify-content-between align-items-start gap-2">
+      <div class="min-width-0 fw-semibold">${esc(s.name)}</div>
+      <span class="badge bg-secondary flex-shrink-0">${s.m}/${s.t}</span>
+    </div>
+    ${s.exp.length ? `<div class="small urgency-3d mt-1"><i class="bi bi-clock-history me-1"></i>Uses expiring: ${s.exp.map(esc).join(', ')}</div>` : ''}
+    <div class="small text-secondary mt-1 text-truncate">${esc(s.desc)}</div>
+    <div class="mt-auto pt-2 d-flex gap-1 flex-wrap">
+      <button class="btn btn-sm btn-outline-info" onclick="setActive('${esc(s.name)}',this)"><i class="bi bi-fire me-1"></i>Cook</button>
+      <button class="btn btn-sm btn-outline-success"><i class="bi bi-check2-circle me-1"></i>Cooked it</button>
+      ${tier==='shopping' && s.missing ? `<button class="btn btn-sm btn-outline-warning"><i class="bi bi-cart-plus me-1"></i>${s.missing}</button>` : ''}
+    </div></div></div></div>`;
+}
+function renderCook(){
+  document.getElementById('cook-tiers').innerHTML = Object.entries(TIERS).map(([k,m]) => {
+    const items = RECIPES[k] || []; if (!items.length) return '';
+    return `<div class="mb-3">
+      <div class="d-flex align-items-baseline gap-2 mb-2">
+        <h6 class="text-${m.color} mb-0"><i class="bi ${m.icon} me-1"></i>${m.label}</h6>
+        <span class="badge text-bg-${m.color}">${items.length}</span>
+      </div>
+      <div class="row g-2 row-cols-1 row-cols-md-2 row-cols-lg-3">${items.map(s=>recipeCard(s,k)).join('')}</div>
+    </div>`;
+  }).join('');
+}
+function setActive(name, btn){ btn.innerHTML = '<i class="bi bi-check2 me-1"></i>Current recipe'; btn.classList.replace('btn-outline-info','btn-info'); }
+
+// ---- Recipes (library) ----------------------------------------------------
+const LIBRARY = [
+  {name:'Garlic butter chicken', src:'Native', color:'primary', time:'25 min', tags:['Dinner','Chicken']},
+  {name:'Spaghetti aglio e olio', src:'Native', color:'primary', time:'15 min', tags:['Dinner','Pasta']},
+  {name:'Creamed spinach', src:'Mealie', color:'info', time:'20 min', tags:['Side','Vegetarian']},
+  {name:'Cheesy scrambled eggs', src:'Native', color:'primary', time:'10 min', tags:['Breakfast']},
+  {name:'Banana oat pancakes', src:'Web', color:'secondary', time:'20 min', tags:['Breakfast','Weekend']},
+  {name:'Chicken parmesan', src:'Mealie', color:'info', time:'45 min', tags:['Dinner','Comfort']},
+];
+function renderRecipes(){
+  document.getElementById('recipe-grid').innerHTML = LIBRARY.map(r => `
+    <div class="col"><div class="card h-100"><div class="card-body d-flex flex-column">
+      <div class="d-flex justify-content-between align-items-start gap-2">
+        <div class="fw-semibold min-width-0">${esc(r.name)}</div>
+        <span class="badge text-bg-${r.color} flex-shrink-0">${esc(r.src)}</span>
+      </div>
+      <div class="text-secondary small mt-1"><i class="bi bi-clock me-1"></i>${esc(r.time)}</div>
+      <div class="mt-2 d-flex gap-1 flex-wrap">${r.tags.map(t=>`<span class="badge rounded-pill text-bg-secondary">${esc(t)}</span>`).join('')}</div>
+    </div></div></div>`).join('');
+}
+
+// ---- Shopping list --------------------------------------------------------
+const SHOP_LIST = [
+  {aisle:'Produce', icon:'bi-flower1', items:[{n:'Lemons', done:false},{n:'Parsley', done:false},{n:'Yellow onion', done:true}]},
+  {aisle:'Dairy', icon:'bi-cup-straw', items:[{n:'Heavy cream', done:false},{n:'Mozzarella', done:false}]},
+  {aisle:'Pantry', icon:'bi-box-seam', items:[{n:'Marinara', done:false},{n:'Breadcrumbs', done:true}]},
+];
+function renderShopping(){
+  document.getElementById('shopping-cols').innerHTML = SHOP_LIST.map(g => `
+    <div class="col-md-6 col-lg-4"><div class="card h-100">
+      <div class="card-header"><i class="bi ${g.icon} me-2"></i>${esc(g.aisle)}</div>
+      <div class="list-group list-group-flush">${g.items.map(it => `
+        <label class="list-group-item d-flex align-items-center gap-2">
+          <input class="form-check-input mt-0" type="checkbox" ${it.done?'checked':''}>
+          <span class="${it.done?'text-secondary text-decoration-line-through':''}">${esc(it.n)}</span>
+        </label>`).join('')}</div>
+    </div></div>`).join('');
+}
+
+// ---- Nutrition ------------------------------------------------------------
+const INTAKE = [
+  {name:'Greek yogurt & berries', kcal:220, p:18},
+  {name:'Spinach salad', kcal:310, p:12},
+  {name:'Garlic butter chicken', kcal:540, p:42},
+];
+function renderNutrition(){
+  const tot = INTAKE.reduce((a,i)=>({kcal:a.kcal+i.kcal, p:a.p+i.p}),{kcal:0,p:0});
+  const stat = (label,val,unit,cls)=>`<div class="col-6 col-md-3"><div class="card text-center ${cls}"><div class="card-body py-3">
+    <div class="fs-3 fw-bold">${val}<span class="fs-6 text-secondary">${unit}</span></div><div class="text-secondary small">${label}</div></div></div></div>`;
+  document.getElementById('nutrition-totals').innerHTML =
+    stat('Calories', tot.kcal, '', 'border-primary') + stat('Protein', tot.p, ' g', 'border-info')
+    + stat('Goal', 2000, '', '') + stat('Remaining', Math.max(0,2000-tot.kcal), '', 'border-success');
+  document.getElementById('nutrition-log').innerHTML = INTAKE.map(i => `
+    <div class="list-group-item d-flex align-items-center gap-2">
+      <span class="flex-grow-1">${esc(i.name)}</span>
+      <span class="text-secondary small">${i.p} g protein</span>
+      <span class="badge text-bg-secondary">${i.kcal} kcal</span></div>`).join('');
+}
+
+// ---- Shop (gear storefront) -----------------------------------------------
+const GEAR = [
+  {name:'Instant-read thermometer', icon:'bi-thermometer-half', note:'Two-second reads for the safe-temp table.'},
+  {name:'Wireless meat probe', icon:'bi-broadcast', note:'Internal + ambient, streamed to the Thermometers screen.'},
+  {name:'Digital kitchen scale', icon:'bi-speedometer2', note:'Grams for the conversion helper.'},
+  {name:'Stream Deck', icon:'bi-grid-3x3-gap', note:'The physical kitchen control surface.'},
+  {name:'Raspberry Pi kit', icon:'bi-cpu', note:'Runs the whole appliance with the kiosk display.'},
+  {name:'USB barcode scanner', icon:'bi-upc-scan', note:'Fast pantry intake, no phone needed.'},
+];
+function renderShop(){
+  document.getElementById('shop-grid').innerHTML = GEAR.map(g => `
+    <div class="col"><div class="card h-100"><div class="card-body d-flex flex-column">
+      <div class="d-flex align-items-center gap-2 mb-1"><i class="bi ${g.icon} fs-4 text-brand"></i><span class="fw-semibold">${esc(g.name)}</span></div>
+      <div class="text-secondary small flex-grow-1">${esc(g.note)}</div>
+      <a class="btn btn-sm btn-outline-primary mt-2" href="https://www.amazon.com/shop/improvisedeng" target="_blank" rel="noopener"><i class="bi bi-box-arrow-up-right me-1"></i>View</a>
+    </div></div></div>`).join('');
+}
+
+// ---- Timers ---------------------------------------------------------------
+const TIMER_STATE = [
+  {label:'Pasta', total:600, remaining:214},
+  {label:'Oven - Chicken', total:2700, remaining:1503},
+];
+const TIMER_PRESETS = [1,3,5,10,20];
+function fmtTime(s){ const m=Math.floor(s/60), ss=s%60; return `${m}:${String(ss).padStart(2,'0')}`; }
+function renderTimerPresets(){
+  document.getElementById('timer-presets').innerHTML = TIMER_PRESETS.map(m =>
+    `<button class="btn btn-outline-primary" onclick="quickTimer(${m})"><i class="bi bi-plus-lg me-1"></i>${m} min</button>`).join('');
+}
+function renderTimers(){
+  document.getElementById('timer-cards').innerHTML = TIMER_STATE.map(t => {
+    const pct = Math.max(0, Math.min(100, 100*t.remaining/t.total));
+    const done = t.remaining<=0;
+    return `<div class="col-sm-6 col-lg-4"><div class="card h-100"><div class="card-body text-center">
+      <div class="text-secondary small mb-1">${esc(t.label)}</div>
+      <div class="display-5 fw-bold ${done?'text-success':''}">${done?'Done':fmtTime(t.remaining)}</div>
+      <div class="progress mt-2" style="height:6px" role="progressbar"><div class="progress-bar bg-primary" style="width:${pct}%"></div></div>
+    </div></div></div>`;
+  }).join('');
+}
+function quickTimer(mins){ TIMER_STATE.push({label:`${mins} min timer`, total:mins*60, remaining:mins*60}); renderTimers(); }
+function tickTimers(){
+  let changed = false;
+  TIMER_STATE.forEach(t => { if (t.remaining>0){ t.remaining--; changed = true; } });
+  if (changed && document.getElementById('screen-timers').classList.contains('active')) renderTimers();
+}
+setInterval(tickTimers, 1000);
+
+// ---- Thermometers ---------------------------------------------------------
+const THERMO = [
+  {name:'TempSpike', battery:78, stale:false, probes:[
+    {label:'Brisket', internal:131, ambient:190, target:203}]},
+  {name:'Govee Grill', battery:54, stale:false, probes:[
+    {label:'Probe 1', internal:203, ambient:null, target:203}]},
+  {name:'Meater Block', battery:null, stale:true, probes:[]},
+];
+function battIcon(b){
+  if (b==null) return '';
+  const ic = b>66?'bi-battery-full':b>25?'bi-battery-half':'bi-battery';
+  const col = b>25?'text-secondary':'text-danger';
+  return `<span class="thermo-batt"><i class="bi ${ic} ${col}"></i>${b}%</span>`;
+}
+function renderThermometers(){
+  document.getElementById('thermo-list').innerHTML = THERMO.map(d => {
+    if (d.stale) return `<div class="col-md-6"><div class="thermo-card thermo-stale" onclick="this.classList.toggle('open')">
+      <div class="thermo-head"><i class="bi bi-thermometer-half text-secondary"></i>
+        <span class="thermo-name">${esc(d.name)}</span>
+        <span class="badge text-bg-secondary ms-auto">No signal</span>
+        <i class="bi bi-chevron-down ms-2 text-secondary thermo-chev"></i></div>
+      <div class="thermo-stale-body text-secondary small pt-2">Last seen 6 min ago. Check the probe is powered and within range of the base.</div>
+    </div></div>`;
+    const probes = d.probes.map(p => `<div class="thermo-probe">
+      <span class="thermo-probe-label">${esc(p.label)}</span>
+      <span class="thermo-internal">${p.internal}&deg;F</span>
+      ${p.ambient!=null ? `<span class="thermo-ambient">Ambient ${p.ambient}&deg;F</span>` : ''}
+      <span class="thermo-target">Target ${p.target}&deg;F</span>
+    </div>`).join('');
+    return `<div class="col-md-6"><div class="thermo-card">
+      <div class="thermo-head"><i class="bi bi-thermometer-half text-info"></i>
+        <span class="thermo-name">${esc(d.name)}</span>${battIcon(d.battery)}</div>
+      ${probes}
+    </div></div>`;
+  }).join('');
+}
+
+// ---- Weather --------------------------------------------------------------
+const FORECAST = [
+  {d:'Thu', hi:78, lo:61, i:'bi-sun'}, {d:'Fri', hi:74, lo:59, i:'bi-cloud-sun'},
+  {d:'Sat', hi:69, lo:57, i:'bi-cloud-drizzle'}, {d:'Sun', hi:72, lo:58, i:'bi-cloud-sun'},
+  {d:'Mon', hi:80, lo:63, i:'bi-sun'},
+];
+function renderForecast(){
+  document.getElementById('forecast-row').innerHTML = FORECAST.map(f => `<div class="col">
+    <div class="text-secondary small">${f.d}</div>
+    <i class="bi ${f.i} fs-4 text-info d-block my-1"></i>
+    <div class="fw-semibold">${f.hi}&deg;</div><div class="text-secondary small">${f.lo}&deg;</div></div>`).join('');
+}
+
+// ---- Camera ---------------------------------------------------------------
+const CAMERAS = [{name:'Front Door', a:'#0d3b5e', b:'#103a4b'}, {name:'Driveway', a:'#3b2100', b:'#5a3a0d'}, {name:'Garage', a:'#1a1a4d', b:'#2b1b5a'}];
+function renderCamSwitch(){
+  document.getElementById('cam-switch').innerHTML = CAMERAS.map((c,i) =>
+    `<button class="btn btn-outline-info${i===0?' active':''}" onclick="selectCam(${i})">${esc(c.name)}</button>`).join('');
+  selectCam(0);
+}
+function selectCam(i){
+  const c = CAMERAS[i];
+  document.getElementById('cam-label').textContent = c.name;
+  document.getElementById('cam-feed').style.background =
+    `repeating-linear-gradient(45deg, ${c.a}, ${c.a} 18px, ${c.b} 18px, ${c.b} 36px)`;
+  document.querySelectorAll('#cam-switch .btn').forEach((b,j)=>b.classList.toggle('active', j===i));
+}
+
+// ---- Convert --------------------------------------------------------------
+const UNITS = { Volume:{ml:1,l:1000,tsp:4.929,tbsp:14.787,cup:240,'fl oz':29.574}, Mass:{g:1,kg:1000,oz:28.35,lb:453.592} };
+function fillUnits(){
+  let html=''; for (const [cat,u] of Object.entries(UNITS)) html += `<optgroup label="${cat}">`+Object.keys(u).map(k=>`<option value="${cat}:${k}">${k}</option>`).join('')+'</optgroup>';
+  cvFrom.innerHTML=html; cvTo.innerHTML=html; cvFrom.value='Volume:cup'; cvTo.value='Volume:ml';
+}
+const cvVal=document.getElementById('cv-val'), cvFrom=document.getElementById('cv-from'), cvTo=document.getElementById('cv-to'), cvRes=document.getElementById('cv-result');
+function convert(){
+  const v=parseFloat(cvVal.value); const [fc,fu]=cvFrom.value.split(':'); const [tc,tu]=cvTo.value.split(':');
+  if (isNaN(v)){ cvRes.textContent='—'; return; }
+  if (fc!==tc){ cvRes.innerHTML='<span class="fs-6 text-secondary">Pick units in the same category</span>'; return; }
+  cvRes.textContent = `${+(v*UNITS[fc][fu]/UNITS[tc][tu]).toFixed(3)} ${tu}`;
+}
+function buildKeypad(){
+  const pad=document.getElementById('keypad'), disp=document.getElementById('pad-display');
+  disp.value=cvVal.value;
+  ['7','8','9','4','5','6','1','2','3','.','0','⌫'].forEach(k=>{
+    const col=document.createElement('div'); col.className='col';
+    const b=document.createElement('button'); b.className='btn btn-outline-secondary w-100'; b.textContent=k;
+    b.onclick=()=>{ if(k==='⌫') disp.value=disp.value.slice(0,-1)||'0';
+      else if(k==='.'&&disp.value.includes('.')){} else disp.value=(disp.value==='0'&&k!=='.')?k:disp.value+k;
+      cvVal.value=disp.value; convert(); };
+    col.appendChild(b); pad.appendChild(col);
+  });
+}
+
+// ---- Stream Deck ----------------------------------------------------------
+const KEYS = [
+  {i:'bi-grid',l:'Inventory',c:'#1f6feb',m:'Opens the inventory dashboard on the display.'},
+  {i:'bi-clock-history',l:'Expiring',c:'#9e6a03',m:'Jumps to items that need using up soon.'},
+  {i:'bi-plus-circle',l:'Add',c:'#238636',m:'Manage: scan, photo, or manual entry.'},
+  {i:'bi-hourglass-split',l:'Pending',c:'#8957e5',m:'Review scanned items waiting to be committed.'},
+  {i:'bi-cloud-upload',l:'Commit',c:'#1a7f37',m:'Commit all pending scans into Grocy.'},
+  {i:'bi-fire',l:'Cook',c:'#bc4c00',m:'What can I cook? Recipes ranked by stock.'},
+  {i:'bi-stopwatch',l:'Timer',c:'#0d9488',m:'Start a kitchen timer, shared with the screen.'},
+  {i:'bi-cloud-sun',l:'Weather',c:'#1e40af',m:'Tap to open the weather page on the display.'},
+  {i:'bi-house',l:'Lights',c:'#475569',m:'Home Assistant key: toggle an entity.'},
+  {i:'bi-play-circle',l:'Play',c:'#7c3aed',m:'Media key: play/pause a Home Assistant media_player.'},
+  {i:'bi-camera-video',l:'Camera',c:'#0f172a',m:'Shows a live camera snapshot; press to open the full feed.'},
+  {i:'bi-upc-scan',l:'Scan mode',c:'#0369a1',m:'Cycle the scanner: Stock / Use / Shop.'},
+  {i:'bi-cart',l:'Shopping',c:'#0f766e',m:'Open the shopping list.'},
+  {i:'bi-brightness-high',l:'Brightness',c:'#374151',m:'Cycle the deck brightness.'},
+  {i:'bi-gear',l:'Settings',c:'#6b7280',m:'Open the setup page on the display.'},
+];
+function renderKeys(gridId, msgId, keys){
+  const d=document.getElementById(gridId);
+  d.innerHTML = keys.map(k=>`<div class="key" style="background:${k.c}" data-m="${esc(k.m)}" data-l="${esc(k.l)}"><i class="bi ${k.i}"></i><span>${k.l}</span></div>`).join('');
+  d.querySelectorAll('.key').forEach(el=>el.onclick=()=>document.getElementById(msgId).innerHTML=`<strong>${el.dataset.l}</strong>: ${el.dataset.m}`);
+}
+function renderDeck(){ renderKeys('deck','deck-msg',KEYS); }
+// The Start Page shares the deck's key catalog and custom keys; its action keys
+// (Home Assistant, media, macro) execute server-side, so they work on any screen.
+const START_KEYS = KEYS.map(k =>
+  k.l==='Lights' ? {...k, m:'Home Assistant key: fires from the screen, no deck needed.'} :
+  k.l==='Play'   ? {...k, m:'Media key: plays/pauses right from the screen.'} : k);
+function renderStart(){ renderKeys('start-grid','start-msg',START_KEYS); }
+
+// ---- Expiring -------------------------------------------------------------
+function expStatus(d){
+  if (d<=0) return '<span class="badge text-bg-warning">Today</span>';
+  if (d<=3) return `<span class="badge text-bg-warning">${d}d left</span>`;
+  return `<span class="badge text-bg-success">${d}d left</span>`;
+}
+function renderExpiring(){
+  // Derive from the same inventory data; show anything within two weeks.
+  const rows = [];
+  PANELS.forEach(p => p.items.forEach(it => { if (it.d <= 14) rows.push({...it, loc:p.label}); }));
+  rows.sort((a,b)=>a.d-b.d);
+  const counts = {exp:0, today:0, soon:0, later:0};
+  rows.forEach(r => { if (r.d<0) counts.exp++; else if (r.d===0) counts.today++; else if (r.d<=3) counts.soon++; else counts.later++; });
+  const card = (n,v,cls)=>`<div class="col-6 col-md-3"><div class="card text-center ${cls}"><div class="card-body py-2">
+    <div class="fs-3 fw-bold">${v}</div><div class="text-secondary small">${n}</div></div></div></div>`;
+  document.getElementById('exp-summary').innerHTML =
+    card('Expired',counts.exp,'border-danger') + card('Today',counts.today,'border-warning')
+    + card('Within 3 Days',counts.soon,'') + card('Later',counts.later,'');
+  document.getElementById('exp-rows').innerHTML = rows.map(r => `<tr>
+    <td><strong>${esc(r.n)}</strong></td><td>${esc(r.q)}</td>
+    <td><span class="badge bg-secondary">${esc(r.loc)}</span></td><td>${expStatus(r.d)}</td>
+    <td><button class="btn btn-sm btn-outline-success py-0 px-1" title="Mark consumed"><i class="bi bi-check-lg"></i></button></td></tr>`).join('');
+}
+
+// ---- Meal plan ------------------------------------------------------------
+const PLAN_DAYS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+const PLAN = {
+  Breakfast:['Greek yogurt & berries','Oatmeal','Cheesy scrambled eggs','Smoothie','Banana oat pancakes','Avocado toast','Bagels & lox'],
+  Lunch:    ['Tomato pasta','Leftover chicken','Spinach salad','Grain bowl','Soup & bread','Tacos','Sandwiches'],
+  Dinner:   ['Garlic butter chicken','Chicken parmesan','Spaghetti aglio e olio','Stir-fry','Pizza night','Roast & veg','Creamed spinach'],
+};
+function renderMealPlan(){
+  let html = '<thead><tr><th></th>' + PLAN_DAYS.map(d=>`<th class="text-secondary small">${d}</th>`).join('') + '</tr></thead><tbody>';
+  for (const meal of Object.keys(PLAN)){
+    html += `<tr><th class="text-start text-secondary small align-middle">${meal}</th>` + PLAN[meal].map(r =>
+      `<td class="small"><span class="d-inline-block px-2 py-1 rounded bg-body-tertiary">${esc(r)}</span></td>`).join('') + '</tr>';
+  }
+  document.getElementById('plan-table').innerHTML = html + '</tbody>';
+}
+
+// ---- Settings -------------------------------------------------------------
+const SETTINGS = [
+  {icon:'bi-box-seam', name:'Grocy', ok:true, note:'Inventory backend', fields:[['URL','grocy.home.lan'],['Status','Connected']]},
+  {icon:'bi-journal-richtext', name:'Mealie', ok:true, note:'Recipes, meal plan, shopping', fields:[['URL','mealie.home.lan'],['API','v1 detected']]},
+  {icon:'bi-stars', name:'AI provider', ok:true, note:'Vision & recipe generation', fields:[['Provider','Anthropic'],['Model','claude (vision)']]},
+  {icon:'bi-house-gear', name:'Home Assistant', ok:false, note:'Cameras, notifications, voice', fields:[['Status','Not configured']]},
+  {icon:'bi-display', name:'Interface', ok:true, note:'Theme, kiosk, display', fields:[['Theme','Dark'],['Kiosk','Auto on Pi display']]},
+  {icon:'bi-hdd-network', name:'Stream Deck', ok:true, note:'Physical control surface', fields:[['Device','15-key'],['Pages','Kitchen, Home']]},
+  {icon:'bi-grid-1x2', name:'Start Page', ok:true, note:'On-screen launcher, shares custom keys with the deck', fields:[['Keys','15'],['Home screen','Yes']]},
+];
+function renderSettings(){
+  document.getElementById('settings-cards').innerHTML = SETTINGS.map(s => `
+    <div class="col-md-6 col-xl-4"><div class="card h-100"><div class="card-body">
+      <div class="d-flex align-items-center gap-2 mb-1">
+        <i class="bi ${s.icon} fs-5"></i><span class="fw-semibold">${esc(s.name)}</span>
+        <span class="badge ${s.ok?'text-bg-success':'text-bg-secondary'} ms-auto">${s.ok?'Connected':'Not set up'}</span>
+      </div>
+      <div class="text-secondary small mb-2">${esc(s.note)}</div>
+      <table class="table table-sm table-borderless mb-2 small"><tbody>${
+        s.fields.map(([k,v])=>`<tr><td class="text-secondary">${esc(k)}</td><td class="text-end">${esc(v)}</td></tr>`).join('')
+      }</tbody></table>
+      <button class="btn btn-sm ${s.ok?'btn-outline-secondary':'btn-outline-primary'} w-100">
+        <i class="bi ${s.ok?'bi-pencil':'bi-plug'} me-1"></i>${s.ok?'Edit':'Connect'}</button>
+    </div></div></div>`).join('');
+}
+
+// ---- Init -----------------------------------------------------------------
+renderNav(); renderGlance();
+renderInventory(); renderExpiring(); renderPending(); renderReview();
+renderCook(); renderRecipes(); renderShopping(); renderNutrition(); renderShop(); renderMealPlan();
+renderTimerPresets(); renderTimers(); renderThermometers(); renderForecast();
+renderCamSwitch(); fillUnits(); buildKeypad(); convert(); renderDeck(); renderStart(); renderSettings();
+goto('glance');
+</script>
+</body>
+</html>
