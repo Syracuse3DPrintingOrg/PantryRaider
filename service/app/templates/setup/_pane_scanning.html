@@ -1,0 +1,254 @@
+{% from "setup/_macros.html" import info, secret_input, extra_keys, ai_model_field, panel, srow, pill, toggle with context %}
+<!-- AI & Scanning (FoodAssistant-jcnh): dense panel/row pattern. The barcode
+             scanner, the vision provider, barcode enrichment, and the token
+             budget are separate panels. Every control id (scanner_type,
+             barcode_global_capture, vision_provider, the provider-fields blocks,
+             barcode_enrichment, barcode_llm_fallback, barcode_autocheck_shopping,
+             enrich_provider, enrich_model, ai_token_budget) and the class hooks
+             (provider-fields, ai-model-select) are unchanged so showProvider(),
+             the model pickers, and the save path keep working. -->
+        <div class="tab-pane fade" id="pane-scanning">
+          <p class="pane-intro">How items get into the pantry: the barcode scanner, barcode enrichment, and the AI models that read your food photos and receipts.</p>
+
+          {% call panel('Barcode scanner', 'A USB, Bluetooth, or camera scanner for adding and consuming items.') %}
+            {% call srow('Scanner type', 'Which method to reach for first.',
+                         'A USB or Bluetooth scanner plugged into any device works on the Manage Pantry page automatically, alongside the in-browser camera scanner. HID scanners act as keyboard wedges, so no drivers are needed. This is only a hint; it does not turn the other methods off.') %}
+              <select class="form-select" id="scanner_type" style="max-width:420px" onchange="scannerTypeChanged()">
+                <option value=""    {{ 'selected' if not s.scanner_type else '' }}>Not set (pick on Manage Pantry page)</option>
+                <option value="usb" {{ 'selected' if s.scanner_type == 'usb' else '' }}>USB / Bluetooth HID (keyboard wedge)</option>
+                <option value="camera" {{ 'selected' if s.scanner_type == 'camera' else '' }}>Camera / built-in scan module</option>
+              </select>
+            {% endcall %}
+            {% call srow('Scan from any page', 'Capture a scan on any screen.',
+                         'When on, a barcode scanned on any screen is saved to Pending and the app jumps to Manage Pantry. When off, scanning only works on the Manage Pantry page.') %}
+              {{ toggle('barcode_global_capture', checked=s.barcode_global_capture, label='Scan from any page') }}
+            {% endcall %}
+            {% call srow('Set up a scan-engine reader', 'Program it off the screen with a guided wizard.',
+                         'Walks a Waveshare (or similar) scan-engine module through its setup codes one at a time so it scans hands-free, no button. Open it here on the kiosk, or scan the code on a phone to run the wizard right by the reader.') %}
+              <div class="d-flex flex-wrap align-items-center gap-3">
+                <a class="btn btn-outline-info btn-sm" href="ui/scanner-setup" target="_blank" rel="noopener">
+                  <i class="bi bi-upc-scan me-1"></i>Open scanner setup wizard
+                </a>
+                {% if scanner_wizard_url %}
+                <div class="text-center">
+                  <img src="ui/qr?url={{ scanner_wizard_url | urlencode }}" alt="QR code to open the scanner setup wizard on a phone"
+                       style="max-width:120px; background:#fff; padding:6px; border-radius:6px;">
+                  <div class="form-text mt-1 mb-0">Scan to run it on a phone.</div>
+                </div>
+                {% endif %}
+              </div>
+            {% endcall %}
+            {% call srow('Test the scanner', 'Plug it in, click, and scan.') %}
+              <div id="scanner-usb-hint" class="{{ '' if s.scanner_type == 'usb' else 'd-none' }}">
+                <div class="input-group mb-2" style="max-width:420px">
+                  <span class="input-group-text"><i class="bi bi-upc"></i></span>
+                  <input type="text" class="form-control font-monospace" id="scanner-test-input"
+                         placeholder="Scan a barcode here…" autocomplete="off" spellcheck="false"
+                         oninput="scannerTestInput(this.value)" onkeydown="if(event.key==='Enter'){scannerTestEnter(this.value);this.select();}">
+                </div>
+                <div class="test-result" id="scanner-test-result"></div>
+                <p class="form-text mt-2 mb-0">Running a Waveshare scan-engine module on a kiosk? See the
+                  <a href="https://docs.pantryraider.app/hardware/waveshare-barcode-scanner/" target="_blank" rel="noopener">hands-free setup codes</a>
+                  to make it scan on sight without the button.</p>
+              </div>
+              <div id="scanner-camera-hint" class="{{ '' if s.scanner_type == 'camera' else 'd-none' }}">
+                <p class="text-secondary small mb-0">Camera scanning runs in the browser, so make sure this site has camera permission.</p>
+              </div>
+            {% endcall %}
+          {% endcall %}
+
+          <button type="button" class="btn btn-outline-info btn-sm" onclick="savePaneHardware(this)">
+            <i class="bi bi-check-lg me-1"></i>Save scanner
+          </button>
+          <div class="test-result mt-2 mb-3" id="hardware-save-result"></div>
+
+          {% call panel('Vision provider',
+                        'Reads food photos, receipts, and photographed recipes. Keys are saved per provider so you can switch freely.') %}
+            {% call srow('Provider', 'The model that reads photos.',
+                         'With None, photo import, receipt scanning, barcode enrichment, and recipe suggestions are off. Inventory, expiry tracking, manual entry, and Open Food Facts barcode lookup keep working. You can add a provider any time.') %}
+              <select class="form-select" id="vision_provider" style="max-width:420px" onchange="showProvider()" {% if features.satellite %}disabled{% endif %}>
+                {% if s.vision_provider == 'cloud' %}
+                {# Forager is chosen and managed under Settings, Forager, not offered
+                   here as a pick. This reflect-only entry keeps the stored value
+                   intact so saving this pane never quietly switches away from it. #}
+                <option value="cloud" selected hidden>Forager (managed under Settings, Forager)</option>
+                {% endif %}
+                <option value="gemini" {{ 'selected' if s.vision_provider == 'gemini' else '' }}>Google Gemini (cloud)</option>
+                <option value="openai" {{ 'selected' if s.vision_provider == 'openai' else '' }}>OpenAI (cloud)</option>
+                <option value="anthropic" {{ 'selected' if s.vision_provider == 'anthropic' else '' }}>Anthropic Claude (cloud)</option>
+                <option value="ollama" {{ 'selected' if s.vision_provider == 'ollama' else '' }}>Ollama (local)</option>
+                <option value="none" {{ 'selected' if s.vision_provider == 'none' else '' }}>None (skip AI)</option>
+              </select>
+              {% if s.vision_provider == 'cloud' %}
+              <div class="alert alert-secondary py-2 small mt-2 mb-0" style="max-width:520px">
+                <i class="bi bi-info-circle me-1"></i>Scanning runs through Forager. Manage it under Settings, Forager.
+              </div>
+              {% endif %}
+            {% endcall %}
+
+            <div class="provider-fields" id="fields-gemini">
+              {% call srow('Gemini API key', 'Free key at aistudio.google.com.') %}
+                <div style="max-width:420px">{{ secret_input('gemini_api_key', 'Free key at aistudio.google.com') }}</div>
+              {% endcall %}
+              {% call srow('Gemini model', 'Which Gemini model to use.') %}
+                <div style="max-width:420px">{{ ai_model_field('gemini', s.gemini_model) }}</div>
+              {% endcall %}
+              {% call srow('Extra Gemini keys', 'Optional fallback keys.',
+                           'Extra keys are tried in order when the primary key is rate-limited or rejected.') %}
+                {{ extra_keys('gemini') }}
+              {% endcall %}
+            </div>
+            <div class="provider-fields" id="fields-openai">
+              {% call srow('OpenAI API key', 'platform.openai.com, API keys.') %}
+                <div style="max-width:420px">{{ secret_input('openai_api_key', 'platform.openai.com → API keys') }}</div>
+              {% endcall %}
+              {% call srow('OpenAI model', 'Must be vision-capable.') %}
+                <div style="max-width:420px">{{ ai_model_field('openai', s.openai_model) }}</div>
+              {% endcall %}
+              {% call srow('Extra OpenAI keys', 'Optional fallback keys.',
+                           'Extra keys are tried in order when the primary key is rate-limited or rejected.') %}
+                {{ extra_keys('openai') }}
+              {% endcall %}
+            </div>
+            <div class="provider-fields" id="fields-anthropic">
+              {% call srow('Anthropic API key', 'console.anthropic.com, API Keys.') %}
+                <div style="max-width:420px">{{ secret_input('anthropic_api_key', 'console.anthropic.com → API Keys') }}</div>
+              {% endcall %}
+              {% call srow('Anthropic model', 'Which Claude model to use.') %}
+                <div style="max-width:420px">{{ ai_model_field('anthropic', s.anthropic_model) }}</div>
+              {% endcall %}
+              {% call srow('Extra Anthropic keys', 'Optional fallback keys.',
+                           'Extra keys are tried in order when the primary key is rate-limited or rejected.') %}
+                {{ extra_keys('anthropic') }}
+              {% endcall %}
+            </div>
+            <div class="provider-fields" id="fields-ollama">
+              {% call srow('Ollama address', 'Your local Ollama server.',
+                           'Run with docker compose --profile with-ollama up -d, then pull a vision model.') %}
+                <input type="url" class="form-control" id="ollama_base_url" style="max-width:420px"
+                       placeholder="http://ollama:11434" value="{{ s.ollama_base_url }}" {% if features.satellite %}readonly{% endif %}>
+              {% endcall %}
+              {% call srow('Ollama model', 'A vision-capable local model.') %}
+                <div style="max-width:420px">{{ ai_model_field('ollama', s.ollama_model) }}</div>
+              {% endcall %}
+            </div>
+
+            {# Shown by showProvider() when Forager is the provider: Forager picks
+               and runs the model, so the direct-provider model and key controls
+               above do not apply and stay hidden. Hidden by default; a direct
+               provider shows its own fields instead (FoodAssistant-rgwa). #}
+            <div id="forager-managed-note" class="alert alert-secondary py-2 small mt-2 mb-0 d-none" style="max-width:520px">
+              <i class="bi bi-magic me-1"></i>Forager manages the AI model for you, so there is nothing to pick here.
+            </div>
+
+            {% call srow('Connection', 'Check the provider and key work.') %}
+              <div class="set-row-actions">
+                <button class="btn btn-outline-info btn-sm" onclick="testVision()">
+                  <i class="bi bi-plug me-1"></i>Test vision
+                </button>
+              </div>
+              <div class="test-result mt-1" id="vision-result"></div>
+            {% endcall %}
+          {% endcall %}
+
+          {% call panel('Barcode enrichment',
+                        'Clean up messy Open Food Facts names, categories, storage, and shelf life per scan.') %}
+            {% call srow('Mode', 'Whether to run the LLM cleanup.',
+                         'Open Food Facts names are often messy ("zero sugar" for Dr Pepper Zero). LLM enrichment cleans up the name, category, storage, and shelf life per scan in one small text call.') %}
+              <select class="form-select" id="barcode_enrichment" style="max-width:420px" {% if features.satellite %}disabled{% endif %}>
+                <option value="llm" {{ 'selected' if s.barcode_enrichment == 'llm' else '' }}>LLM enrichment (recommended)</option>
+                <option value="off" {{ 'selected' if s.barcode_enrichment == 'off' else '' }}>Heuristics only (no LLM call)</option>
+              </select>
+            {% endcall %}
+            {% call srow('Fallback for unknown barcodes', 'Ask AI when Open Food Facts misses.',
+                         'When a barcode is not in Open Food Facts, ask the AI to identify it by number. Results are low-confidence guesses, so the item goes to the pending queue for review. Only useful with LLM enrichment enabled.') %}
+              {{ toggle('barcode_llm_fallback', checked=s.barcode_llm_fallback, disabled=features.satellite, label='LLM fallback for unknown barcodes') }}
+            {% endcall %}
+            {% call srow('Auto-check shopping list', 'Tick items off when scanned in.',
+                         'When a scanned item is committed to inventory, tick any matching item off your shopping list automatically.') %}
+              {{ toggle('barcode_autocheck_shopping', checked=s.barcode_autocheck_shopping, disabled=features.satellite, label='Auto-check shopping list on scan') }}
+            {% endcall %}
+            {% if ai_configured %}
+            {% call srow('Estimate shelf life and storage', 'Let the AI set best-by and where to keep it.',
+                         'When on, the AI provider also estimates how long an item keeps and where to store it (refrigerator, freezer, or pantry), and uses that instead of the generic category rule. This helps items the built-in rules get wrong, like a refrigerated cheesecake that would otherwise import as a room-temperature pantry item. It works for barcode scans and for food photos and receipts. The item goes to your chosen provider, the same as regular scanning; a photo or receipt image goes there too.') %}
+              {{ toggle('llm_expiry_enabled', checked=s.llm_expiry_effective(), disabled=features.satellite, label='Estimate shelf life and storage with AI') }}
+            {% endcall %}
+            {% endif %}
+            {% call srow('Provider override', 'Optional.',
+                         'Uses the key and address from the Vision section. Pick Ollama to keep scans fully local. Leave as "same as vision provider" to reuse your main choice.') %}
+              <select class="form-select" id="enrich_provider" style="max-width:420px" onchange="onEnrichProviderChange()" {% if features.satellite %}disabled{% endif %}>
+                <option value="" {{ 'selected' if not s.enrich_provider else '' }}>Same as vision provider</option>
+                <option value="gemini" {{ 'selected' if s.enrich_provider == 'gemini' else '' }}>Google Gemini</option>
+                <option value="openai" {{ 'selected' if s.enrich_provider == 'openai' else '' }}>OpenAI</option>
+                <option value="anthropic" {{ 'selected' if s.enrich_provider == 'anthropic' else '' }}>Anthropic Claude</option>
+                <option value="ollama" {{ 'selected' if s.enrich_provider == 'ollama' else '' }}>Ollama (local)</option>
+                <option value="cloud" {{ 'selected' if s.enrich_provider == 'cloud' else '' }}>Forager</option>
+              </select>
+            {% endcall %}
+            {# The model override applies only to a direct provider. When the
+               enrichment provider (or the vision provider it follows) is Forager,
+               onEnrichProviderChange() hides this row and shows the managed-model
+               note below, so a Forager user cannot set a model that would be
+               ignored (FoodAssistant-rgwa). #}
+            <div id="enrich-model-row">
+            {% call srow('Model override', 'Optional.',
+                         'Enrichment is text-only, so a small model works well (claude-haiku-4-5, gpt-4o-mini, llama3.2:3b). Leave empty to use the provider default.') %}
+              <div style="max-width:420px">
+                {# Same curated-dropdown component as the main AI model picker, driven by the
+                   selected enrichment provider (FoodAssistant-r4nz). The empty option keeps the
+                   provider's default; Custom reveals the free-text override. The text input keeps
+                   id="enrich_model" so the save path reads the effective value either way. #}
+                <select class="form-select ai-model-select" id="enrich_model_sel" onchange="enrichModelSelChanged()" {% if features.satellite %}disabled{% endif %}></select>
+                <input type="text" class="form-control font-monospace mt-2 d-none" id="enrich_model"
+                       placeholder="exact model id (e.g. claude-haiku-4-5)" value="{{ s.enrich_model }}" {% if features.satellite %}readonly{% endif %}>
+                <div class="form-text ai-model-note" id="enrich_model_note">Text-only, so a small model works well (claude-haiku-4-5, gpt-4o-mini, llama3.2:3b).</div>
+              </div>
+            {% endcall %}
+            </div>
+            <div id="enrich-forager-note" class="alert alert-secondary py-2 small mt-2 mb-0 d-none" style="max-width:520px">
+              <i class="bi bi-magic me-1"></i>Forager manages the AI model for you, so there is nothing to pick here.
+            </div>
+            {% call srow('Connection', 'Check the enrichment model works.') %}
+              <div class="set-row-actions">
+                <button class="btn btn-outline-info btn-sm" onclick="testEnrich()">
+                  <i class="bi bi-plug me-1"></i>Test enrichment
+                </button>
+              </div>
+              <div class="test-result mt-1" id="enrich-result"></div>
+            {% endcall %}
+          {% endcall %}
+
+          {% if features.satellite %}
+          <div class="form-text mb-3"><i class="bi bi-hdd-network me-1"></i>AI settings are managed on the main server and synced here automatically. Edit them there, then Sync.</div>
+          {% else %}
+          <button type="button" class="btn btn-outline-info btn-sm" onclick="savePaneAi(this)">
+            <i class="bi bi-check-lg me-1"></i>Save AI
+          </button>
+          <div class="test-result mt-2 mb-3" id="ai-save-result"></div>
+          {% endif %}
+
+          {# AI token usage + budget (Pantry Raider). Shows what this instance's
+             AI key has spent and lets a user on their own key cap it per month. #}
+          {% call panel('AI token usage & budget',
+                        'What your AI key has spent through this app, with an optional monthly cap.') %}
+            {% call srow('Usage', 'Tokens used this month.') %}
+              <div id="ai-usage-display" class="small text-secondary">Loading usage…</div>
+            {% endcall %}
+            {% if not features.satellite %}
+            {% call srow('Monthly token budget', '0 = no budget.',
+                         'When the budget is reached, AI photo import and barcode enrichment are declined until the next month or you raise it.') %}
+              <div class="d-flex flex-wrap gap-2 align-items-center">
+                <input type="number" min="0" step="1000" class="form-control form-control-sm" id="ai_token_budget" style="max-width:200px"
+                       value="{{ s.ai_token_budget }}" placeholder="0 = unlimited">
+                <button type="button" class="btn btn-outline-info btn-sm" onclick="saveAiBudget(this)">
+                  <i class="bi bi-check-lg me-1"></i>Save budget
+                </button>
+                <button type="button" class="btn btn-outline-secondary btn-sm" onclick="resetAiUsage(this)">
+                  <i class="bi bi-arrow-counterclockwise me-1"></i>Reset usage
+                </button>
+              </div>
+              <span class="test-result" id="ai-budget-result"></span>
+            {% endcall %}
+            {% endif %}
+          {% endcall %}
+        </div>
