@@ -1,0 +1,42 @@
+# Web framework and server (required)
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+
+# Database ORM (required); psycopg2 is the production Postgres driver.
+# Tests run on SQLite and do not need it.
+sqlalchemy==2.0.35
+psycopg2-binary==2.9.9
+
+# Schema migrations. Startup runs `alembic upgrade head` for a database
+# already under Alembic control; see migrations/README.md.
+alembic==1.13.3
+
+# Settings management (required)
+pydantic==2.9.2
+pydantic-settings==2.5.2
+
+# Templates for the web portal (required). 3.1.6 carries the 2024-2025
+# security fixes (sandbox escapes and the xmlattr injection advisory).
+jinja2==3.1.6
+
+# Async HTTP client, for the AI forwarder once a provider is wired up
+httpx==0.27.2
+
+# Form and file upload parsing for the AI proxy endpoint (required). 0.0.18
+# fixes CVE-2024-53981, a malformed multipart denial of service.
+python-multipart==0.0.18
+
+# QR codes for two-factor sign-in enrollment. The SVG image factory renders
+# the authenticator QR with no Pillow dependency, so it stays light.
+qrcode==8.2
+
+# Passkey (WebAuthn / FIDO2) sign-in for the Forager account. The maintained
+# py_webauthn package builds the registration/authentication options and
+# verifies attestations and assertions, so the app never hand-rolls CBOR/COSE.
+# It pulls in cryptography and cbor2; both are pure wheels on the target arch.
+webauthn==2.8.0
+
+# Reading text out of an uploaded recipe PDF on the portal upload path. Pure
+# Python, no native deps; a scanned (image-only) PDF yields no text and the
+# upload path falls back to a "take a photo instead" message.
+pypdf==5.1.0
