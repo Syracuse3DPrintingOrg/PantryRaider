@@ -1,0 +1,79 @@
+camera_popup:
+  name: Camera pop-up
+  description: >-
+    Pop a camera feed up on a Pantry Raider screen, for example when someone
+    rings the doorbell.
+  fields:
+    device_id:
+      name: Device
+      description: >-
+        Which Pantry Raider screen shows the pop-up. Leave empty to use your
+        main install when only one is set up.
+      selector:
+        device:
+          integration: pantry_raider
+    camera:
+      name: Camera
+      description: >-
+        The camera's name as set on Pantry Raider's Cameras page. Leave empty
+        for the first configured camera.
+      example: Front Door
+      selector:
+        text:
+    seconds:
+      name: Seconds
+      description: >-
+        How long the pop-up stays on screen. Leave at 0 to use the length set
+        in Pantry Raider.
+      selector:
+        number:
+          min: 0
+          max: 300
+          unit_of_measurement: seconds
+          mode: box
+
+camera_detect:
+  name: Camera detection
+  description: >-
+    Report a camera detection and let Pantry Raider decide whether to pop the
+    camera up, using each camera's own "pop up on" checkboxes. One automation
+    can send every detection type it sees.
+  fields:
+    device_id:
+      name: Device
+      description: >-
+        Which Pantry Raider screen shows the pop-up. Leave empty to use your
+        main install when only one is set up.
+      selector:
+        device:
+          integration: pantry_raider
+    camera:
+      name: Camera
+      description: >-
+        The camera's name as set on Pantry Raider's Cameras page. Leave empty
+        for the first configured camera.
+      example: Front Door
+      selector:
+        text:
+    detection_type:
+      name: Detection type
+      description: What the camera saw. Visitor means a doorbell button press.
+      required: true
+      selector:
+        select:
+          options:
+            - person
+            - vehicle
+            - animal
+            - visitor
+    seconds:
+      name: Seconds
+      description: >-
+        How long the pop-up stays on screen. Leave at 0 to use the length set
+        in Pantry Raider.
+      selector:
+        number:
+          min: 0
+          max: 300
+          unit_of_measurement: seconds
+          mode: box

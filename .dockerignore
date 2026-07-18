@@ -1,0 +1,51 @@
+# Keep the Docker build context lean and prevent secrets or runtime data from
+# ever landing in an image layer. The build context is the REPO ROOT, because
+# the image needs both service/ and gadgets/foodassistant_gadgets/ (the BLE
+# decoders the Cub relay reads advertisements with). So this file carries the
+# whole repo's exclusions, not just the app's.
+
+# Runtime data and any secrets that live beside the app
+data/
+service/data/
+**/*.env
+.env
+**/rclone.conf
+**/settings.json
+**/*.key
+**/*.pem
+**/*.pfx
+
+# Version control and agent infrastructure. .git alone is over 100 MB and no
+# layer has any use for it.
+.git/
+.gitignore
+.github/
+.beads/
+.claude/
+.agents/
+.codex/
+
+# Directories the image never reads. esphome/ is by far the largest thing in
+# the repo (hundreds of MB of firmware build output); the rest are docs, tests,
+# and publishing side-cars that ship elsewhere.
+esphome/
+docs/
+tests/
+image/
+dashboard/
+cloud/
+homeassistant/
+streamdeck/
+
+# Python build noise
+**/__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node and local virtualenvs
+**/node_modules/
+.venv/
+venv/
