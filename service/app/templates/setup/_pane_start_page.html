@@ -1,0 +1,98 @@
+{% from "setup/_macros.html" import info, panel, srow, pill, toggle, ds_toggle with context %}
+<!-- On-screen Start Page (FoodAssistant-jcnh): dense panel/row polish around
+             the existing full-screen launcher editor. The two-editor sub-toggle
+             (ds_toggle) and the grid/palette editor blocks are unchanged; only
+             the container and the simple controls move to the panel/row/tooltip
+             layout. All ids (start_page_enabled, start_page_keys, start-grid,
+             start-palette, start-overrides, start_key_style, start_icon_color)
+             are preserved. -->
+        <div class="tab-pane fade" id="pane-start-page">
+          {{ ds_toggle('start') }}
+          <p class="pane-intro">An optional full-screen launcher that works like an on-screen Stream Deck. It opens at <a href="ui/start" target="_blank">/ui/start</a> and replaces the fixed and floating menus while shown. With Start at the top of the navigation menu it becomes this device's home screen.</p>
+          {% call panel('Start Page', 'A grid of action keys that fills the screen. Custom keys are shared with the Stream Deck.') %}
+            {% call srow('Enable the Start Page', 'Open it at /ui/start.',
+                         'Off by default. When on, open it at /ui/start or point the kiosk there.') %}
+              {{ toggle('start_page_enabled', checked=s.start_page_enabled, label='Enable the Start Page') }}
+            {% endcall %}
+            {% call srow('Home style', 'Glance builds itself; Custom is yours to arrange.',
+                         'Glance auto-builds the home from your top-level pages plus a row of notification pills. Custom lets you arrange your own grid of action keys below; until you save a layout, the grid starts from the Glance arrangement.') %}
+              <select class="form-select form-select-sm" id="start_page_mode" style="max-width:200px" onchange="_startModeChanged()">
+                <option value="glance" {{ 'selected' if (s.start_page_mode or 'glance') != 'custom' else '' }}>Glance (auto)</option>
+                <option value="custom" {{ 'selected' if (s.start_page_mode or 'glance') == 'custom' else '' }}>Custom layout</option>
+              </select>
+            {% endcall %}
+
+            {# Glance builds the layout itself, so the arrange-keys editor only
+               renders in Custom mode (FoodAssistant-6oew). _startModeChanged()
+               in deck-editor.js flips these two live when the select changes;
+               every editor id inside stays in the DOM either way. #}
+            {% set _start_custom = (s.start_page_mode or 'glance') == 'custom' %}
+            <div id="start-glance-note" class="text-secondary small mb-2{{ '' if not _start_custom else ' d-none' }}">
+              Glance arranges the home screen automatically. Switch to Custom layout to arrange keys yourself.
+            </div>
+            <div id="start-layout-editor" class="{{ 'd-none' if not _start_custom else '' }}">
+            {% call srow('Keys', 'They scale to fill the screen.',
+                         'The keys scale to fill the screen without scrolling.') %}
+              <select class="form-select form-select-sm" id="start_page_keys" style="max-width:180px" onchange="_startEditorRender()">
+                <option value="6"  {{ 'selected' if s.start_page_keys == 6 else '' }}>6 (3 x 2)</option>
+                <option value="15" {{ 'selected' if s.start_page_keys == 15 else '' }}>15 (5 x 3)</option>
+                <option value="32" {{ 'selected' if s.start_page_keys == 32 else '' }}>32 (8 x 4)</option>
+              </select>
+            {% endcall %}
+
+            <div class="editor-dense">
+              <div class="editor-block">
+                <div class="block-head"><i class="bi bi-stars text-warning"></i>Suggested
+                  {{ info('Quick-action buttons suggested from what you actually buy and cook: groceries bought 3+ times recently, and your most-cooked recipe once it hits 2+ cooks. Tap + to add one as a real button, or the x to dismiss it.') }}
+                </div>
+                <div id="start-suggested-list" class="d-flex flex-column gap-2 mb-2"></div>
+              </div>
+              <div class="editor-block">
+                <div class="block-head"><i class="bi bi-grid text-success"></i>Layout
+                  {{ info('Drag an action from the palette onto a key, drag keys to rearrange them, or click a key to clear it. Custom buttons are shared with the Stream Deck.') }}
+                </div>
+                {# Grid and palette sit side by side on wide screens (less scrolling),
+                   stacking on narrow/mobile widths. #}
+                <div class="d-flex flex-column flex-lg-row gap-3 align-items-start">
+                  <div id="start-grid" class="d-inline-grid gap-2" style="grid-template-columns: repeat(5, minmax(0,1fr));"></div>
+                  <div id="start-palette" class="d-flex flex-column gap-1" style="flex:1 1 260px;min-width:0;max-width:700px;"></div>
+                </div>
+              </div>
+
+              <div class="editor-block">
+                <div class="block-head"><i class="bi bi-sliders text-success"></i>Custom keys
+                  {{ info('Build your own keys (Home Assistant actions, timers, weather, cameras, media, macros), the same as the Stream Deck. Each appears as a chip in the palette above; drag it onto a key. Custom keys are shared with the Stream Deck both ways.') }}
+                </div>
+                <div id="start-overrides" class="d-flex flex-column gap-2 mb-2"></div>
+                <button type="button" class="btn btn-outline-secondary btn-sm" onclick="_startAddOverrideRow()">
+                  <i class="bi bi-plus-lg me-1"></i>Add custom key
+                </button>
+              </div>
+            </div>
+            </div>
+
+            {# Key style + icon treatment, shared with the Stream Deck. #}
+            {% call srow('Key style', 'Depth and background treatment.',
+                         'Rich and Glass have depth; Clean drops the coloured background so the icons stand out; Minimalist is flat. Shared with the Stream Deck.') %}
+              <select class="form-select form-select-sm" id="start_key_style" style="max-width:200px">
+                <option value="rich"    {{ 'selected' if s.streamdeck_key_style == 'rich' else '' }}>Rich (gradient)</option>
+                <option value="glass"   {{ 'selected' if s.streamdeck_key_style == 'glass' else '' }}>Glass</option>
+                <option value="clean"   {{ 'selected' if s.streamdeck_key_style == 'clean' else '' }}>Clean (no background)</option>
+                <option value="minimal" {{ 'selected' if s.streamdeck_key_style == 'minimal' else '' }}>Minimalist (flat)</option>
+              </select>
+            {% endcall %}
+            {% call srow('Icons', 'How the glyphs are coloured.',
+                         'Full colour uses bundled artwork (best with Clean); Tinted recolours the line glyph; Monochrome leaves it plain. Shared with the Stream Deck.') %}
+              <select class="form-select form-select-sm" id="start_icon_color" style="max-width:220px">
+                <option value="color" {{ 'selected' if s.streamdeck_icon_color == 'color' else '' }}>Full colour (emoji set)</option>
+                <option value="full"  {{ 'selected' if s.streamdeck_icon_color == 'full' else '' }}>Tinted glyph</option>
+                <option value="mono"  {{ 'selected' if s.streamdeck_icon_color == 'mono' else '' }}>Monochrome</option>
+              </select>
+            {% endcall %}
+          {% endcall %}
+
+          <button type="button" class="btn btn-outline-info btn-sm" onclick="savePaneStartPage(this)">
+            <i class="bi bi-check-lg me-1"></i>Save Start Page
+          </button>
+          <div class="test-result mt-2" id="start-page-result"></div>
+        </div>
