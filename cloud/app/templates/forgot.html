@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Reset your password: Forager{% endblock %}
+{% block main_class %}narrow{% endblock %}
+{% block content %}
+<h1>Reset your password</h1>
+<div class="card">
+  {% if sent %}
+  <div class="alert alert-notice">If that email has an account, a reset link
+  is on its way. Check your inbox.</div>
+  <p class="muted small">The link works for the next hour. Did not get it? Check
+  your spam folder, or <a href="/forgot">try again</a>.</p>
+  {% else %}
+  {% if error %}<div class="alert alert-error">{{ error }}</div>{% endif %}
+  <p class="muted">Enter your email and we will send you a link to choose a new
+  password.</p>
+  <form method="post" action="/forgot">
+    <label for="email">Email</label>
+    <input type="email" id="email" name="email"
+           autocomplete="email" required autofocus>
+    {# Honeypot: hidden from people; only a bot fills it. #}
+    <div class="hp-field" aria-hidden="true">
+      <label for="website">Website</label>
+      <input type="text" id="website" name="website" tabindex="-1" autocomplete="off">
+    </div>
+    <button class="btn btn-block" type="submit">Send reset link</button>
+  </form>
+  {% endif %}
+</div>
+<p class="muted small">Remembered it? <a href="/login">Log in</a>.</p>
+{% endblock %}
