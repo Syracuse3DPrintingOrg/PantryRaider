@@ -1,0 +1,324 @@
+#!/usr/bin/env bash
+# FoodAssistant full-stack snapshot restore helper (Pi appliance).
+# ======================================================================
+# Restores the FULL stack snapshot (the three bind-mounted data dirs that
+# backup.sh tars: service/data, grocy/config, mealie/data) from a .tar.gz that
+# already lives on the device, or one pulled first from the configured rclone
+# remote. This is the appliance counterpart of scripts/restore.sh: it stops the
+# container stack, moves the current data aside (suffixed .pre-restore-<stamp>,
+# never deleted), unpacks the archive, and restarts.
+#
+# It is invoked by the host bridge (POST /restore), which runs as root, so it
+# can stop/start the docker stack and write under the install dir. It prints a
+# short human log to stdout and, as its LAST line, a single JSON object the
+# bridge parses and relays to the web UI. EVERY exit path emits that JSON line.
+#
+# Source argument (first positional arg, or the SOURCE env var):
+#   /abs/path/to/foo.tar.gz   restore a snapshot already on the device
+#   rclone:remote:bucket/foo.tar.gz
+#                             pull that object from the configured rclone remote
+#                             into a temp file first, then restore it
+#
+# Safety guarantees:
+#   - Nothing is ever deleted. Current data is MOVED to .pre-restore-<stamp>.
+#   - We validate the archive (readable gzip tar containing the expected top
+#     level dirs) BEFORE stopping the stack. A bad source fails fast with the
+#     stack still up.
+#   - The archive is CONFINED to the expected data dirs (FoodAssistant-ifmt):
+#     members with absolute paths or "..", members outside those dirs, device
+#     nodes, and links pointing outside them are all rejected up front, and
+#     the unpack happens in a staging dir from which only the whitelisted
+#     dirs are moved into place. A snapshot can never replace the compose
+#     file, .env, or anything else outside the data dirs.
+#   - If a failure happens mid-restore (after the stack is stopped) we attempt
+#     to restart so the device is never left down, and report the error.
+#
+# Env overrides (so it is testable in a sandbox, mirroring foodassistant-update):
+#   REPO_DIR / INSTALL_DIR  the compose project dir (where the data dirs live)
+#   DATA_DIRS               space-separated list of the top-level dirs to restore
+#                           (default: service/data grocy/config mealie/data)
+#   COMPOSE                 the docker compose invocation (default below)
+#   RCLONE_CONFIG           rclone config file (default: <install>/data/rclone.conf)
+#   RCLONE                  the rclone binary (default: rclone)
+set -uo pipefail
+
+# The compose project lives under the install dir on an appliance; restore.sh
+# uses the repo checkout. Accept either name, install dir first.
+PROJECT_DIR="${INSTALL_DIR:-${REPO_DIR:-/opt/foodassistant}}"
+DATA_DIRS="${DATA_DIRS:-service/data grocy/config mealie/data}"
+# The three profiles backup.sh / restore.sh use so every container in the stack
+# is stopped and started, not just the always-on ones.
+COMPOSE="${COMPOSE:-docker compose --profile with-grocy --profile with-mealie --profile with-ollama}"
+RCLONE="${RCLONE:-rclone}"
+RCLONE_CONFIG="${RCLONE_CONFIG:-$PROJECT_DIR/data/rclone.conf}"
+
+STAMP="$(date +%Y%m%d-%H%M%S)"
+
+# Plain stdout log (the bridge tails stdout for a human summary too).
+log() { printf '%s\n' "$*"; }
+
+# Emit the final JSON result line and exit. A python one-liner does the JSON
+# encoding so log text with quotes is escaped correctly. The process exit code
+# mirrors ok (0 on success).
+_result() {
+  local ok="$1" error="$2" source="$3" restored="$4" snapshot="$5" restarted="$6"
+  OK="$ok" ERR="$error" SRC="$source" RESTORED="$restored" SNAP="$snapshot" \
+  RESTARTED="$restarted" python3 -c '
+import json, os
+print(json.dumps({
+    "ok": os.environ["OK"] == "1",
+    "error": os.environ.get("ERR", ""),
+    "source": os.environ.get("SRC", ""),
+    "restored_dirs": [d for d in os.environ.get("RESTORED", "").split() if d],
+    "snapshot": os.environ.get("SNAP", ""),
+    "restarted": os.environ.get("RESTARTED", "") == "1",
+}))'
+  if [ "$ok" = "1" ]; then exit 0; fi
+  exit 1
+}
+
+# Start the stack back up. Returns 0 when compose reported success.
+_start_stack() {
+  if (cd "$PROJECT_DIR" && $COMPOSE start) >/dev/null 2>&1; then
+    log "Restarted the container stack."
+    return 0
+  fi
+  log "WARN: failed to restart the container stack."
+  return 1
+}
+
+SOURCE_ARG="${1:-${SOURCE:-}}"
+if [ -z "$SOURCE_ARG" ]; then
+  log "No source given."
+  _result 0 "No restore source given." "" "" "" 0
+fi
+
+# --- Resolve the source to a local archive path (validate before touching the
+#     stack). An rclone: source is pulled into a temp file first. --------------
+ARCHIVE=""
+TMP_PULL=""
+UNPACK_DIR=""
+cleanup() {
+  [ -n "$TMP_PULL" ] && rm -f "$TMP_PULL" 2>/dev/null
+  [ -n "$UNPACK_DIR" ] && rm -rf "$UNPACK_DIR" 2>/dev/null
+  return 0
+}
+trap cleanup EXIT
+
+case "$SOURCE_ARG" in
+  rclone:*)
+    remote="${SOURCE_ARG#rclone:}"
+    if [ -z "$remote" ]; then
+      _result 0 "Empty rclone remote path." "$SOURCE_ARG" "" "" 0
+    fi
+    if ! command -v "$RCLONE" >/dev/null 2>&1; then
+      _result 0 "rclone is not installed on this device." "$SOURCE_ARG" "" "" 0
+    fi
+    TMP_PULL="$(mktemp /tmp/foodassistant-restore-XXXXXX.tar.gz)"
+    log "Pulling $remote from the rclone remote..."
+    if ! RCLONE_CONFIG="$RCLONE_CONFIG" "$RCLONE" copyto "$remote" "$TMP_PULL" 2>&1 | while IFS= read -r l; do log "  $l"; done; then
+      :
+    fi
+    if [ ! -s "$TMP_PULL" ]; then
+      _result 0 "rclone pull produced no file (check the remote path and rclone.conf)." "$SOURCE_ARG" "" "" 0
+    fi
+    ARCHIVE="$TMP_PULL"
+    ;;
+  /*)
+    ARCHIVE="$SOURCE_ARG"
+    ;;
+  *)
+    _result 0 "Source must be an absolute path or an rclone:remote path." "$SOURCE_ARG" "" "" 0
+    ;;
+esac
+
+if [ ! -f "$ARCHIVE" ]; then
+  _result 0 "Archive not found: $ARCHIVE" "$SOURCE_ARG" "" "" 0
+fi
+
+# Verify it is a readable gzip tar, that every member is CONFINED to the
+# expected data dirs (no absolute paths, no "..", no symlink or hardlink that
+# points outside them, no device nodes), and that it carries at least one of
+# those dirs. Restores run as root, so an unconfined archive could otherwise
+# drop a replacement compose file or escape the install dir entirely
+# (FoodAssistant-ifmt). This catches a wrong/corrupt/malicious file BEFORE we
+# stop the stack. Mirrors the app's own zip-slip restore guard
+# (service/app/routers/admin.py).
+log "Verifying archive $ARCHIVE..."
+screen="$(ARCHIVE="$ARCHIVE" DATA_DIRS="$DATA_DIRS" python3 - <<'PYEOF'
+import os
+import tarfile
+
+
+def clean_parts(name):
+    """Path components of a tar member name, or None when the name is
+    absolute or steps upward. "."/empty components are dropped."""
+    if name.startswith("/"):
+        return None
+    parts = [p for p in name.split("/") if p not in ("", ".")]
+    if ".." in parts:
+        return None
+    return parts
+
+
+def member_error(name, member, allowed):
+    """Why this member may not be restored, or None when it is safe."""
+    parts = clean_parts(name)
+    if parts is None:
+        return "path escapes the restore dir"
+    if not parts:
+        return "empty member name"
+    clean = "/".join(parts)
+    if not any(clean == d or clean.startswith(d + "/") for d in allowed):
+        return "outside the restored data dirs"
+    if member.isdev() or member.isfifo():
+        return "device or fifo member"
+    if member.issym():
+        target = member.linkname
+        if not target or target.startswith("/") or clean_parts(target) is None:
+            return "symlink points outside the restore dir"
+    elif member.islnk():
+        target = clean_parts(member.linkname)
+        if target is None or not any(
+            "/".join(target) == d or "/".join(target).startswith(d + "/")
+            for d in allowed
+        ):
+            return "hardlink points outside the restored data dirs"
+    elif not (member.isreg() or member.isdir()):
+        return "unsupported member type"
+    return None
+
+
+allowed = [d.strip("/") for d in os.environ["DATA_DIRS"].split() if d.strip("/")]
+try:
+    tf = tarfile.open(os.environ["ARCHIVE"], mode="r:gz")
+except Exception:
+    print("ERR archive is not a readable .tar.gz")
+    raise SystemExit(0)
+matched = []
+try:
+    with tf:
+        for member in tf:
+            err = member_error(member.name, member, allowed)
+            if err:
+                print("ERR unsafe member %r: %s" % (member.name, err))
+                raise SystemExit(0)
+            clean = "/".join(clean_parts(member.name))
+            for d in allowed:
+                if (clean == d or clean.startswith(d + "/")) and d not in matched:
+                    matched.append(d)
+except tarfile.TarError:
+    print("ERR archive is not a readable .tar.gz")
+    raise SystemExit(0)
+print("OK " + " ".join(d for d in allowed if d in matched))
+PYEOF
+)" || screen="ERR archive screening failed"
+case "$screen" in
+  "OK "*) matched=" ${screen#OK }" ;;
+  OK) matched="" ;;
+  ERR*)
+    _result 0 "Archive rejected: ${screen#ERR }" "$SOURCE_ARG" "" "" 0
+    ;;
+  *)
+    _result 0 "Archive screening produced no verdict." "$SOURCE_ARG" "" "" 0
+    ;;
+esac
+if [ -z "${matched// /}" ]; then
+  _result 0 "Archive does not contain any expected data dir ($DATA_DIRS)." "$SOURCE_ARG" "" "" 0
+fi
+log "Archive looks valid; contains:$matched"
+
+if [ ! -d "$PROJECT_DIR" ]; then
+  _result 0 "Compose project dir not found: $PROJECT_DIR" "$SOURCE_ARG" "" "" 0
+fi
+
+# Unpack into a private staging dir first, while the stack is still up. Only
+# the whitelisted data dirs are moved into place afterwards, so nothing in the
+# archive can ever land outside them (and a failed unpack costs no downtime).
+UNPACK_DIR="$(mktemp -d "$PROJECT_DIR/.restore-unpack-XXXXXX" 2>/dev/null)" || UNPACK_DIR=""
+if [ -z "$UNPACK_DIR" ]; then
+  _result 0 "Could not create a staging dir under $PROJECT_DIR." "$SOURCE_ARG" "" "" 0
+fi
+chmod 700 "$UNPACK_DIR" 2>/dev/null || true
+log "Unpacking $ARCHIVE into a staging area..."
+if ! tar_out="$(tar -xzf "$ARCHIVE" -C "$UNPACK_DIR" 2>&1)"; then
+  [ -n "$tar_out" ] && log "  $tar_out"
+  _result 0 "Unpack failed; nothing was changed." "$SOURCE_ARG" "" "" 0
+fi
+for d in $matched; do
+  if [ ! -d "$UNPACK_DIR/$d" ]; then
+    _result 0 "Unpack did not produce $d; nothing was changed." "$SOURCE_ARG" "" "" 0
+  fi
+done
+
+# --- From here on the stack may be stopped; on any failure try to restart. ---
+log "Stopping the container stack..."
+if ! (cd "$PROJECT_DIR" && $COMPOSE stop) >/dev/null 2>&1; then
+  # Could not stop cleanly; the stack should still be up, so do not proceed.
+  _start_stack
+  _result 0 "Could not stop the container stack; nothing was changed." "$SOURCE_ARG" "" "" 1
+fi
+
+# Only the dirs the snapshot actually carries ($matched) are touched. A data
+# dir the archive does not include is LEFT IN PLACE, never moved aside, so a
+# partial snapshot (e.g. an app-data-only backup, or one from a server that
+# never ran Mealie) can never orphan the Grocy or Mealie data a running Pi
+# still depends on. "Existing installs are production" (AGENTS.md); a restore
+# must never silently strand live data.
+#
+# Roll back everything on any failure so the device always comes up
+# consistent: dirs already restored go back to staging, and every set-aside
+# original returns to its live path.
+placed=""   # dirs whose restored copy is now in place
+moved=""    # dirs whose live copy was set aside to .pre-restore-$STAMP
+_rollback_restore() {
+  local d
+  for d in $placed; do
+    mv -f "$PROJECT_DIR/$d" "$UNPACK_DIR/$d" 2>/dev/null || true
+  done
+  for d in $moved; do
+    if [ -d "$PROJECT_DIR/$d.pre-restore-$STAMP" ]; then
+      mv -f "$PROJECT_DIR/$d.pre-restore-$STAMP" "$PROJECT_DIR/$d" 2>/dev/null || true
+    fi
+  done
+}
+
+log "Setting aside current data..."
+for d in $matched; do
+  if [ -d "$PROJECT_DIR/$d" ]; then
+    if mv "$PROJECT_DIR/$d" "$PROJECT_DIR/$d.pre-restore-$STAMP"; then
+      log "  $d -> $d.pre-restore-$STAMP"
+      moved="$moved $d"
+    else
+      log "WARN: could not move $d aside; rolling back and restarting."
+      _rollback_restore
+      _start_stack && restarted=1 || restarted=0
+      _result 0 "Could not set aside $d; the previous data is intact." "$SOURCE_ARG" "" "$STAMP" "$restarted"
+    fi
+  fi
+done
+
+log "Moving the restored data into place..."
+move_ok=1
+for d in $matched; do
+  mkdir -p "$(dirname "$PROJECT_DIR/$d")" 2>/dev/null || true
+  if mv -f "$UNPACK_DIR/$d" "$PROJECT_DIR/$d"; then
+    placed="$placed $d"
+  else
+    move_ok=0
+    break
+  fi
+done
+if [ "$move_ok" != "1" ]; then
+  log "Could not move the restored data into place; rolling back and restarting."
+  _rollback_restore
+  _start_stack && restarted=1 || restarted=0
+  _result 0 "Restore failed while moving data into place; the previous data was restored." "$SOURCE_ARG" "" "$STAMP" "$restarted"
+fi
+
+log "Restarting the container stack..."
+restarted=0
+_start_stack && restarted=1
+
+log "Restore complete (source=$SOURCE_ARG restored=$matched snapshot=$STAMP restarted=$restarted)."
+_result 1 "" "$SOURCE_ARG" "$matched" "$STAMP" "$restarted"

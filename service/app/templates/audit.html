@@ -1,0 +1,215 @@
+{% extends "base.html" %}
+{% block title %}Pantry Audit: Pantry Raider{% endblock %}
+
+{% block content %}
+<div class="mt-3 mb-3 d-flex align-items-center justify-content-between">
+  <h4 class="mb-0"><i class="bi bi-clipboard-check me-2"></i>Pantry Audit</h4>
+  <span id="auditMode" class="badge bg-secondary fs-6">Read only</span>
+</div>
+
+<p class="text-secondary">
+  Start a count of every area, or narrow it to one, then scan the items
+  physically there. Nothing is added or used up (read only); the audit just
+  shows what you have scanned against what Grocy expects, so missing or out of
+  place items stand out.
+</p>
+
+<div id="auditSetup" class="card mb-3">
+  <div class="card-body">
+    <div class="row g-2 align-items-end">
+      <div class="col-12 col-md-8">
+        <label for="locationSelect" class="form-label">Area to count</label>
+        <select id="locationSelect" class="form-select form-select-lg">
+          <option value="__all__">All areas</option>
+        </select>
+      </div>
+      <div class="col-12 col-md-4 d-grid">
+        <button id="startBtn" class="btn btn-primary btn-lg" disabled>
+          <i class="bi bi-play-fill me-1"></i>Start audit
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="auditActive" class="d-none">
+  <div class="d-flex align-items-center justify-content-between mb-3">
+    <div>
+      <span class="text-secondary">Auditing</span>
+      <span id="auditLocation" class="fs-4 fw-bold ms-1"></span>
+    </div>
+    <button id="stopBtn" class="btn btn-outline-danger">
+      <i class="bi bi-stop-fill me-1"></i>Stop audit
+    </button>
+  </div>
+
+  <div class="row g-2 mb-3">
+    <div class="col"><div class="card text-center"><div class="card-body py-2">
+      <div class="fs-3 fw-bold" id="cExpected">0</div><div class="small text-secondary">Expected</div>
+    </div></div></div>
+    <div class="col"><div class="card text-center border-success"><div class="card-body py-2">
+      <div class="fs-3 fw-bold text-success" id="cSeen">0</div><div class="small text-secondary">Seen</div>
+    </div></div></div>
+    <div class="col"><div class="card text-center border-warning"><div class="card-body py-2">
+      <div class="fs-3 fw-bold text-warning" id="cMissing">0</div><div class="small text-secondary">Missing</div>
+    </div></div></div>
+    <div class="col"><div class="card text-center border-info"><div class="card-body py-2">
+      <div class="fs-3 fw-bold text-info" id="cUnexpected">0</div><div class="small text-secondary">Unexpected</div>
+    </div></div></div>
+  </div>
+
+  <div class="row g-3">
+    <div class="col-12 col-lg-7">
+      <h5 class="mb-2">Expected here</h5>
+      <ul id="expectedList" class="list-group"></ul>
+    </div>
+    <div class="col-12 col-lg-5">
+      <h5 class="mb-2">Unexpected scans</h5>
+      <ul id="unexpectedList" class="list-group"></ul>
+      <p id="unexpectedEmpty" class="text-secondary mt-2">None so far.</p>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  var setup = document.getElementById("auditSetup");
+  var active = document.getElementById("auditActive");
+  var sel = document.getElementById("locationSelect");
+  var startBtn = document.getElementById("startBtn");
+  var stopBtn = document.getElementById("stopBtn");
+  var pollTimer = null;
+
+  function esc(s) {
+    return String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+
+  async function loadLocations() {
+    // "All areas" is always the default and a valid choice, so start is ready
+    // even if the per-area list cannot load (an offline Grocy just means you
+    // count everything). The specific areas are added after it when they load.
+    var head = '<option value="__all__">All areas</option>';
+    try {
+      var r = await fetch("../audit/locations", { headers: { "Accept": "application/json" } });
+      var data = await r.json();
+      if (!r.ok) {
+        sel.innerHTML = head;
+        startBtn.disabled = false;
+        return;
+      }
+      var locs = (data && data.locations) || [];
+      var html = head;
+      for (var i = 0; i < locs.length; i++) {
+        html += '<option value="' + esc(locs[i].name) + '">' +
+          esc(locs[i].name) + ' (' + locs[i].item_count + ')</option>';
+      }
+      sel.innerHTML = html;
+      startBtn.disabled = false;
+    } catch (e) {
+      sel.innerHTML = head;
+      startBtn.disabled = false;
+    }
+  }
+
+  sel.addEventListener("change", function () {
+    startBtn.disabled = !sel.value;
+  });
+
+  startBtn.addEventListener("click", async function () {
+    if (!sel.value) { return; }
+    startBtn.disabled = true;
+    try {
+      await fetch("../audit/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ location: sel.value })
+      });
+      enterActive();
+    } catch (e) {
+      startBtn.disabled = false;
+    }
+  });
+
+  stopBtn.addEventListener("click", async function () {
+    try { await fetch("../audit/stop", { method: "POST" }); } catch (e) {}
+    leaveActive();
+  });
+
+  function enterActive() {
+    setup.classList.add("d-none");
+    active.classList.remove("d-none");
+    poll();
+    pollTimer = setInterval(poll, 1500);
+  }
+
+  function leaveActive() {
+    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+    active.classList.add("d-none");
+    setup.classList.remove("d-none");
+    startBtn.disabled = !sel.value;
+    loadLocations();
+  }
+
+  function render(s) {
+    document.getElementById("auditLocation").textContent = s.location || "";
+    var counts = s.counts || {};
+    document.getElementById("cExpected").textContent = counts.expected || 0;
+    document.getElementById("cSeen").textContent = counts.seen || 0;
+    document.getElementById("cMissing").textContent = counts.missing || 0;
+    document.getElementById("cUnexpected").textContent = counts.unexpected || 0;
+
+    var expHtml = "";
+    var expected = s.expected || [];
+    for (var i = 0; i < expected.length; i++) {
+      var e = expected[i];
+      var cls = e.seen ? "list-group-item-success" : "list-group-item-warning";
+      var icon = e.seen
+        ? '<i class="bi bi-check-circle-fill text-success me-2"></i>'
+        : '<i class="bi bi-question-circle text-warning me-2"></i>';
+      var badge = e.seen
+        ? '<span class="badge bg-success">scanned ' + e.scanned_count + '</span>'
+        : '<span class="badge bg-warning text-dark">not seen</span>';
+      expHtml += '<li class="list-group-item d-flex justify-content-between align-items-center ' + cls + '">' +
+        '<span>' + icon + esc(e.name) + '</span>' + badge + '</li>';
+    }
+    document.getElementById("expectedList").innerHTML = expHtml ||
+      '<li class="list-group-item text-secondary">No stock recorded here.</li>';
+
+    var unexpHtml = "";
+    var unexpScans = (s.scanned || []).filter(function (x) { return !x.expected; });
+    for (var j = 0; j < unexpScans.length; j++) {
+      var u = unexpScans[j];
+      unexpHtml += '<li class="list-group-item d-flex justify-content-between align-items-center list-group-item-info">' +
+        '<span><i class="bi bi-exclamation-triangle me-2"></i>' + esc(u.name) + '</span>' +
+        '<span class="badge bg-info text-dark">x' + u.count + '</span></li>';
+    }
+    document.getElementById("unexpectedList").innerHTML = unexpHtml;
+    document.getElementById("unexpectedEmpty").classList.toggle("d-none", unexpScans.length > 0);
+  }
+
+  async function poll() {
+    try {
+      var r = await fetch("../audit/status", { headers: { "Accept": "application/json" } });
+      var s = await r.json();
+      if (!s.active) { leaveActive(); return; }
+      render(s);
+    } catch (e) {
+      // Keep the last snapshot on a network hiccup.
+    }
+  }
+
+  // If an audit is already running (started elsewhere or before a reload), jump
+  // straight into the live view.
+  (async function init() {
+    await loadLocations();
+    try {
+      var r = await fetch("../audit/status", { headers: { "Accept": "application/json" } });
+      var s = await r.json();
+      if (s && s.active) { enterActive(); }
+    } catch (e) {}
+  })();
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,164 @@
+# Bandit Cub common package: everything every Cub profile shares.
+#
+# Stacked under a profile package (tdisplay.yaml, tdisplay-s3.yaml,
+# touch7.yaml) by the top-level cub-<profile>.yaml build files. Substitutions
+# here are defaults; the build file (or your own YAML) overrides them.
+
+substitutions:
+  name: bandit-cub
+  friendly_name: Bandit Cub
+  cub_profile: custom
+  cub_version: "0.18.36"
+  # Server address ("192.168.1.170", "192.168.1.170:9284", or a full
+  # http:// URL). Leave empty to find the server automatically: the Cub tries
+  # a server it remembered from a past run, then mDNS, then a LAN sweep. The
+  # sweep is what finds a bridge-networked Docker server, which cannot
+  # advertise itself over mDNS. Set this only to pin a fixed address.
+  pr_server: ""
+  pr_port: "9284"
+  # Leave empty on a normal Cub: the pairing flow mints a key and stores it
+  # in flash. Fill it in only if you minted a key by hand on the server.
+  pr_api_key: ""
+  # Starting poll interval; the server's cub_poll_seconds setting takes over
+  # after the first successful poll.
+  pr_poll: 15s
+  # Where firmware updates are checked. Leave this empty and the Cub checks
+  # whichever server it found, which is the only address that works when the
+  # server is a Docker container with no name on the network. Fill it in to
+  # pin the check at a fixed URL instead.
+  ota_manifest_url: ""
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+  # Every Cub gets a unique hostname out of the same factory image.
+  name_add_mac_suffix: true
+  min_version: 2026.6.0
+  # The version a Cub reports and compares against the server's. Without this
+  # the device would call itself by its ESPHome version and think every
+  # firmware on the server was a different one.
+  project:
+    name: pantryraider.bandit-cub
+    version: ${cub_version}
+  on_boot:
+    # Before the hub starts (its own setup runs at a lower priority), tell it
+    # how to point the firmware check at the server it finds. This is the only
+    # place the two components meet: the hub takes a callback and never names
+    # the update entity, so a custom YAML that leaves updates out still
+    # builds, and the hub simply has nobody to tell.
+    - priority: 600
+      then:
+        - lambda: |-
+            id(pantry)->set_ota_url_callback([](const std::string &url) {
+              id(cub_firmware)->set_source_url(url);
+              id(cub_firmware)->check();
+            });
+
+logger:
+
+# First-boot Wi-Fi: Improv over the USB cable used for flashing, Improv over
+# BLE from a phone, and a captive-portal fallback AP.
+wifi:
+  ap: {}
+
+captive_portal:
+
+improv_serial:
+
+esp32_improv:
+  authorizer: none
+
+# The stock native API block is what makes every pantry_raider sensor below a
+# Home Assistant entity too. A Cub works fine without HA; never reboot just
+# because no API client is connected.
+api:
+  reboot_timeout: 0s
+
+ota:
+  - platform: esphome
+  - platform: http_request
+
+# The firmware check. The source below is only ever the starting guess: the
+# hub replaces it with the real address as soon as it knows which server this
+# Cub belongs to, and checks again right then. After that this runs on its own
+# every six hours (and once shortly after boot, from the component itself).
+update:
+  - platform: http_request
+    id: cub_firmware
+    name: Cub Firmware
+    update_interval: 6h
+    source: http://pr.local:9284/cub/firmware/manifest.json
+
+# Installing is a separate decision from checking, and it is the one that has
+# to wait for the right moment. Asking every few minutes means an update found
+# while a timer was ringing lands soon after the kitchen goes quiet, instead of
+# waiting for the next check six hours later. A Cub with the server's automatic
+# updates turned off never gets past the first condition.
+interval:
+  - interval: 5min
+    then:
+      - if:
+          condition:
+            and:
+              - update.is_available: cub_firmware
+              - lambda: |-
+                  return id(pantry)->ota_install_ready(
+                      id(cub_firmware)->update_info.latest_version);
+          then:
+            - logger.log: "Installing new Cub firmware"
+            - lambda: |-
+                id(pantry)->ota_mark_attempt(
+                    id(cub_firmware)->update_info.latest_version);
+            - update.perform: cub_firmware
+
+# Timers tick locally between polls: remaining time is computed from each
+# timer's deadline_epoch against real (SNTP) time.
+time:
+  - platform: sntp
+    id: sntp_time
+
+mdns:
+
+http_request:
+  id: pr_http
+  timeout: 10s
+  verify_ssl: false
+
+# The hub: polls GET /cub/summary with the X-API-Key and X-Cub-* headers,
+# runs the pairing flow when there is no key yet, and feeds the display.
+pantry_raider:
+  id: pantry
+  server: ${pr_server}
+  port: ${pr_port}
+  api_key: ${pr_api_key}
+  profile: ${cub_profile}
+  device_name: ${friendly_name}
+  firmware_version: ${cub_version}
+  update_interval: ${pr_poll}
+  ota_manifest_url: ${ota_manifest_url}
+
+sensor:
+  - platform: pantry_raider
+    expired:
+      name: Expired items
+    expiring_today:
+      name: Expiring today
+    expiring_soon:
+      name: Expiring soon
+    pending:
+      name: Pending scans
+    active_timers:
+      name: Active timers
+    next_timer_seconds:
+      name: Next timer remaining
+    probe_temperature:
+      name: Probe temperature
+
+text_sensor:
+  - platform: pantry_raider
+    view:
+      name: View
+    next_timer:
+      name: Next timer
+    pairing_code:
+      name: Pairing code
