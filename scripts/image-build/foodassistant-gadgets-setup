@@ -1,0 +1,209 @@
+#!/usr/bin/env bash
+# FoodAssistant Bluetooth thermometer reader setup (FoodAssistant-6ivl).
+# ======================================================================
+# Installs the OPTIONAL host-side Bluetooth thermometer reader
+# (gadgets/foodassistant_gadgets): the app runs in a container that cannot
+# reach the Bluetooth radio, so a small host daemon reads the thermometers
+# and posts to the app on localhost, the same split as the Stream Deck
+# controller.
+#
+# OFF BY DEFAULT. This script only runs when a user opts in (ENABLE_GADGETS=1
+# at install time, or run by hand: `sudo foodassistant-gadgets-setup`). A
+# normal update never calls it, so existing installs are untouched. Once
+# installed, foodassistant-update keeps the package current (sync_gadgets).
+#
+# Design, matching foodassistant-print-setup:
+#   - Idempotent and safe to re-run: the venv is reused, the package copy is
+#     replaced outright, and the systemd unit is rewritten in place.
+#   - Non-interactive: apt runs with DEBIAN_FRONTEND=noninteractive and -y.
+#   - Degrades gracefully: an offline box or a missing repo checkout is
+#     logged and the script exits nonzero without half-installing.
+#
+# Env overrides (for tests and unusual layouts):
+#   INSTALL_DIR   base dir (default /opt/foodassistant)
+#   REPO_DIR      the git checkout holding gadgets/ (default $INSTALL_DIR/repo,
+#                 falling back to the directory this script was run from)
+#   SKIP_APT=1    skip package installation (re-config-only runs)
+set -uo pipefail
+
+INSTALL_DIR="${INSTALL_DIR:-/opt/foodassistant}"
+VENV_DIR="${VENV_DIR:-$INSTALL_DIR/venv}"
+GD_DST="${GD_DST:-$INSTALL_DIR/foodassistant_gadgets}"
+GD_SERVICE="${GD_SERVICE:-foodassistant-gadgets.service}"
+CONFIG_DIR="${CONFIG_DIR:-/etc/foodassistant}"
+
+log()  { printf '%s\n' "$*"; }
+warn() { printf 'WARN: %s\n' "$*" >&2; }
+fail() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
+
+# Resolve the source checkout. The appliance keeps it at /opt/foodassistant-src
+# (where the host bridge, foodassistant-update, and firstboot.sh all look); a
+# manual run from a clone works too. Installed to /usr/local/bin, the script's
+# own ../.. is /usr, so that fallback must come last, after the known layouts
+# (this is the FoodAssistant-0bcn bug: it failed with REPO_DIR unset on the
+# Bandit because /usr/gadgets does not exist).
+if [ -z "${REPO_DIR:-}" ]; then
+  _here="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"
+  for _cand in "$INSTALL_DIR/repo" /opt/foodassistant-src \
+               /home/foodassistant/FoodAssistant \
+               "$(cd "$_here/../.." 2>/dev/null && pwd)"; do
+    if [ -n "$_cand" ] && [ -d "$_cand/gadgets/foodassistant_gadgets" ]; then
+      REPO_DIR="$_cand"
+      break
+    fi
+  done
+  REPO_DIR="${REPO_DIR:-$INSTALL_DIR/repo}"
+fi
+GD_SRC="$REPO_DIR/gadgets"
+[ -d "$GD_SRC/foodassistant_gadgets" ] || fail "gadgets package not found under $GD_SRC (set REPO_DIR)"
+
+# --- Packages ----------------------------------------------------------------
+# bluez is the host Bluetooth stack bleak talks to over D-Bus; python3-venv
+# for the shared venv. Both may already be present (the print stack installs
+# bluez too), in which case apt is a fast no-op.
+if [ "${SKIP_APT:-0}" != "1" ]; then
+  log "Installing Bluetooth and Python venv packages"
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update -y >/dev/null 2>&1 || warn "apt-get update failed (offline?); continuing"
+  apt-get install -y bluez python3-venv >/dev/null 2>&1 || warn "apt install failed; continuing if deps are already present"
+fi
+
+# --- Shared venv ---------------------------------------------------------------
+if [ ! -d "$VENV_DIR" ]; then
+  log "Creating Python venv at $VENV_DIR"
+  python3 -m venv "$VENV_DIR" || fail "could not create venv at $VENV_DIR"
+fi
+log "Installing reader dependencies into $VENV_DIR"
+"$VENV_DIR/bin/pip" install --quiet -r "$GD_SRC/requirements.txt" || fail "pip install failed"
+
+# --- Package copy --------------------------------------------------------------
+# Replace any prior copy outright: copying into an existing target dir would
+# nest the package one level too deep and break `python -m`.
+log "Copying foodassistant_gadgets package to $GD_DST"
+rm -rf "$GD_DST"
+cp -a "$GD_SRC/foodassistant_gadgets" "$GD_DST" || fail "could not copy package to $GD_DST"
+chmod -R a+rX "$GD_DST" 2>/dev/null || true
+_owner="$(stat -c %U "$VENV_DIR" 2>/dev/null || true)"
+if [ -n "$_owner" ] && [ "$_owner" != "root" ]; then
+  chown -R "$_owner" "$GD_DST" 2>/dev/null || true
+fi
+
+# --- Config --------------------------------------------------------------------
+mkdir -p "$CONFIG_DIR"
+if [ ! -f "$CONFIG_DIR/gadgets.toml" ]; then
+  cp -f "$GD_SRC/config.example.toml" "$CONFIG_DIR/gadgets.toml" 2>/dev/null || true
+fi
+
+# --- systemd unit ----------------------------------------------------------------
+# The unit runs as the venv owner (the interactive appliance user); bluez
+# D-Bus access works for local users by default. Rewrite in place so a re-run
+# picks up unit changes.
+GD_USER="${GD_USER:-${_owner:-foodassistant}}"
+log "Installing $GD_SERVICE (user $GD_USER)"
+sed "s/^User=.*/User=$GD_USER/" "$GD_SRC/systemd/foodassistant-gadgets.service" \
+  > "/etc/systemd/system/$GD_SERVICE" || fail "could not write the systemd unit"
+systemctl daemon-reload || warn "systemctl daemon-reload failed"
+systemctl enable "$GD_SERVICE" || warn "service enable failed"
+
+# --- Radio readiness ---------------------------------------------------------
+# On the Bandit Pi the adapter came up rfkill-soft-blocked and powered off, so
+# the reader scanned nothing and said nothing. Turn the radio on now so the
+# first run works; the unit repeats these on every start as a backstop. Both
+# are idempotent and best-effort: a box without rfkill or bluetoothctl is fine.
+log "Turning the Bluetooth radio on"
+rfkill unblock bluetooth 2>/dev/null || warn "rfkill unblock failed (no rfkill?); continuing"
+bluetoothctl power on >/dev/null 2>&1 || warn "bluetoothctl power on failed; continuing"
+
+# --- I2C bus for plug-in accessories (FoodAssistant-etsc) --------------------
+# STEMMA QT / Qwiic boards (the NeoKey scan-mode selector and friends) hang off
+# /dev/i2c-1. Three things make that work, all idempotent and all harmless on a
+# box without I2C: the interface turned on in the boot config, the i2c-dev
+# module loaded, and the service user in the "i2c" group that owns the device
+# node. No root is needed at run time; group membership is the whole permission
+# story, which is exactly why this lives in the agent and not the host bridge.
+log "Turning the I2C bus on for plug-in accessories"
+if command -v raspi-config >/dev/null 2>&1; then
+  raspi-config nonint do_i2c 0 >/dev/null 2>&1 || warn "raspi-config could not enable I2C; continuing"
+else
+  # Not a Pi (or a Pi without raspi-config): set the boot parameter by hand
+  # wherever this system keeps it. Nothing to do on a box with neither.
+  for _cfg in /boot/firmware/config.txt /boot/config.txt; do
+    if [ -f "$_cfg" ]; then
+      grep -q '^dtparam=i2c_arm=on' "$_cfg" 2>/dev/null \
+        || printf 'dtparam=i2c_arm=on\n' >> "$_cfg" \
+        || warn "could not write $_cfg; continuing"
+      break
+    fi
+  done
+fi
+# Load the module now so a fresh install works without a reboot, and on boot.
+modprobe i2c-dev 2>/dev/null || warn "could not load i2c-dev (no I2C on this box?); continuing"
+if [ -d /etc/modules-load.d ]; then
+  printf 'i2c-dev\n' > /etc/modules-load.d/foodassistant-i2c.conf 2>/dev/null \
+    || warn "could not write the i2c-dev module config; continuing"
+fi
+# The service user needs the i2c group to open /dev/i2c-1. New membership only
+# applies to new logins, so the service restart below picks it up.
+if getent group i2c >/dev/null 2>&1; then
+  usermod -aG i2c "$GD_USER" 2>/dev/null \
+    || warn "could not add $GD_USER to the i2c group; continuing"
+else
+  log "No i2c group on this system; skipping (nothing to join)"
+fi
+
+# --- UART for a wired barcode scanner (FoodAssistant-x61t) -------------------
+# A Waveshare-style 3.3V scan engine wires straight to the Pi's GPIO UART
+# (TX/RX on GPIO14/15, physical pins 8/10). Two things free that port: the
+# hardware UART turned on, and the serial login console turned off (it owns the
+# port by default and would fight the scanner). Then the service user needs the
+# dialout group to open /dev/serial0. All idempotent and harmless on a box with
+# no scanner: enabling the UART and dropping the console just leaves an unused
+# port, and a machine with no serial hardware has nothing to grab.
+log "Freeing the Pi UART for a wired barcode scanner"
+if command -v raspi-config >/dev/null 2>&1; then
+  # do_serial_hw 0 turns the hardware UART on; do_serial_cons 1 turns the
+  # serial login console off. Together: a usable /dev/serial0 with no getty.
+  raspi-config nonint do_serial_hw 0 >/dev/null 2>&1 || warn "raspi-config could not enable the UART; continuing"
+  raspi-config nonint do_serial_cons 1 >/dev/null 2>&1 || warn "raspi-config could not disable the serial console; continuing"
+else
+  # Not a Pi (or no raspi-config): set enable_uart=1 in the boot config and
+  # strip any console=serial0/ttyAMA0/ttyS0 token from the kernel cmdline.
+  for _cfg in /boot/firmware/config.txt /boot/config.txt; do
+    if [ -f "$_cfg" ]; then
+      grep -q '^enable_uart=1' "$_cfg" 2>/dev/null \
+        || printf 'enable_uart=1\n' >> "$_cfg" \
+        || warn "could not write $_cfg; continuing"
+      break
+    fi
+  done
+  for _cmd in /boot/firmware/cmdline.txt /boot/cmdline.txt; do
+    if [ -f "$_cmd" ]; then
+      # Drop the serial console token so the scanner has the port to itself.
+      # sed in place; the pattern matches console=serial0,115200 / ttyAMA0 /
+      # ttyS0 and leaves the rest of the single-line cmdline untouched.
+      sed -i -E 's/console=(serial0|ttyAMA0|ttyS0)[,0-9]* ?//g' "$_cmd" 2>/dev/null \
+        || warn "could not edit $_cmd; continuing"
+      break
+    fi
+  done
+fi
+# /dev/serial0 is owned by the dialout group; the service user needs to join it
+# to open the port. New membership applies on the next login, which the service
+# restart below picks up.
+if getent group dialout >/dev/null 2>&1; then
+  usermod -aG dialout "$GD_USER" 2>/dev/null \
+    || warn "could not add $GD_USER to the dialout group; continuing"
+else
+  log "No dialout group on this system; skipping (nothing to join)"
+fi
+
+systemctl restart "$GD_SERVICE" || warn "service start failed (will retry on boot)"
+
+log "Bluetooth thermometer reader installed. Thermometers in range appear on the Timers page under Probes."
+log "Plug-in STEMMA QT accessories appear in Settings, Thermometers & Sensors, Accessories."
+if [ ! -e /dev/i2c-1 ]; then
+  log "Note: /dev/i2c-1 is not there yet. If you plan to use plug-in accessories, reboot once and it appears."
+fi
+if [ ! -e /dev/serial0 ]; then
+  log "Note: /dev/serial0 is not there yet. If you plan to wire a UART barcode scanner, reboot once and it appears."
+fi

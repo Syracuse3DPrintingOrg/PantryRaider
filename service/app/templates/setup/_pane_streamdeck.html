@@ -1,0 +1,190 @@
+{% from "setup/_macros.html" import info, secret_input, extra_keys, ai_model_field, satellite_keys, upstream_cards, recipe_connection_cards, ds_toggle with context %}
+{% if is_pi %}
+        <!-- Stream Deck (Pi appliance only): a sub-area of the Start Page &
+             Stream Deck pill, reached through its toggle -->
+        <div class="tab-pane fade" id="pane-streamdeck">
+          {{ ds_toggle('deck') }}
+          <p class="pane-intro">Configure the Elgato Stream Deck attached to this appliance.</p>
+
+          {% if features.satellite %}
+          <!-- On a satellite the deck weather is server-controlled. Just a note
+               (no section); hidden inputs keep the synced values for a deck save. -->
+          <div class="form-text mb-3"><i class="bi bi-cloud-sun me-1"></i>Weather location and units are managed on the main server and sync here automatically.</div>
+          <input type="hidden" id="streamdeck_weather_location" value="{{ s.streamdeck_weather_location }}">
+          <input type="hidden" id="streamdeck_weather_units" value="{{ s.streamdeck_weather_units }}">
+          {% endif %}
+
+          <div class="section-card mb-3">
+            <div class="section-title"><i class="bi bi-grid-3x3-gap text-info"></i> Stream Deck Device</div>
+            <div class="form-check form-switch mb-3">
+              <input class="form-check-input" type="checkbox" role="switch" id="has_streamdeck"
+                     {{ 'checked' if s.has_streamdeck else '' }}
+                     onchange="toggleStreamDeckOptions()">
+              <label class="form-check-label" for="has_streamdeck">Stream Deck connected to this device</label>
+            </div>
+            <div id="streamdeck-opts" class="editor-dense {{ '' if s.has_streamdeck else 'd-none' }}">
+              <!-- Top save bar so settings can be saved without scrolling to the
+                   bottom of a long editor (FoodAssistant-cqbs). -->
+              <div class="d-flex gap-2 flex-wrap align-items-center mb-3 pb-2 border-bottom">
+                <button type="button" class="btn btn-info btn-sm" onclick="saveStreamDeckSettings()">
+                  <i class="bi bi-check-lg me-1"></i>Save Stream Deck settings
+                </button>
+                <button type="button" class="btn btn-outline-secondary btn-sm" onclick="restartStreamDeck()">
+                  <i class="bi bi-arrow-repeat me-1"></i>Restart service
+                </button>
+                <span class="test-result sd-save-result ms-1"></span>
+              </div>
+              <div class="editor-block row g-3">
+                <div class="col-auto">
+                  <label class="form-label">Model{{ info('The deck key count. Fills the key layout. Can also be set in config.toml. Auto-detected when the deck is attached.') }}</label>
+                  <select class="form-select form-select-sm" id="streamdeck_key_count" style="max-width:260px" onchange="_sdRenderGrid(); _sdPopulateProfileSelect()">
+                    <option value="6" {{ 'selected' if s.streamdeck_key_count == 6 else '' }}>6 keys (Stream Deck Mini)</option>
+                    <option value="15" {{ 'selected' if (s.streamdeck_key_count == 15 or not s.streamdeck_key_count) else '' }}>15 keys (Stream Deck MK.2 / Classic)</option>
+                    <option value="32" {{ 'selected' if s.streamdeck_key_count == 32 else '' }}>32 keys (Stream Deck XL)</option>
+                  </select>
+                  <div class="form-text sd-autodetect-hint text-success d-none"><i class="bi bi-check-circle me-1"></i>Auto-detected.</div>
+                </div>
+                <div class="col-auto">
+                  <label class="form-label">Rotation</label>
+                  <select class="form-select form-select-sm" id="streamdeck_rotation" onchange="_sdRenderGrid()">
+                    <option value="0"   {{ 'selected' if s.streamdeck_rotation == 0 else '' }}>0° (Normal)</option>
+                    <option value="90"  {{ 'selected' if s.streamdeck_rotation == 90 else '' }}>90° (Clockwise)</option>
+                    <option value="180" {{ 'selected' if s.streamdeck_rotation == 180 else '' }}>180° (Upside down)</option>
+                    <option value="270" {{ 'selected' if s.streamdeck_rotation == 270 else '' }}>270° (Counter-clockwise)</option>
+                  </select>
+                </div>
+                <div class="col-auto">
+                  <label class="form-label">Brightness (5-100)</label>
+                  <input type="number" class="form-control form-control-sm" id="streamdeck_brightness" min="5" max="100" value="60" style="max-width:110px">
+                </div>
+              </div>
+              <div class="editor-block">
+                <div class="block-head"><i class="bi bi-stars text-info"></i>Suggested
+                  {{ info('Quick-action keys suggested from what you actually buy and cook: groceries bought 3+ times recently, and your most-cooked recipe once it hits 2+ cooks. Tap + to add one as a real key, or the x to dismiss it.') }}
+                </div>
+                <div id="streamdeck-suggested-list" class="d-flex flex-column gap-2 mb-2"></div>
+              </div>
+
+              <div class="editor-block">
+                <div class="block-head"><i class="bi bi-grid text-info"></i>Key layout
+                  {{ info('Drag actions from the palette onto grid cells; drag keys to rearrange. The grid shape matches your deck orientation. Long-press a timer key to reset it. When you use more keys than fit, the deck adds a "More" key and continues on the next page.') }}
+                </div>
+                <div id="streamdeck-page-nav" class="d-flex align-items-center gap-2 mb-2 d-none"></div>
+                {# Grid and palette side by side on wide screens, stacked on
+                   narrow/mobile widths, to cut down on scrolling. #}
+                <div class="d-flex flex-column flex-lg-row gap-3 align-items-start mb-2">
+                  <div id="streamdeck-grid" class="d-inline-grid gap-2" style="grid-template-columns: repeat(5, minmax(0,1fr));"></div>
+                  <div id="streamdeck-palette" class="d-flex flex-column gap-1" style="flex:1 1 260px;min-width:0;max-width:700px;"></div>
+                </div>
+                <button type="button" class="btn btn-outline-secondary btn-sm" onclick="_sdResetLayout()">
+                  <i class="bi bi-arrow-counterclockwise me-1"></i>Reset layout{{ info('Restores the stock key arrangement. Custom keys you built are kept in the palette.') }}
+                </button>
+              </div>
+
+              <!-- Custom keys sit directly below the editor so you build a key
+                   and immediately drag its chip onto the grid (FoodAssistant-o7cz). -->
+              <div class="editor-block">
+                <div class="block-head"><i class="bi bi-sliders text-info"></i>Custom keys
+                  {{ info('Build your own keys (Home Assistant actions, timers, weather, cameras, media, macros). Each one appears as a chip in the palette under the grid; drag it onto a key to place it. A custom key left unplaced is kept for later.') }}
+                </div>
+                <div id="streamdeck-overrides" class="d-flex flex-column gap-2 mb-2"></div>
+                <div class="d-flex align-items-center gap-3 flex-wrap">
+                  <button type="button" class="btn btn-outline-secondary btn-sm" onclick="_sdAddOverrideRow()">
+                    <i class="bi bi-plus-lg me-1"></i>Add custom key
+                  </button>
+                  <span class="form-text mt-0"><i class="bi bi-house me-1"></i>Home Assistant keys use the "Home Assistant action" type{{ info('Pick a device or entity from the list and the key is ready to press. The HA URL and token are set once under the Home Assistant pane in the Settings menu.') }}</span>
+                  <span class="form-text mt-0"><i class="bi bi-camera-video me-1"></i>Camera feeds come from Connections{{ info('Camera feeds are configured under Connections in the Settings menu (they also power the on-screen Camera page) and are pushed to the deck from there.') }}</span>
+                </div>
+              </div>
+
+              {# Idle timeout + key style + icon treatment on one compact row. #}
+              <div class="editor-block">
+                <div class="row g-3">
+                  <div class="col-auto">
+                    <label class="form-label" for="streamdeck_idle_timeout">Blank after idle (min){{ info('Sets all keys to black after inactivity (0 = off). Any key press or kiosk activity restores them. The display has its own separate timeout.') }}</label>
+                    <input class="form-control form-control-sm" style="max-width:100px" type="number"
+                           id="streamdeck_idle_timeout" min="0" max="120" step="5"
+                           value="{{ s.streamdeck_idle_timeout }}">
+                  </div>
+                  <div class="col-auto">
+                    <label class="form-label d-block" for="streamdeck_logo_when_display_off">Show logo when deck goes idle{{ info('When the deck reaches the idle time above, it shows the Pantry Raider logo across the keys instead of going dark. Press any key (or touch the screen) to bring the buttons back. Turn this off to have the deck blank fully at idle.') }}</label>
+                    <div class="form-check form-switch mt-1">
+                      <input class="form-check-input" type="checkbox" id="streamdeck_logo_when_display_off"
+                             {{ 'checked' if s.streamdeck_logo_when_display_off else '' }}>
+                    </div>
+                  </div>
+                  <div class="col-auto">
+                    <label class="form-label" for="streamdeck_key_style">Key style{{ info('Rich and Glass have depth; Clean drops the coloured background so the icons stand out; Minimalist is flat.') }}</label>
+                    <select class="form-select form-select-sm" id="streamdeck_key_style" style="max-width:180px">
+                      <option value="rich"    {{ 'selected' if s.streamdeck_key_style == 'rich' else '' }}>Rich (gradient)</option>
+                      <option value="glass"   {{ 'selected' if s.streamdeck_key_style == 'glass' else '' }}>Glass</option>
+                      <option value="clean"   {{ 'selected' if s.streamdeck_key_style == 'clean' else '' }}>Clean (no background)</option>
+                      <option value="minimal" {{ 'selected' if s.streamdeck_key_style == 'minimal' else '' }}>Minimalist (flat)</option>
+                    </select>
+                  </div>
+                  <div class="col-auto">
+                    <label class="form-label" for="streamdeck_icon_color">Icons{{ info('Full colour uses bundled colour artwork (best with Clean); Tinted recolours the line glyph; Monochrome leaves it plain.') }}</label>
+                    <select class="form-select form-select-sm" id="streamdeck_icon_color" style="max-width:200px">
+                      <option value="color" {{ 'selected' if s.streamdeck_icon_color == 'color' else '' }}>Full colour (emoji set)</option>
+                      <option value="full"  {{ 'selected' if s.streamdeck_icon_color == 'full' else '' }}>Tinted glyph</option>
+                      <option value="mono"  {{ 'selected' if s.streamdeck_icon_color == 'mono' else '' }}>Monochrome</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              <div class="editor-block">
+                <div class="block-head"><i class="bi bi-collection text-info"></i>Saved profiles
+                  {{ info('Save the current key layout as a named profile. Profiles are stored on the main server and available on all devices with a matching deck size.') }}
+                </div>
+                <div class="d-flex align-items-center gap-2 flex-wrap">
+                  <select class="form-select form-select-sm" id="sd-profile-select" style="max-width:200px" onchange="_sdProfileSelectionChanged()">
+                    <option value="">(no profile selected)</option>
+                  </select>
+                  <button type="button" class="btn btn-outline-secondary btn-sm" id="btn-sd-profile-load" disabled onclick="_sdLoadProfile()">
+                    <i class="bi bi-box-arrow-in-down me-1"></i>Load
+                  </button>
+                  <button type="button" class="btn btn-outline-danger btn-sm" id="btn-sd-profile-delete" disabled onclick="_sdDeleteProfile()">
+                    <i class="bi bi-trash me-1"></i>Delete
+                  </button>
+                  <span class="vr mx-1"></span>
+                  <input type="text" class="form-control form-control-sm" id="sd-profile-name-input" placeholder="New profile name" style="max-width:180px">
+                  <button type="button" class="btn btn-outline-info btn-sm" onclick="_sdSaveProfile()">
+                    <i class="bi bi-floppy me-1"></i>Save as profile
+                  </button>
+                </div>
+                <div class="test-result mt-1" id="sd-profile-result"></div>
+              </div>
+
+            </div>
+            <div id="streamdeck-status-row" class="mb-2"><span class="text-secondary small">Checking...</span></div>
+            <button class="btn btn-outline-info btn-sm d-none mb-2" id="btn-install-streamdeck" onclick="installStreamDeck(this)">
+              <i class="bi bi-download me-1"></i>Install Stream Deck service
+            </button>
+            <div class="test-result mb-2" id="streamdeck-install-result"></div>
+            <pre class="install-log d-none bg-body-tertiary border rounded p-2 small mb-2" data-log="streamdeck"></pre>
+            <div class="d-flex gap-2 flex-wrap">
+              <button type="button" class="btn btn-outline-info btn-sm" onclick="saveStreamDeckSettings()">
+                <i class="bi bi-check-lg me-1"></i>Save Stream Deck settings
+              </button>
+              <button type="button" class="btn btn-outline-secondary btn-sm" onclick="restartStreamDeck()">
+                <i class="bi bi-arrow-repeat me-1"></i>Restart service
+              </button>
+            </div>
+            <div class="test-result mt-2 sd-save-result" id="streamdeck-save-result"></div>
+          </div>
+
+          <div class="section-card">
+            <div class="section-title"><i class="bi bi-info-circle text-secondary"></i> Stream Deck Notes</div>
+            <ul class="small text-secondary mb-0">
+              <li>The Stream Deck service starts automatically at boot after it is enabled by the installer.</li>
+              <li>If the deck was not attached at install time, use the Install button above after plugging it in.</li>
+              <li>Logs: <code>journalctl -u foodassistant-streamdeck -f</code></li>
+              <li>Config file: <code>/opt/foodassistant/config.toml</code></li>
+            </ul>
+          </div>
+
+        </div>
+
+
+        {% endif %}
