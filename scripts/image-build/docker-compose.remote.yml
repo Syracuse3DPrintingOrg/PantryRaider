@@ -1,0 +1,46 @@
+# FoodAssistant Pi Remote compose
+# ================================
+# Used by pi_remote devices: the FoodAssistant UI-only service, no Grocy/Mealie.
+# Inventory and all data live on a pi_hosted or server instance elsewhere on
+# the LAN; this Pi just runs the control surface (kiosk browser, Stream Deck).
+#
+# The service binds on port 80 so the local settings page is reachable at
+# http://<hostname>.local without specifying a port.
+#
+# NOTE: this file is an ALTERNATIVE to running the service in a Python venv
+# directly, never an addition. For most Pi Remotes, firstboot.sh installs and
+# runs the service via venv (no Docker needed). This compose file is provided
+# for operators who prefer the containerised path or need image-based updates.
+#
+# Both paths bind host port 80, so they cannot run at the same time. Before you
+# bring this stack up on a device that firstboot already provisioned, stop and
+# disable the venv unit so it does not fight for the port:
+#   sudo systemctl disable --now foodassistant-remote.service
+#   docker compose -f docker-compose.remote.yml up -d
+# firstboot.sh also guards the reverse case: if this container is already
+# running on port 80, it skips installing the venv service (FoodAssistant-dhr).
+services:
+  service:
+    image: ghcr.io/syracuse3dprintingorg/pantryraider:${FOODASSISTANT_TAG:-latest}
+    build:
+      context: ${REPO_DIR:-/home/foodassistant/FoodAssistant}
+      dockerfile: service/Dockerfile
+    container_name: foodassistant-service
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "9284"]
+    ports:
+      - "80:9284"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      - TZ=${TZ:-America/New_York}
+      - DEPLOYMENT_MODE=pi_remote
+      - REMOTE_SERVER_URL=${REMOTE_SERVER_URL:-}
+      - FOODASSISTANT_FORCE_MODEL=Raspberry Pi
+      # Pi Remote is a LAN-only control surface; local auth is off by default.
+      # Set AUTH_REQUIRED=true in .env to password-protect the settings page.
+      - AUTH_REQUIRED=${AUTH_REQUIRED:-false}
+    volumes:
+      - ./data:/app/data
+      - /var/run/hostbridge.sock:/var/run/hostbridge.sock
+    restart: unless-stopped

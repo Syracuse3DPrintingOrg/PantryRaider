@@ -1,0 +1,129 @@
+{% extends "admin_base.html" %}
+{% from "_settings.html" import ov_card with context %}
+{% block title %}Admin: Forager{% endblock %}
+{% block admin_content %}
+<p class="muted">A quick read on the service, and the tools to run it. Pick a
+card to jump to a section, or use the menu on the left.</p>
+
+<div class="ov-group">
+  <div class="ov-grid">
+    {{ ov_card('user', 'Accounts', 'Search accounts, open one, disable, comp, or manage recipe sharing.', href='/admin#accounts') }}
+    {{ ov_card('people', 'Recipe moderation', 'Approve, hide, or reject shared recipes and act on reports.', href='/admin/recipes') }}
+    {{ ov_card('gauge', 'Trials and stats', 'Totals, verified accounts, and the plan breakdown.', href='/admin/stats') }}
+  </div>
+</div>
+
+<div class="stats">
+  <div class="stat">
+    <div class="label">Accounts</div>
+    <div class="value">{{ totals.accounts }}</div>
+  </div>
+  <div class="stat">
+    <div class="label">Kitchens</div>
+    <div class="value">{{ totals.kitchens }}</div>
+  </div>
+  <div class="stat">
+    <div class="label">Active paid subs</div>
+    <div class="value">{{ totals.active_subs }}</div>
+  </div>
+  <div class="stat">
+    <div class="label">Tokens ({{ totals.month }})</div>
+    <div class="value">{{ "{:,}".format(totals.month_tokens) }}</div>
+  </div>
+  <div class="stat">
+    <div class="label">Est. Gemini cost</div>
+    <div class="value">${{ totals.est_cost }}</div>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Community recipes</h2>
+  <p class="muted small">Moderation queue for shared recipes.
+    <a href="/admin/recipes">Open the moderation page</a>.</p>
+  <div class="stats">
+    <div class="stat">
+      <div class="label">Pending review</div>
+      <div class="value"><a href="/admin/recipes?status=pending">{{ recipes_summary.pending }}</a></div>
+    </div>
+    <div class="stat">
+      <div class="label">Approved</div>
+      <div class="value"><a href="/admin/recipes?status=approved">{{ recipes_summary.approved }}</a></div>
+    </div>
+    <div class="stat">
+      <div class="label">Hidden</div>
+      <div class="value"><a href="/admin/recipes?status=hidden">{{ recipes_summary.hidden }}</a></div>
+    </div>
+    <div class="stat">
+      <div class="label">Open reports</div>
+      <div class="value"><a href="/admin/recipes?status=reported">{{ recipes_summary.reported }}</a></div>
+    </div>
+  </div>
+</div>
+
+<div class="card" id="accounts">
+  <h2>Accounts</h2>
+  <form class="searchbar" method="get" action="/admin">
+    <input type="text" name="q" value="{{ q }}" placeholder="Search by email"
+           aria-label="Search accounts by email">
+    <button class="btn btn-outline" type="submit">Search</button>
+  </form>
+  {% if capped %}
+  <p class="muted small">Showing the first {{ cap }} matches. Narrow the
+  search to see the rest.</p>
+  {% endif %}
+  <div class="table-wrap">
+    <table class="admin">
+      <thead>
+        <tr>
+          <th>Email</th><th>Auth</th><th>Plan</th>
+          <th class="num">Tokens this month</th><th class="num">Kitchens</th>
+          <th>Created</th><th>Last seen</th><th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+        <tr>
+          <td><a href="/admin/accounts/{{ r.id }}">{{ r.email }}</a>
+              {% if r.verified %}<span class="badge badge-success">verified</span>{% endif %}</td>
+          <td>{{ r.auth }}</td>
+          <td>{{ r.plan }}{% if r.comp %} <span class="badge badge-primary">comp</span>{% endif %}</td>
+          <td class="num">{{ "{:,}".format(r.tokens) }}</td>
+          <td class="num">{{ r.kitchens }}</td>
+          <td>{{ r.created[:10] }}</td>
+          <td>{{ r.last_seen[:10] }}</td>
+          <td>{% if r.disabled %}<span class="badge badge-danger">disabled</span>{% endif %}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="8" class="muted">No accounts match.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Recent admin actions</h2>
+  {% if recent %}
+  <div class="table-wrap">
+    <table class="admin">
+      <thead>
+        <tr><th>When</th><th>Admin</th><th>Action</th><th>Account</th><th>Detail</th></tr>
+      </thead>
+      <tbody>
+        {% for a in recent %}
+        <tr>
+          <td>{{ a.created_at[:16].replace("T", " ") }}</td>
+          <td>{{ a.admin_email }}</td>
+          <td>{{ a.action }}</td>
+          <td><a href="/admin/accounts/{{ a.account_id }}">{{ action_emails.get(a.account_id, "#" ~ a.account_id) }}</a></td>
+          <td>{{ a.detail }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="muted">No admin actions yet.</p>
+  {% endif %}
+</div>
+{% endblock %}
