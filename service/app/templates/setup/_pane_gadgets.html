@@ -1,0 +1,420 @@
+{% from "setup/_macros.html" import info, panel, srow, toggle with context %}
+<!-- Thermometers & Sensors (FoodAssistant-mnks): the management surface for
+     the probe feature that lives day-to-day on the Timers page, plus the
+     hygrometers, door sensors, and shelf buttons that share its Bluetooth
+     reader. Renders in every mode: a sensor sits near whichever device has
+     the radio, and the Home Assistant source works anywhere. The live status,
+     device lists, and entity list are filled by static/js/setup/panes.js from
+     /gadgets/state and /gadgets/ha-entities when the pane opens.
+
+     The pane is split into sections switched by the pill row below (plain JS
+     show/hide, no server round trip; Probes opens first). Every element id and
+     onclick hook inside the sections is unchanged from the single-page layout;
+     tests/test_setup_refactor.py pins them. -->
+        <div class="tab-pane fade" id="pane-gadgets">
+          <p class="pane-intro">Bluetooth and WiFi sensors around the kitchen: cooking probes, fridge and room sensors, door sensors, and shelf buttons. Readings stay on your own network; no cloud account is involved.</p>
+
+          {# Section pills: one section shows at a time. A pill can carry a
+             small count badge (a red count of live alarms, or a muted count of
+             newly discovered devices), filled by panes.js on each state poll. #}
+          <div class="d-flex flex-wrap gap-1 mb-3" id="gadget-section-pills" aria-label="Sensor types">
+            <button type="button" class="btn btn-sm btn-outline-primary active" data-gsec="probes" onclick="gadgetsShowSection('probes')">Probes<span class="badge ms-1 d-none" id="gsec-badge-probes"></span></button>
+            <button type="button" class="btn btn-sm btn-outline-primary" data-gsec="wifi" onclick="gadgetsShowSection('wifi')">WiFi &amp; DIY<span class="badge ms-1 d-none" id="gsec-badge-wifi"></span></button>
+            <button type="button" class="btn btn-sm btn-outline-primary" data-gsec="ha" onclick="gadgetsShowSection('ha')">Home Assistant<span class="badge ms-1 d-none" id="gsec-badge-ha"></span></button>
+            <button type="button" class="btn btn-sm btn-outline-primary" data-gsec="hygro" onclick="gadgetsShowSection('hygro')">Hygrometers<span class="badge ms-1 d-none" id="gsec-badge-hygro"></span></button>
+            <button type="button" class="btn btn-sm btn-outline-primary" data-gsec="doors" onclick="gadgetsShowSection('doors')">Door sensors<span class="badge ms-1 d-none" id="gsec-badge-doors"></span></button>
+            <button type="button" class="btn btn-sm btn-outline-primary" data-gsec="buttons" onclick="gadgetsShowSection('buttons')">Shelf buttons<span class="badge ms-1 d-none" id="gsec-badge-buttons"></span></button>
+            <button type="button" class="btn btn-sm btn-outline-primary" data-gsec="stemma" onclick="gadgetsShowSection('stemma')">Accessories<span class="badge ms-1 d-none" id="gsec-badge-stemma"></span></button>
+          </div>
+
+          {# ---- Probes: the BLE cooking thermometers ---- #}
+          <div class="gadget-section" id="gadget-sec-probes">
+          <p class="pane-intro">Wireless probe thermometers show live temperatures on the Timers page and raise an on-screen alert when a probe reaches its target.{{ info('Supported probes: Inkbird, ThermoPro including the TempSpike, Combustion, Govee grill probes, and the ThermoWorks BlueDOT.') }}</p>
+
+          {% call panel('Thermometers',
+                        'The master switch for probe temperatures on the Timers page.',
+                        pill_text=('On' if s.gadgets_enabled else 'Off'),
+                        pill_kind=('good' if s.gadgets_enabled else 'neutral'),
+                        pill_id='gadgets-pill') %}
+            {% call srow('Enable thermometers', 'Adding your first thermometer below turns this on for you.') %}
+              {{ toggle('gadgets_enabled', checked=s.gadgets_enabled) }}
+            {% endcall %}
+          {% endcall %}
+
+          {% call panel('Bluetooth reader',
+                        'The reader listens for thermometers over Bluetooth on this device and reports their temperatures to the app.',
+                        pill_id='gadgets-reader-pill', pill_text='Checking') %}
+            <div class="mb-2 mt-1" id="gadgets-reader-status">
+              <span class="text-secondary small">Checking the reader…</span>
+            </div>
+
+            <!-- Setup guidance, shown only while the reader has never checked
+                 in on this device (panes.js flips it by reader_age_seconds). -->
+            <div id="gadgets-reader-help" style="display:none">
+              {% if is_pi_appliance %}
+              <div class="alert alert-secondary d-flex align-items-start gap-2" role="alert">
+                <i class="bi bi-info-circle fs-5"></i>
+                <div>
+                  This device does not have the thermometer reader turned on yet.
+                  Set it up here and thermometers in range appear below.
+                  <div class="mt-2">
+                    <button type="button" class="btn btn-outline-info btn-sm" onclick="installGadgetsReader(this)">
+                      <i class="bi bi-download me-1"></i>Set up for me
+                    </button>
+                    <div class="test-result mt-2" id="gadgets-install-result"></div>
+                  </div>
+                  <div class="small text-secondary mt-2">
+                    The reader can also be chosen at install time, or added later by
+                    running <code>sudo foodassistant-gadgets-setup</code> on the device.
+                  </div>
+                </div>
+              </div>
+              {% else %}
+              <div class="alert alert-secondary d-flex align-items-start gap-2" role="alert">
+                <i class="bi bi-info-circle fs-5"></i>
+                <div>
+                  The reader runs on the server itself and needs a Bluetooth radio
+                  there. To install it, run this on the server, in your Pantry Raider
+                  folder:
+                  <div class="font-monospace small my-2">sudo ./scripts/image-build/foodassistant-gadgets-setup</div>
+                  The <code>gadgets/README.md</code> file in that folder covers the
+                  details. No Bluetooth radio on the server? If Home Assistant
+                  already sees your thermometers, use the Home Assistant
+                  section instead; it needs no radio here.
+                </div>
+              </div>
+              {% endif %}
+            </div>
+
+            {% call srow('Your thermometers', 'Thermometers this device reads, with their latest probe readings.') %}
+              <div id="gadgets-devices"><span class="text-secondary small">Loading…</span></div>
+            {% endcall %}
+            {% call srow('Found nearby', 'Thermometers the reader can see that are not added yet.') %}
+              <div id="gadgets-discovered"><span class="text-secondary small">Loading…</span></div>
+            {% endcall %}
+            {% call srow('Add by address', 'Add a thermometer that is not in range right now, by its Bluetooth address.',
+                         'The address (like AA:BB:CC:DD:EE:FF) is usually on a sticker on the thermometer or in its phone app. For a Combustion probe, use its serial number.') %}
+              <div class="d-flex flex-column gap-2" style="max-width:420px">
+                <input type="text" class="form-control font-monospace" id="gadget-add-id" placeholder="AA:BB:CC:DD:EE:FF">
+                <input type="text" class="form-control" id="gadget-add-name" placeholder="A name for it (e.g. Grill)">
+                <select class="form-select" id="gadget-add-protocol">
+                  <option value="inkbird" selected>Inkbird (iBBQ)</option>
+                  <option value="thermopro">ThermoPro (TP25/TP27)</option>
+                  <option value="tempspike">ThermoPro TempSpike (TP96x)</option>
+                  <option value="combustion">Combustion</option>
+                  <option value="govee_grill">Govee grill (H518x)</option>
+                  <option value="bluedot">ThermoWorks BlueDOT</option>
+                </select>
+                <div>
+                  <button type="button" class="btn btn-outline-info btn-sm" onclick="gadgetsAddManual(this)">
+                    <i class="bi bi-plus-lg me-1"></i>Add thermometer
+                  </button>
+                </div>
+              </div>
+              <div class="test-result mt-2" id="gadget-add-result"></div>
+            {% endcall %}
+          {% endcall %}
+          </div>
+
+          {# ---- WiFi & DIY: ESPHome devices ---- #}
+          <div class="gadget-section d-none" id="gadget-sec-wifi">
+          {% call panel('From an ESP device',
+                        'DIY WiFi sensors built with ESPHome report straight to Pantry Raider over your network.',
+                        pill_text=('On' if s.gadget_esp_enabled else 'Off'),
+                        pill_kind=('good' if s.gadget_esp_enabled else 'neutral'),
+                        pill_id='gadgets-esp-pill') %}
+            {% call srow('Read from ESP devices', 'Adding a device below turns this on for you.',
+                         'An ESP32 or ESP8266 flashed with ESPHome (a temperature probe plus the web_server component) needs no Bluetooth radio anywhere. Great for a fridge, freezer, or room you want watched.') %}
+              {{ toggle('gadget_esp_enabled', checked=s.gadget_esp_enabled) }}
+            {% endcall %}
+            {% call srow('ESP device', 'Each sensor shows as one probe on the Timers page, targets and alerts included.',
+                         'Type the device address (an IP like 192.168.1.50 or an mDNS name like fridge.local), then Find sensors, or type the sensor id yourself.') %}
+              <div class="input-group mb-2" style="max-width:420px">
+                <input type="text" class="form-control font-monospace" id="gadget-esp-host"
+                       placeholder="192.168.1.50 or fridge.local">
+                <button type="button" class="btn btn-outline-secondary" onclick="gadgetsEspDiscover(this)">
+                  <i class="bi bi-search me-1"></i>Find sensors
+                </button>
+              </div>
+              <div class="input-group" style="max-width:420px">
+                <input type="text" class="form-control font-monospace" id="gadget-esp-sensor"
+                       list="gadget-esp-sensor-list" placeholder="fridge_temp">
+                <input type="text" class="form-control" id="gadget-esp-name" placeholder="A name for it (e.g. Fridge)">
+                <button type="button" class="btn btn-outline-info" onclick="gadgetsEspAdd(this)">
+                  <i class="bi bi-plus-lg me-1"></i>Add
+                </button>
+              </div>
+              <datalist id="gadget-esp-sensor-list"></datalist>
+              <div class="test-result mt-1" id="gadget-esp-add-result"></div>
+              <div class="mt-2" id="gadget-esp-list">
+                {% for dev in s.gadget_esp_devices %}
+                <div class="d-flex align-items-center gap-2 small mb-1">
+                  <i class="bi bi-cpu text-secondary"></i>
+                  <span>{{ dev.name or dev.sensor }}</span>
+                  <span class="font-monospace text-secondary">{{ dev.host }}/{{ dev.sensor }}</span>
+                  <button type="button" class="btn btn-outline-danger btn-sm ms-auto py-0"
+                          onclick="gadgetsEspRemove('ESP:{{ (dev.host or '')|upper }}:{{ (dev.sensor or '')|upper }}')"
+                          title="Stop reading this sensor">
+                    <i class="bi bi-trash3"></i>
+                  </button>
+                </div>
+                {% else %}
+                <span class="text-secondary small">No ESP devices added yet.</span>
+                {% endfor %}
+              </div>
+            {% endcall %}
+            <div class="form-text mt-2"><i class="bi bi-easel me-1"></i>
+              An ESP device can also carry buttons that start a kitchen timer or
+              fire an action. See the ESP devices guide in the docs for the
+              wiring and firmware.
+            </div>
+          {% endcall %}
+          </div>
+
+          {# ---- Home Assistant: HA-sourced readings ---- #}
+          <div class="gadget-section d-none" id="gadget-sec-ha">
+          {% call panel('From Home Assistant',
+                        'Read thermometers Home Assistant already sees; no radio is needed on this device.',
+                        pill_text=('On' if s.gadget_ha_enabled else 'Off'),
+                        pill_kind=('good' if s.gadget_ha_enabled else 'neutral'),
+                        pill_id='gadgets-ha-pill') %}
+            {% if not s.streamdeck_ha_token %}
+            <div class="form-text mb-2"><i class="bi bi-house-gear me-1"></i>
+              Connect Home Assistant first, under
+              <a href="#" onclick="openSettingsPane('pane-home-assistant'); return false;">Settings, Home Assistant</a>.
+            </div>
+            {% endif %}
+            {% call srow('Read from Home Assistant', 'Adding an entity below turns this on for you.',
+                         'Works with Home Assistant Bluetooth proxies too, so a probe near any proxy in the house can feed the kitchen.') %}
+              {{ toggle('gadget_ha_enabled', checked=s.gadget_ha_enabled) }}
+            {% endcall %}
+            {% call srow('Temperature entities', 'Each entity shows as one probe on the Timers page, targets and alerts included.',
+                         'Pick from the temperature sensors Home Assistant knows, or type an entity id like sensor.grill_probe_1.') %}
+              <div class="input-group" style="max-width:420px">
+                <input type="text" class="form-control font-monospace" id="gadget-ha-entity"
+                       list="gadget-ha-entity-list" placeholder="sensor.grill_probe_1">
+                <button type="button" class="btn btn-outline-info" onclick="gadgetsHaAdd(this)">
+                  <i class="bi bi-plus-lg me-1"></i>Add
+                </button>
+              </div>
+              <div class="form-check mt-1">
+                <input type="checkbox" class="form-check-input" id="gadget-ha-hide-empty"
+                       checked onchange="gadgetsHaToggleHideEmpty(this)">
+                <label class="form-check-label small text-secondary" for="gadget-ha-hide-empty">
+                  Only show sensors with a current reading
+                </label>
+              </div>
+              <datalist id="gadget-ha-entity-list"></datalist>
+              <button type="button" class="btn btn-outline-secondary btn-sm mt-2 d-none"
+                      id="gadget-ha-discover-btn" onclick="gadgetsHaToggleDiscover()">
+                <i class="bi bi-search me-1"></i>Discover grills
+              </button>
+              <div class="mt-2 d-none" id="gadget-ha-discover"></div>
+              <div class="test-result mt-1" id="gadget-ha-add-result"></div>
+              <div class="mt-2" id="gadget-ha-list">
+                {% for entity in s.gadget_ha_entities %}
+                <div class="d-flex align-items-center gap-2 small mb-1">
+                  <i class="bi bi-thermometer-half text-secondary"></i>
+                  <span class="font-monospace">{{ entity }}</span>
+                  <button type="button" class="btn btn-outline-danger btn-sm ms-auto py-0"
+                          onclick="gadgetsHaRemove('{{ entity }}')" title="Stop reading this entity">
+                    <i class="bi bi-trash3"></i>
+                  </button>
+                </div>
+                {% else %}
+                <span class="text-secondary small">No entities added yet.</span>
+                {% endfor %}
+              </div>
+            {% endcall %}
+          {% endcall %}
+          </div>
+
+          {# ---- Hygrometers ---- #}
+          <div class="gadget-section d-none" id="gadget-sec-hygro">
+          {% call panel('Hygrometers',
+                        'Temperature and humidity sensors for a fridge, freezer, pantry, or room.',
+                        pill_text=('On' if s.hygrometers_enabled else 'Off'),
+                        pill_kind=('good' if s.hygrometers_enabled else 'neutral'),
+                        pill_id='hygro-pill') %}
+            {% call srow('Enable hygrometers', 'Adding your first hygrometer below turns this on for you.',
+                         'Supported sensors: Govee H5075 and H5074, Xiaomi LYWSD03MMC with the ATC firmware, SwitchBot Meter, and Inkbird IBS-TH. A separate class from the cooking probes: they show in their own block on the Time & Temp page.') %}
+              {{ toggle('hygrometers_enabled', checked=s.hygrometers_enabled) }}
+            {% endcall %}
+            {% call srow('Your hygrometers', 'Sensors this device reads, with their latest temperature and humidity.',
+                         'Give each one a location like Fridge or Freezer, and a normal range: a reading outside it for longer than the grace period raises an on-screen alarm that clears when it recovers.') %}
+              <div id="hygro-devices"><span class="text-secondary small">Loading…</span></div>
+            {% endcall %}
+            {% call srow('Found nearby', 'Hygrometers the reader can see that are not added yet.',
+                         'Uses the same Bluetooth reader as the thermometers in the Probes section.') %}
+              <div id="hygro-discovered"><span class="text-secondary small">Loading…</span></div>
+            {% endcall %}
+            {% call srow('Add by address', 'Add a hygrometer that is not in range right now, by its Bluetooth address.',
+                         'A Xiaomi LYWSD03MMC must run the community ATC firmware; the stock firmware\'s broadcasts are encrypted and cannot be read.') %}
+              <div class="d-flex flex-column gap-2" style="max-width:420px">
+                <input type="text" class="form-control font-monospace" id="hygro-add-id" placeholder="AA:BB:CC:DD:EE:FF">
+                <input type="text" class="form-control" id="hygro-add-name" placeholder="A name for it (e.g. Garage fridge)">
+                <input type="text" class="form-control" id="hygro-add-location" list="hygro-location-list" placeholder="Location (e.g. Fridge)">
+                <select class="form-select" id="hygro-add-protocol">
+                  <option value="govee_hygro" selected>Govee (H5075 / H5074)</option>
+                  <option value="xiaomi_atc">Xiaomi LYWSD03MMC (ATC firmware)</option>
+                  <option value="switchbot_meter">SwitchBot Meter</option>
+                  <option value="inkbird_hygro">Inkbird IBS-TH1 / IBS-TH2</option>
+                </select>
+                <div>
+                  <button type="button" class="btn btn-outline-info btn-sm" onclick="hygroAddManual(this)">
+                    <i class="bi bi-plus-lg me-1"></i>Add hygrometer
+                  </button>
+                </div>
+              </div>
+              <datalist id="hygro-location-list">
+                <option value="Fridge"></option>
+                <option value="Freezer"></option>
+                <option value="Pantry"></option>
+                <option value="Room"></option>
+              </datalist>
+              <div class="test-result mt-2" id="hygro-add-result"></div>
+            {% endcall %}
+            {% call srow('From Home Assistant', 'Read a fridge or room sensor Home Assistant already sees.',
+                         'Pick its temperature entity, and its humidity entity if it has one.') %}
+              <div class="d-flex flex-column gap-2" style="max-width:420px">
+                <input type="text" class="form-control font-monospace" id="hygro-ha-temp"
+                       list="hygro-ha-temp-list" placeholder="sensor.fridge_temperature">
+                <input type="text" class="form-control font-monospace" id="hygro-ha-hum"
+                       list="hygro-ha-hum-list" placeholder="sensor.fridge_humidity (optional)">
+                <div class="input-group">
+                  <input type="text" class="form-control" id="hygro-ha-name" placeholder="A name for it (e.g. Fridge)">
+                  <button type="button" class="btn btn-outline-info" onclick="hygroHaAdd(this)">
+                    <i class="bi bi-plus-lg me-1"></i>Add
+                  </button>
+                </div>
+              </div>
+              <datalist id="hygro-ha-temp-list"></datalist>
+              <datalist id="hygro-ha-hum-list"></datalist>
+              <div class="test-result mt-1" id="hygro-ha-add-result"></div>
+              <div class="mt-2" id="hygro-ha-list">
+                <span class="text-secondary small">No Home Assistant hygrometers added yet.</span>
+              </div>
+            {% endcall %}
+          {% endcall %}
+          </div>
+
+          {# ---- Door sensors ---- #}
+          <div class="gadget-section d-none" id="gadget-sec-doors">
+          {% call panel('Door sensors',
+                        'A small magnet sensor on the fridge or freezer door: leave the door open past its limit and every screen in the kitchen says so.',
+                        pill_text=('On' if s.contacts_enabled else 'Off'),
+                        pill_kind=('good' if s.contacts_enabled else 'neutral'),
+                        pill_id='contacts-pill') %}
+            {% call srow('Enable door sensors', 'Adding your first sensor below turns this on for you.',
+                         'Works with sensors that broadcast BTHome (Shelly BLU Door/Window and friends), the SwitchBot Contact Sensor, and unencrypted Xiaomi door sensors. Uses the same Bluetooth reader as the thermometers in the Probes section. The alarm clears itself when the door closes.') %}
+              {{ toggle('contacts_enabled', checked=s.contacts_enabled) }}
+            {% endcall %}
+            {% call srow('Your door sensors', 'Sensors this device reads, with their open or closed state.',
+                         'Give each one a location like Fridge or Freezer, and set how long the door may stay open before the alarm.') %}
+              <div id="contact-devices"><span class="text-secondary small">Loading…</span></div>
+            {% endcall %}
+            {% call srow('Found nearby', 'Door sensors the reader can see that are not added yet.',
+                         'Open or close the door once if a sensor is not showing; many only broadcast on a change.') %}
+              <div id="contact-discovered"><span class="text-secondary small">Loading…</span></div>
+            {% endcall %}
+            {% call srow('Add by address', 'Add a door sensor that is not in range right now, by its Bluetooth address.',
+                         'A Xiaomi door sensor that has been paired to the Mi Home app encrypts its broadcasts and cannot be read; most current Xiaomi models do this out of the box.') %}
+              <div class="d-flex flex-column gap-2" style="max-width:420px">
+                <input type="text" class="form-control font-monospace" id="contact-add-id" placeholder="AA:BB:CC:DD:EE:FF">
+                <input type="text" class="form-control" id="contact-add-name" placeholder="A name for it (e.g. Freezer door)">
+                <input type="text" class="form-control" id="contact-add-location" list="hygro-location-list" placeholder="Location (e.g. Freezer)">
+                <select class="form-select" id="contact-add-protocol">
+                  <option value="bthome_contact" selected>BTHome (Shelly BLU Door/Window)</option>
+                  <option value="switchbot_contact">SwitchBot Contact Sensor</option>
+                  <option value="xiaomi_contact">Xiaomi door sensor (unencrypted)</option>
+                </select>
+                <div>
+                  <button type="button" class="btn btn-outline-info btn-sm" onclick="contactAddManual(this)">
+                    <i class="bi bi-plus-lg me-1"></i>Add door sensor
+                  </button>
+                </div>
+              </div>
+              <div class="test-result mt-2" id="contact-add-result"></div>
+            {% endcall %}
+          {% endcall %}
+          </div>
+
+          {# ---- Shelf buttons ---- #}
+          <div class="gadget-section d-none" id="gadget-sec-buttons">
+          {% call panel('Shelf buttons',
+                        'Stick-anywhere Bluetooth buttons for the pantry: press one and its mapped item lands on the shopping list, or a mapped action fires.',
+                        pill_text=('On' if s.buttons_enabled else 'Off'),
+                        pill_kind=('good' if s.buttons_enabled else 'neutral'),
+                        pill_id='buttons-pill') %}
+            {% call srow('Enable buttons', 'Adding your first button below turns this on for you.',
+                         'Works with buttons that broadcast BTHome (Shelly BLU Button1 and friends, or a DIY ESPHome button) and unencrypted Xiaomi Bluetooth switches. Uses the same Bluetooth reader as the thermometers in the Probes section.') %}
+              {{ toggle('buttons_enabled', checked=s.buttons_enabled) }}
+            {% endcall %}
+            {% call srow('Your buttons', 'Each button maps its single, double, and long press to a shopping-list add or an action.',
+                         'Use Try it to test a mapping without pressing the button.') %}
+              <div id="button-devices"><span class="text-secondary small">Loading…</span></div>
+            {% endcall %}
+            {% call srow('Add a button', 'Press any button on the device and it appears here within a few seconds, ready to add and name.',
+                         'A button only broadcasts when pressed, so pressing it is how the reader finds it. A Xiaomi switch that has been paired to the Mi Home app encrypts its presses and cannot be read.') %}
+              <div class="mb-2">
+                <button type="button" class="btn btn-outline-info btn-sm" id="button-capture-btn"
+                        onclick="buttonsStartCapture(this)">
+                  <i class="bi bi-broadcast me-1"></i>Listen for a press
+                </button>
+                <span class="text-secondary small ms-2" id="button-capture-hint"></span>
+              </div>
+              <div id="button-discovered"><span class="text-secondary small">Loading…</span></div>
+              <div class="test-result mt-2" id="button-add-result"></div>
+            {% endcall %}
+            <datalist id="button-product-list"></datalist>
+          {% endcall %}
+          </div>
+
+          {# ---- Plug-in accessories: STEMMA QT / Qwiic (FoodAssistant-etsc) ---- #}
+          <div class="gadget-section d-none" id="gadget-sec-stemma">
+          {% call panel('Plug-in accessories (STEMMA QT / Qwiic)',
+                        'Solder-free boards that plug into this device with one cable: a four-key pad that switches what a barcode scan does, and more to come.',
+                        pill_text=('On' if s.stemma_enabled else 'Off'),
+                        pill_kind=('good' if s.stemma_enabled else 'neutral'),
+                        pill_id='stemma-pill') %}
+            {% call srow('Enable accessories', 'Adding your first accessory below turns this on for you.',
+                         'STEMMA QT (Adafruit) and Qwiic (SparkFun) are the same connector, so boards from either one work. They plug into this device directly, so they are found by this device, not over Bluetooth. See the hardware guide for which port to use.') %}
+              {{ toggle('stemma_enabled', checked=s.stemma_enabled) }}
+            {% endcall %}
+            <div class="mb-2 mt-1" id="stemma-status"></div>
+            {% call srow('Your accessories', 'Boards plugged into this device, and what each one does.',
+                         'A NeoKey lights the key for whatever the scanner is set to right now, and follows along when you change the mode somewhere else.') %}
+              <div id="stemma-devices"><span class="text-secondary small">Loading…</span></div>
+            {% endcall %}
+            {% call srow('Found plugged in', 'Boards on the connector that are not added yet.',
+                         'Plug a board in and it appears here within a minute. Boards without support yet are listed too, so you can tell a missing driver from a bad cable.') %}
+              <div id="stemma-discovered"><span class="text-secondary small">Loading…</span></div>
+            {% endcall %}
+            {% call srow('Key color', 'What the keys glow when you are not at the Manage screen.',
+                         'At the Manage screen the keys take on the colors of the on-screen tiles, so you can match a key to what it does. Everywhere else there is nothing to match, and this one color simply says the pad is awake. The key for the current mode always sits brighter than the rest.') %}
+              <div class="d-flex align-items-center gap-2">
+                <input type="color" class="form-control form-control-color" id="neokey_rest_color"
+                       name="neokey_rest_color" value="{{ s.neokey_rest_color or '#F2006E' }}"
+                       aria-label="Resting key color">
+                <button type="button" class="btn btn-outline-secondary btn-sm"
+                        onclick="document.getElementById('neokey_rest_color').value = '#F2006E'">Pantry Raider pink</button>
+              </div>
+            {% endcall %}
+            {% call srow('Timer color', 'The countdown bar, and the flash when time is up.',
+                         'While a timer runs the four keys become one bar that empties from the top down. When it finishes, the whole pad flashes in this color until you deal with it.') %}
+              <div class="d-flex align-items-center gap-2">
+                <input type="color" class="form-control form-control-color" id="neokey_timer_color"
+                       name="neokey_timer_color" value="{{ s.neokey_timer_color or '#FF0000' }}"
+                       aria-label="Timer color">
+                <button type="button" class="btn btn-outline-secondary btn-sm"
+                        onclick="document.getElementById('neokey_timer_color').value = '#FF0000'">Red</button>
+              </div>
+            {% endcall %}
+          {% endcall %}
+          </div>
+
+          <button type="button" class="btn btn-outline-info btn-sm" onclick="savePaneGadgets(this)">
+            <i class="bi bi-check-lg me-1"></i>Save Thermometers &amp; Sensors
+          </button>
+          <div class="test-result mt-2 mb-3" id="gadgets-save-result"></div>
+        </div>
