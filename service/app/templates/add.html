@@ -1,0 +1,489 @@
+{% extends "base.html" %}
+{% block title %}Manage Pantry: Pantry Raider{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center my-3">
+  <h4 class="mb-0"><i class="bi bi-plus-circle me-2"></i>Manage Pantry</h4>
+  <button class="btn btn-outline-secondary btn-sm" data-bs-toggle="modal" data-bs-target="#qrModal"
+          id="openOnPhoneBtn" title="Show a QR code that opens this page on your phone">
+    <i class="bi bi-qr-code me-1"></i>Open on phone
+  </button>
+</div>
+
+{% if demo_mode %}
+{# In the read-only demo, scanning and adding are turned off (the middleware
+   blocks the writes). Say so plainly instead of leaving buttons that just fail. #}
+<div class="alert alert-secondary py-2 small d-flex align-items-center">
+  <i class="bi bi-eye me-2"></i>
+  You are browsing the demo. Adding and consuming stock are turned off here, but
+  feel free to look around.
+</div>
+{% endif %}
+
+<!-- Mode selector: these tiles ARE the shared scanner mode. Picking one changes
+     the mode for every scanner on the network (USB wedge, Stream Deck key, this
+     page), and the page follows along when the mode is changed elsewhere. Each
+     tile leads with the same word the Stream Deck key face shows for the mode
+     (Stock, Use, Shop, Audit), so the two surfaces read as one control.
+
+     This is the hero of the page: a big, touch-friendly grid (2 across on a
+     phone, 4 across on the kiosk panel) so the active mode reads at a glance and
+     is unmistakable, because it decides what every scan does. -->
+<style>
+  /* Scoped to Manage Pantry. kiosk.css and the shared theme are owned
+     elsewhere, so page-specific styling lives here. */
+  #modeSelector {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.75rem;
+  }
+  @media (min-width: 768px) {
+    #modeSelector { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  }
+  .mode-tile {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: 0.35rem;
+    padding: 1rem 0.75rem;
+    min-height: 132px;
+    border: 2px solid var(--bs-border-color);
+    border-radius: 0.9rem;
+    background: var(--bs-tertiary-bg, rgba(255, 255, 255, 0.03));
+    color: var(--bs-body-color);
+    transition: border-color 0.15s, background 0.15s, transform 0.05s;
+    cursor: pointer;
+  }
+  /* Each tile carries its scanner-mode color, the same colors the NeoKey LEDs
+     use (services/stemma.py MODE_COLORS), so the on-screen selector and the
+     physical keys read as one control. */
+  #mode-tab-inventory { --mode-color: #00c853; }  /* green: stocking up */
+  #mode-tab-consume   { --mode-color: #ff9100; }  /* amber: using up */
+  #mode-tab-shopping  { --mode-color: #0091ff; }  /* blue: the shopping list */
+  #mode-tab-audit     { --mode-color: #aa00ff; }  /* purple: counting only */
+  .mode-tile { border-color: color-mix(in srgb, var(--mode-color) 42%, var(--bs-border-color)); }
+  .mode-tile:hover { border-color: var(--mode-color); }
+  .mode-tile:active { transform: scale(0.98); }
+  .mode-tile:focus-visible {
+    outline: 2px solid var(--mode-color);
+    outline-offset: 2px;
+  }
+  .mode-tile .mode-tile-icon { font-size: 1.9rem; line-height: 1; color: var(--mode-color); }
+  .mode-tile .mode-tile-label { font-weight: 600; font-size: 1.05rem; }
+  .mode-tile .mode-tile-desc {
+    font-size: 0.8rem;
+    color: var(--bs-secondary-color);
+    line-height: 1.2;
+  }
+  /* The active mode is the one every scan obeys, so make it unmistakable. */
+  .mode-tile.active {
+    border-color: var(--mode-color);
+    background: color-mix(in srgb, var(--mode-color) 20%, transparent);
+    box-shadow: 0 0 0 1px var(--mode-color) inset;
+  }
+  .mode-tile.active .mode-tile-icon,
+  .mode-tile.active .mode-tile-label { color: var(--mode-color); }
+  .mode-tile.active .mode-tile-desc { color: var(--bs-body-color); }
+  .mode-tile .mode-tile-check { display: none; }
+  .mode-tile.active .mode-tile-check {
+    display: inline-block;
+    color: var(--mode-color);
+    font-size: 0.85rem;
+  }
+  /* A quick bounce on the tile that just became active, so a mode change reads
+     at a glance (respecting reduced-motion). */
+  @keyframes mode-bounce {
+    0%   { transform: scale(1); }
+    30%  { transform: scale(1.09); }
+    55%  { transform: scale(0.96); }
+    75%  { transform: scale(1.03); }
+    100% { transform: scale(1); }
+  }
+  .mode-tile.mode-bounce { animation: mode-bounce 0.45s ease; }
+  @media (prefers-reduced-motion: reduce) {
+    .mode-tile.mode-bounce { animation: none; }
+  }
+</style>
+{% if has_neokey %}
+<!-- This device has a NeoKey pad beside the screen (FoodAssistant-3alc): mark
+     the page so the kiosk layout can stand the mode tiles up as a column on the
+     right edge, lined up with the physical keys. Set before the tiles lay out
+     so there is no flash of the wide grid; the actual column rules live in
+     kiosk.css, so a phone browsing this same page keeps the normal grid. -->
+<script>document.documentElement.classList.add('pr-neokey');</script>
+{% endif %}
+<div id="modeSelector" role="radiogroup" aria-label="Scanner mode" class="mb-3">
+  <button type="button" class="mode-tile active" id="mode-tab-inventory"
+          role="radio" aria-checked="true" onclick="selectMode('inventory')">
+    <i class="bi bi-plus-circle mode-tile-icon"></i>
+    <span class="mode-tile-label">Stock up <i class="bi bi-check-circle-fill mode-tile-check"></i></span>
+    <span class="mode-tile-desc">Each scan adds the item to your import queue</span>
+  </button>
+  <button type="button" class="mode-tile" id="mode-tab-consume"
+          role="radio" aria-checked="false" onclick="selectMode('consume')">
+    <i class="bi bi-dash-circle mode-tile-icon"></i>
+    <span class="mode-tile-label">Use stock <i class="bi bi-check-circle-fill mode-tile-check"></i></span>
+    <span class="mode-tile-desc">Each scan takes one off your stock</span>
+  </button>
+  <button type="button" class="mode-tile" id="mode-tab-shopping"
+          role="radio" aria-checked="false" onclick="selectMode('shopping')">
+    <i class="bi bi-cart-plus mode-tile-icon"></i>
+    <span class="mode-tile-label">Shopping list <i class="bi bi-check-circle-fill mode-tile-check"></i></span>
+    <span class="mode-tile-desc">Each scan goes onto your shopping list</span>
+  </button>
+  <button type="button" class="mode-tile" id="mode-tab-audit"
+          role="radio" aria-checked="false" onclick="selectMode('audit')">
+    <i class="bi bi-clipboard-check mode-tile-icon"></i>
+    <span class="mode-tile-label">Audit stock <i class="bi bi-check-circle-fill mode-tile-check"></i></span>
+    <span class="mode-tile-desc">Count one location, nothing is changed</span>
+  </button>
+</div>
+
+<!-- Scanner-live banner (FoodAssistant-x61t): while this page is open it holds
+     the scan session alive, so a serial (UART) scanner reads continuously. The
+     banner makes that visible and names the active mode; leaving the page stops
+     the session and the scanner goes dark. Shown once a heartbeat confirms the
+     session is live. -->
+<div id="scanner-live-banner" class="alert alert-success py-1 px-2 small d-none d-flex align-items-center mb-2">
+  <i class="bi bi-upc-scan me-2"></i>
+  <span>Scanner live in <strong id="scanner-live-mode">Stock up</strong> mode &middot; leave to stop</span>
+</div>
+
+<!-- Kiosk hint: shown on an attached kiosk screen, where the USB scanner is
+     the input and there is no camera or file picker. -->
+<div id="kiosk-scan-hint" class="alert alert-info py-2 small d-none">
+  <i class="bi bi-upc-scan me-1"></i>
+  Scan with the barcode scanner, or tap <strong>Open on phone</strong> to use your phone's camera.
+</div>
+
+<!-- ============================= Stock up ============================= -->
+<div id="mode-pane-inventory">
+
+<!-- Input-method tabs (within Stock up): barcode, photo, manual -->
+<ul class="nav nav-tabs mb-3" id="inputTabs">
+  <li class="nav-item">
+    <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tab-barcode">
+      <i class="bi bi-upc-scan me-1"></i>Barcode
+    </button>
+  </li>
+  {% if ai_configured %}
+  <li class="nav-item" id="photoTabItem">
+    <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-photo">
+      <i class="bi bi-camera me-1"></i>Photo / Receipt
+    </button>
+  </li>
+  {% endif %}
+  <li class="nav-item">
+    <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-manual">
+      <i class="bi bi-pencil me-1"></i>Manual
+    </button>
+  </li>
+</ul>
+
+<div class="tab-content">
+
+  <!-- Barcode Tab -->
+  <div class="tab-pane fade show active" id="tab-barcode">
+    <div class="row g-3">
+      <div class="col-md-6" id="camera-scan-card">
+        <div class="card">
+          <div class="card-body">
+            <h6 class="card-title">Camera Scanner</h6>
+            <div id="scanner-container" style="width:100%; max-width:400px; margin:0 auto;">
+              <div id="reader" style="width:100%"></div>
+            </div>
+            <div class="mt-2 d-flex gap-2 flex-wrap">
+              <button class="btn btn-primary" id="startScanBtn" onclick="startScanner()">
+                <i class="bi bi-camera-video me-1"></i>Start Camera
+              </button>
+              <button class="btn btn-secondary d-none" id="stopScanBtn" onclick="stopScanner()">
+                <i class="bi bi-stop-circle me-1"></i>Stop
+              </button>
+              <button class="btn btn-outline-primary" onclick="document.getElementById('barcodePhotoInput').click()">
+                <i class="bi bi-camera me-1"></i>Snap Barcode Photo
+              </button>
+              <input type="file" id="barcodePhotoInput" accept="image/*" capture="environment"
+                     class="d-none" onchange="decodeBarcodePhoto(this)">
+            </div>
+            <div class="form-text mt-1">
+              Live scanning requires HTTPS. On HTTP use "Snap Barcode Photo" instead.
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="col-md-6">
+        <div class="card">
+          <div class="card-body">
+            <h6 class="card-title">Enter Barcode Manually</h6>
+            <div class="input-group">
+              <input type="text" id="barcodeInput" class="form-control" placeholder="e.g. 049000028935"
+                     inputmode="numeric" pattern="[0-9]*"
+                     onkeydown="if(event.key==='Enter'){event.preventDefault();lookupBarcode();}">
+              <button class="btn btn-primary" onclick="lookupBarcode()">
+                <i class="bi bi-search me-1"></i>Look Up
+              </button>
+            </div>
+            <div class="form-text">UPC-A, EAN-13, or EAN-8</div>
+            <div id="barcode-status" class="mt-2"></div>
+            <div id="barcode-saved-count" class="mt-2 d-none">
+              <span class="badge bg-success" id="barcode-saved-badge">0</span>
+              saved to
+              <a href="ui/pending">Pending</a>: review and import from there.
+            </div>
+            <!-- Live scan list (FoodAssistant-x61t): each scan appends here the
+                 instant it is stored ("Saved, looking up..."), then the row
+                 updates in place to the product name once the background lookup
+                 lands. No page reload, so a continuous scan just keeps stacking
+                 up rows. -->
+            <ul class="list-group list-group-flush mt-2 d-none" id="scan-live-list"></ul>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Photo Tab (AI vision only; hidden when no AI provider is configured) -->
+  {% if ai_configured %}
+  <div class="tab-pane fade" id="tab-photo">
+    <div class="card">
+      <div class="card-body">
+        <div id="drop-zone" class="border border-2 border-dashed rounded p-4 text-center mb-3"
+             style="cursor:pointer; transition: border-color 0.2s;"
+             ondragover="event.preventDefault(); this.style.borderColor='#0d6efd'"
+             ondragleave="this.style.borderColor=''"
+             ondrop="handleDrop(event)">
+          <i class="bi bi-cloud-upload fs-2 d-block mb-2 text-muted"></i>
+          <div>Drag &amp; drop an image here, or <a href="#" onclick="document.getElementById('photoInput').click(); return false">browse</a></div>
+          <div class="text-muted small mt-1">Supports food and receipt photos: JPG, PNG, WEBP</div>
+          <input type="file" id="photoInput" accept="image/*" class="d-none" onchange="handleFileSelect(this)">
+        </div>
+
+        <div id="photo-preview" class="d-none mb-3 text-center">
+          <img id="preview-img" src="" alt="Selected photo preview" class="img-fluid rounded" style="max-height:250px">
+        </div>
+
+        <div class="d-flex gap-2 align-items-center">
+          <div class="form-check form-check-inline">
+            <input class="form-check-input" type="radio" name="photoType" id="typeFood" value="food" checked>
+            <label class="form-check-label" for="typeFood">Food Photo</label>
+          </div>
+          <div class="form-check form-check-inline">
+            <input class="form-check-input" type="radio" name="photoType" id="typeReceipt" value="receipt">
+            <label class="form-check-label" for="typeReceipt">Receipt</label>
+          </div>
+          <button class="btn btn-primary ms-auto" id="analyzeBtn" onclick="analyzePhoto()" disabled>
+            <i class="bi bi-magic me-1"></i>Analyze
+          </button>
+        </div>
+
+        <div id="photo-status" class="mt-2"></div>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Manual Tab -->
+  <div class="tab-pane fade" id="tab-manual">
+    <div class="card">
+      <div class="card-body">
+        <div class="row g-3">
+          <div class="col-md-6">
+            <label class="form-label">Name <span class="text-danger">*</span></label>
+            <input type="text" id="manual-name" class="form-control" placeholder="e.g. Chicken Breast">
+          </div>
+          <div class="col-md-3">
+            <label class="form-label">Quantity</label>
+            <input type="number" id="manual-qty" class="form-control" value="1" min="0.1" step="0.1">
+          </div>
+          <div class="col-md-3">
+            <label class="form-label">Unit</label>
+            <input type="text" id="manual-unit" class="form-control" value="item">
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">Category</label>
+            <select id="manual-category" class="form-select">
+              {% for cat in ['Poultry','Meat','Seafood','Dairy','Produce','Grains','Condiments','Beverages','Snacks','Frozen','Canned','Other'] %}
+              <option>{{ cat }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">Storage</label>
+            <select id="manual-storage" class="form-select">
+              <option value="refrigerated">Refrigerated</option>
+              <option value="frozen">Frozen</option>
+              <option value="room_temp">Room Temp</option>
+              <option value="dry">Dry</option>
+            </select>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">Best By Date</label>
+            <input type="date" id="manual-bestby" class="form-control">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">Brand</label>
+            <input type="text" id="manual-brand" class="form-control">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">Notes</label>
+            <input type="text" id="manual-notes" class="form-control">
+          </div>
+          <div class="col-12">
+            {% if not demo_mode %}
+            <button class="btn btn-primary" onclick="addManualItem()">
+              <i class="bi bi-plus-lg me-1"></i>Add to Queue
+            </button>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /tab-content -->
+
+<!-- Results Queue -->
+<div id="results-section" class="d-none mt-4">
+  <div class="d-flex justify-content-between align-items-center mb-2">
+    <h5 class="mb-0">
+      <i class="bi bi-basket me-2"></i>Import Queue
+      <span class="badge bg-primary ms-1" id="queue-count">0</span>
+    </h5>
+    <div class="d-flex gap-2">
+      <button class="btn btn-outline-secondary" onclick="clearQueue()">
+        <i class="bi bi-x-circle me-1"></i>Clear All
+      </button>
+      {% if not demo_mode %}
+      <button class="btn btn-success" onclick="importAll()">
+        <i class="bi bi-cloud-upload me-1"></i>Import All to Grocy
+      </button>
+      {% endif %}
+    </div>
+  </div>
+  <div id="results-list"></div>
+  <div id="import-status" class="mt-2"></div>
+</div>
+
+</div><!-- /mode-pane-inventory -->
+
+<!-- ============================= Use stock ============================= -->
+<div id="mode-pane-consume" class="d-none">
+  <div class="card">
+    <div class="card-body">
+      <h6 class="card-title">Use stock</h6>
+      <p class="text-muted small mb-2">
+        Scan an item to use it up: each scan takes one off your Grocy stock.
+        You can also type the barcode below.
+      </p>
+      <div class="input-group" style="max-width:400px;">
+        <input type="text" id="consumeInput" class="form-control" placeholder="Barcode"
+               inputmode="numeric" pattern="[0-9]*"
+               onkeydown="if(event.key==='Enter'){event.preventDefault();consumeScan();}">
+        {% if not demo_mode %}
+        <button class="btn btn-primary" onclick="consumeScan()">
+          <i class="bi bi-dash-circle me-1"></i>Consume
+        </button>
+        {% endif %}
+      </div>
+      <div id="consume-status" class="mt-2"></div>
+      <ul class="list-group list-group-flush mt-2 d-none" id="consume-recent"></ul>
+    </div>
+  </div>
+</div>
+
+<!-- ============================ Shopping list ============================ -->
+<div id="mode-pane-shopping" class="d-none">
+  <div class="card">
+    <div class="card-body">
+      <h6 class="card-title">Shopping list</h6>
+      <p class="text-muted small mb-2">
+        Scan an item to put it on your shopping list, type a barcode,
+        or add any item by name.
+      </p>
+      <div class="row g-3">
+        <div class="col-md-6">
+          <label class="form-label small" for="shoppingBarcodeInput">By barcode</label>
+          <div class="input-group">
+            <input type="text" id="shoppingBarcodeInput" class="form-control" placeholder="Barcode"
+                   inputmode="numeric" pattern="[0-9]*"
+                   onkeydown="if(event.key==='Enter'){event.preventDefault();shoppingScan();}">
+            <button class="btn btn-primary" onclick="shoppingScan()">
+              <i class="bi bi-cart-plus me-1"></i>Add
+            </button>
+          </div>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label small" for="shoppingNameInput">By name</label>
+          <div class="input-group">
+            <input type="text" id="shoppingNameInput" class="form-control" placeholder="e.g. Olive oil"
+                   list="shoppingNameSuggestions" autocomplete="off"
+                   oninput="shoppingSuggest(this.value)"
+                   onkeydown="if(event.key==='Enter'){event.preventDefault();addShoppingByName();}">
+            <datalist id="shoppingNameSuggestions"></datalist>
+            <button class="btn btn-primary" onclick="addShoppingByName()">
+              <i class="bi bi-plus-lg me-1"></i>Add
+            </button>
+          </div>
+        </div>
+      </div>
+      <div id="shopping-status" class="mt-2"></div>
+      <ul class="list-group list-group-flush mt-2 d-none" id="shopping-recent"></ul>
+      <div class="form-text mt-2">
+        See the full list on the <a href="ui/shopping">Shopping</a> page.
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================ Audit stock ============================ -->
+<div id="mode-pane-audit" class="d-none">
+  <div class="card">
+    <div class="card-body">
+      <h6 class="card-title">Audit stock</h6>
+      <div id="audit-inactive" class="d-none">
+        <p class="text-muted small mb-2">
+          An audit is a read-only stock count for one storage location: scan
+          everything on the shelf and see what matches, what is missing, and
+          what does not belong. Nothing is written back to Grocy.
+        </p>
+        <a class="btn btn-primary" href="ui/audit">
+          <i class="bi bi-clipboard-check me-1"></i>Pick a location and start
+        </a>
+      </div>
+      <div id="audit-active" class="d-none">
+        <p class="mb-2">
+          Counting <strong id="audit-location"></strong>:
+          <span id="audit-counts" class="text-muted small"></span>
+        </p>
+        <div class="input-group" style="max-width:400px;">
+          <input type="text" id="auditInput" class="form-control" placeholder="Barcode"
+                 inputmode="numeric" pattern="[0-9]*"
+                 onkeydown="if(event.key==='Enter'){event.preventDefault();auditScan();}">
+          <button class="btn btn-primary" onclick="auditScan()">
+            <i class="bi bi-upc-scan me-1"></i>Record
+          </button>
+        </div>
+        <div id="audit-scan-status" class="mt-2"></div>
+        <a class="btn btn-outline-secondary btn-sm mt-2" href="ui/audit">
+          <i class="bi bi-clipboard-check me-1"></i>Open the full audit view
+        </a>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<!-- The page logic (mode tiles, scan routing, queue, camera hooks) lives in
+     static/js/manage-pantry.js, not inline: the browser caches it immutably
+     (?v= busted) and keeps its compiled bytecode across kiosk reloads, and the
+     HTML rendered and gzipped per request shrinks by ~28KB. This page was the
+     slowest kiosk load (FoodAssistant-3c7k); the 367KB camera decoder is
+     already lazy-loaded from inside that file for the same reason. The config
+     div carries the only two server-rendered values the script needs. -->
+<div id="manage-pantry-config"
+     data-printing="{{ '1' if printing_enabled else '0' }}"
+     data-version="{{ app_version }}" hidden></div>
+<script src="static/js/manage-pantry.js?v={{ app_version }}"></script>
+{% endblock %}
