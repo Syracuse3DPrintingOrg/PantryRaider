@@ -1,0 +1,117 @@
+# Bandit Cub on your own board: the YAML escape hatch.
+#
+# Copy this file, fill in your board and display, and build it with your own
+# ESPHome dashboard or CLI. The pantry_raider component gives you the same
+# hub, sensors, pairing flow, and actions the prebuilt Cubs use; only the
+# hardware wiring is yours to write.
+#
+# The pinned source below fetches the component from the public repo. If you
+# are building from a checkout of this repository, swap it for:
+#   external_components:
+#     - source:
+#         type: local
+#         path: components
+#       components: [pantry_raider]
+
+substitutions:
+  name: my-cub
+  friendly_name: My Cub
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+
+# Your board here.
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+
+external_components:
+  - source: github://Syracuse3DPrintingOrg/PantryRaider@main
+    components: [pantry_raider]
+
+logger:
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap: {}
+
+captive_portal:
+
+api:
+  reboot_timeout: 0s
+
+ota:
+  - platform: esphome
+
+time:
+  - platform: sntp
+    id: sntp_time
+
+http_request:
+  id: pr_http
+  timeout: 10s
+  verify_ssl: false
+
+pantry_raider:
+  id: pantry
+  # Leave server empty to discover it over mDNS, or pin it:
+  # server: 192.168.1.170
+  server: ""
+  port: 9284
+  # Leave the key empty to pair from the screen (show pairing_line() on your
+  # display), or mint a key on the server's Security pane and paste it here.
+  api_key: ""
+  profile: custom
+  device_name: ${friendly_name}
+
+# Every one of these is optional; each becomes a Home Assistant entity too.
+sensor:
+  - platform: pantry_raider
+    expiring_soon:
+      name: Expiring soon
+    active_timers:
+      name: Active timers
+
+text_sensor:
+  - platform: pantry_raider
+    view:
+      name: View
+    next_timer:
+      name: Next timer
+    pairing_code:
+      name: Pairing code
+
+# A physical button that starts a shared kitchen timer (press again to add a
+# minute, hold to cancel), using the same action names as docs/esp-devices.md.
+binary_sensor:
+  - platform: gpio
+    pin:
+      number: GPIO5
+      inverted: true
+      mode:
+        input: true
+        pullup: true
+    name: Timer button
+    on_multi_click:
+      - timing:
+          - ON for at most 0.6s
+          - OFF for at least 0.1s
+        then:
+          - pantry_raider.press:
+              button: timer_eggs
+      - timing:
+          - ON for at least 1s
+        then:
+          - pantry_raider.press:
+              button: timer_eggs
+              long: true
+
+# Your display here. Everything the hub knows is available in the lambda:
+#   id(pantry)->state()            parsed /cub/summary (timers, expiring, probes)
+#   id(pantry)->effective_view()   what to show right now
+#   id(pantry)->pairing_line()     "Pair me: code 1234" during pairing
+#   id(pantry)->format_remaining(t)  live countdown text per timer
+# See packages/tdisplay.yaml for a complete rendering example.

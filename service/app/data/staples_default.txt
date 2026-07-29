@@ -1,0 +1,85 @@
+# Default pantry staples — one item per line.
+# Edit this file to change what counts as "always on hand" for recipe suggestions.
+# Lines starting with # are comments and are ignored.
+# The Setup page's "Staple Items" field overrides this file when non-empty.
+
+Flour
+Granulated Sugar
+Confectioners Sugar
+Brown Sugar
+Baking soda
+Baking powder
+Dried Pasta
+Rice
+Breadcrumbs
+Kosher salt
+Table salt
+Whole black peppercorns
+Garlic powder
+Onion powder
+Dried oregano
+Dried basil
+Dried thyme
+Bay leaves
+Smoked paprika
+Cayenne pepper
+Crushed red pepper flakes
+Ground cumin
+Chili powder
+Dry mustard
+Extra-virgin olive oil
+Vegetable Oil
+Balsamic vinegar
+Apple cider vinegar
+White vinegar
+Chicken stock
+Beef stock
+Vegetable stock
+Soy sauce
+Worcestershire sauce
+Hot sauce
+Crushed tomatoes
+Tomato paste
+Canned chickpeas
+Canned black beans
+Canned cannellini beans
+Capers
+Olives
+Anchovy paste
+Dijon mustard
+Mayonnaise
+Ketchup
+Unsalted butter
+Milk
+Hard grating cheese
+Parmesan
+Pecorino
+Large eggs
+Onions
+Garlic
+Potatoes
+Lemons
+Limes
+Sesame oil
+Rice vinegar
+Red wine vinegar
+Fish sauce
+Cornstarch
+Cocoa powder
+Rolled oats
+Peanut butter
+Maple syrup
+Molasses
+Italian seasoning
+Ground ginger
+Ground coriander
+Garlic salt
+Crushed red pepper flakes
+Canned diced tomatoes
+Tomato sauce
+Dried lentils
+Chicken bouillon
+Powdered sugar
+Sliced bread
+Yellow mustard
+Honey

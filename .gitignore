@@ -1,0 +1,22 @@
+.env
+*.pyc
+__pycache__/
+*.egg-info/
+.pytest_cache/
+grocy/data/
+ollama/models/
+service/data/
+*.db
+*.sqlite
+.DS_Store
+
+.dolt/
+backups/
+node_modules/
+package-lock.json
+package.json
+
+# Claude Code worktrees (transient agent worktrees)
+
+# MkDocs build output
+site/

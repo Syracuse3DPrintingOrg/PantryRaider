@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Cancel your subscription: Forager{% endblock %}
+{% block main_class %}narrow{% endblock %}
+{% block content %}
+<h1>Cancel your subscription</h1>
+<div class="card">
+  {% if error %}<div class="alert alert-error">{{ error }}</div>{% endif %}
+  {% if already_cancelling %}
+  <div class="alert alert-notice">Your plan is already set to cancel. It stays
+  active{% if period_end %} until {{ period_end }}{% endif %} and will not
+  renew.</div>
+  <a class="btn btn-outline" href="/account#billing">Back to your account</a>
+  {% else %}
+  <p>Cancelling stops your plan from renewing. It stays active
+  {% if period_end %}until {{ period_end }}{% else %}until the end of the
+  period you already paid for{% endif %}, so you keep remote access and your
+  scanning allowance until then. Nothing else changes: your account, your
+  kitchens, and your recipes all stay.</p>
+  <p class="muted small">Changed your mind later? You can subscribe again
+  anytime from your account page.</p>
+  <form method="post" action="/account/cancel" style="margin:0">
+    <button class="btn btn-block" type="submit">Cancel my subscription</button>
+  </form>
+  <p style="margin-top:0.75rem; margin-bottom:0;">
+    <a class="muted small" href="/account#billing">Keep my subscription</a>
+  </p>
+  {% endif %}
+</div>
+{% endblock %}

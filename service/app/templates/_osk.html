@@ -1,0 +1,7 @@
+{# On-screen keyboard for kiosk touchscreens (FoodAssistant-wo9j). Included on
+   every page a kiosk can land on (base.html plus the standalone start, setup,
+   pin, and login pages). The keyboard docks to the bottom of the screen when
+   a text field gains focus, in kiosk mode only; the per-device osk_enabled
+   setting (default on) turns it off for kiosks with an attached keyboard. #}
+<div id="osk-config" data-enabled="{{ 'true' if osk_enabled else 'false' }}" hidden></div>
+<script src="static/js/osk.js?v={{ app_version }}"></script>
