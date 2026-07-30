@@ -1,0 +1,17 @@
+{# Shared outage banner (FoodAssistant-2cmm).
+
+   Rendered when a page's upstream service (Grocy, Mealie, or the main server
+   from a satellite) cannot be reached. The page shell stays navigable; this
+   banner just says honestly what is missing and that it comes back on its own.
+
+   Include with a message from the caller:
+     {% with upstream_down_message = grocy_error %}{% include "_upstream_down.html" %}{% endwith %}
+   The message should be the user-forward copy raised by the service client
+   (services.grocy.unreachable_message / services.mealie.unreachable_message),
+   so every surface reports an outage with the same words. #}
+{% if upstream_down_message %}
+<div class="alert alert-warning d-flex align-items-center gap-2" role="alert">
+  <i class="bi bi-plug"></i>
+  <div>{{ upstream_down_message }}</div>
+</div>
+{% endif %}

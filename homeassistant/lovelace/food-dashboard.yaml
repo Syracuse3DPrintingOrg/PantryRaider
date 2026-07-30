@@ -1,0 +1,230 @@
+title: Food Tracker
+views:
+  - title: Food
+    path: food
+    icon: mdi:fridge-outline
+    cards:
+
+      # ── Status Tiles ─────────────────────────────────────────────────────────
+      - type: grid
+        columns: 2
+        square: false
+        cards:
+          - type: tile
+            entity: sensor.food_expired
+            name: Expired
+            icon: mdi:food-off
+            color: red
+          - type: tile
+            entity: sensor.food_expiring_today
+            name: Today
+            icon: mdi:food-variant-off
+            color: deep-orange
+          - type: tile
+            entity: sensor.food_expiring_3_days
+            name: 3 Days
+            icon: mdi:food-drumstick
+            color: amber
+          - type: tile
+            entity: sensor.food_expiring_7_days
+            name: 7 Days
+            icon: mdi:food-apple
+            color: green
+          - type: tile
+            entity: sensor.food_pending_scans
+            name: Pending Scans
+            icon: mdi:barcode-scan
+            color: purple
+            tap_action:
+              action: url
+              url_path: http://YOUR_HOST:9284/ui/pending
+          - type: tile
+            entity: sensor.shopping_list_items
+            name: Shopping List
+            icon: mdi:cart-outline
+            color: teal
+            tap_action:
+              action: url
+              url_path: http://YOUR_HOST:9284/ui/shopping
+          - type: tile
+            entity: sensor.meal_plan_today
+            name: Meals Today
+            icon: mdi:silverware-fork-knife
+            color: blue
+            tap_action:
+              action: url
+              url_path: http://YOUR_HOST:9284/ui/mealplan
+
+      # ── Alerts (only shows when something needs attention) ──────────────────
+      - type: conditional
+        conditions:
+          - condition: or
+            conditions:
+              - condition: numeric_state
+                entity: sensor.food_expired
+                above: 0
+              - condition: numeric_state
+                entity: sensor.food_expiring_today
+                above: 0
+        card:
+          type: markdown
+          content: >
+            {% set expired = states('sensor.food_expired') | int(0) %}
+            {% set today = states('sensor.food_expiring_today') | int(0) %}
+            {% if expired > 0 %}❌ **{{ expired }} item(s) EXPIRED**, check the fridge
+
+            {% endif %}
+            {% if today > 0 %}🔴 **{{ today }} expiring today**, use them up!{% endif %}
+
+      # ── Inventory Panels ──────────────────────────────────────────────────────
+      # Read-only mirror of the web UI's inventory page. Items sorted by
+      # expiring soonest (set by the REST sensor's sort= parameter).
+      - type: grid
+        columns: 2
+        square: false
+        cards:
+          - type: markdown
+            content: >-
+              {% set items = state_attr('sensor.food_inventory', 'refrigerated') or [] %}
+              ### 🧊 Refrigerated ({{ items | length }})
+
+              {% if items %}{% for i in items %}{{ i.name }}:
+              {%- if i.days_remaining is none %} no date
+              {%- elif i.days_remaining < 0 %} **⚠ {{ -i.days_remaining }}d ago**
+              {%- elif i.days_remaining == 0 %} **today**
+              {%- else %} {{ i.days_remaining }}d{% endif %}
+
+              {% endfor %}{% else %}*Empty*{% endif %}
+          - type: markdown
+            content: >-
+              {% set items = state_attr('sensor.food_inventory', 'frozen') or [] %}
+              ### ❄️ Frozen ({{ items | length }})
+
+              {% if items %}{% for i in items %}{{ i.name }}:
+              {%- if i.days_remaining is none %} no date
+              {%- elif i.days_remaining < 0 %} **⚠ {{ -i.days_remaining }}d ago**
+              {%- elif i.days_remaining == 0 %} **today**
+              {%- else %} {{ i.days_remaining }}d{% endif %}
+
+              {% endfor %}{% else %}*Empty*{% endif %}
+          - type: markdown
+            content: >-
+              {% set items = state_attr('sensor.food_inventory', 'room_temp') or [] %}
+              ### ☀️ Room Temp ({{ items | length }})
+
+              {% if items %}{% for i in items %}{{ i.name }}:
+              {%- if i.days_remaining is none %} no date
+              {%- elif i.days_remaining < 0 %} **⚠ {{ -i.days_remaining }}d ago**
+              {%- elif i.days_remaining == 0 %} **today**
+              {%- else %} {{ i.days_remaining }}d{% endif %}
+
+              {% endfor %}{% else %}*Empty*{% endif %}
+          - type: markdown
+            content: >-
+              {% set items = state_attr('sensor.food_inventory', 'pantry') or [] %}
+              ### 📦 Pantry ({{ items | length }})
+
+              {% if items %}{% for i in items %}{{ i.name }}:
+              {%- if i.days_remaining is none %} no date
+              {%- elif i.days_remaining < 0 %} **⚠ {{ -i.days_remaining }}d ago**
+              {%- elif i.days_remaining == 0 %} **today**
+              {%- else %} {{ i.days_remaining }}d{% endif %}
+
+              {% endfor %}{% else %}*Empty*{% endif %}
+
+      # ── Shopping List ─────────────────────────────────────────────────────────
+      # Unchecked items from the Mealie shopping list. Tap the tile above to
+      # open the Pantry Raider shopping page and check things off.
+      - type: conditional
+        conditions:
+          - condition: numeric_state
+            entity: sensor.shopping_list_items
+            above: 0
+        card:
+          type: markdown
+          content: >-
+            {% set items = state_attr('sensor.shopping_list_items', 'items') or [] %}
+            ### 🛒 {{ state_attr('sensor.shopping_list_items', 'list_name') or 'Shopping List' }}
+            ({{ items | length }})
+
+            {% for i in items %}- {{ i }}
+
+            {% endfor %}
+
+      # ── Meal Plan ─────────────────────────────────────────────────────────────
+      # Today's and tomorrow's planned meals from Mealie. Tap the tile above
+      # to open the meal plan page.
+      - type: conditional
+        conditions:
+          - condition: or
+            conditions:
+              - condition: numeric_state
+                entity: sensor.meal_plan_today
+                above: 0
+              - condition: template
+                value_template: "{{ (state_attr('sensor.meal_plan_today', 'tomorrow') or []) | length > 0 }}"
+        card:
+          type: markdown
+          content: >-
+            {% set today = state_attr('sensor.meal_plan_today', 'today') or [] %}
+            {% set tomorrow = state_attr('sensor.meal_plan_today', 'tomorrow') or [] %}
+            ### 🍽️ Meal Plan
+
+            {% if today %}**Today**
+
+            {% for m in today %}- {{ m.type | title }}: {{ m.name }}
+
+            {% endfor %}{% endif %}
+            {% if tomorrow %}**Tomorrow**
+
+            {% for m in tomorrow %}- {{ m.type | title }}: {{ m.name }}
+
+            {% endfor %}{% endif %}
+
+      # ── Action Buttons ────────────────────────────────────────────────────────
+      - type: grid
+        columns: 2
+        square: false
+        cards:
+          - type: button
+            name: Add Food
+            icon: mdi:barcode-scan
+            icon_height: 44px
+            tap_action:
+              action: url
+              url_path: http://YOUR_HOST:9284/ui/add
+          - type: button
+            name: Inventory
+            icon: mdi:view-grid-outline
+            icon_height: 44px
+            tap_action:
+              action: url
+              url_path: http://YOUR_HOST:9284/ui/inventory
+          - type: button
+            name: Expiring Items
+            icon: mdi:clock-alert-outline
+            icon_height: 44px
+            tap_action:
+              action: url
+              url_path: http://YOUR_HOST:9284/ui/expiring
+          - type: button
+            name: Expiry Defaults
+            icon: mdi:table-edit
+            icon_height: 44px
+            tap_action:
+              action: url
+              url_path: http://YOUR_HOST:9284/ui/defaults
+          - type: button
+            name: Pending Scans
+            icon: mdi:barcode-scan
+            icon_height: 44px
+            tap_action:
+              action: url
+              url_path: http://YOUR_HOST:9284/ui/pending
+          - type: button
+            name: Grocy Stock
+            icon: mdi:fridge
+            icon_height: 44px
+            tap_action:
+              action: url
+              url_path: http://YOUR_GROCY_HOST/stockoverview

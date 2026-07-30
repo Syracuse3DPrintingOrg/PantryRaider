@@ -1,0 +1,196 @@
+services:
+  service:
+    # Repo root, not ./service: the Dockerfile copies both the app and the
+    # gadgets decoders, so the context has to span both. The root .dockerignore
+    # keeps it small.
+    build:
+      context: .
+      dockerfile: service/Dockerfile
+    container_name: foodassistant-service
+    env_file: .env
+    environment:
+      - TZ=${TZ:-America/New_York}
+      # Optional label printing (FoodAssistant-gyri). CUPS_SERVER tells the
+      # container's lp/lpstat clients where a real cupsd is. Empty by default,
+      # so printing stays gracefully unavailable (list_queues returns []). Turn
+      # printing on with the with-printing profile below and point this at that
+      # sibling container:
+      #   CUPS_SERVER=cups:631 docker compose --profile with-printing up -d
+      # or run scripts/image-build/foodassistant-print-setup on the host to use
+      # a host cupsd, which writes CUPS_SERVER into .env for you.
+      - CUPS_SERVER=${CUPS_SERVER:-}
+    # Dev workflow: mount the code and run with --reload so `git pull` applies
+    # changes live. The published image's default command omits --reload.
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    volumes:
+      - ./service/app:/app/app
+      - ./service/data:/app/data
+      # The Bluetooth decoders the Bandit Cub advertisement relay decodes with
+      # (FoodAssistant-nn3u). The image already carries this package, so the
+      # mount is not what makes the relay work; it is here for the same reason
+      # ./service/app is mounted above, to overlay the baked copy with the live
+      # source so a `git pull` applies decoder changes without a rebuild.
+      - ./gadgets/foodassistant_gadgets:/app/foodassistant_gadgets:ro
+    ports:
+      - "9284:8000"
+    # These enable Forager remote access (a WireGuard hub tunnel run inside this
+    # container) and are otherwise inert: NET_ADMIN plus /dev/net/tun let
+    # wg-quick create the interface, and the src_valid_mark sysctl keeps
+    # wg-quick happy about the fwmark it sets for the split-tunnel route.
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - "/dev/net/tun:/dev/net/tun"
+    sysctls:
+      - net.ipv4.conf.all.src_valid_mark=1
+    restart: unless-stopped
+    depends_on:
+      grocy:
+        condition: service_started
+        required: false   # Grocy is only present when --profile with-grocy is used
+
+  # Optional Grocy instance, only started with:
+  #   docker compose --profile with-grocy up -d
+  # Skip this if you already have Grocy running elsewhere and just point
+  # GROCY_BASE_URL at it in the web setup (/setup) or .env.
+  grocy:
+    image: lscr.io/linuxserver/grocy:4.6.0   # pinned; see "Upgrading pinned images" in README
+    container_name: foodassistant-grocy
+    profiles: ["with-grocy"]
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=${TZ:-America/New_York}
+    volumes:
+      - ./grocy/config:/config
+    ports:
+      - "9383:80"
+    restart: unless-stopped
+
+  # Optional Mealie recipe manager / meal planner, only started with:
+  #   docker compose --profile with-mealie up -d
+  # First run: open http://localhost:9285, log in (changeme@example.com /
+  # MyPassword, change it!), then create an API token under
+  # User Profile → API Tokens and paste it into /setup.
+  mealie:
+    image: ghcr.io/mealie-recipes/mealie:v3.19.2   # pinned; see "Upgrading pinned images" in README
+    container_name: foodassistant-mealie
+    profiles: ["with-mealie"]
+    environment:
+      - TZ=${TZ:-America/New_York}
+      - ALLOW_SIGNUP=false
+      - BASE_URL=http://localhost:9285
+    volumes:
+      - ./mealie/data:/app/data
+    ports:
+      - "9285:9000"
+    restart: unless-stopped
+
+  # Optional containerized CUPS for label printing (FoodAssistant-gyri), only
+  # started with:
+  #   CUPS_SERVER=cups:631 docker compose --profile with-printing up -d
+  # Off by default. Network printers (IPP / driverless) work out of the box once
+  # you add them in the CUPS admin at http://localhost:6631. USB and Bluetooth
+  # printers need the printer's device passed into this container: uncomment the
+  # devices:/privileged hints below for your hardware (kept off by default so the
+  # container stays unprivileged). Config and queues live in the cups-config
+  # named volume (seeded from the image) so added printers persist.
+  cups:
+    image: olbat/cupsd@sha256:28c47cfe20d59c94e07c37c3759d469624ba209daa0e5821ed3b6b1d6f665bf5   # CUPS + cups-filters (rastertolabel); pinned. Our config is applied at start below.
+    container_name: foodassistant-cups
+    profiles: ["with-printing"]
+    environment:
+      - TZ=${TZ:-America/New_York}
+    # Apply the Pantry Raider CUPS config + Zebra PPD at start so the app can
+    # manage queues over the compose network with no manual setup (ServerAlias,
+    # LAN admin without a password, the Zebra ZPL PPD). See docker-compose.prod.yml.
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        u=https://raw.githubusercontent.com/Syracuse3DPrintingOrg/PantryRaider/main/docker/cups
+        if wget -qO /tmp/cupsd.new "$$u/cupsd.conf" && [ -s /tmp/cupsd.new ]; then
+          cp /tmp/cupsd.new /etc/cups/cupsd.conf; echo "Applied Pantry Raider cupsd.conf"
+        else
+          echo "WARN: could not fetch cupsd.conf; keeping the existing one"
+        fi
+        mkdir -p /usr/share/ppd/foodassistant
+        wget -qO /usr/share/ppd/foodassistant/zebra-zpl.ppd "$$u/zebra-zpl.ppd" || echo "WARN: could not fetch the Zebra PPD"
+        exec /usr/sbin/cupsd -f
+    volumes:
+      - cups-config:/etc/cups
+    ports:
+      # CUPS admin UI, so you can add and manage printers from a browser.
+      - "6631:631"
+    # USB / Bluetooth printer passthrough (best-effort; uncomment as needed):
+    # devices:
+    #   - "/dev/bus/usb:/dev/bus/usb"
+    # privileged: true
+    restart: unless-stopped
+
+  # Ollama local vision, only started with:
+  #   docker compose --profile with-ollama up -d
+  # After starting, pull a vision model:
+  #   docker exec foodassistant-ollama ollama pull llava:7b
+  ollama:
+    image: ollama/ollama:0.30.8   # pinned; see "Upgrading pinned images" in README
+    container_name: foodassistant-ollama
+    profiles: ["with-ollama"]
+    volumes:
+      - ./ollama/models:/root/.ollama
+    ports:
+      - "11434:11434"
+    restart: unless-stopped
+    # Intel Arc GPU passthrough (uncomment if applicable):
+    # devices:
+    #   - /dev/dri:/dev/dri
+    # environment:
+    #   - OLLAMA_GPU=intel
+
+  # Optional Beszel monitoring hub (FoodAssistant-4kz2), a self-hosted
+  # dashboard with history and graphs, richer than the built-in live
+  # snapshot in Settings > Resources. Off by default; turn it on with:
+  #   docker compose --profile with-beszel up -d
+  # First run: open http://localhost:8090, create the admin account, then add
+  # a system in the hub UI pointing at the beszel-agent container below
+  # (host "beszel-agent", port 45876) to get its pairing token. Paste the hub
+  # URL into Settings > Resources in the app to add the "Open the Beszel
+  # dashboard" link there.
+  beszel:
+    image: henrygd/beszel:0.12.1   # pinned; check github.com/henrygd/beszel/releases before bumping
+    container_name: foodassistant-beszel
+    profiles: ["with-beszel"]
+    environment:
+      - TZ=${TZ:-America/New_York}
+    volumes:
+      - beszel-data:/beszel_data
+    ports:
+      - "8090:8090"
+    restart: unless-stopped
+
+  # The Beszel agent reports this host's own metrics (not the container's) to
+  # the hub above. It needs to see host processes/network/disks to do that,
+  # so it runs with host networking and PID namespace and a read-only bind of
+  # the host root filesystem; treat it like Watchtower's Docker socket
+  # requirement, opt in only if you want this device monitored. BESZEL_KEY is
+  # the pairing key the hub shows when you add this system; paste it into a
+  # .env entry (BESZEL_AGENT_KEY=...) rather than editing this file.
+  beszel-agent:
+    image: henrygd/beszel-agent:0.12.1   # pinned; check github.com/henrygd/beszel/releases before bumping
+    container_name: foodassistant-beszel-agent
+    profiles: ["with-beszel"]
+    network_mode: host
+    pid: host
+    environment:
+      - TZ=${TZ:-America/New_York}
+      - KEY=${BESZEL_AGENT_KEY:-}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /:/host:ro
+    restart: unless-stopped
+
+volumes:
+  # Beszel hub's SQLite data + config (with-beszel profile).
+  beszel-data:
+  # CUPS config + added printer queues, seeded from the image and persisted
+  # across recreates (label printing, with-printing profile).
+  cups-config:
