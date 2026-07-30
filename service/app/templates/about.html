@@ -1,0 +1,187 @@
+{% extends "base.html" %}
+{% block title %}About &amp; Credits: Pantry Raider{% endblock %}
+
+{% block content %}
+<div class="mt-3 mb-4">
+  <h4><i class="bi bi-info-circle me-2"></i>About &amp; Credits</h4>
+  <p class="text-secondary">Pantry Raider is built on top of a number of excellent open-source projects.
+  If this project has been useful to you, please consider donating to the open-source projects listed below.</p>
+</div>
+
+{% include "_disclaimers.html" %}
+
+<div class="row g-3">
+
+  <div class="col-md-6 col-lg-4">
+    <div class="card h-100">
+      <div class="card-body">
+        <h5 class="card-title"><a href="https://grocy.info" target="_blank" rel="noopener">Grocy</a></h5>
+        <p class="card-text text-secondary">Inventory backbone. Grocy handles product storage, stock tracking, and expiry management. Pantry Raider is essentially a better front-end for Grocy.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-6 col-lg-4">
+    <div class="card h-100">
+      <div class="card-body">
+        <h5 class="card-title"><a href="https://mealie.io" target="_blank" rel="noopener">Mealie</a></h5>
+        <p class="card-text text-secondary">Recipes and meal planning. Mealie stores your recipe library, drives the meal plan week view, and manages shopping lists.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-6 col-lg-4">
+    <div class="card h-100">
+      <div class="card-body">
+        <h5 class="card-title"><a href="https://world.openfoodfacts.org" target="_blank" rel="noopener">Open Food Facts</a></h5>
+        <p class="card-text text-secondary">Barcode database. Product names, brands, and nutritional data come from Open Food Facts when you scan a barcode.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-6 col-lg-4">
+    <div class="card h-100">
+      <div class="card-body">
+        <h5 class="card-title"><a href="https://www.themealdb.com" target="_blank" rel="noopener">TheMealDB</a></h5>
+        <p class="card-text text-secondary">Recipe database. Browse and import from TheMealDB's free community recipe collection when adding recipes without Mealie.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-6 col-lg-4">
+    <div class="card h-100">
+      <div class="card-body">
+        <h5 class="card-title"><a href="https://getbootstrap.com" target="_blank" rel="noopener">Bootstrap</a></h5>
+        <p class="card-text text-secondary">UI framework. The responsive layout, dark theme, and all component styling come from Bootstrap 5 and Bootstrap Icons.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-6 col-lg-4">
+    <div class="card h-100">
+      <div class="card-body">
+        <h5 class="card-title"><a href="https://fastapi.tiangolo.com" target="_blank" rel="noopener">FastAPI</a></h5>
+        <p class="card-text text-secondary">Web framework. All API routes, background tasks, and the Jinja2 template rendering run on FastAPI.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-6 col-lg-4">
+    <div class="card h-100">
+      <div class="card-body">
+        <h5 class="card-title">Pillow</h5>
+        <p class="card-text text-secondary">Image processing. Photo analysis and barcode camera capture rely on Pillow for image resizing and format conversion before sending to the vision model.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-6 col-lg-4">
+    <div class="card h-100">
+      <div class="card-body">
+        <h5 class="card-title"><a href="https://www.home-assistant.io" target="_blank" rel="noopener">Home Assistant</a></h5>
+        <p class="card-text text-secondary">Automation integration. REST sensors, barcode scanner automations, and the Lovelace inventory dashboard all tie into Home Assistant.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-6 col-lg-4">
+    <div class="card h-100">
+      <div class="card-body">
+        <h5 class="card-title"><a href="https://python-barcode.readthedocs.io" target="_blank" rel="noopener">python-barcode / ZBar</a></h5>
+        <p class="card-text text-secondary">Barcode decoding. Camera-based barcode scanning uses ZBar (via a browser library) to decode product codes from photos.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-6 col-lg-4">
+    <div class="card h-100">
+      <div class="card-body">
+        <h5 class="card-title"><a href="https://elgato.com" target="_blank" rel="noopener">python-elgato-streamdeck</a></h5>
+        <p class="card-text text-secondary">Stream Deck driver. The hardware controller uses the open-source python-elgato-streamdeck library for USB communication and key image rendering.</p>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div class="mt-4 p-4 rounded" style="background: var(--bs-tertiary-bg); border: 1px solid var(--bs-border-color);">
+  <h5 class="mb-2"><i class="bi bi-heart-fill text-danger me-2"></i>Support the projects that make this possible</h5>
+  <p class="text-secondary mb-3">Pantry Raider is built on the shoulders of excellent open-source projects. If Pantry Raider
+  has saved you money on food waste or made cooking easier, please consider giving back to the projects that
+  make it possible.</p>
+  <div class="d-flex flex-wrap gap-2">
+    <a href="https://ko-fi.com/berrnd" target="_blank" rel="noopener" class="btn btn-sm btn-outline-success">
+      <i class="bi bi-cup-hot me-1"></i>Donate to Grocy
+    </a>
+    <a href="https://github.com/sponsors/hay-kot" target="_blank" rel="noopener" class="btn btn-sm btn-outline-success">
+      <i class="bi bi-heart me-1"></i>Sponsor Mealie
+    </a>
+    <a href="https://www.themealdb.com/api.php" target="_blank" rel="noopener" class="btn btn-sm btn-outline-success">
+      <i class="bi bi-star me-1"></i>Support TheMealDB
+    </a>
+    <a href="https://world.openfoodfacts.org/contribute" target="_blank" rel="noopener" class="btn btn-sm btn-outline-success">
+      <i class="bi bi-database me-1"></i>Contribute to Open Food Facts
+    </a>
+  </div>
+  <p class="text-secondary small mt-3 mb-0">These are all volunteer-run, community-supported projects. Even a small donation
+  or a GitHub star goes a long way.</p>
+  {% if buymeacoffee_url %}
+  <hr class="my-3">
+  <p class="text-secondary small mb-2">Pantry Raider itself is free for home use. If it has earned a spot on your counter,
+  you can buy the developer a coffee.</p>
+  <a href="{{ buymeacoffee_url }}" target="_blank" rel="noopener" class="btn btn-sm btn-outline-warning">
+    <i class="bi bi-cup-hot-fill me-1"></i>Support the project
+  </a>
+  {% endif %}
+</div>
+
+<div class="mt-4">
+  <div class="accordion" id="aiDeclarationsAccordion">
+    <div class="accordion-item">
+      <h2 class="accordion-header" id="aiDeclarationsHeading">
+        <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse"
+                data-bs-target="#aiDeclarationsCollapse" aria-expanded="false" aria-controls="aiDeclarationsCollapse">
+          <i class="bi bi-robot me-2"></i>AI Declarations
+        </button>
+      </h2>
+      <div id="aiDeclarationsCollapse" class="accordion-collapse collapse" aria-labelledby="aiDeclarationsHeading"
+           data-bs-parent="#aiDeclarationsAccordion">
+        <div class="accordion-body">
+          <p class="text-secondary">An honest note about how AI tools were used to build Pantry Raider.</p>
+
+          <div class="row g-3">
+            <div class="col-lg-8">
+              <div class="card">
+                <div class="card-body">
+                  <h5 class="card-title">How AI was used</h5>
+                  <p class="card-text">Large language models were used as a tool during development, the same
+                    way a developer uses an editor, a search engine, or a linter. They helped draft code, suggest
+                    fixes, and speed up routine work.</p>
+                  <p class="card-text">The end program is mainly the result of real human work. Design decisions,
+                    architecture, and the choices about what to build and how it should behave were made by a person.
+                    The code was reviewed, edited, and validated with thorough testing on real hardware (Raspberry Pi
+                    appliances, real scanners, and live Grocy and Mealie instances), not just generated and shipped.</p>
+                </div>
+              </div>
+            </div>
+
+            <div class="col-lg-8">
+              <div class="card border-warning">
+                <div class="card-body">
+                  <h5 class="card-title"><i class="bi bi-shield-exclamation text-warning me-2"></i>A note on security</h5>
+                  <p class="card-text">Use caution when installing software on your network, and review what you run
+                    before you run it. That is good practice for any project, with or without AI involvement. Pantry Raider
+                    is open source, so you can read the code, check the dependencies, and decide for yourself.</p>
+                  <p class="card-text mb-0">If you find a problem or have a question about how something works, the source
+                    is on <a href="https://github.com/Syracuse3DPrintingOrg/PantryRaider" target="_blank" rel="noopener">GitHub</a>.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}

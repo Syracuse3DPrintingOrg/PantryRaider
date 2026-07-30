@@ -1,0 +1,315 @@
+/*
+ * iOS Dark theme for Pantry Raider.
+ * Loaded as an overlay on top of Bootstrap 5 dark mode.
+ * A clean, Apple-like dark look: the iOS system font stack, rounded corners,
+ * near-black system greys and the brighter iOS dark-mode blue (#0a84ff)
+ * accent. Authored locally (no Bootswatch, no CDN).
+ */
+
+/* Core palette */
+:root,
+[data-bs-theme=dark] {
+  /* Backgrounds (iOS dark system greys) */
+  --bs-body-bg:           #000000;
+  --bs-body-bg-rgb:       0, 0, 0;
+  --bs-secondary-bg:      #1c1c1e;
+  --bs-secondary-bg-rgb:  28, 28, 30;
+  --bs-tertiary-bg:       #2c2c2e;
+  --bs-tertiary-bg-rgb:   44, 44, 46;
+
+  /* Text (iOS dark label / secondary label) */
+  --bs-body-color:        #f2f2f7;
+  --bs-body-color-rgb:    242, 242, 247;
+  --bs-secondary-color:   rgba(235, 235, 245, 0.74);
+  --bs-tertiary-color:    rgba(235, 235, 245, 0.50);
+  --bs-emphasis-color:    #ffffff;
+
+  /* iOS dark-mode system colours (brighter variants) */
+  --ios-blue:    #0a84ff;
+  --ios-green:   #30d158;
+  --ios-indigo:  #5e5ce6;
+  --ios-orange:  #ff9f0a;
+  --ios-red:     #ff453a;
+  --ios-teal:    #64d2ff;
+
+  /* Bootstrap semantic overrides */
+  --bs-primary:           #0a84ff;
+  --bs-primary-rgb:       10, 132, 255;
+  --bs-secondary:         #8e8e93;
+  --bs-secondary-rgb:     142, 142, 147;
+  --bs-success:           #30d158;
+  --bs-success-rgb:       48, 209, 88;
+  --bs-info:              #5e5ce6;
+  --bs-info-rgb:          94, 92, 230;
+  --bs-warning:           #ff9f0a;
+  --bs-warning-rgb:       255, 159, 10;
+  --bs-danger:            #ff453a;
+  --bs-danger-rgb:        255, 69, 58;
+  --bs-light:             #2c2c2e;
+  --bs-light-rgb:         44, 44, 46;
+  --bs-dark:              #000000;
+  --bs-dark-rgb:          0, 0, 0;
+
+  /* Text-emphasis colours (for text-bg-* utilities) */
+  --bs-primary-text-emphasis:   #6fb4ff;
+  --bs-secondary-text-emphasis: #c7c7cc;
+  --bs-success-text-emphasis:   #7ee29a;
+  --bs-info-text-emphasis:      #9d9bf0;
+  --bs-warning-text-emphasis:   #ffc560;
+  --bs-danger-text-emphasis:    #ff8d85;
+
+  /* Borders (iOS dark hairline separators) */
+  --bs-border-color:        #38383a;
+  --bs-border-color-translucent: rgba(235, 235, 245, 0.18);
+
+  /* Links */
+  --bs-link-color:        #0a84ff;
+  --bs-link-color-rgb:    10, 132, 255;
+  --bs-link-hover-color:  #6fb4ff;
+
+  /* Cards / components */
+  --bs-card-bg:           #1c1c1e;
+  --bs-card-border-color: #38383a;
+  --bs-border-radius:        0.75rem;
+  --bs-border-radius-sm:     0.55rem;
+  --bs-border-radius-lg:     1rem;
+  --bs-modal-bg:          #1c1c1e;
+  --bs-dropdown-bg:       #1c1c1e;
+  --bs-dropdown-border-color: #38383a;
+  --bs-input-bg:          #1c1c1e;
+  --bs-input-border-color: #38383a;
+  --bs-input-color:       #f2f2f7;
+  --bs-list-group-bg:     #1c1c1e;
+  --bs-list-group-border-color: #38383a;
+
+  /* Navbar */
+  --bs-navbar-color:       rgba(242, 242, 247, 0.82);
+  --bs-navbar-hover-color: #0a84ff;
+  --bs-navbar-active-color: #0a84ff;
+
+  /* Table */
+  --bs-table-bg:          transparent;
+  --bs-table-striped-bg:  rgba(10, 132, 255, 0.06);
+  --bs-table-hover-bg:    rgba(10, 132, 255, 0.10);
+  --bs-table-border-color: #38383a;
+
+  color-scheme: dark;
+}
+
+/* iOS system font stack on the whole document */
+body {
+  background-color: var(--bs-body-bg);
+  color: var(--bs-body-color);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display",
+               "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Rounded corners on the chrome iOS favours */
+.btn, .form-control, .form-select, .input-group-text, .card, .modal-content,
+.dropdown-menu, .alert, .list-group, .badge {
+  border-radius: var(--bs-border-radius);
+}
+
+/* Navbar */
+.navbar {
+  background: rgba(28, 28, 30, 0.92) !important;
+  border-bottom: 1px solid #38383a !important;
+  backdrop-filter: saturate(180%) blur(12px);
+}
+.navbar-brand {
+  color: var(--ios-blue) !important;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.nav-link {
+  color: rgba(242, 242, 247, 0.82) !important;
+}
+.nav-link:hover,
+.nav-link.active {
+  color: var(--ios-blue) !important;
+}
+
+/* Cards */
+.card {
+  background-color: #1c1c1e;
+  border-color: #38383a;
+}
+.card-header {
+  background-color: #2c2c2e;
+  border-bottom-color: #38383a;
+  color: #f2f2f7;
+  font-weight: 600;
+}
+
+/* Buttons (iOS filled / tinted style) */
+.btn {
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.btn-primary {
+  background-color: var(--ios-blue);
+  border-color: var(--ios-blue);
+  color: #ffffff;
+}
+.btn-primary:hover {
+  background-color: #3b9bff;
+  border-color: #3b9bff;
+}
+.btn-secondary {
+  background-color: rgba(10, 132, 255, 0.18);
+  border-color: transparent;
+  color: #6fb4ff;
+}
+.btn-secondary:hover {
+  background-color: rgba(10, 132, 255, 0.28);
+  border-color: transparent;
+  color: #9cc9ff;
+}
+.btn-success {
+  background-color: var(--ios-green);
+  border-color: var(--ios-green);
+  color: #000000;
+}
+.btn-success:hover {
+  background-color: #4cdc70;
+  border-color: #4cdc70;
+}
+.btn-outline-primary {
+  border-color: var(--ios-blue);
+  color: #6fb4ff;
+}
+.btn-outline-primary:hover {
+  background-color: var(--ios-blue);
+  color: #ffffff;
+}
+.btn-outline-danger {
+  border-color: var(--ios-red);
+  color: var(--ios-red);
+}
+.btn-outline-danger:hover {
+  background-color: var(--ios-red);
+  color: #ffffff;
+}
+
+/* Forms */
+.form-control,
+.form-select {
+  background-color: #1c1c1e;
+  border-color: #38383a;
+  color: #f2f2f7;
+}
+.form-control:focus,
+.form-select:focus {
+  background-color: #1c1c1e;
+  border-color: var(--ios-blue);
+  color: #f2f2f7;
+  box-shadow: 0 0 0 0.2rem rgba(10, 132, 255, 0.28);
+}
+.form-control::placeholder { color: rgba(235, 235, 245, 0.45); }
+.form-check-input:checked {
+  background-color: var(--ios-blue);
+  border-color: var(--ios-blue);
+}
+.input-group-text {
+  background-color: #2c2c2e;
+  border-color: #38383a;
+  color: rgba(235, 235, 245, 0.74);
+}
+
+/* Tables */
+.table {
+  color: var(--bs-body-color);
+  border-color: #38383a;
+}
+.table > thead {
+  border-bottom: 2px solid #38383a;
+  color: rgba(235, 235, 245, 0.74);
+}
+
+/* Badges */
+.text-bg-primary   { background-color: var(--ios-blue)   !important; color: #ffffff !important; }
+.text-bg-secondary { background-color: #636366           !important; color: #ffffff !important; }
+.text-bg-success   { background-color: var(--ios-green)  !important; color: #000000 !important; }
+.text-bg-info      { background-color: var(--ios-indigo) !important; color: #ffffff !important; }
+.text-bg-warning   { background-color: var(--ios-orange) !important; color: #000000 !important; }
+.text-bg-danger    { background-color: var(--ios-red)    !important; color: #000000 !important; }
+
+/* Alerts */
+.alert-success {
+  background-color: rgba(48, 209, 88, 0.14);
+  border-color: rgba(48, 209, 88, 0.40);
+  color: #7ee29a;
+}
+.alert-danger {
+  background-color: rgba(255, 69, 58, 0.14);
+  border-color: rgba(255, 69, 58, 0.40);
+  color: #ff8d85;
+}
+.alert-warning {
+  background-color: rgba(255, 159, 10, 0.14);
+  border-color: rgba(255, 159, 10, 0.40);
+  color: #ffc560;
+}
+.alert-info {
+  background-color: rgba(94, 92, 230, 0.16);
+  border-color: rgba(94, 92, 230, 0.40);
+  color: #9d9bf0;
+}
+
+/* Dropdowns & modals */
+.dropdown-menu {
+  background-color: #1c1c1e;
+  border-color: #38383a;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.6);
+}
+.dropdown-item { color: #f2f2f7; }
+.dropdown-item:hover {
+  background-color: rgba(10, 132, 255, 0.16);
+  color: #6fb4ff;
+}
+.modal-content {
+  background-color: #1c1c1e;
+  border-color: #38383a;
+}
+.modal-header { border-bottom-color: #38383a; color: #f2f2f7; }
+.modal-footer { border-top-color: #38383a; }
+
+/* List groups */
+.list-group-item {
+  background-color: #1c1c1e;
+  border-color: #38383a;
+  color: #f2f2f7;
+}
+.list-group-item-action:hover {
+  background-color: rgba(10, 132, 255, 0.14);
+  color: #6fb4ff;
+}
+
+/* Nav tabs */
+.nav-tabs { border-bottom-color: #38383a; }
+.nav-tabs .nav-link { color: rgba(235, 235, 245, 0.74) !important; }
+.nav-tabs .nav-link.active {
+  background-color: #2c2c2e;
+  border-color: #38383a #38383a #2c2c2e;
+  color: #6fb4ff !important;
+}
+
+/* Urgency colours (override base.html) */
+.urgency-expired { color: #ff453a; }
+.urgency-today   { color: #ff9f0a; }
+.urgency-3d      { color: #ffd60a; }
+.urgency-ok      { color: #30d158; }
+
+/* Scrollbar (Webkit) */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: #000000; }
+::-webkit-scrollbar-thumb { background: #38383a; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #545458; }
+
+/* Progress bars */
+.progress { background-color: #2c2c2e; }
+.progress-bar { background-color: var(--ios-blue); }
+
+/* contrast: dark badge text (FoodAssistant-tjlm) */
+.badge.bg-secondary { color: #000 !important; }
