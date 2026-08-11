@@ -33,7 +33,7 @@ Pillow==10.4.0
 # PDF text extraction for the "Import from PDF" recipe upload. Pure Python (no
 # poppler or other system deps); the recipe's text is handed to the same LLM
 # extractor the URL import fallback uses.
-pypdf==5.1.0
+pypdf==6.15.0
 
 # Renders a scanned / image-only PDF's pages to images so the vision AI can read
 # them (the "Import from PDF" fallback). Its wheels bundle the PDFium engine and
