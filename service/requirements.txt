@@ -1,29 +1,29 @@
 # Web framework and server (required)
-fastapi==0.115.0
-uvicorn[standard]==0.30.6
+fastapi==0.141.1
+uvicorn[standard]==0.52.4
 
 # Database ORM for SQLite inventory (required)
-sqlalchemy==2.0.35
+sqlalchemy==2.0.52
 
 # Data validation and settings management (required)
-pydantic==2.9.2
-pydantic-settings==2.5.2
+pydantic==2.13.5
+pydantic-settings==2.15.0
 
 # Async HTTP client - used for Grocy, Mealie, and cloud provider APIs (required)
-httpx==0.27.2
+httpx==0.28.1
 
 # Form and file upload parsing for photo analysis endpoints (required)
-python-multipart==0.0.12
+python-multipart==0.0.32
 
 # HTML templating engine for the web UI (required)
-jinja2==3.1.4
+jinja2==3.1.6
 
 # AI vision providers (optional - install whichever providers you use)
-google-generativeai==0.8.3  # Gemini vision/enrichment provider
+google-generativeai==0.8.6  # Gemini vision/enrichment provider
 # Transitive dep of google-generativeai. Pin to a current normalized release so
 # pip never resolves the legacy 1.0beta5prerelease2 wheel, whose non-normalized
 # version pip 25.3 hard-errors on (pypa/pip#12938).
-google-api-python-client==2.197.0
+google-api-python-client==2.199.0
 anthropic>=0.45.0            # Anthropic Claude vision/enrichment provider
 # OpenAI is accessed via httpx directly - no SDK needed
 
@@ -39,12 +39,12 @@ pypdf==5.1.0
 # them (the "Import from PDF" fallback). Its wheels bundle the PDFium engine and
 # ship for both amd64 and arm64 (manylinux2014 x86_64 + aarch64, plus armv7l),
 # so there is still no poppler or other system binary to install in the image.
-pypdfium2==5.11.0
+pypdfium2==5.13.0
 
 # Structured-data recipe scraping for the "From URL" import (the same library
 # Mealie wraps, now run in-process for the native recipe store). Pure Python;
 # pages the scraper cannot read fall back to the existing LLM extraction.
-recipe-scrapers==15.11.0
+recipe-scrapers==15.12.0
 
 # Flexible date parsing for expiry date extraction (required)
 python-dateutil==2.9.0
@@ -63,4 +63,4 @@ qrcode[pil]==8.2
 # mDNS advertisement so the Home Assistant integration can find this install
 # on the LAN without the owner typing an IP into the config flow (required).
 # Pure Python; pulls in ifaddr transitively for interface enumeration.
-zeroconf==0.150.0
+zeroconf==0.151.1
