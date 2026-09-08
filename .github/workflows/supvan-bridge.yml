@@ -1,0 +1,185 @@
+name: Build Supvan label printer bridge
+
+# Cross-compiles the Supvan CUPS printer application (heeen/supvan-cups, MIT)
+# for aarch64 and x86_64, then publishes the arch-named binaries plus a
+# SHA256SUMS and the vendored LICENSE as a GitHub Release on the PUBLIC repo.
+# Those assets are the OPTIONAL prebuilt fast path that the on-device installer
+# (scripts/image-build/foodassistant-print-setup, install_supvan_bridge) tries
+# before it falls back to building from source.
+#
+# ACTIVATION: this workflow only publishes when the repository secret
+# PUBLIC_RELEASE_TOKEN is set to a token that can create releases on the PUBLIC
+# repo (Syracuse3DPrintingOrg/PantryRaider). Until that secret exists the
+# publish step is skipped and the binaries are only uploaded as build artifacts,
+# so no prebuilt is hosted and every device uses the guaranteed build-from-source
+# path. Setting the secret is what turns the fast path on.
+#
+# This workflow lives in the DEV repo only and is NOT synced to public. It is
+# run by hand (workflow_dispatch); it is not part of the app release cadence.
+#
+# ASSET NAMING CONTRACT (must match install_supvan_bridge):
+#   supvan-app-aarch64   the aarch64 binary
+#   supvan-app-x86_64    the x86_64 binary
+#   SHA256SUMS           checksums, one line per binary ("<sha256>  <asset>")
+#   LICENSE              the upstream MIT LICENSE (redistribution requirement)
+# published on the PUBLIC repo under the tag SUPVAN_BRIDGE_TAG below.
+
+on:
+  workflow_dispatch:
+
+env:
+  # Pinned upstream source tag (heeen/supvan-cups). Bump together with
+  # SUPVAN_SRC_TAG in foodassistant-print-setup.
+  SUPVAN_SRC_TAG: v0.5.1
+  # Our PUBLIC-repo release tag; matches SUPVAN_BRIDGE_RELEASE in the installer.
+  SUPVAN_BRIDGE_TAG: supvan-bridge-v0.5.1
+  # The PUBLIC repo that devices download from (never the private dev repo).
+  PUBLIC_REPO: Syracuse3DPrintingOrg/PantryRaider
+  UPSTREAM_REPO: https://github.com/heeen/supvan-cups
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - target: aarch64-unknown-linux-gnu
+            asset: supvan-app-aarch64
+          - target: x86_64-unknown-linux-gnu
+            asset: supvan-app-x86_64
+    steps:
+      - name: Install the Rust toolchain and cross target
+        run: |
+          set -euo pipefail
+          rustup toolchain install stable --profile minimal
+          rustup target add "${{ matrix.target }}"
+
+      - name: Install cross-build dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update -y
+          # cross, its aarch64 linker, and the aarch64 dbus dev libs so the
+          # dbus dependency links for the foreign target.
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            pkg-config libdbus-1-dev
+          if [ "${{ matrix.target }}" = "aarch64-unknown-linux-gnu" ]; then
+            # Ubuntu's default mirrors only serve amd64; arm64 packages live on
+            # ports.ubuntu.com. Scope the stock sources to amd64 and add a
+            # ports entry for arm64, or apt update 404s on binary-arm64 indexes.
+            codename="$(. /etc/os-release && echo "$VERSION_CODENAME")"
+            sudo sed -i 's/^Signed-By:/Architectures: amd64\nSigned-By:/' /etc/apt/sources.list.d/ubuntu.sources
+            {
+              echo "Types: deb"
+              echo "URIs: http://ports.ubuntu.com/ubuntu-ports"
+              echo "Suites: ${codename} ${codename}-updates ${codename}-security"
+              echo "Components: main universe"
+              echo "Architectures: arm64"
+              echo "Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg"
+            } | sudo tee /etc/apt/sources.list.d/arm64-ports.sources >/dev/null
+            sudo dpkg --add-architecture arm64
+            sudo apt-get update -y
+            sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+              gcc-aarch64-linux-gnu libdbus-1-dev:arm64
+          fi
+
+      - name: Fetch the pinned upstream source
+        run: |
+          set -euo pipefail
+          git clone --depth 1 --branch "$SUPVAN_SRC_TAG" "$UPSTREAM_REPO" src
+          ls -la src
+
+      - name: Cross-compile the printer application
+        working-directory: src
+        env:
+          CARGO_BUILD_TARGET: ${{ matrix.target }}
+          # Cross linker and pkg-config for the aarch64 target so libdbus links.
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+          PKG_CONFIG_ALLOW_CROSS: "1"
+        run: |
+          set -euo pipefail
+          if [ "${{ matrix.target }}" = "aarch64-unknown-linux-gnu" ]; then
+            export PKG_CONFIG_PATH=/usr/lib/aarch64-linux-gnu/pkgconfig
+          fi
+          cargo build --release --target "${{ matrix.target }}"
+
+      - name: Stage the arch-named asset and LICENSE
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          bin="src/target/${{ matrix.target }}/release/supvan-printer-app"
+          if [ ! -x "$bin" ]; then
+            bin="$(find "src/target/${{ matrix.target }}/release" -maxdepth 1 -type f -name 'supvan-*' -perm -u+x | head -n1)"
+          fi
+          test -n "$bin" && test -x "$bin"
+          cp -f "$bin" "out/${{ matrix.asset }}"
+          # Vendor the MIT LICENSE for redistribution.
+          lic="$(find src -maxdepth 1 -iname 'license*' | head -n1)"
+          test -n "$lic" && cp -f "$lic" out/LICENSE
+          ls -la out
+
+      - name: Upload the build artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: ${{ matrix.asset }}
+          path: |
+            out/${{ matrix.asset }}
+            out/LICENSE
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Collect the built binaries
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4
+        with:
+          path: dl
+
+      - name: Assemble the release assets and checksums
+        id: pack
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          # download-artifact nests each artifact under its own dir; flatten.
+          find dl -type f -name 'supvan-app-*' -exec cp -f {} release/ \;
+          # Any one LICENSE copy is fine; they are identical across targets.
+          find dl -type f -name 'LICENSE' | head -n1 | xargs -r -I{} cp -f {} release/LICENSE
+          cd release
+          sha256sum supvan-app-* > SHA256SUMS
+          cat SHA256SUMS
+          ls -la
+
+      - name: Check for the public release token
+        id: gate
+        run: |
+          if [ -n "${{ secrets.PUBLIC_RELEASE_TOKEN }}" ]; then
+            echo "have_token=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "have_token=false" >> "$GITHUB_OUTPUT"
+            echo "PUBLIC_RELEASE_TOKEN is not set; skipping publish. Devices will build the bridge from source until this secret is configured."
+          fi
+
+      - name: Publish the release on the PUBLIC repo
+        if: steps.gate.outputs.have_token == 'true'
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65  # v2
+        with:
+          token: ${{ secrets.PUBLIC_RELEASE_TOKEN }}
+          repository: ${{ env.PUBLIC_REPO }}
+          tag_name: ${{ env.SUPVAN_BRIDGE_TAG }}
+          name: Supvan label printer bridge ${{ env.SUPVAN_BRIDGE_TAG }}
+          body: |
+            Prebuilt Supvan CUPS printer application (from heeen/supvan-cups
+            ${{ env.SUPVAN_SRC_TAG }}, MIT) for the Pantry Raider print stack.
+            These binaries are the optional fast path for enabling label
+            printing; devices without them build the bridge from source.
+          files: |
+            release/supvan-app-aarch64
+            release/supvan-app-x86_64
+            release/SHA256SUMS
+            release/LICENSE
+
+      - name: Upload the release bundle as an artifact (no token)
+        if: steps.gate.outputs.have_token != 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: supvan-bridge-release
+          path: release/*

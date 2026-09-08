@@ -1,0 +1,66 @@
+# Web framework and server (required)
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+
+# Database ORM for SQLite inventory (required)
+sqlalchemy==2.0.35
+
+# Data validation and settings management (required)
+pydantic==2.9.2
+pydantic-settings==2.5.2
+
+# Async HTTP client - used for Grocy, Mealie, and cloud provider APIs (required)
+httpx==0.27.2
+
+# Form and file upload parsing for photo analysis endpoints (required)
+python-multipart==0.0.12
+
+# HTML templating engine for the web UI (required)
+jinja2==3.1.4
+
+# AI vision providers (optional - install whichever providers you use)
+google-generativeai==0.8.3  # Gemini vision/enrichment provider
+# Transitive dep of google-generativeai. Pin to a current normalized release so
+# pip never resolves the legacy 1.0beta5prerelease2 wheel, whose non-normalized
+# version pip 25.3 hard-errors on (pypa/pip#12938).
+google-api-python-client==2.197.0
+anthropic>=0.45.0            # Anthropic Claude vision/enrichment provider
+# OpenAI is accessed via httpx directly - no SDK needed
+
+# Image resizing before sending to AI providers (required for photo analysis)
+Pillow==10.4.0
+
+# PDF text extraction for the "Import from PDF" recipe upload. Pure Python (no
+# poppler or other system deps); the recipe's text is handed to the same LLM
+# extractor the URL import fallback uses.
+pypdf==5.1.0
+
+# Renders a scanned / image-only PDF's pages to images so the vision AI can read
+# them (the "Import from PDF" fallback). Its wheels bundle the PDFium engine and
+# ship for both amd64 and arm64 (manylinux2014 x86_64 + aarch64, plus armv7l),
+# so there is still no poppler or other system binary to install in the image.
+pypdfium2==5.11.0
+
+# Structured-data recipe scraping for the "From URL" import (the same library
+# Mealie wraps, now run in-process for the native recipe store). Pure Python;
+# pages the scraper cannot read fall back to the existing LLM extraction.
+recipe-scrapers==15.11.0
+
+# Flexible date parsing for expiry date extraction (required)
+python-dateutil==2.9.0
+
+# Signed session cookies for browser authentication (required)
+itsdangerous==2.2.0
+
+# TOTP two-factor authentication (required)
+pyotp==2.10.0
+
+# QR code generation for TOTP setup page and phone deep-link (required).
+# [pil] pulls Pillow for the PNG TOTP code; SVG output uses qrcode's built-in
+# stdlib SVG factory in 8.x, so no extra (and no lxml) is needed.
+qrcode[pil]==8.2
+
+# mDNS advertisement so the Home Assistant integration can find this install
+# on the LAN without the owner typing an IP into the config flow (required).
+# Pure Python; pulls in ifaddr transitively for interface enumeration.
+zeroconf==0.150.0

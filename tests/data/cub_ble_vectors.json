@@ -1,0 +1,1758 @@
+[
+  {
+    "device_id": "aabbccdd00112233",
+    "hex": "02010613ffffff01000000000000ffffff7f7f5eae1602",
+    "name": "idle clock, nothing happening",
+    "now": 1750000000,
+    "seq": 0,
+    "summary": {
+      "alerts": [],
+      "counts": {
+        "pending": 0
+      },
+      "expiring": {
+        "expired": 0,
+        "soon": 0,
+        "today": 0
+      },
+      "probes": [],
+      "timers": [],
+      "view": "clock"
+    }
+  },
+  {
+    "device_id": "aabbccdd00112233",
+    "hex": "02010613ffffff01070102050300ffffff7f7f5eae1602",
+    "name": "expiring view with counts",
+    "now": 1750000000,
+    "seq": 7,
+    "summary": {
+      "alerts": [],
+      "counts": {
+        "pending": 3
+      },
+      "expiring": {
+        "expired": 2,
+        "soon": 4,
+        "today": 1
+      },
+      "probes": [],
+      "timers": [],
+      "view": "expiring"
+    }
+  },
+  {
+    "device_id": "aabbccdd00112233",
+    "hex": "02010613ffffff010c0200010002f202ff7f7f5eae1602",
+    "name": "two timers, soonest 754 s",
+    "now": 1750000000,
+    "seq": 12,
+    "summary": {
+      "alerts": [],
+      "counts": {
+        "pending": 0
+      },
+      "expiring": {
+        "expired": 0,
+        "soon": 1,
+        "today": 0
+      },
+      "probes": [],
+      "timers": [
+        {
+          "deadline_epoch": 1750000754,
+          "expired": false,
+          "id": "a"
+        },
+        {
+          "deadline_epoch": 1750003600,
+          "expired": false,
+          "id": "b"
+        }
+      ],
+      "view": "timers"
+    }
+  },
+  {
+    "device_id": "aabbccdd00112233",
+    "hex": "02010613ffffff010d12000000010000ff7f7f5eae1602",
+    "name": "timer ringing",
+    "now": 1750000000,
+    "seq": 13,
+    "summary": {
+      "alerts": [],
+      "counts": {
+        "pending": 0
+      },
+      "expiring": {
+        "expired": 0,
+        "soon": 0,
+        "today": 0
+      },
+      "probes": [],
+      "timers": [
+        {
+          "deadline_epoch": 1749999980,
+          "expired": true,
+          "id": "a"
+        }
+      ],
+      "view": "timers"
+    }
+  },
+  {
+    "device_id": "aabbccdd00112233",
+    "hex": "02010613ffffff01280300000000ffff3f02245eae1602",
+    "name": "probe climbing to an above target",
+    "now": 1750000000,
+    "seq": 40,
+    "summary": {
+      "alerts": [],
+      "counts": {
+        "pending": 0
+      },
+      "expiring": {
+        "expired": 0,
+        "soon": 0,
+        "today": 0
+      },
+      "probes": [
+        {
+          "direction": "above",
+          "id": "P1",
+          "probe": 1,
+          "stale": false,
+          "target_c": 93.0,
+          "temp_c": 57.5
+        }
+      ],
+      "timers": [],
+      "view": "probe"
+    }
+  },
+  {
+    "device_id": "aabbccdd00112233",
+    "hex": "02010613ffffff01292300000000ffffa603005eae1602",
+    "name": "probe at target, flag set, delta 0",
+    "now": 1750000000,
+    "seq": 41,
+    "summary": {
+      "alerts": [],
+      "counts": {
+        "pending": 0
+      },
+      "expiring": {
+        "expired": 0,
+        "soon": 0,
+        "today": 0
+      },
+      "probes": [
+        {
+          "direction": "above",
+          "id": "P1",
+          "probe": 1,
+          "stale": false,
+          "target_c": 93.0,
+          "temp_c": 93.4
+        }
+      ],
+      "timers": [],
+      "view": "probe"
+    }
+  },
+  {
+    "device_id": "aabbccdd00112233",
+    "hex": "02010613ffffff012a4000000000ffffff7f7f5eae1602",
+    "name": "protection alarm live: attention flag, idle nibble",
+    "now": 1750000000,
+    "seq": 42,
+    "summary": {
+      "alerts": [
+        {
+          "id": "F1",
+          "kind": "hygrometer",
+          "message": "Fridge above range"
+        }
+      ],
+      "counts": {
+        "pending": 0
+      },
+      "expiring": {
+        "expired": 0,
+        "soon": 0,
+        "today": 0
+      },
+      "probes": [],
+      "timers": [],
+      "view": "alert"
+    }
+  },
+  {
+    "device_id": "other-install",
+    "hex": "02010613ffffff01ff01fffffffffeff00807ee1ed4a34",
+    "name": "everything clamped: counts over 255, timer over u16",
+    "now": 1750000000,
+    "seq": 255,
+    "summary": {
+      "alerts": [],
+      "counts": {
+        "pending": 400
+      },
+      "expiring": {
+        "expired": 999,
+        "soon": 200,
+        "today": 200
+      },
+      "probes": [
+        {
+          "direction": "above",
+          "id": "P1",
+          "probe": 1,
+          "stale": false,
+          "target_c": 4000.0,
+          "temp_c": -4000.0
+        }
+      ],
+      "timers": [
+        {
+          "deadline_epoch": 1750070000,
+          "expired": false,
+          "id": "0"
+        },
+        {
+          "deadline_epoch": 1750070001,
+          "expired": false,
+          "id": "1"
+        },
+        {
+          "deadline_epoch": 1750070002,
+          "expired": false,
+          "id": "2"
+        },
+        {
+          "deadline_epoch": 1750070003,
+          "expired": false,
+          "id": "3"
+        },
+        {
+          "deadline_epoch": 1750070004,
+          "expired": false,
+          "id": "4"
+        },
+        {
+          "deadline_epoch": 1750070005,
+          "expired": false,
+          "id": "5"
+        },
+        {
+          "deadline_epoch": 1750070006,
+          "expired": false,
+          "id": "6"
+        },
+        {
+          "deadline_epoch": 1750070007,
+          "expired": false,
+          "id": "7"
+        },
+        {
+          "deadline_epoch": 1750070008,
+          "expired": false,
+          "id": "8"
+        },
+        {
+          "deadline_epoch": 1750070009,
+          "expired": false,
+          "id": "9"
+        },
+        {
+          "deadline_epoch": 1750070010,
+          "expired": false,
+          "id": "10"
+        },
+        {
+          "deadline_epoch": 1750070011,
+          "expired": false,
+          "id": "11"
+        },
+        {
+          "deadline_epoch": 1750070012,
+          "expired": false,
+          "id": "12"
+        },
+        {
+          "deadline_epoch": 1750070013,
+          "expired": false,
+          "id": "13"
+        },
+        {
+          "deadline_epoch": 1750070014,
+          "expired": false,
+          "id": "14"
+        },
+        {
+          "deadline_epoch": 1750070015,
+          "expired": false,
+          "id": "15"
+        },
+        {
+          "deadline_epoch": 1750070016,
+          "expired": false,
+          "id": "16"
+        },
+        {
+          "deadline_epoch": 1750070017,
+          "expired": false,
+          "id": "17"
+        },
+        {
+          "deadline_epoch": 1750070018,
+          "expired": false,
+          "id": "18"
+        },
+        {
+          "deadline_epoch": 1750070019,
+          "expired": false,
+          "id": "19"
+        },
+        {
+          "deadline_epoch": 1750070020,
+          "expired": false,
+          "id": "20"
+        },
+        {
+          "deadline_epoch": 1750070021,
+          "expired": false,
+          "id": "21"
+        },
+        {
+          "deadline_epoch": 1750070022,
+          "expired": false,
+          "id": "22"
+        },
+        {
+          "deadline_epoch": 1750070023,
+          "expired": false,
+          "id": "23"
+        },
+        {
+          "deadline_epoch": 1750070024,
+          "expired": false,
+          "id": "24"
+        },
+        {
+          "deadline_epoch": 1750070025,
+          "expired": false,
+          "id": "25"
+        },
+        {
+          "deadline_epoch": 1750070026,
+          "expired": false,
+          "id": "26"
+        },
+        {
+          "deadline_epoch": 1750070027,
+          "expired": false,
+          "id": "27"
+        },
+        {
+          "deadline_epoch": 1750070028,
+          "expired": false,
+          "id": "28"
+        },
+        {
+          "deadline_epoch": 1750070029,
+          "expired": false,
+          "id": "29"
+        },
+        {
+          "deadline_epoch": 1750070030,
+          "expired": false,
+          "id": "30"
+        },
+        {
+          "deadline_epoch": 1750070031,
+          "expired": false,
+          "id": "31"
+        },
+        {
+          "deadline_epoch": 1750070032,
+          "expired": false,
+          "id": "32"
+        },
+        {
+          "deadline_epoch": 1750070033,
+          "expired": false,
+          "id": "33"
+        },
+        {
+          "deadline_epoch": 1750070034,
+          "expired": false,
+          "id": "34"
+        },
+        {
+          "deadline_epoch": 1750070035,
+          "expired": false,
+          "id": "35"
+        },
+        {
+          "deadline_epoch": 1750070036,
+          "expired": false,
+          "id": "36"
+        },
+        {
+          "deadline_epoch": 1750070037,
+          "expired": false,
+          "id": "37"
+        },
+        {
+          "deadline_epoch": 1750070038,
+          "expired": false,
+          "id": "38"
+        },
+        {
+          "deadline_epoch": 1750070039,
+          "expired": false,
+          "id": "39"
+        },
+        {
+          "deadline_epoch": 1750070040,
+          "expired": false,
+          "id": "40"
+        },
+        {
+          "deadline_epoch": 1750070041,
+          "expired": false,
+          "id": "41"
+        },
+        {
+          "deadline_epoch": 1750070042,
+          "expired": false,
+          "id": "42"
+        },
+        {
+          "deadline_epoch": 1750070043,
+          "expired": false,
+          "id": "43"
+        },
+        {
+          "deadline_epoch": 1750070044,
+          "expired": false,
+          "id": "44"
+        },
+        {
+          "deadline_epoch": 1750070045,
+          "expired": false,
+          "id": "45"
+        },
+        {
+          "deadline_epoch": 1750070046,
+          "expired": false,
+          "id": "46"
+        },
+        {
+          "deadline_epoch": 1750070047,
+          "expired": false,
+          "id": "47"
+        },
+        {
+          "deadline_epoch": 1750070048,
+          "expired": false,
+          "id": "48"
+        },
+        {
+          "deadline_epoch": 1750070049,
+          "expired": false,
+          "id": "49"
+        },
+        {
+          "deadline_epoch": 1750070050,
+          "expired": false,
+          "id": "50"
+        },
+        {
+          "deadline_epoch": 1750070051,
+          "expired": false,
+          "id": "51"
+        },
+        {
+          "deadline_epoch": 1750070052,
+          "expired": false,
+          "id": "52"
+        },
+        {
+          "deadline_epoch": 1750070053,
+          "expired": false,
+          "id": "53"
+        },
+        {
+          "deadline_epoch": 1750070054,
+          "expired": false,
+          "id": "54"
+        },
+        {
+          "deadline_epoch": 1750070055,
+          "expired": false,
+          "id": "55"
+        },
+        {
+          "deadline_epoch": 1750070056,
+          "expired": false,
+          "id": "56"
+        },
+        {
+          "deadline_epoch": 1750070057,
+          "expired": false,
+          "id": "57"
+        },
+        {
+          "deadline_epoch": 1750070058,
+          "expired": false,
+          "id": "58"
+        },
+        {
+          "deadline_epoch": 1750070059,
+          "expired": false,
+          "id": "59"
+        },
+        {
+          "deadline_epoch": 1750070060,
+          "expired": false,
+          "id": "60"
+        },
+        {
+          "deadline_epoch": 1750070061,
+          "expired": false,
+          "id": "61"
+        },
+        {
+          "deadline_epoch": 1750070062,
+          "expired": false,
+          "id": "62"
+        },
+        {
+          "deadline_epoch": 1750070063,
+          "expired": false,
+          "id": "63"
+        },
+        {
+          "deadline_epoch": 1750070064,
+          "expired": false,
+          "id": "64"
+        },
+        {
+          "deadline_epoch": 1750070065,
+          "expired": false,
+          "id": "65"
+        },
+        {
+          "deadline_epoch": 1750070066,
+          "expired": false,
+          "id": "66"
+        },
+        {
+          "deadline_epoch": 1750070067,
+          "expired": false,
+          "id": "67"
+        },
+        {
+          "deadline_epoch": 1750070068,
+          "expired": false,
+          "id": "68"
+        },
+        {
+          "deadline_epoch": 1750070069,
+          "expired": false,
+          "id": "69"
+        },
+        {
+          "deadline_epoch": 1750070070,
+          "expired": false,
+          "id": "70"
+        },
+        {
+          "deadline_epoch": 1750070071,
+          "expired": false,
+          "id": "71"
+        },
+        {
+          "deadline_epoch": 1750070072,
+          "expired": false,
+          "id": "72"
+        },
+        {
+          "deadline_epoch": 1750070073,
+          "expired": false,
+          "id": "73"
+        },
+        {
+          "deadline_epoch": 1750070074,
+          "expired": false,
+          "id": "74"
+        },
+        {
+          "deadline_epoch": 1750070075,
+          "expired": false,
+          "id": "75"
+        },
+        {
+          "deadline_epoch": 1750070076,
+          "expired": false,
+          "id": "76"
+        },
+        {
+          "deadline_epoch": 1750070077,
+          "expired": false,
+          "id": "77"
+        },
+        {
+          "deadline_epoch": 1750070078,
+          "expired": false,
+          "id": "78"
+        },
+        {
+          "deadline_epoch": 1750070079,
+          "expired": false,
+          "id": "79"
+        },
+        {
+          "deadline_epoch": 1750070080,
+          "expired": false,
+          "id": "80"
+        },
+        {
+          "deadline_epoch": 1750070081,
+          "expired": false,
+          "id": "81"
+        },
+        {
+          "deadline_epoch": 1750070082,
+          "expired": false,
+          "id": "82"
+        },
+        {
+          "deadline_epoch": 1750070083,
+          "expired": false,
+          "id": "83"
+        },
+        {
+          "deadline_epoch": 1750070084,
+          "expired": false,
+          "id": "84"
+        },
+        {
+          "deadline_epoch": 1750070085,
+          "expired": false,
+          "id": "85"
+        },
+        {
+          "deadline_epoch": 1750070086,
+          "expired": false,
+          "id": "86"
+        },
+        {
+          "deadline_epoch": 1750070087,
+          "expired": false,
+          "id": "87"
+        },
+        {
+          "deadline_epoch": 1750070088,
+          "expired": false,
+          "id": "88"
+        },
+        {
+          "deadline_epoch": 1750070089,
+          "expired": false,
+          "id": "89"
+        },
+        {
+          "deadline_epoch": 1750070090,
+          "expired": false,
+          "id": "90"
+        },
+        {
+          "deadline_epoch": 1750070091,
+          "expired": false,
+          "id": "91"
+        },
+        {
+          "deadline_epoch": 1750070092,
+          "expired": false,
+          "id": "92"
+        },
+        {
+          "deadline_epoch": 1750070093,
+          "expired": false,
+          "id": "93"
+        },
+        {
+          "deadline_epoch": 1750070094,
+          "expired": false,
+          "id": "94"
+        },
+        {
+          "deadline_epoch": 1750070095,
+          "expired": false,
+          "id": "95"
+        },
+        {
+          "deadline_epoch": 1750070096,
+          "expired": false,
+          "id": "96"
+        },
+        {
+          "deadline_epoch": 1750070097,
+          "expired": false,
+          "id": "97"
+        },
+        {
+          "deadline_epoch": 1750070098,
+          "expired": false,
+          "id": "98"
+        },
+        {
+          "deadline_epoch": 1750070099,
+          "expired": false,
+          "id": "99"
+        },
+        {
+          "deadline_epoch": 1750070100,
+          "expired": false,
+          "id": "100"
+        },
+        {
+          "deadline_epoch": 1750070101,
+          "expired": false,
+          "id": "101"
+        },
+        {
+          "deadline_epoch": 1750070102,
+          "expired": false,
+          "id": "102"
+        },
+        {
+          "deadline_epoch": 1750070103,
+          "expired": false,
+          "id": "103"
+        },
+        {
+          "deadline_epoch": 1750070104,
+          "expired": false,
+          "id": "104"
+        },
+        {
+          "deadline_epoch": 1750070105,
+          "expired": false,
+          "id": "105"
+        },
+        {
+          "deadline_epoch": 1750070106,
+          "expired": false,
+          "id": "106"
+        },
+        {
+          "deadline_epoch": 1750070107,
+          "expired": false,
+          "id": "107"
+        },
+        {
+          "deadline_epoch": 1750070108,
+          "expired": false,
+          "id": "108"
+        },
+        {
+          "deadline_epoch": 1750070109,
+          "expired": false,
+          "id": "109"
+        },
+        {
+          "deadline_epoch": 1750070110,
+          "expired": false,
+          "id": "110"
+        },
+        {
+          "deadline_epoch": 1750070111,
+          "expired": false,
+          "id": "111"
+        },
+        {
+          "deadline_epoch": 1750070112,
+          "expired": false,
+          "id": "112"
+        },
+        {
+          "deadline_epoch": 1750070113,
+          "expired": false,
+          "id": "113"
+        },
+        {
+          "deadline_epoch": 1750070114,
+          "expired": false,
+          "id": "114"
+        },
+        {
+          "deadline_epoch": 1750070115,
+          "expired": false,
+          "id": "115"
+        },
+        {
+          "deadline_epoch": 1750070116,
+          "expired": false,
+          "id": "116"
+        },
+        {
+          "deadline_epoch": 1750070117,
+          "expired": false,
+          "id": "117"
+        },
+        {
+          "deadline_epoch": 1750070118,
+          "expired": false,
+          "id": "118"
+        },
+        {
+          "deadline_epoch": 1750070119,
+          "expired": false,
+          "id": "119"
+        },
+        {
+          "deadline_epoch": 1750070120,
+          "expired": false,
+          "id": "120"
+        },
+        {
+          "deadline_epoch": 1750070121,
+          "expired": false,
+          "id": "121"
+        },
+        {
+          "deadline_epoch": 1750070122,
+          "expired": false,
+          "id": "122"
+        },
+        {
+          "deadline_epoch": 1750070123,
+          "expired": false,
+          "id": "123"
+        },
+        {
+          "deadline_epoch": 1750070124,
+          "expired": false,
+          "id": "124"
+        },
+        {
+          "deadline_epoch": 1750070125,
+          "expired": false,
+          "id": "125"
+        },
+        {
+          "deadline_epoch": 1750070126,
+          "expired": false,
+          "id": "126"
+        },
+        {
+          "deadline_epoch": 1750070127,
+          "expired": false,
+          "id": "127"
+        },
+        {
+          "deadline_epoch": 1750070128,
+          "expired": false,
+          "id": "128"
+        },
+        {
+          "deadline_epoch": 1750070129,
+          "expired": false,
+          "id": "129"
+        },
+        {
+          "deadline_epoch": 1750070130,
+          "expired": false,
+          "id": "130"
+        },
+        {
+          "deadline_epoch": 1750070131,
+          "expired": false,
+          "id": "131"
+        },
+        {
+          "deadline_epoch": 1750070132,
+          "expired": false,
+          "id": "132"
+        },
+        {
+          "deadline_epoch": 1750070133,
+          "expired": false,
+          "id": "133"
+        },
+        {
+          "deadline_epoch": 1750070134,
+          "expired": false,
+          "id": "134"
+        },
+        {
+          "deadline_epoch": 1750070135,
+          "expired": false,
+          "id": "135"
+        },
+        {
+          "deadline_epoch": 1750070136,
+          "expired": false,
+          "id": "136"
+        },
+        {
+          "deadline_epoch": 1750070137,
+          "expired": false,
+          "id": "137"
+        },
+        {
+          "deadline_epoch": 1750070138,
+          "expired": false,
+          "id": "138"
+        },
+        {
+          "deadline_epoch": 1750070139,
+          "expired": false,
+          "id": "139"
+        },
+        {
+          "deadline_epoch": 1750070140,
+          "expired": false,
+          "id": "140"
+        },
+        {
+          "deadline_epoch": 1750070141,
+          "expired": false,
+          "id": "141"
+        },
+        {
+          "deadline_epoch": 1750070142,
+          "expired": false,
+          "id": "142"
+        },
+        {
+          "deadline_epoch": 1750070143,
+          "expired": false,
+          "id": "143"
+        },
+        {
+          "deadline_epoch": 1750070144,
+          "expired": false,
+          "id": "144"
+        },
+        {
+          "deadline_epoch": 1750070145,
+          "expired": false,
+          "id": "145"
+        },
+        {
+          "deadline_epoch": 1750070146,
+          "expired": false,
+          "id": "146"
+        },
+        {
+          "deadline_epoch": 1750070147,
+          "expired": false,
+          "id": "147"
+        },
+        {
+          "deadline_epoch": 1750070148,
+          "expired": false,
+          "id": "148"
+        },
+        {
+          "deadline_epoch": 1750070149,
+          "expired": false,
+          "id": "149"
+        },
+        {
+          "deadline_epoch": 1750070150,
+          "expired": false,
+          "id": "150"
+        },
+        {
+          "deadline_epoch": 1750070151,
+          "expired": false,
+          "id": "151"
+        },
+        {
+          "deadline_epoch": 1750070152,
+          "expired": false,
+          "id": "152"
+        },
+        {
+          "deadline_epoch": 1750070153,
+          "expired": false,
+          "id": "153"
+        },
+        {
+          "deadline_epoch": 1750070154,
+          "expired": false,
+          "id": "154"
+        },
+        {
+          "deadline_epoch": 1750070155,
+          "expired": false,
+          "id": "155"
+        },
+        {
+          "deadline_epoch": 1750070156,
+          "expired": false,
+          "id": "156"
+        },
+        {
+          "deadline_epoch": 1750070157,
+          "expired": false,
+          "id": "157"
+        },
+        {
+          "deadline_epoch": 1750070158,
+          "expired": false,
+          "id": "158"
+        },
+        {
+          "deadline_epoch": 1750070159,
+          "expired": false,
+          "id": "159"
+        },
+        {
+          "deadline_epoch": 1750070160,
+          "expired": false,
+          "id": "160"
+        },
+        {
+          "deadline_epoch": 1750070161,
+          "expired": false,
+          "id": "161"
+        },
+        {
+          "deadline_epoch": 1750070162,
+          "expired": false,
+          "id": "162"
+        },
+        {
+          "deadline_epoch": 1750070163,
+          "expired": false,
+          "id": "163"
+        },
+        {
+          "deadline_epoch": 1750070164,
+          "expired": false,
+          "id": "164"
+        },
+        {
+          "deadline_epoch": 1750070165,
+          "expired": false,
+          "id": "165"
+        },
+        {
+          "deadline_epoch": 1750070166,
+          "expired": false,
+          "id": "166"
+        },
+        {
+          "deadline_epoch": 1750070167,
+          "expired": false,
+          "id": "167"
+        },
+        {
+          "deadline_epoch": 1750070168,
+          "expired": false,
+          "id": "168"
+        },
+        {
+          "deadline_epoch": 1750070169,
+          "expired": false,
+          "id": "169"
+        },
+        {
+          "deadline_epoch": 1750070170,
+          "expired": false,
+          "id": "170"
+        },
+        {
+          "deadline_epoch": 1750070171,
+          "expired": false,
+          "id": "171"
+        },
+        {
+          "deadline_epoch": 1750070172,
+          "expired": false,
+          "id": "172"
+        },
+        {
+          "deadline_epoch": 1750070173,
+          "expired": false,
+          "id": "173"
+        },
+        {
+          "deadline_epoch": 1750070174,
+          "expired": false,
+          "id": "174"
+        },
+        {
+          "deadline_epoch": 1750070175,
+          "expired": false,
+          "id": "175"
+        },
+        {
+          "deadline_epoch": 1750070176,
+          "expired": false,
+          "id": "176"
+        },
+        {
+          "deadline_epoch": 1750070177,
+          "expired": false,
+          "id": "177"
+        },
+        {
+          "deadline_epoch": 1750070178,
+          "expired": false,
+          "id": "178"
+        },
+        {
+          "deadline_epoch": 1750070179,
+          "expired": false,
+          "id": "179"
+        },
+        {
+          "deadline_epoch": 1750070180,
+          "expired": false,
+          "id": "180"
+        },
+        {
+          "deadline_epoch": 1750070181,
+          "expired": false,
+          "id": "181"
+        },
+        {
+          "deadline_epoch": 1750070182,
+          "expired": false,
+          "id": "182"
+        },
+        {
+          "deadline_epoch": 1750070183,
+          "expired": false,
+          "id": "183"
+        },
+        {
+          "deadline_epoch": 1750070184,
+          "expired": false,
+          "id": "184"
+        },
+        {
+          "deadline_epoch": 1750070185,
+          "expired": false,
+          "id": "185"
+        },
+        {
+          "deadline_epoch": 1750070186,
+          "expired": false,
+          "id": "186"
+        },
+        {
+          "deadline_epoch": 1750070187,
+          "expired": false,
+          "id": "187"
+        },
+        {
+          "deadline_epoch": 1750070188,
+          "expired": false,
+          "id": "188"
+        },
+        {
+          "deadline_epoch": 1750070189,
+          "expired": false,
+          "id": "189"
+        },
+        {
+          "deadline_epoch": 1750070190,
+          "expired": false,
+          "id": "190"
+        },
+        {
+          "deadline_epoch": 1750070191,
+          "expired": false,
+          "id": "191"
+        },
+        {
+          "deadline_epoch": 1750070192,
+          "expired": false,
+          "id": "192"
+        },
+        {
+          "deadline_epoch": 1750070193,
+          "expired": false,
+          "id": "193"
+        },
+        {
+          "deadline_epoch": 1750070194,
+          "expired": false,
+          "id": "194"
+        },
+        {
+          "deadline_epoch": 1750070195,
+          "expired": false,
+          "id": "195"
+        },
+        {
+          "deadline_epoch": 1750070196,
+          "expired": false,
+          "id": "196"
+        },
+        {
+          "deadline_epoch": 1750070197,
+          "expired": false,
+          "id": "197"
+        },
+        {
+          "deadline_epoch": 1750070198,
+          "expired": false,
+          "id": "198"
+        },
+        {
+          "deadline_epoch": 1750070199,
+          "expired": false,
+          "id": "199"
+        },
+        {
+          "deadline_epoch": 1750070200,
+          "expired": false,
+          "id": "200"
+        },
+        {
+          "deadline_epoch": 1750070201,
+          "expired": false,
+          "id": "201"
+        },
+        {
+          "deadline_epoch": 1750070202,
+          "expired": false,
+          "id": "202"
+        },
+        {
+          "deadline_epoch": 1750070203,
+          "expired": false,
+          "id": "203"
+        },
+        {
+          "deadline_epoch": 1750070204,
+          "expired": false,
+          "id": "204"
+        },
+        {
+          "deadline_epoch": 1750070205,
+          "expired": false,
+          "id": "205"
+        },
+        {
+          "deadline_epoch": 1750070206,
+          "expired": false,
+          "id": "206"
+        },
+        {
+          "deadline_epoch": 1750070207,
+          "expired": false,
+          "id": "207"
+        },
+        {
+          "deadline_epoch": 1750070208,
+          "expired": false,
+          "id": "208"
+        },
+        {
+          "deadline_epoch": 1750070209,
+          "expired": false,
+          "id": "209"
+        },
+        {
+          "deadline_epoch": 1750070210,
+          "expired": false,
+          "id": "210"
+        },
+        {
+          "deadline_epoch": 1750070211,
+          "expired": false,
+          "id": "211"
+        },
+        {
+          "deadline_epoch": 1750070212,
+          "expired": false,
+          "id": "212"
+        },
+        {
+          "deadline_epoch": 1750070213,
+          "expired": false,
+          "id": "213"
+        },
+        {
+          "deadline_epoch": 1750070214,
+          "expired": false,
+          "id": "214"
+        },
+        {
+          "deadline_epoch": 1750070215,
+          "expired": false,
+          "id": "215"
+        },
+        {
+          "deadline_epoch": 1750070216,
+          "expired": false,
+          "id": "216"
+        },
+        {
+          "deadline_epoch": 1750070217,
+          "expired": false,
+          "id": "217"
+        },
+        {
+          "deadline_epoch": 1750070218,
+          "expired": false,
+          "id": "218"
+        },
+        {
+          "deadline_epoch": 1750070219,
+          "expired": false,
+          "id": "219"
+        },
+        {
+          "deadline_epoch": 1750070220,
+          "expired": false,
+          "id": "220"
+        },
+        {
+          "deadline_epoch": 1750070221,
+          "expired": false,
+          "id": "221"
+        },
+        {
+          "deadline_epoch": 1750070222,
+          "expired": false,
+          "id": "222"
+        },
+        {
+          "deadline_epoch": 1750070223,
+          "expired": false,
+          "id": "223"
+        },
+        {
+          "deadline_epoch": 1750070224,
+          "expired": false,
+          "id": "224"
+        },
+        {
+          "deadline_epoch": 1750070225,
+          "expired": false,
+          "id": "225"
+        },
+        {
+          "deadline_epoch": 1750070226,
+          "expired": false,
+          "id": "226"
+        },
+        {
+          "deadline_epoch": 1750070227,
+          "expired": false,
+          "id": "227"
+        },
+        {
+          "deadline_epoch": 1750070228,
+          "expired": false,
+          "id": "228"
+        },
+        {
+          "deadline_epoch": 1750070229,
+          "expired": false,
+          "id": "229"
+        },
+        {
+          "deadline_epoch": 1750070230,
+          "expired": false,
+          "id": "230"
+        },
+        {
+          "deadline_epoch": 1750070231,
+          "expired": false,
+          "id": "231"
+        },
+        {
+          "deadline_epoch": 1750070232,
+          "expired": false,
+          "id": "232"
+        },
+        {
+          "deadline_epoch": 1750070233,
+          "expired": false,
+          "id": "233"
+        },
+        {
+          "deadline_epoch": 1750070234,
+          "expired": false,
+          "id": "234"
+        },
+        {
+          "deadline_epoch": 1750070235,
+          "expired": false,
+          "id": "235"
+        },
+        {
+          "deadline_epoch": 1750070236,
+          "expired": false,
+          "id": "236"
+        },
+        {
+          "deadline_epoch": 1750070237,
+          "expired": false,
+          "id": "237"
+        },
+        {
+          "deadline_epoch": 1750070238,
+          "expired": false,
+          "id": "238"
+        },
+        {
+          "deadline_epoch": 1750070239,
+          "expired": false,
+          "id": "239"
+        },
+        {
+          "deadline_epoch": 1750070240,
+          "expired": false,
+          "id": "240"
+        },
+        {
+          "deadline_epoch": 1750070241,
+          "expired": false,
+          "id": "241"
+        },
+        {
+          "deadline_epoch": 1750070242,
+          "expired": false,
+          "id": "242"
+        },
+        {
+          "deadline_epoch": 1750070243,
+          "expired": false,
+          "id": "243"
+        },
+        {
+          "deadline_epoch": 1750070244,
+          "expired": false,
+          "id": "244"
+        },
+        {
+          "deadline_epoch": 1750070245,
+          "expired": false,
+          "id": "245"
+        },
+        {
+          "deadline_epoch": 1750070246,
+          "expired": false,
+          "id": "246"
+        },
+        {
+          "deadline_epoch": 1750070247,
+          "expired": false,
+          "id": "247"
+        },
+        {
+          "deadline_epoch": 1750070248,
+          "expired": false,
+          "id": "248"
+        },
+        {
+          "deadline_epoch": 1750070249,
+          "expired": false,
+          "id": "249"
+        },
+        {
+          "deadline_epoch": 1750070250,
+          "expired": false,
+          "id": "250"
+        },
+        {
+          "deadline_epoch": 1750070251,
+          "expired": false,
+          "id": "251"
+        },
+        {
+          "deadline_epoch": 1750070252,
+          "expired": false,
+          "id": "252"
+        },
+        {
+          "deadline_epoch": 1750070253,
+          "expired": false,
+          "id": "253"
+        },
+        {
+          "deadline_epoch": 1750070254,
+          "expired": false,
+          "id": "254"
+        },
+        {
+          "deadline_epoch": 1750070255,
+          "expired": false,
+          "id": "255"
+        },
+        {
+          "deadline_epoch": 1750070256,
+          "expired": false,
+          "id": "256"
+        },
+        {
+          "deadline_epoch": 1750070257,
+          "expired": false,
+          "id": "257"
+        },
+        {
+          "deadline_epoch": 1750070258,
+          "expired": false,
+          "id": "258"
+        },
+        {
+          "deadline_epoch": 1750070259,
+          "expired": false,
+          "id": "259"
+        },
+        {
+          "deadline_epoch": 1750070260,
+          "expired": false,
+          "id": "260"
+        },
+        {
+          "deadline_epoch": 1750070261,
+          "expired": false,
+          "id": "261"
+        },
+        {
+          "deadline_epoch": 1750070262,
+          "expired": false,
+          "id": "262"
+        },
+        {
+          "deadline_epoch": 1750070263,
+          "expired": false,
+          "id": "263"
+        },
+        {
+          "deadline_epoch": 1750070264,
+          "expired": false,
+          "id": "264"
+        },
+        {
+          "deadline_epoch": 1750070265,
+          "expired": false,
+          "id": "265"
+        },
+        {
+          "deadline_epoch": 1750070266,
+          "expired": false,
+          "id": "266"
+        },
+        {
+          "deadline_epoch": 1750070267,
+          "expired": false,
+          "id": "267"
+        },
+        {
+          "deadline_epoch": 1750070268,
+          "expired": false,
+          "id": "268"
+        },
+        {
+          "deadline_epoch": 1750070269,
+          "expired": false,
+          "id": "269"
+        },
+        {
+          "deadline_epoch": 1750070270,
+          "expired": false,
+          "id": "270"
+        },
+        {
+          "deadline_epoch": 1750070271,
+          "expired": false,
+          "id": "271"
+        },
+        {
+          "deadline_epoch": 1750070272,
+          "expired": false,
+          "id": "272"
+        },
+        {
+          "deadline_epoch": 1750070273,
+          "expired": false,
+          "id": "273"
+        },
+        {
+          "deadline_epoch": 1750070274,
+          "expired": false,
+          "id": "274"
+        },
+        {
+          "deadline_epoch": 1750070275,
+          "expired": false,
+          "id": "275"
+        },
+        {
+          "deadline_epoch": 1750070276,
+          "expired": false,
+          "id": "276"
+        },
+        {
+          "deadline_epoch": 1750070277,
+          "expired": false,
+          "id": "277"
+        },
+        {
+          "deadline_epoch": 1750070278,
+          "expired": false,
+          "id": "278"
+        },
+        {
+          "deadline_epoch": 1750070279,
+          "expired": false,
+          "id": "279"
+        },
+        {
+          "deadline_epoch": 1750070280,
+          "expired": false,
+          "id": "280"
+        },
+        {
+          "deadline_epoch": 1750070281,
+          "expired": false,
+          "id": "281"
+        },
+        {
+          "deadline_epoch": 1750070282,
+          "expired": false,
+          "id": "282"
+        },
+        {
+          "deadline_epoch": 1750070283,
+          "expired": false,
+          "id": "283"
+        },
+        {
+          "deadline_epoch": 1750070284,
+          "expired": false,
+          "id": "284"
+        },
+        {
+          "deadline_epoch": 1750070285,
+          "expired": false,
+          "id": "285"
+        },
+        {
+          "deadline_epoch": 1750070286,
+          "expired": false,
+          "id": "286"
+        },
+        {
+          "deadline_epoch": 1750070287,
+          "expired": false,
+          "id": "287"
+        },
+        {
+          "deadline_epoch": 1750070288,
+          "expired": false,
+          "id": "288"
+        },
+        {
+          "deadline_epoch": 1750070289,
+          "expired": false,
+          "id": "289"
+        },
+        {
+          "deadline_epoch": 1750070290,
+          "expired": false,
+          "id": "290"
+        },
+        {
+          "deadline_epoch": 1750070291,
+          "expired": false,
+          "id": "291"
+        },
+        {
+          "deadline_epoch": 1750070292,
+          "expired": false,
+          "id": "292"
+        },
+        {
+          "deadline_epoch": 1750070293,
+          "expired": false,
+          "id": "293"
+        },
+        {
+          "deadline_epoch": 1750070294,
+          "expired": false,
+          "id": "294"
+        },
+        {
+          "deadline_epoch": 1750070295,
+          "expired": false,
+          "id": "295"
+        },
+        {
+          "deadline_epoch": 1750070296,
+          "expired": false,
+          "id": "296"
+        },
+        {
+          "deadline_epoch": 1750070297,
+          "expired": false,
+          "id": "297"
+        },
+        {
+          "deadline_epoch": 1750070298,
+          "expired": false,
+          "id": "298"
+        },
+        {
+          "deadline_epoch": 1750070299,
+          "expired": false,
+          "id": "299"
+        }
+      ],
+      "view": "expiring"
+    }
+  },
+  {
+    "device_id": "aabbccdd00112233",
+    "hex": "02010613ffffff01030300000000ffff5400fc5eae1602",
+    "name": "stale probe ignored, negative delta below target",
+    "now": 1750000000,
+    "seq": 3,
+    "summary": {
+      "alerts": [],
+      "counts": {
+        "pending": 0
+      },
+      "expiring": {
+        "expired": 0,
+        "soon": 0,
+        "today": 0
+      },
+      "probes": [
+        {
+          "id": "OLD",
+          "probe": 1,
+          "stale": true,
+          "target_c": 50.0,
+          "temp_c": 99.0
+        },
+        {
+          "direction": "below",
+          "id": "P2",
+          "probe": 1,
+          "stale": false,
+          "target_c": 4.0,
+          "temp_c": 8.4
+        }
+      ],
+      "timers": [],
+      "view": "probe"
+    }
+  }
+]
