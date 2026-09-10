@@ -3,7 +3,7 @@
 # transitively) because the earlier 0.38 line carries denial-of-service
 # advisories that reach every upload and form endpoint here.
 fastapi==0.120.1
-starlette==0.49.3
+starlette==1.6.0
 uvicorn[standard]==0.30.6
 
 # Database ORM (required); psycopg2 is the production Postgres driver.
