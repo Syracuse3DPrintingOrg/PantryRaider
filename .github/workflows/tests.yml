@@ -22,7 +22,7 @@ jobs:
     env:
       DATA_DIR: /tmp/foodassistant-data
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v4
 
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
@@ -46,7 +46,7 @@ jobs:
   cloud-tests:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v4
 
       # 3.12 is what cloud/Dockerfile runs, so CI matches production.
       - name: Set up Python 3.12
@@ -71,7 +71,7 @@ jobs:
   static-checks:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v4
 
       # Syntax-check every shell script, including the extensionless
       # provisioning helpers (two of those are Python, so dispatch on the
@@ -111,7 +111,7 @@ jobs:
       # browser is installed on purpose, so a missing one is a broken job.
       REQUIRE_BROWSER: "1"
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v4
 
       - name: Set up Python 3.12
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
