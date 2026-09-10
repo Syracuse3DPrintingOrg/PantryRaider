@@ -1,0 +1,220 @@
+{% extends "base.html" %}
+{% block title %}Bandit Cubs: Pantry Raider{% endblock %}
+
+{% block content %}
+<div class="cubs-page">
+  <div class="d-flex align-items-center gap-2 mt-3 mb-2">
+    <h4 class="mb-0"><i class="bi bi-cpu me-2"></i>Bandit Cubs</h4>
+  </div>
+  <p class="text-secondary" style="max-width:56rem">
+    A Bandit Cub is a small ESP32 screen that sits on a counter, a fridge door, or
+    by the stove and shows what your kitchen needs right now: items about to
+    expire, running timers, and thermometer probes. What it shows is decided here
+    on your server, not on the device, so you never reflash to change it. Plug one
+    into this computer over USB, flash it below, join it to Wi-Fi, and approve it
+    under Settings, Devices.
+  </p>
+
+  {# Browser capability banner. Web Serial (what the browser flasher uses) only
+     works in a secure context (HTTPS or localhost) and only in Chrome or Edge.
+     Filled in by the script below; distinguishes an insecure address from an
+     unsupported browser so the fix is clear. The download link and command line
+     under each board work everywhere and are never hidden. #}
+  <div id="cubs-capability" class="alert d-none" role="alert"></div>
+
+  <div class="row g-3">
+    {% for p in cub_profiles %}
+    <div class="col-12 col-lg-4">
+      <div class="card h-100 cub-card" data-profile="{{ p.id }}">
+        <div class="card-body d-flex flex-column">
+          <h5 class="card-title mb-1"><i class="bi bi-display me-2"></i>{{ p.label }}</h5>
+          <div class="text-secondary small mb-3">{{ p.board }}</div>
+
+          {# Shown while firmware exists to flash. Toggled by the status fetch. #}
+          <div class="cub-ready d-none">
+            <div class="cub-install mb-3">
+              <esp-web-install-button manifest="/cub/firmware/manifest.json?profile={{ p.id }}">
+                <button slot="activate" class="btn btn-primary">
+                  <i class="bi bi-usb-plug me-1"></i>Install
+                </button>
+                <span slot="unsupported" class="small text-secondary">
+                  This browser cannot flash over USB. Use the download and command below.
+                </span>
+                <span slot="not-allowed" class="small text-secondary">
+                  Open this page over your secure (HTTPS) address to flash from the browser.
+                </span>
+              </esp-web-install-button>
+            </div>
+            <div class="small mb-2">
+              <a href="/cub/firmware/{{ p.id }}.bin" download="{{ p.asset }}">
+                <i class="bi bi-download me-1"></i>Download firmware ({{ p.asset }})
+              </a>
+            </div>
+            <div class="small text-secondary mb-1">Or flash it yourself with esptool:</div>
+            <div class="cub-cmd input-group input-group-sm">
+              <input type="text" class="form-control font-monospace" readonly
+                     value="{{ p.esptool }}" aria-label="esptool command for {{ p.label }}">
+              <button type="button" class="btn btn-outline-secondary cub-copy"
+                      title="Copy"><i class="bi bi-clipboard"></i></button>
+            </div>
+          </div>
+
+          {# Shown while no image is published for this board yet. #}
+          <div class="cub-unpublished d-none text-secondary small">
+            <i class="bi bi-hourglass-split me-1"></i>Firmware for this board has not
+            been published yet. Check back after the next release, or build it from
+            the ESPHome project below.
+          </div>
+
+          {# Shown briefly while the readiness check runs. #}
+          <div class="cub-checking text-secondary small">
+            <span class="spinner-border spinner-border-sm me-2"></span>Checking for firmware...
+          </div>
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+
+  <div class="card mt-4">
+    <div class="card-body">
+      <h5 class="card-title"><i class="bi bi-signpost-2 me-2"></i>What happens next</h5>
+      <ol class="mb-0 ps-3" style="max-width:56rem">
+        <li>Plug the Cub into this computer over USB.</li>
+        <li>Click <strong>Install</strong> on its board above and let it write the firmware.</li>
+        <li>Set the Wi-Fi network right here in the browser when it asks (no app needed).</li>
+        <li>The Cub finds this server on its own and shows a short pairing code on its screen.</li>
+        <li>Open <a href="setup">Settings, Devices</a>, check the code matches, name the Cub,
+            and approve it. Within a few seconds it starts showing your kitchen.</li>
+      </ol>
+    </div>
+  </div>
+
+  <div class="card mt-3">
+    <div class="card-body">
+      <h5 class="card-title"><i class="bi bi-globe me-2"></i>No Chrome or a locked-down browser?</h5>
+      <p class="text-secondary mb-2" style="max-width:56rem">
+        The browser flasher needs Chrome or Edge over a secure (HTTPS) address.
+        If that is not you, download the firmware for your board above and flash it
+        with the esptool command shown, or use
+        <a href="https://web.esphome.io" target="_blank" rel="noopener">web.esphome.io</a>,
+        a browser flasher that works from any HTTPS page (upload the same downloaded
+        firmware file there).
+      </p>
+    </div>
+  </div>
+
+  <div class="card mt-3 mb-4">
+    <div class="card-body">
+      <h5 class="card-title"><i class="bi bi-tools me-2"></i>A different board</h5>
+      <p class="text-secondary mb-0" style="max-width:56rem">
+        A Cub is a standard ESPHome project, so any ESP32 board can be one: the
+        firmware here is built from the
+        <a href="{{ esphome_repo_url }}" target="_blank" rel="noopener">esphome/ folder in the project repo</a>.
+        Copy the profile YAML closest to your board, set the two substitutions it
+        documents (your server address and, after pairing, an API key), and build
+        it in your own ESPHome dashboard. The three boards above are the ones with
+        prebuilt one-click images; everything else takes this route for now.
+      </p>
+    </div>
+  </div>
+</div>
+
+<style>
+  .cub-card .cub-cmd input { background: var(--bs-tertiary-bg, rgba(255,255,255,0.03)); }
+  .cubs-page esp-web-install-button { display: inline-block; }
+</style>
+{% endblock %}
+
+{% block scripts %}
+{# ESP Web Tools is self-hosted (static/js/vendor/esp-web-tools), never a CDN,
+   so the flasher loads with no external network requests. It is an ES module
+   that dynamically imports its sibling chunks from the same folder. #}
+<script type="module" src="static/js/vendor/esp-web-tools/install-button.js?v={{ app_version }}"></script>
+<script>
+(function () {
+  "use strict";
+  // Web Serial (what <esp-web-install-button> uses) is only exposed in a secure
+  // context and only by Chromium browsers. Explain WHY when it is missing, and
+  // tell insecure-origin and unsupported-browser cases apart so the fix is clear.
+  var secure = window.isSecureContext;
+  var hasSerial = ("serial" in navigator);
+  var capable = secure && hasSerial;
+
+  var banner = document.getElementById("cubs-capability");
+  if (banner && !capable) {
+    if (!secure) {
+      banner.className = "alert alert-warning";
+      banner.innerHTML = '<i class="bi bi-shield-lock me-2"></i>' +
+        '<strong>Flashing from the browser needs a secure address.</strong> ' +
+        'You are on a plain http address on your network, where browsers block ' +
+        'USB flashing. Open this same page over your secure (HTTPS) address, the ' +
+        'one you use to reach Pantry Raider from away from home, then flash from ' +
+        'there. The firmware download and command line below work from here as they are.';
+    } else {
+      banner.className = "alert alert-warning";
+      banner.innerHTML = '<i class="bi bi-browser-chrome me-2"></i>' +
+        '<strong>This browser cannot flash over USB.</strong> ' +
+        'The browser flasher needs Chrome or Edge (Firefox and Safari do not ' +
+        'support it). Switch to Chrome or Edge to use Install, or download the ' +
+        'firmware below and flash it with the command shown.';
+    }
+    banner.classList.remove("d-none");
+  }
+
+  // Hide the Install button on any board when the browser cannot flash: it
+  // would only report "not supported" itself. The download and command stay.
+  if (!capable) {
+    document.querySelectorAll(".cub-install").forEach(function (el) {
+      el.classList.add("d-none");
+    });
+  }
+
+  // Copy the esptool command.
+  document.querySelectorAll(".cub-copy").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var input = btn.parentElement.querySelector("input");
+      if (!input) return;
+      var done = function () {
+        var icon = btn.querySelector("i");
+        if (icon) { icon.className = "bi bi-check-lg"; setTimeout(function () { icon.className = "bi bi-clipboard"; }, 1500); }
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(input.value).then(done).catch(function () {
+          input.select(); try { document.execCommand("copy"); done(); } catch (e) {}
+        });
+      } else {
+        input.select(); try { document.execCommand("copy"); done(); } catch (e) {}
+      }
+    });
+  });
+
+  // Ask the server which boards actually have an image to flash, and show the
+  // right state per card (ready vs not-published-yet) instead of a button that
+  // would fail. Any error degrades to "ready" so the download link is never
+  // hidden by a transient hiccup.
+  function applyStatus(profiles) {
+    document.querySelectorAll(".cub-card").forEach(function (card) {
+      var id = card.getAttribute("data-profile");
+      var info = profiles && profiles[id];
+      var available = !info || info.available !== false;
+      var checking = card.querySelector(".cub-checking");
+      var ready = card.querySelector(".cub-ready");
+      var unpub = card.querySelector(".cub-unpublished");
+      if (checking) checking.classList.add("d-none");
+      if (available) {
+        if (ready) ready.classList.remove("d-none");
+        if (unpub) unpub.classList.add("d-none");
+      } else {
+        if (ready) ready.classList.add("d-none");
+        if (unpub) unpub.classList.remove("d-none");
+      }
+    });
+  }
+  fetch("/cub/firmware/status", { headers: { "Accept": "application/json" } })
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (d) { applyStatus(d && d.profiles); })
+    .catch(function () { applyStatus(null); });
+})();
+</script>
+{% endblock %}

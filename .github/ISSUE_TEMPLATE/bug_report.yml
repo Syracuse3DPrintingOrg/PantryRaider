@@ -1,0 +1,56 @@
+name: Bug report
+description: Report a problem with Pantry Raider
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug. Please do not use this form for
+        security vulnerabilities. See SECURITY.md for private disclosure.
+  - type: input
+    id: version
+    attributes:
+      label: App version
+      description: The value of APP_VERSION in service/app/config.py, or the version shown on the app About page.
+      placeholder: "0.6.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: deployment_mode
+    attributes:
+      label: Deployment mode
+      description: How is this instance deployed?
+      options:
+        - server
+        - pi_hosted
+        - pi_remote
+    validations:
+      required: true
+  - type: checkboxes
+    id: profiles
+    attributes:
+      label: Optional profiles enabled
+      description: Which optional Docker Compose profiles are enabled?
+      options:
+        - label: Grocy (with-grocy)
+        - label: Mealie (with-mealie)
+        - label: Ollama (with-ollama)
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction steps
+      description: Steps to reproduce the behavior, what you expected, and what actually happened.
+      placeholder: |
+        1. Go to ...
+        2. Click on ...
+        3. See error ...
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots
+      description: Any relevant logs, error output, or screenshots. This will be rendered automatically, no backticks needed.
+      render: shell
+    validations:
+      required: false

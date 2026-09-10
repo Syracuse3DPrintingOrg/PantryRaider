@@ -1,0 +1,1038 @@
+#!/usr/bin/env bash
+# FoodAssistant print stack setup (FoodAssistant-gyri).
+# ====================================================
+# Installs and configures the OPTIONAL print stack on the host: CUPS (so the
+# containerized app can print through host cupsd), Bluetooth (for cheap BT
+# thermal label printers), and a generic driver set. It then points the app
+# stack at the host cupsd by writing CUPS_SERVER into the stack's .env, so the
+# app container's lp/lpstat clients reach a real print server with no code
+# change (services/printing.py honors CUPS_SERVER as-is).
+#
+# OFF BY DEFAULT. This script only ever runs when a user opts in: at install
+# time (install.sh, ENABLE_PRINTING=1 or the interactive prompt), from the
+# setup UI's "Install now" button (via the host bridge POST /print-setup), or
+# re-asserted by an OTA update when printing was already enabled. A normal
+# update never calls it, so an existing install (Dan's Korolev server, any
+# deployed Pi) is untouched unless its owner turns printing on.
+#
+# Design:
+#   - Idempotent and safe to re-run: already-installed packages are skipped,
+#     the cupsd drop-in is rewritten in place, and the .env markers are
+#     replaced rather than duplicated.
+#   - Non-interactive: apt runs with DEBIAN_FRONTEND=noninteractive and -y.
+#   - Degrades gracefully: a missing apt, an offline box, or an absent stack
+#     .env is logged and does not abort the rest of the run where it can go on.
+#
+# Env overrides (for tests and unusual layouts):
+#   INSTALL_DIR   stack dir holding docker-compose.yml + .env (default /opt/foodassistant)
+#   PRINT_SERVICE_USER  extra user to add to the lpadmin group (default: owner of INSTALL_DIR)
+#   CUPSD_DROPIN  path of the cupsd listen/allow drop-in
+#   SKIP_APT=1    skip package installation (used by tests / re-config-only runs)
+#   ENABLE_BLUETOOTH_PRINTING=1  also install the Supvan Bluetooth bridge
+#                 (FoodAssistant-po9c). OFF by default so a plain network-printing
+#                 install stays fast: the Supvan bridge otherwise triggers a
+#                 multi-minute on-device Rust build. The app also writes a
+#                 BLUETOOTH_PRINTING=1 marker into the stack .env when a user opts
+#                 in, which is honored here so an OTA re-assert keeps the bridge.
+set -uo pipefail
+
+INSTALL_DIR="${INSTALL_DIR:-/opt/foodassistant}"
+ENV_FILE="${ENV_FILE:-$INSTALL_DIR/.env}"
+COMPOSE_FILE="${COMPOSE_FILE:-$INSTALL_DIR/docker-compose.yml}"
+# CUPS ships a serverbin config dir; a drop-in under cupsd.conf.d keeps our
+# changes separate from the stock cupsd.conf so they are reversible (delete the
+# file, reload) and a re-run never mangles the base config.
+CUPSD_CONF="${CUPSD_CONF:-/etc/cups/cupsd.conf}"
+
+log()  { printf '%s\n' "$*"; }
+warn() { printf 'WARN: %s\n' "$*" >&2; }
+
+# --- Package set -------------------------------------------------------------
+# The choice, deliberately kept lean:
+#   cups           the print server (brings lp/lpstat host-side too)
+#   cups-client    the lp/lpstat/lpadmin clients (explicit; some minimal images
+#                  ship cups without them)
+#   cups-filters   the filter chain that renders PDFs/images to printer formats
+#   printer-driver-gutenprint  broad coverage for common inkjet/laser printers
+#                  without pulling the very heavy printer-driver-all metapackage
+#   bluez          Bluetooth stack for cheap BT thermal label printers
+#   avahi-daemon   mDNS so driverless (IPP Everywhere) network printers are found
+#   avahi-utils    avahi-browse, used to enumerate DNS-SD printers on the LAN
+#   cups-ipp-utils the `driverless`/`ippfind` helpers for in-app discovery
+# Discovery (avahi-utils + cups-ipp-utils, and lpinfo which ships with cups)
+# is part of the BASE set so the in-app "Find printers" flow works right after a
+# plain print install, with no Bluetooth build (FoodAssistant-po9c). Supvan and
+# other Bluetooth thermal printers get their bridge from a separate, opt-in step
+# (install_supvan_bridge below, FoodAssistant-usxj/-po9c), which is NOT part of
+# the base install.
+PRINT_PACKAGES=(cups cups-client cups-filters printer-driver-gutenprint bluez avahi-daemon avahi-utils cups-ipp-utils)
+
+install_packages() {
+  if [ "${SKIP_APT:-0}" = "1" ]; then
+    log "SKIP_APT=1; skipping package installation."
+    return 0
+  fi
+  if ! command -v apt-get >/dev/null 2>&1; then
+    warn "apt-get not found; cannot install the print stack on this host."
+    return 1
+  fi
+  # Skip the slow apt run when every package is already present.
+  local missing=0 pkg
+  if command -v dpkg-query >/dev/null 2>&1; then
+    for pkg in "${PRINT_PACKAGES[@]}"; do
+      if ! dpkg-query -W -f='${Status}' "$pkg" 2>/dev/null | grep -q "install ok installed"; then
+        missing=1; break
+      fi
+    done
+    if [ "$missing" = "0" ]; then
+      log "Print packages already installed; skipping apt."
+      return 0
+    fi
+  fi
+  log "Installing print stack packages: ${PRINT_PACKAGES[*]}"
+  if ! DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "${PRINT_PACKAGES[@]}"; then
+    log "First install attempt failed; refreshing apt lists and retrying."
+    DEBIAN_FRONTEND=noninteractive apt-get update -y || warn "apt-get update failed (offline?)."
+    if ! DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "${PRINT_PACKAGES[@]}"; then
+      warn "Could not install the print stack packages (offline?)."
+      return 1
+    fi
+  fi
+  return 0
+}
+
+# --- Service enable ----------------------------------------------------------
+enable_services() {
+  command -v systemctl >/dev/null 2>&1 || { warn "systemctl not found; not enabling services."; return 0; }
+  local svc
+  for svc in cups bluetooth avahi-daemon; do
+    systemctl enable --now "$svc" >/dev/null 2>&1 \
+      && log "Enabled and started $svc" \
+      || warn "Could not enable/start $svc (may not exist on this host)."
+  done
+}
+
+# Bring the Bluetooth adapter to a usable state for the Supvan label printer.
+# Enabling bluetooth.service is not enough on a fresh Pi: the adapter often comes
+# up rfkill soft-blocked and/or with the HCI interface DOWN, so RFCOMM to the
+# printer fails and the printer never appears (Dan's Bandit: hci0 DOWN, power-on
+# refused with org.bluez.Error.Failed, rfkill not even installed). Unblock it,
+# bring the interface up, and power it on. All idempotent and best-effort: a host
+# without these tools, or with the radio already up, is left as-is
+# (FoodAssistant-h2j6 / gtg2 adapter-readiness, mirrors gadgets-setup).
+bluetooth_adapter_up() {
+  # rfkill is not always installed; install it so a soft block can be cleared,
+  # then unblock. Skip quietly if apt or rfkill is unavailable.
+  if ! command -v rfkill >/dev/null 2>&1; then
+    DEBIAN_FRONTEND=noninteractive apt-get install -y rfkill >/dev/null 2>&1 || true
+  fi
+  command -v rfkill >/dev/null 2>&1 && rfkill unblock bluetooth 2>/dev/null || true
+  # Bring the HCI interface up (bluez power-on fails while it is DOWN).
+  command -v hciconfig >/dev/null 2>&1 && hciconfig hci0 up 2>/dev/null || true
+  # Finally ask bluez to power the controller on.
+  command -v bluetoothctl >/dev/null 2>&1 && bluetoothctl power on >/dev/null 2>&1 || true
+}
+
+# --- lpadmin group membership ------------------------------------------------
+# The user that owns the stack (foodassistant on a Pi) should be able to manage
+# queues from the host; add it to lpadmin. Best-effort; never fatal.
+add_to_lpadmin() {
+  getent group lpadmin >/dev/null 2>&1 || { log "No lpadmin group; skipping."; return 0; }
+  local users=""
+  local owner=""
+  owner="$(stat -c %U "$INSTALL_DIR" 2>/dev/null || true)"
+  [ -n "${PRINT_SERVICE_USER:-}" ] && users="$PRINT_SERVICE_USER"
+  [ -n "$owner" ] && [ "$owner" != "root" ] && users="${users:+$users }$owner"
+  # foodassistant is the appliance primary user; add it when present even if it
+  # does not own INSTALL_DIR (root-owned data dir on a hosted appliance).
+  id foodassistant >/dev/null 2>&1 && users="${users:+$users }foodassistant"
+  local u
+  for u in $users; do
+    id "$u" >/dev/null 2>&1 || continue
+    usermod -aG lpadmin "$u" >/dev/null 2>&1 \
+      && log "Added $u to the lpadmin group" \
+      || warn "Could not add $u to lpadmin."
+  done
+}
+
+# --- cupsd listen/allow so the app container can reach host CUPS -------------
+# A pi_hosted appliance runs the app container with network_mode: host, so the
+# container reaches host cupsd at localhost:631 with the stock config. To also
+# cover a bridge-networked layout, cupsd is told to Listen on the docker bridge
+# address and Allow the docker subnet. This is written as an idempotent block
+# appended once to cupsd.conf (guarded by a marker), reversible by deleting the
+# block and reloading. It never opens cupsd to the LAN, only to the local
+# docker network.
+_CUPS_MARK_BEGIN="# >>> foodassistant print stack (FoodAssistant-gyri) >>>"
+_CUPS_MARK_END="# <<< foodassistant print stack (FoodAssistant-gyri) <<<"
+
+docker_bridge_addr() {
+  # The docker0 bridge gateway address, or "" when docker networking is absent.
+  ip -4 addr show docker0 2>/dev/null | awk '/inet /{print $2}' | cut -d/ -f1 | head -n1
+}
+
+docker_bridge_cidr() {
+  ip -4 addr show docker0 2>/dev/null | awk '/inet /{print $2}' | head -n1
+}
+
+CUPSD_BIN="${CUPSD_BIN:-/usr/sbin/cupsd}"
+
+# A known-good cupsd.conf for a Pi appliance: it listens on loopback (the
+# host-networked app container reaches cupsd there) plus the local socket,
+# allows the LAN for admin and sharing, and advertises shared queues over
+# DNS-SD. Written ONLY as a repair, when the live config will not validate (see
+# heal_cupsd_conf), so a valid or user-customized config is left alone.
+write_default_cupsd_conf() {
+  cat > "$CUPSD_CONF" <<'CUPSD_EOF'
+MaxLogSize 0
+LogLevel warn
+PageLogFormat
+Listen 0.0.0.0:631
+Listen /run/cups/cups.sock
+Browsing On
+BrowseLocalProtocols dnssd
+# retry-job, not the CUPS default stop-printer, so a failed job never disables
+# a whole queue and freezes all printing (FoodAssistant-q46v).
+ErrorPolicy retry-job
+DefaultAuthType Basic
+WebInterface Yes
+<Location />
+  Order allow,deny
+  Allow @LOCAL
+</Location>
+<Location /admin>
+  Order allow,deny
+  Allow @LOCAL
+</Location>
+<Location /admin/conf>
+  AuthType Default
+  Require user @SYSTEM
+  Order allow,deny
+  Allow @LOCAL
+</Location>
+<Policy default>
+  JobPrivateAccess default
+  JobPrivateValues default
+  SubscriptionPrivateAccess default
+  SubscriptionPrivateValues default
+  <Limit Create-Job Print-Job Print-URI Validate-Job>
+    Order deny,allow
+  </Limit>
+  <Limit Send-Document Send-URI Hold-Job Release-Job Restart-Job Purge-Jobs Set-Job-Attributes Create-Job-Subscription Renew-Subscription Cancel-Subscription Get-Notifications Reprocess-Job Cancel-Current-Job Suspend-Current-Job Resume-Job Cancel-My-Jobs Close-Job CUPS-Move-Job CUPS-Get-Document>
+    Require user @OWNER @SYSTEM
+    Order deny,allow
+  </Limit>
+  <Limit CUPS-Add-Modify-Printer CUPS-Delete-Printer CUPS-Add-Modify-Class CUPS-Delete-Class CUPS-Set-Default CUPS-Get-Devices>
+    AuthType Default
+    Require user @SYSTEM
+    Order deny,allow
+  </Limit>
+  <Limit Pause-Printer Resume-Printer Enable-Printer Disable-Printer Pause-Printer-After-Current-Job Hold-New-Jobs Release-Held-New-Jobs Deactivate-Printer Activate-Printer Restart-Printer Shutdown-Printer Startup-Printer Promote-Job Schedule-Job-After Cancel-Jobs CUPS-Accept-Jobs CUPS-Reject-Jobs>
+    AuthType Default
+    Require user @SYSTEM
+    Order deny,allow
+  </Limit>
+  <Limit Cancel-Job CUPS-Authenticate-Job>
+    Require user @OWNER @SYSTEM
+    Order deny,allow
+  </Limit>
+  <Limit All>
+    Order deny,allow
+  </Limit>
+</Policy>
+CUPSD_EOF
+}
+
+configure_cupsd() {
+  [ -f "$CUPSD_CONF" ] || { warn "cupsd.conf not found at $CUPSD_CONF; skipping cupsd listen config."; return 0; }
+  # A pi_hosted appliance runs the app container with HOST networking, so it
+  # reaches cupsd on the stock localhost:631 listener. We add NOTHING to the
+  # Location or Listen directives here: an earlier version appended a duplicate
+  # <Location /> and a docker-bridge listener with an invalid netmask, which
+  # stopped cupsd from starting and broke all printing. Any leftover block is
+  # cleaned up, and a broken config is repaired wholesale in heal_cupsd_conf.
+  if grep -qF "$_CUPS_MARK_BEGIN" "$CUPSD_CONF" 2>/dev/null; then
+    sed -i "/$(printf '%s' "$_CUPS_MARK_BEGIN" | sed 's/[.[\*^$/]/\\&/g')/,/$(printf '%s' "$_CUPS_MARK_END" | sed 's/[.[\*^$/]/\\&/g')/d" "$CUPSD_CONF" 2>/dev/null \
+      && log "Removed an obsolete cupsd listen block."
+  fi
+  return 0
+}
+
+# Validate the live cupsd.conf and, if it will not parse (a prior version could
+# corrupt it), restore the known-good config so the scheduler always comes back.
+# Runs last, so it catches breakage from any earlier step.
+heal_cupsd_conf() {
+  [ -f "$CUPSD_CONF" ] || return 0
+  [ -x "$CUPSD_BIN" ] || return 0
+  if "$CUPSD_BIN" -t >/dev/null 2>&1; then
+    return 0
+  fi
+  warn "cupsd.conf did not validate; restoring a known-good configuration."
+  cp -f "$CUPSD_CONF" "$CUPSD_CONF.foodassistant-broken" 2>/dev/null || true
+  write_default_cupsd_conf
+  # Re-enable sharing on the fresh config (cupsctl edits cupsd.conf safely).
+  command -v cupsctl >/dev/null 2>&1 && cupsctl --share-printers >/dev/null 2>&1 || true
+  if "$CUPSD_BIN" -t >/dev/null 2>&1; then
+    log "Restored a working cupsd.conf."
+  else
+    warn "cupsd.conf still does not validate after repair; leaving it for manual review."
+  fi
+}
+
+# --- LAN printer sharing + discovery (FoodAssistant-gdwm) ---------------------
+# So a printer attached to ANY device is usable from EVERY device on the home
+# LAN. Two halves:
+#   1. SHARE this device's own queues on the LAN and advertise them over DNS-SD
+#      (mDNS), so peers can find them. Scope is the LOCAL subnet only (@LOCAL):
+#      cupsctl is run WITHOUT --remote-any, and the drop-in below never opens
+#      cupsd to the WAN. The docker-bridge Listen/Allow written by configure_cupsd
+#      already covers the app container; this adds LAN visibility for peers.
+#   2. DISCOVER peers' shared queues with cups-browsed, which auto-creates a local
+#      queue for each remote shared printer it sees. Those queues then show up in
+#      plain `lpstat -e` / `lpstat -p`, so services/printing.list_queues() returns
+#      them with no code change.
+# Written as a marker-guarded block (reversible: delete the block, run
+# `cupsctl --no-share-printers`, reload) and idempotent (the block is stripped and
+# rewritten on every run, never stacked up).
+_CUPS_SHARE_BEGIN="# >>> foodassistant print sharing (FoodAssistant-gdwm) >>>"
+_CUPS_SHARE_END="# <<< foodassistant print sharing (FoodAssistant-gdwm) <<<"
+
+configure_cups_sharing() {
+  [ -f "$CUPSD_CONF" ] || { warn "cupsd.conf not found at $CUPSD_CONF; skipping sharing config."; return 0; }
+  # Listen on the LAN, not just loopback, so a peer that cannot run cups-browsed
+  # (notably a server-mode box whose container ships only the cups-client, e.g.
+  # Korolev) can print to this device's printer by pointing CUPS_SERVER at it
+  # (FoodAssistant-t1tz). Access stays LAN-only: the <Location> blocks keep
+  # Allow @LOCAL, so listening on all interfaces does not open cupsd to the WAN.
+  # A single plain `Listen 0.0.0.0:631` avoids the invalid-netmask/duplicate
+  # directives that broke cupsd before; the stock loopback listener is rewritten
+  # in place (never added alongside) so there is no double bind on 127.0.0.1:631.
+  if ! grep -qE '^\s*(Listen\s+0\.0\.0\.0:631|Listen\s+\*:631|Port\s+631)\b' "$CUPSD_CONF" 2>/dev/null; then
+    if grep -qE '^\s*Listen\s+(localhost|127\.0\.0\.1):631\b' "$CUPSD_CONF" 2>/dev/null; then
+      sed -i -E 's/^\s*Listen\s+(localhost|127\.0\.0\.1):631\b/Listen 0.0.0.0:631/' "$CUPSD_CONF" 2>/dev/null \
+        && log "cupsd now listens on the LAN (0.0.0.0:631, access still @LOCAL only)."
+    else
+      printf 'Listen 0.0.0.0:631\n' >> "$CUPSD_CONF" 2>/dev/null \
+        && log "cupsd now listens on the LAN (0.0.0.0:631, access still @LOCAL only)."
+    fi
+  fi
+  # Enable printer sharing on the LAN. Deliberately no --remote-any: sharing is
+  # constrained to @LOCAL (the local subnet), never the WAN. Best-effort.
+  if command -v cupsctl >/dev/null 2>&1; then
+    cupsctl --share-printers >/dev/null 2>&1 \
+      && log "Enabled CUPS printer sharing on the local network (@LOCAL only)." \
+      || warn "Could not run cupsctl --share-printers."
+  else
+    log "cupsctl not present; relying on the cupsd sharing drop-in only."
+  fi
+  # Strip any prior block so re-runs converge rather than stack up.
+  if grep -qF "$_CUPS_SHARE_BEGIN" "$CUPSD_CONF" 2>/dev/null; then
+    sed -i "/$(printf '%s' "$_CUPS_SHARE_BEGIN" | sed 's/[.[\*^$/]/\\&/g')/,/$(printf '%s' "$_CUPS_SHARE_END" | sed 's/[.[\*^$/]/\\&/g')/d" "$CUPSD_CONF" 2>/dev/null || true
+  fi
+  {
+    printf '%s\n' "$_CUPS_SHARE_BEGIN"
+    printf '# Advertise local queues over DNS-SD so LAN peers discover them.\n'
+    printf 'Browsing On\n'
+    printf 'BrowseLocalProtocols dnssd\n'
+    # Default every queue (local and cups-browsed) to retry-job instead of the
+    # CUPS default stop-printer. Otherwise ONE failed job to a briefly
+    # unreachable network printer disables the whole queue and silently freezes
+    # ALL printing until someone manually re-enables it (FoodAssistant-q46v,
+    # the Korolev outage in t1tz). retry-job retries then drops the job but
+    # keeps the queue alive.
+    printf 'ErrorPolicy retry-job\n'
+    printf '%s\n' "$_CUPS_SHARE_END"
+  } >> "$CUPSD_CONF" 2>/dev/null \
+    && log "Configured cupsd to advertise shared queues over DNS-SD (queues default to retry-job)." \
+    || warn "Could not write the cupsd sharing block."
+  command -v systemctl >/dev/null 2>&1 && systemctl reload cups >/dev/null 2>&1 || true
+  # The server default above only covers queues that do not carry their own
+  # ErrorPolicy; existing queues (including ones cups-browsed already created)
+  # keep whatever they were set to. Re-apply retry-job to each so none can be
+  # left on the freeze-the-whole-queue stop-printer policy. Best-effort.
+  if command -v lpadmin >/dev/null 2>&1 && command -v lpstat >/dev/null 2>&1; then
+    for _q in $(lpstat -e 2>/dev/null); do
+      lpadmin -p "$_q" -o printer-error-policy=retry-job >/dev/null 2>&1 || true
+    done
+  fi
+}
+
+# cups-browsed auto-creates a local queue for every remote shared printer it
+# discovers over DNS-SD, so this device can print to printers attached to other
+# devices on the LAN. On modern Debian/Ubuntu it is its own package; on older
+# bases it ships inside cups-filters (already installed above), so a failed
+# install is not fatal, we just enable whatever binary is present.
+install_cups_browsed() {
+  if ! command -v cups-browsed >/dev/null 2>&1; then
+    if [ "${SKIP_APT:-0}" = "1" ]; then
+      log "SKIP_APT=1; not installing cups-browsed."
+    elif command -v apt-get >/dev/null 2>&1; then
+      log "Installing cups-browsed for remote-printer discovery."
+      DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends cups-browsed >/dev/null 2>&1 \
+        || warn "Could not install cups-browsed (it may ship inside cups-filters on this base)."
+    fi
+  fi
+  command -v systemctl >/dev/null 2>&1 || { warn "systemctl not found; not enabling cups-browsed."; return 0; }
+  # The service unit is named cups-browsed on every base that ships it.
+  systemctl enable --now cups-browsed >/dev/null 2>&1 \
+    && log "Enabled cups-browsed; remote shared printers will appear as local queues." \
+    || warn "Could not enable/start cups-browsed (not installed on this host)."
+}
+
+# --- Env fragment the app stack reads ----------------------------------------
+# The app container gets CUPS_SERVER through the stack's .env (env_file), so
+# lp/lpstat inside it talk to host cupsd. We write PRINTING_ENABLED=1 as the
+# marker the update helper looks for to know printing should be re-asserted.
+# Keys are replaced in place (never duplicated) so re-runs stay clean.
+resolve_cups_server() {
+  # Host-networked appliance: the container shares the host netns, so localhost
+  # reaches host cupsd. Bridge-networked: use the docker0 gateway. Default to
+  # localhost, the safe value for the shipped appliance layout.
+  if [ -f "$COMPOSE_FILE" ] && grep -q 'network_mode:.*host' "$COMPOSE_FILE" 2>/dev/null; then
+    printf 'localhost:631'
+    return 0
+  fi
+  local bridge
+  bridge="$(docker_bridge_addr)"
+  if [ -n "$bridge" ]; then
+    printf '%s:631' "$bridge"
+  else
+    printf 'localhost:631'
+  fi
+}
+
+set_env_key() {
+  # set_env_key KEY VALUE FILE : replace the KEY= line or append it.
+  local key="$1" value="$2" file="$3" tmp
+  mkdir -p "$(dirname "$file")" 2>/dev/null || true
+  if [ -f "$file" ] && grep -q "^$key=" "$file" 2>/dev/null; then
+    tmp="$(mktemp "$(dirname "$file")/.env.XXXXXX" 2>/dev/null)" || { warn "Could not write $file"; return 1; }
+    sed "s|^$key=.*|$key=$value|" "$file" > "$tmp" && mv -f "$tmp" "$file"
+  else
+    printf '%s=%s\n' "$key" "$value" >> "$file"
+  fi
+}
+
+write_env_fragment() {
+  local server
+  server="$(resolve_cups_server)"
+  if [ ! -e "$ENV_FILE" ] && [ ! -d "$INSTALL_DIR" ]; then
+    warn "No stack dir at $INSTALL_DIR; skipping .env fragment (nothing to point at cupsd)."
+    return 0
+  fi
+  set_env_key "PRINTING_ENABLED" "1" "$ENV_FILE" \
+    && log "Marked printing enabled in $ENV_FILE"
+  set_env_key "CUPS_SERVER" "$server" "$ENV_FILE" \
+    && log "Pointed the app stack at cupsd via CUPS_SERVER=$server"
+  # Make good on the comment at the top of this file: when Bluetooth printing
+  # is enabled (by ENABLE_BLUETOOTH_PRINTING=1 this run, or an already-present
+  # marker from a prior run), write the BLUETOOTH_PRINTING=1 marker so an OTA
+  # re-assert (foodassistant-update, which runs this helper with no
+  # ENABLE_BLUETOOTH_PRINTING) sees bluetooth_printing_enabled() as true and
+  # keeps re-installing the Supvan bridge (FoodAssistant-h2j6). Idempotent:
+  # set_env_key replaces the line rather than duplicating it.
+  if bluetooth_printing_enabled; then
+    set_env_key "BLUETOOTH_PRINTING" "1" "$ENV_FILE" \
+      && log "Marked Bluetooth printing enabled in $ENV_FILE"
+  fi
+}
+
+# --- Supvan / cheap BT thermal bridge (FoodAssistant-usxj) -------------------
+# Installs the Supvan CUPS printer application (heeen/supvan-cups, MIT), which
+# exposes a SUPVAN T50M / T50M Pro / T50M Plus over Bluetooth RFCOMM (and USB
+# HID) as a self-contained IPP Everywhere printer on 127.0.0.1:8631. It
+# advertises over DNS-SD (the avahi-daemon enabled above), so host cupsd creates
+# an on-demand queue automatically, no standing driver required.
+#
+# Two install paths, tried in order:
+#   1. Prebuilt fast path (optional): download an arch-matched supvan-app binary
+#      that our own CI publishes as a GitHub Release on the PUBLIC repo, verified
+#      against a published SHA256SUMS file. Fails closed (any 404, network error,
+#      or checksum mismatch) to path 2. This path only exists once the CI
+#      workflow (.github/workflows/supvan-bridge.yml) has run with its release
+#      token set; until then every device uses path 2.
+#   2. Build from source (guaranteed): apt-get the Rust toolchain, shallow-clone
+#      the pinned upstream tag, cargo build --release, install the binary. Works
+#      with zero external hosting. On a Pi this build takes several minutes.
+#
+# Idempotent: a matching already-installed version short-circuits both paths.
+# Non-fatal: any failure is logged and leaves the rest of the print stack intact.
+#
+# Extra env overrides (tests / unusual layouts):
+#   SUPVAN_BRIDGE_RELEASE   our release tag (default supvan-bridge-v0.5.1)
+#   SUPVAN_BRIDGE_BASE_URL  release asset base URL (default PUBLIC repo release)
+#   SUPVAN_BRIDGE_PREBUILT  set to 0 to force the build-from-source path
+#   SUPVAN_SRC_TAG          pinned upstream source tag (default v0.5.1)
+#   SUPVAN_BIN_DIR          install dir (default /opt/foodassistant/bin)
+SUPVAN_SRC_REPO="${SUPVAN_SRC_REPO:-https://github.com/heeen/supvan-cups}"
+SUPVAN_SRC_TAG="${SUPVAN_SRC_TAG:-v0.5.1}"                              # pinned upstream source tag
+SUPVAN_BRIDGE_RELEASE="${SUPVAN_BRIDGE_RELEASE:-supvan-bridge-v0.5.1}"  # our PUBLIC-repo release tag
+SUPVAN_BRIDGE_BASE_URL="${SUPVAN_BRIDGE_BASE_URL:-https://github.com/Syracuse3DPrintingOrg/PantryRaider/releases/download/${SUPVAN_BRIDGE_RELEASE}}"
+SUPVAN_BIN_DIR="${SUPVAN_BIN_DIR:-/opt/foodassistant/bin}"
+SUPVAN_BIN="${SUPVAN_BIN:-$SUPVAN_BIN_DIR/supvan-app}"
+SUPVAN_VERSION_FILE="${SUPVAN_VERSION_FILE:-$SUPVAN_BIN.version}"
+SUPVAN_LICENSE_FILE="${SUPVAN_LICENSE_FILE:-$SUPVAN_BIN_DIR/supvan-app.LICENSE}"
+SUPVAN_UNIT="${SUPVAN_UNIT:-/etc/systemd/system/foodassistant-supvan-app.service}"
+# Our model-registry override. The upstream bridge only auto-adds a Bluetooth
+# printer whose advertised name matches a known Supvan pattern; several units
+# (the T50M Pro among them) advertise a bare serial like "T0148C260429G993"
+# whose prefix upstream does not list, so they never register. We ship a
+# complete models.toml with those serial prefixes added and point the binary at
+# it, which fixes discovery without rebuilding the binary (FoodAssistant-gtg2).
+SUPVAN_MODELS_DIR="${SUPVAN_MODELS_DIR:-/usr/share/supvan-printer-app}"
+SUPVAN_MODELS_FILE="${SUPVAN_MODELS_FILE:-$SUPVAN_MODELS_DIR/models.toml}"
+SUPVAN_BUILD_PACKAGES=(cargo pkg-config libdbus-1-dev git)
+
+# supvan_arch : normalize the host machine to the release asset arch token.
+# Prints aarch64 or x86_64 on supported hosts, nothing (and returns 1) otherwise.
+# Kept tiny and side-effect free so a test harness can exercise the mapping.
+supvan_arch() {
+  local m="${1:-$(uname -m 2>/dev/null)}"
+  case "$m" in
+    aarch64|arm64) printf 'aarch64' ;;
+    x86_64|amd64)  printf 'x86_64' ;;
+    *) return 1 ;;
+  esac
+}
+
+# supvan_asset_name : the release asset filename for a host/arch string (or the
+# host arch when called with no argument). Input is normalized through
+# supvan_arch, so an unsupported arch prints nothing and returns 1. Shared
+# naming contract with supvan-bridge.yml.
+supvan_asset_name() {
+  local arch
+  arch="$(supvan_arch "${1:-}")" || return 1
+  printf 'supvan-app-%s' "$arch"
+}
+
+supvan_installed_version() {
+  [ -f "$SUPVAN_VERSION_FILE" ] && cat "$SUPVAN_VERSION_FILE" 2>/dev/null || true
+}
+
+# Optional prebuilt fast path. Returns 0 only after a verified binary is in
+# place; any problem returns non-zero so the caller falls back to source.
+install_supvan_prebuilt() {
+  [ "${SUPVAN_BRIDGE_PREBUILT:-1}" = "1" ] || { log "Supvan bridge: prebuilt fast path disabled; using source."; return 1; }
+  command -v curl      >/dev/null 2>&1 || { log "Supvan bridge: curl not present; skipping prebuilt fast path."; return 1; }
+  command -v sha256sum >/dev/null 2>&1 || { log "Supvan bridge: sha256sum not present; skipping prebuilt fast path."; return 1; }
+  local arch asset tmp
+  arch="$(supvan_arch)" || { warn "Supvan bridge: unsupported arch $(uname -m 2>/dev/null); no prebuilt."; return 1; }
+  asset="$(supvan_asset_name "$arch")"
+  tmp="$(mktemp -d 2>/dev/null)" || return 1
+  local url_bin="$SUPVAN_BRIDGE_BASE_URL/$asset"
+  local url_sum="$SUPVAN_BRIDGE_BASE_URL/SHA256SUMS"
+  log "Supvan bridge: trying prebuilt $asset from $SUPVAN_BRIDGE_BASE_URL"
+  if ! curl -fsSL "$url_bin" -o "$tmp/$asset" 2>/dev/null; then
+    log "Supvan bridge: no prebuilt at $url_bin; falling back to source."
+    rm -rf "$tmp"; return 1
+  fi
+  if ! curl -fsSL "$url_sum" -o "$tmp/SHA256SUMS" 2>/dev/null; then
+    log "Supvan bridge: no SHA256SUMS published; falling back to source."
+    rm -rf "$tmp"; return 1
+  fi
+  # Verify only our asset's line; fail closed on a missing entry or mismatch.
+  local want got
+  want="$(awk -v a="$asset" '$2==a || $2=="*"a {print $1}' "$tmp/SHA256SUMS" | head -n1)"
+  if [ -z "$want" ]; then
+    warn "Supvan bridge: $asset missing from SHA256SUMS; refusing prebuilt."
+    rm -rf "$tmp"; return 1
+  fi
+  got="$(sha256sum "$tmp/$asset" | awk '{print $1}')"
+  if [ "$want" != "$got" ]; then
+    warn "Supvan bridge: checksum mismatch for $asset (want $want, got $got); refusing prebuilt."
+    rm -rf "$tmp"; return 1
+  fi
+  mkdir -p "$SUPVAN_BIN_DIR"
+  install -m 0755 "$tmp/$asset" "$SUPVAN_BIN"
+  # The MIT LICENSE ships alongside the binary (redistribution requirement); the
+  # CI release publishes it as an asset. Best-effort, not fatal on its own.
+  curl -fsSL "$SUPVAN_BRIDGE_BASE_URL/LICENSE" -o "$SUPVAN_LICENSE_FILE" 2>/dev/null \
+    || warn "Supvan bridge: LICENSE asset not fetched with the prebuilt binary."
+  rm -rf "$tmp"
+  return 0
+}
+
+# Guaranteed build-from-source path. Needs the Rust toolchain and git.
+install_supvan_from_source() {
+  if [ "${SKIP_APT:-0}" = "1" ]; then
+    log "SKIP_APT=1; not installing the Rust toolchain for the Supvan bridge."
+  elif command -v apt-get >/dev/null 2>&1; then
+    local need=0 pkg
+    if command -v dpkg-query >/dev/null 2>&1; then
+      for pkg in "${SUPVAN_BUILD_PACKAGES[@]}"; do
+        dpkg-query -W -f='${Status}' "$pkg" 2>/dev/null | grep -q "install ok installed" || { need=1; break; }
+      done
+    else
+      need=1
+    fi
+    if [ "$need" = "1" ]; then
+      log "Supvan bridge: installing build deps: ${SUPVAN_BUILD_PACKAGES[*]}"
+      if ! DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "${SUPVAN_BUILD_PACKAGES[@]}"; then
+        DEBIAN_FRONTEND=noninteractive apt-get update -y || warn "apt-get update failed (offline?)."
+        DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "${SUPVAN_BUILD_PACKAGES[@]}" \
+          || { warn "Supvan bridge: could not install build deps (offline?)."; return 1; }
+      fi
+    fi
+  fi
+  command -v cargo >/dev/null 2>&1 || { warn "Supvan bridge: cargo not available; cannot build from source."; return 1; }
+  command -v git   >/dev/null 2>&1 || { warn "Supvan bridge: git not available; cannot fetch source."; return 1; }
+  local tmp
+  tmp="$(mktemp -d 2>/dev/null)" || return 1
+  log "Supvan bridge: building from source ($SUPVAN_SRC_REPO @ $SUPVAN_SRC_TAG); this can take several minutes on a Pi."
+  if ! git clone --depth 1 --branch "$SUPVAN_SRC_TAG" "$SUPVAN_SRC_REPO" "$tmp/src" >/dev/null 2>&1; then
+    warn "Supvan bridge: source clone failed (offline?)."; rm -rf "$tmp"; return 1
+  fi
+  if ! ( cd "$tmp/src" && cargo build --release ); then
+    warn "Supvan bridge: cargo build failed."; rm -rf "$tmp"; return 1
+  fi
+  local built="$tmp/src/target/release/supvan-printer-app"
+  if [ ! -x "$built" ]; then
+    built="$(find "$tmp/src/target/release" -maxdepth 1 -type f -name 'supvan-*' -perm -u+x 2>/dev/null | head -n1)"
+  fi
+  if [ -z "$built" ] || [ ! -x "$built" ]; then
+    warn "Supvan bridge: built binary not found under target/release."; rm -rf "$tmp"; return 1
+  fi
+  mkdir -p "$SUPVAN_BIN_DIR"
+  install -m 0755 "$built" "$SUPVAN_BIN"
+  # Ship the MIT LICENSE alongside the binary (redistribution requirement).
+  if [ -f "$tmp/src/LICENSE" ]; then
+    install -m 0644 "$tmp/src/LICENSE" "$SUPVAN_LICENSE_FILE"
+  else
+    find "$tmp/src" -maxdepth 1 -iname 'license*' -exec install -m 0644 {} "$SUPVAN_LICENSE_FILE" \; 2>/dev/null || true
+  fi
+  rm -rf "$tmp"
+  return 0
+}
+
+# Write our model-registry override (see SUPVAN_MODELS_FILE above). This is the
+# upstream data/models.toml for the pinned tag with extra Bluetooth serial
+# prefixes added to the T50 family so serial-named units (e.g. the T50M Pro,
+# which advertises "T0148...") are recognized and auto-added. The file must be
+# complete: the binary uses it in place of its embedded table, not merged.
+write_supvan_models() {
+  mkdir -p "$SUPVAN_MODELS_DIR" 2>/dev/null || true
+  cat > "$SUPVAN_MODELS_FILE" <<'MODELS_EOF'
+# Supvan printer model registry (Pantry Raider override).
+#
+# This is the upstream heeen/supvan-cups data/models.toml with additional
+# Bluetooth serial-name prefixes added to the T50 family (see the bt_patterns
+# note at the bottom). Dimensions are in millimetres.
+
+[[families]]
+name = "supvan_t50"
+description = "Supvan T50 Series"
+dpi = 203
+printhead_dots = 384
+media_mm = [
+    [40, 30], [40, 40], [40, 50], [40, 60], [40, 70], [40, 80],
+    [30, 15], [30, 20], [30, 30], [30, 40],
+    [48, 30], [48, 45], [48, 70],
+    [25, 25],
+    [50, 30],
+]
+
+[[families]]
+name = "supvan_t80"
+description = "Supvan T80 Series"
+dpi = 201
+printhead_dots = 568
+media_mm = [
+    [40, 30], [40, 40], [40, 50], [40, 60], [40, 70], [40, 80],
+    [30, 15], [30, 20], [30, 30], [30, 40],
+    [48, 30], [48, 45], [48, 70],
+    [25, 25],
+    [50, 30],
+    [60, 30], [60, 40], [60, 60],
+    [70, 30], [70, 40], [70, 70],
+    [72, 30], [72, 45],
+]
+
+[[families]]
+name = "supvan_g"
+description = "Supvan G Series"
+dpi = 193
+printhead_dots = 190
+media_mm = [
+    [12, 30], [12, 40], [12, 20],
+    [15, 30], [15, 40], [15, 20],
+    [20, 30], [20, 40], [20, 20],
+    [25, 30], [25, 40], [25, 25],
+]
+
+[[families]]
+name = "supvan_tp76"
+description = "Supvan TP76 Series"
+dpi = 305
+printhead_dots = 912
+media_mm = [
+    [76, 30], [76, 40], [76, 50], [76, 60], [76, 70],
+    [60, 30], [60, 40], [60, 50],
+    [50, 30], [50, 40], [50, 50],
+    [40, 30], [40, 40],
+]
+
+[[families]]
+name = "supvan_tp80"
+description = "Supvan TP80 Series"
+dpi = 305
+printhead_dots = 960
+media_mm = [
+    [80, 30], [80, 40], [80, 50], [80, 60], [80, 70],
+    [70, 30], [70, 40],
+    [60, 30], [60, 40],
+    [50, 30], [50, 40],
+    [40, 30], [40, 40],
+]
+
+[[families]]
+name = "supvan_tp86"
+description = "Supvan TP86 Series"
+dpi = 305
+printhead_dots = 1032
+media_mm = [
+    [86, 30], [86, 40], [86, 50], [86, 60], [86, 70],
+    [76, 30], [76, 40],
+    [70, 30], [70, 40],
+    [60, 30], [60, 40],
+    [50, 30], [50, 40],
+]
+
+[[families]]
+name = "supvan_sp650"
+description = "Supvan SP650"
+dpi = 203
+printhead_dots = 384
+media_mm = [
+    [40, 30], [40, 40], [40, 50], [40, 60], [40, 70], [40, 80],
+    [30, 15], [30, 20], [30, 30], [30, 40],
+    [48, 30], [48, 45], [48, 70],
+    [25, 25],
+    [50, 30],
+]
+
+# -- USB models (VID 0x1820) -------------------------------------------------
+
+[[models]]
+pid = "2072"
+name = "T50M"
+family = "supvan_t50"
+
+[[models]]
+pid = "2073"
+name = "T50M Pro"
+family = "supvan_t50"
+
+[[models]]
+pid = "2074"
+name = "T50M Plus"
+family = "supvan_t50"
+
+[[models]]
+pid = "2076"
+name = "T50s"
+family = "supvan_t50"
+
+[[models]]
+pid = "2077"
+name = "T50s Pro"
+family = "supvan_t50"
+
+[[models]]
+pid = "2075"
+name = "T80M"
+family = "supvan_t80"
+
+[[models]]
+pid = "207a"
+name = "T80M Pro"
+family = "supvan_t80"
+
+[[models]]
+pid = "2090"
+name = "G11"
+family = "supvan_g"
+
+[[models]]
+pid = "2091"
+name = "G15"
+family = "supvan_g"
+
+[[models]]
+pid = "2092"
+name = "G18"
+family = "supvan_g"
+
+[[models]]
+pid = "2093"
+name = "G18 Pro"
+family = "supvan_g"
+
+[[models]]
+pid = "202c"
+name = "TP76I"
+family = "supvan_tp76"
+
+[[models]]
+pid = "2087"
+name = "TP76I Pro"
+family = "supvan_tp76"
+
+[[models]]
+pid = "202e"
+name = "TP80A"
+family = "supvan_tp80"
+
+[[models]]
+pid = "2080"
+name = "TP80A Pro"
+family = "supvan_tp80"
+
+[[models]]
+pid = "202f"
+name = "TP86A"
+family = "supvan_tp86"
+
+[[models]]
+pid = "2081"
+name = "TP86A Pro"
+family = "supvan_tp86"
+
+[[models]]
+pid = "203e"
+name = "SP650"
+family = "supvan_sp650"
+
+# -- Bluetooth name patterns (substring match, case-insensitive) -------------
+#
+# Used for BT discovery (is_matching_bt_name) and family detection. The brand
+# names "supvan" and "katasymbol" are always accepted. The "t0117" and "t0148"
+# entries are device serial-name prefixes: some units advertise a bare serial
+# (e.g. a T50M Pro as "T0148C260429G993") instead of a friendly name, so their
+# prefix must be listed here or the bridge never auto-adds them. Add new serial
+# prefixes here as other Supvan models are seen in the field.
+[bt_patterns]
+supvan_t50 = ["t50", "t0117", "t0148", "e10", "e11", "e12", "e16"]
+supvan_t80 = ["t80"]
+supvan_g = ["g11", "g15", "g18"]
+supvan_tp76 = ["tp76"]
+supvan_tp80 = ["tp80"]
+supvan_tp86 = ["tp86"]
+supvan_sp650 = ["sp650"]
+MODELS_EOF
+  log "Wrote Supvan model registry override ($SUPVAN_MODELS_FILE)."
+}
+
+# Install and start the systemd unit that runs the printer application. The app
+# serves IPP on 127.0.0.1:8631 and advertises over DNS-SD; it needs bluez (for
+# RFCOMM) and the system D-Bus.
+write_supvan_unit() {
+  command -v systemctl >/dev/null 2>&1 || { warn "systemctl not found; not installing the Supvan service."; return 0; }
+  # Always refresh the model-registry override alongside the unit, so an
+  # existing install picks up new serial prefixes on the next setup run.
+  write_supvan_models
+  local unit_name
+  unit_name="$(basename "$SUPVAN_UNIT")"
+  mkdir -p "$(dirname "$SUPVAN_UNIT")" 2>/dev/null || true
+  cat > "$SUPVAN_UNIT" <<EOF
+[Unit]
+Description=FoodAssistant Supvan label printer bridge (IPP Everywhere over Bluetooth)
+Documentation=https://github.com/heeen/supvan-cups
+After=network-online.target bluetooth.service dbus.service
+Wants=network-online.target bluetooth.service
+
+[Service]
+Type=simple
+Environment=SUPVAN_MODELS=$SUPVAN_MODELS_FILE
+# Ensure the radio is usable before the bridge opens RFCOMM: a reboot can leave
+# the adapter rfkill-blocked or the HCI interface DOWN, which makes the bridge
+# start with no reachable printer (FoodAssistant-h2j6). Best-effort, so a host
+# without these tools or an already-up radio is unaffected.
+ExecStartPre=-/bin/sh -c 'command -v rfkill >/dev/null 2>&1 && rfkill unblock bluetooth; command -v hciconfig >/dev/null 2>&1 && hciconfig hci0 up; command -v bluetoothctl >/dev/null 2>&1 && bluetoothctl power on; true'
+ExecStart=$SUPVAN_BIN
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  systemctl daemon-reload >/dev/null 2>&1 || true
+  systemctl enable --now "$unit_name" >/dev/null 2>&1 \
+    && log "Enabled and started the Supvan bridge service (IPP on 127.0.0.1:8631)." \
+    || warn "Could not enable/start the Supvan bridge service."
+}
+
+# Bluetooth (Supvan) printing is opt-in (FoodAssistant-po9c). It is enabled by
+# ENABLE_BLUETOOTH_PRINTING=1 in the environment, or by a BLUETOOTH_PRINTING=1
+# marker the app writes into the stack .env when a user turns it on, so an OTA
+# re-assert keeps the bridge without the env being set. Default off keeps the
+# base print install (CUPS + network discovery) fast: no Rust build.
+bluetooth_printing_enabled() {
+  case "${ENABLE_BLUETOOTH_PRINTING:-0}" in
+    1|true|TRUE|yes|YES|on|ON) return 0 ;;
+  esac
+  if [ -f "$ENV_FILE" ] && grep -qiE '^BLUETOOTH_PRINTING=(1|true|yes|on)([[:space:]]|$)' "$ENV_FILE" 2>/dev/null; then
+    return 0
+  fi
+  return 1
+}
+
+install_supvan_bridge() {
+  # The Supvan bridge speaks RFCOMM to the printer, so the radio must be up. On
+  # a fresh Pi the adapter is often blocked/DOWN (Dan's Bandit); ensure it is
+  # usable before we depend on it. Best-effort and idempotent.
+  bluetooth_adapter_up
+  # Already installed for this release? Re-assert the unit and stop.
+  if [ -x "$SUPVAN_BIN" ] && [ "$(supvan_installed_version)" = "$SUPVAN_BRIDGE_RELEASE" ]; then
+    log "Supvan bridge: $SUPVAN_BRIDGE_RELEASE already installed at $SUPVAN_BIN; skipping install."
+    write_supvan_unit
+    return 0
+  fi
+  mkdir -p "$SUPVAN_BIN_DIR" 2>/dev/null || true
+  local path=""
+  if install_supvan_prebuilt; then
+    path="prebuilt"
+  elif install_supvan_from_source; then
+    path="source"
+  fi
+  if [ -z "$path" ]; then
+    warn "Supvan bridge: neither the prebuilt nor the source install succeeded; the T50M bridge is not available. The rest of the print stack is unaffected."
+    return 0
+  fi
+  printf '%s\n' "$SUPVAN_BRIDGE_RELEASE" > "$SUPVAN_VERSION_FILE" 2>/dev/null || true
+  log "Supvan bridge: installed via the ${path} path -> $SUPVAN_BIN ($SUPVAN_BRIDGE_RELEASE)."
+  # bluez must be live for RFCOMM; enable_services handles it earlier, re-assert.
+  command -v systemctl >/dev/null 2>&1 && systemctl enable --now bluetooth >/dev/null 2>&1 || true
+  write_supvan_unit
+  return 0
+}
+
+# Install bundled label-printer PPDs (FoodAssistant-zqh0). Modern CUPS ships no
+# driver database (lpinfo -m is empty), so a Zebra ZPL label printer needs an
+# explicit PPD. It pairs with the cups-filters rastertolabel filter (already
+# installed with cups-filters) to rasterize a rendered label image into ZPL.
+# The app's add-printer flow references this exact path (PPD_DRIVERS in
+# services/printing.py and the host-bridge). Idempotent: rewritten every run.
+install_label_ppds() {
+  local dir="/usr/share/ppd/foodassistant"
+  if ! mkdir -p "$dir" 2>/dev/null; then
+    warn "Could not create $dir; skipping label PPDs."
+    return 0
+  fi
+  cat > "$dir/zebra-zpl.ppd" <<'PPD_EOF'
+*PPD-Adobe: "4.3"
+*FormatVersion: "4.3"
+*FileVersion: "1.1"
+*LanguageVersion: English
+*LanguageEncoding: ISOLatin1
+*PCFileName: "ZEBRA.PPD"
+*Manufacturer: "Zebra"
+*Product: "(Label Printer)"
+*ModelName: "Zebra ZPL Label Printer"
+*ShortNickName: "Zebra ZPL Label Printer"
+*NickName: "Zebra ZPL Label Printer"
+*PSVersion: "(3010.000) 0"
+*LanguageLevel: "3"
+*ColorDevice: False
+*DefaultColorSpace: Gray
+*FileSystem: False
+*Throughput: "1"
+*LandscapeOrientation: Plus90
+*TTRasterizer: Type42
+*cupsVersion: "1.2"
+*cupsModelNumber: 18
+*cupsManualCopies: True
+*cupsFilter: "application/vnd.cups-raster 0 rastertolabel"
+*OpenUI *PageSize/Media Size: PickOne
+*OrderDependency: 10 AnySetup *PageSize
+*DefaultPageSize: w144h72
+*PageSize w144h72/2.00x1.00": "<</PageSize[144 72]/ImagingBBox null>>setpagedevice"
+*PageSize w288h144/4.00x2.00": "<</PageSize[288 144]/ImagingBBox null>>setpagedevice"
+*PageSize w162h72/2.25x1.00": "<</PageSize[162 72]/ImagingBBox null>>setpagedevice"
+*PageSize w288h432/4.00x6.00": "<</PageSize[288 432]/ImagingBBox null>>setpagedevice"
+*PageSize Custom/Custom: "<</PageSize[Custom]/ImagingBBox null>>setpagedevice"
+*CloseUI: *PageSize
+*OpenUI *PageRegion/Media Size: PickOne
+*OrderDependency: 10 AnySetup *PageRegion
+*DefaultPageRegion: w144h72
+*PageRegion w144h72/2.00x1.00": "<</PageSize[144 72]/ImagingBBox null>>setpagedevice"
+*PageRegion w288h144/4.00x2.00": "<</PageSize[288 144]/ImagingBBox null>>setpagedevice"
+*PageRegion w162h72/2.25x1.00": "<</PageSize[162 72]/ImagingBBox null>>setpagedevice"
+*PageRegion w288h432/4.00x6.00": "<</PageSize[288 432]/ImagingBBox null>>setpagedevice"
+*CloseUI: *PageRegion
+*DefaultImageableArea: w144h72
+*ImageableArea w144h72/2.00x1.00": "0 0 144 72"
+*ImageableArea w288h144/4.00x2.00": "0 0 288 144"
+*ImageableArea w162h72/2.25x1.00": "0 0 162 72"
+*ImageableArea w288h432/4.00x6.00": "0 0 288 432"
+*DefaultPaperDimension: w144h72
+*PaperDimension w144h72/2.00x1.00": "144 72"
+*PaperDimension w288h144/4.00x2.00": "288 144"
+*PaperDimension w162h72/2.25x1.00": "162 72"
+*PaperDimension w288h432/4.00x6.00": "288 432"
+*MaxMediaWidth: "864"
+*MaxMediaHeight: "86400"
+*HWMargins: 0 0 0 0
+*CustomPageSize True: "pop pop pop <</PageSize[5 -2 roll]/ImagingBBox null>>setpagedevice"
+*ParamCustomPageSize Width: 1 points 36 864
+*ParamCustomPageSize Height: 2 points 36 86400
+*ParamCustomPageSize WidthOffset: 3 points 0 0
+*ParamCustomPageSize HeightOffset: 4 points 0 0
+*ParamCustomPageSize Orientation: 5 int 0 0
+*OpenUI *Resolution/Resolution: PickOne
+*OrderDependency: 20 AnySetup *Resolution
+*DefaultResolution: 203dpi
+*Resolution 203dpi/203 dpi: "<</HWResolution[203 203]>>setpagedevice"
+*Resolution 300dpi/300 dpi: "<</HWResolution[300 300]>>setpagedevice"
+*CloseUI: *Resolution
+*OpenUI *zeMediaTracking/Media Tracking: PickOne
+*OrderDependency: 50 AnySetup *zeMediaTracking
+*DefaultzeMediaTracking: Web
+*zeMediaTracking Continuous/Continuous: ""
+*zeMediaTracking Web/Web Sensing: ""
+*zeMediaTracking Mark/Mark Sensing: ""
+*CloseUI: *zeMediaTracking
+*OpenUI *zeDarkness/Darkness: PickOne
+*OrderDependency: 50 AnySetup *zeDarkness
+*DefaultzeDarkness: 20
+*zeDarkness 0/0: ""
+*zeDarkness 10/10: ""
+*zeDarkness 20/20: ""
+*zeDarkness 30/30: ""
+*CloseUI: *zeDarkness
+*DefaultFont: Courier
+*Font Courier: Standard "(1.05)" Standard ROM
+PPD_EOF
+  log "Installed Zebra ZPL label PPD at $dir/zebra-zpl.ppd"
+}
+
+main() {
+  log "=== FoodAssistant print stack setup ==="
+  install_packages || warn "Package install did not fully succeed; continuing with configuration."
+  enable_services
+  add_to_lpadmin
+  configure_cupsd
+  configure_cups_sharing
+  install_cups_browsed
+  install_label_ppds
+  if bluetooth_printing_enabled; then
+    log "Bluetooth printing opted in; installing the Supvan bridge."
+    install_supvan_bridge
+  else
+    log "Bluetooth printing not enabled; skipping the Supvan bridge (set ENABLE_BLUETOOTH_PRINTING=1 to install it). The base network print stack is ready."
+  fi
+  # Validate and repair cupsd.conf LAST, so a broken config from any step (or a
+  # prior version) is healed before we restart, and the scheduler always comes
+  # back up. Then restart cups so the final config (repaired or not) is live.
+  heal_cupsd_conf
+  if command -v systemctl >/dev/null 2>&1; then
+    systemctl restart cups >/dev/null 2>&1 || true
+  fi
+  write_env_fragment
+  log "=== Print stack setup complete ==="
+  log "Bring the app up to apply: cd $INSTALL_DIR && docker compose up -d"
+}
+
+# Allow sourcing for tests without running main().
+if [ "${FA_PRINT_SETUP_SOURCE:-0}" != "1" ]; then
+  main "$@"
+fi
