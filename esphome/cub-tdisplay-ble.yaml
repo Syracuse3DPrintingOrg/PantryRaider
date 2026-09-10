@@ -1,0 +1,80 @@
+# Bandit Cub build: LilyGo T-Display with BLE receive (tdisplay profile).
+#   esphome run esphome/cub-tdisplay-ble.yaml
+#
+# Identical to cub-tdisplay.yaml plus a BLE listener: the Cub passively scans
+# for the Pantry Raider status broadcast a Pi appliance sends (the
+# cub_ble_advertise setting, off by default). With transport: auto the
+# Cub behaves exactly like a normal paired Cub while the LAN feed works and
+# falls back to the broadcast when Wi-Fi or the server drops. Set
+# transport: ble for a receive-only Cub that never pairs and needs no Wi-Fi
+# network at all (skip Wi-Fi setup; the setup screen clears once the first
+# broadcast lands). The broadcast carries counts, the soonest timer, and one
+# probe temperature; item names and the expiring list need the LAN feed.
+#
+# This is a separate build file so the default cub-tdisplay.yaml build stays
+# exactly as it was unless you opt in here. The static cost is small (about
+# 1.5 KB RAM and 42 KB flash over the default build, measured on ESPHome
+# 2026.6.5, because every Cub already carries the Bluetooth stack for Improv
+# BLE); the real cost is runtime heap for the continuous scan, which the
+# plain ESP32 shares with Wi-Fi and the display.
+#
+# The relay is the other use for the same radio: set pr_ble_relay to true
+# below and this Cub forwards the advertisements of the kitchen sensors near
+# it to the server. That is what gives a server with no Bluetooth radio (a
+# Docker box on a NAS) the fridge and freezer sensors in the kitchen. It costs
+# about 1.2 KB more RAM and nothing at all while the server has the Bandit
+# Cubs relay setting off.
+#
+# The relay does not need this file's broadcast listener: a normal LAN Cub can
+# relay too. Copy the esp32_ble_tracker block below into your own build on top
+# of cub-tdisplay.yaml and give the hub "relay: true" (leave transport alone,
+# and leave install_tag out; it belongs to the broadcast listener).
+#
+# The T-Display S3 takes the same two additions (the esp32_ble_tracker block
+# and the transport/install_tag options) on top of cub-tdisplay-s3.yaml.
+
+substitutions:
+  name: bandit-cub
+  friendly_name: Bandit Cub
+  # auto: LAN while paired and reachable, broadcast otherwise.
+  # ble:  broadcast only; never pairs, never needs Wi-Fi.
+  pr_transport: auto
+  # Optional: pin which install this Cub listens to. 8 hex characters, the
+  # first 4 bytes of sha256 of the broadcasting install's device id. Empty
+  # means the first sender heard wins and is remembered until the device is
+  # erased, which is the right default for a one-server home.
+  pr_install_tag: ""
+  # Advertisement relay: forward the kitchen sensors this Cub hears to the
+  # server, which decodes them. Set this to true and your server has the
+  # fridge and freezer sensors near this Cub even with no Bluetooth radio of
+  # its own. The server's Bandit Cubs setting has to be on as well, and the
+  # server decides what is listened for, so a Cub only ever spends radio time
+  # on sensors the server can actually read.
+  pr_ble_relay: "false"
+
+external_components:
+  - source:
+      type: local
+      path: components
+    components: [pantry_raider]
+
+packages:
+  base: !include packages/cub-base.yaml
+  profile: !include packages/tdisplay.yaml
+
+# Passive scan: listen only, never connect. The broadcast repeats every
+# second, so a generous interval/window still catches it quickly.
+esp32_ble_tracker:
+  scan_parameters:
+    active: false
+
+# Merges into the hub block from cub-base.yaml (packages merge dict keys).
+pantry_raider:
+  transport: ${pr_transport}
+  install_tag: ${pr_install_tag}
+  relay: ${pr_ble_relay}
+
+# A Cub that never joins Wi-Fi must not reboot for lack of it (the base
+# package leaves the default 15 minute reboot timeout in place for LAN Cubs).
+wifi:
+  reboot_timeout: 0s

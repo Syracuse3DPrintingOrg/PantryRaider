@@ -1,0 +1,421 @@
+{% extends "base.html" %}
+{% block title %}Shopping List: Pantry Raider{% endblock %}
+{% block content %}
+
+<div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mt-3 mb-3">
+  <h4 class="mb-0"><i class="bi bi-cart me-2"></i>Shopping List</h4>
+  <div class="d-flex gap-2 align-items-center">
+    <select class="form-select form-select-sm d-none" id="list-select" style="width:auto"
+            onchange="load(this.value)"></select>
+    {% if ai_configured %}
+    <button class="btn btn-sm btn-outline-primary" id="receipt-btn"
+            onclick="document.getElementById('receipt-file').click()">
+      <i class="bi bi-receipt me-1"></i>Add receipt
+    </button>
+    <input type="file" id="receipt-file" accept="image/*" capture="environment"
+           class="d-none" onchange="receiptSelected(this)">
+    {% endif %}
+    {% if shopping_backend == 'mealie' %}
+    <a class="btn btn-sm btn-outline-secondary" href="{{ mealie_url }}" target="_blank">
+      <i class="bi bi-box-arrow-up-right me-1"></i>Open Mealie
+    </a>
+    {% endif %}
+  </div>
+</div>
+
+{% if ai_configured %}
+<div id="receipt-card" class="card mb-3 d-none">
+  <div class="card-body">
+    <h6 class="mb-1"><i class="bi bi-receipt me-1"></i>Receipt prices</h6>
+    <div class="text-secondary small mb-2">
+      Snap a photo of a grocery receipt and the prices you paid are matched to
+      the items in your pantry. Review the pairings, then apply to record them
+      in Grocy's price history.
+    </div>
+    <div id="receipt-status" class="d-none"></div>
+    <div id="receipt-dismiss" class="d-none">
+      <button class="btn btn-sm btn-outline-secondary" onclick="dismissReceipt()">
+        Dismiss
+      </button>
+    </div>
+    <div id="receipt-review" class="d-none">
+      <div id="receipt-store" class="small text-secondary mb-2"></div>
+      <div id="receipt-rows" class="list-group mb-2"></div>
+      <div class="d-flex gap-2">
+        <button class="btn btn-sm btn-primary" id="receipt-apply-btn"
+                onclick="applyReceiptPrices()">
+          <i class="bi bi-check2 me-1"></i>Apply prices
+        </button>
+        <button class="btn btn-sm btn-outline-secondary" onclick="dismissReceipt()">
+          Dismiss
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+<div class="row">
+  <div class="col-lg-7 col-xl-6">
+    <form class="input-group mb-3" onsubmit="addItem(event)">
+      <input type="text" class="form-control" id="new-item" placeholder="Add an item…"
+             list="new-item-suggestions" autocomplete="off" oninput="suggestItems(this.value)">
+      <datalist id="new-item-suggestions"></datalist>
+      <button class="btn btn-primary" type="submit"><i class="bi bi-plus-lg"></i></button>
+    </form>
+
+    <div id="items" class="list-group">
+      <div class="text-secondary"><span class="spinner-border spinner-border-sm me-2"></span>Loading…</div>
+    </div>
+
+    {% if shopping_backend == 'grocy' %}
+    <div class="mt-2">
+      <button class="btn btn-sm btn-outline-secondary" onclick="clearDone()">
+        <i class="bi bi-check2-all me-1"></i>Clear checked
+      </button>
+    </div>
+    {% endif %}
+  </div>
+
+  {% if shopping_backend == 'grocy' %}
+  <div class="col-lg-5 col-xl-4 mt-3 mt-lg-0">
+    <div id="suggestions-card" class="d-none">
+      <h6 class="text-secondary mb-2">
+        <i class="bi bi-arrow-repeat me-1"></i>Restock suggestions
+      </h6>
+      <div id="suggestions" class="list-group"></div>
+    </div>
+  </div>
+  {% endif %}
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+// One implementation for both list backends: the /mealie/shopping API answers
+// the same shapes whether the list lives in Grocy (the default, next to the
+// inventory) or in Mealie (installs still running their recipes there).
+const SHOPPING_BACKEND = {{ shopping_backend | tojson }};
+let currentListId = '';
+let itemsById = {};
+
+function esc(s) {
+  return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+async function load(listId = '') {
+  const el = document.getElementById('items');
+  try {
+    const r = await fetch('mealie/shopping' + (listId ? '?list_id=' + listId : ''));
+    if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
+    const data = await r.json();
+    if (data.error) {
+      // Backend down or unconfigured: the API answers with an honest reason
+      // instead of an error status, so say that rather than "no lists yet".
+      el.innerHTML = `<div class="alert alert-warning"><i class="bi bi-plug me-2"></i>${esc(data.error)}</div>`;
+      return;
+    }
+    if (!data.list) {
+      el.innerHTML = '<div class="alert alert-info">No shopping list yet: add an item above to start one.</div>';
+      return;
+    }
+    currentListId = data.list.id;
+    itemsById = Object.fromEntries(data.items.map(i => [i.id, i]));
+
+    const sel = document.getElementById('list-select');
+    if (data.lists.length > 1) {
+      sel.classList.remove('d-none');
+      sel.innerHTML = data.lists.map(l =>
+        `<option value="${l.id}" ${l.id === currentListId ? 'selected' : ''}>${esc(l.name)}</option>`).join('');
+    }
+
+    if (!data.items.length) {
+      el.innerHTML = '<div class="text-secondary small p-2">List is empty.</div>';
+      return;
+    }
+    el.innerHTML = data.items.map(i => {
+      const label = i.display || ((i.quantity && i.quantity !== 1 ? i.quantity + ' \xd7 ' : '') + (i.note || (i.food && i.food.name) || ''));
+      return `
+      <div class="list-group-item d-flex align-items-center justify-content-between ${i.checked ? 'opacity-50' : ''}">
+        <div class="form-check mb-0">
+          <input class="form-check-input" type="checkbox" ${i.checked ? 'checked' : ''}
+                 onchange="toggleItem('${i.id}', this.checked)" id="chk-${i.id}">
+          <label class="form-check-label ${i.checked ? 'text-decoration-line-through' : ''}" for="chk-${i.id}">
+            ${esc(label)}
+          </label>
+        </div>
+        <button class="btn btn-sm btn-outline-danger btn-icon" onclick="removeItem('${i.id}')" title="Delete">
+          <i class="bi bi-x-lg"></i>
+        </button>
+      </div>`;
+    }).join('');
+  } catch (e) {
+    el.innerHTML = `<div class="alert alert-danger">Could not load shopping list: ${esc(e.message)}</div>`;
+  }
+}
+
+async function toggleItem(id, checked) {
+  const item = {...itemsById[id], checked};
+  await fetch('mealie/shopping/items/' + id, {
+    method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(item),
+  });
+  load(currentListId);
+}
+
+async function removeItem(id) {
+  await fetch('mealie/shopping/items/' + id, {method: 'DELETE'});
+  load(currentListId);
+}
+
+async function addItem(ev) {
+  ev.preventDefault();
+  const input = document.getElementById('new-item');
+  const note = input.value.trim();
+  if (!note) return;
+  await fetch('mealie/shopping/items', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({list_id: currentListId || '', note}),
+  });
+  input.value = '';
+  load(currentListId);
+}
+
+// Typeahead for the add box: known product/food names from the list's backend.
+// Fail-soft: no suggestions just leaves a plain text box.
+let suggestTimer = null;
+function suggestItems(q) {
+  clearTimeout(suggestTimer);
+  q = (q || '').trim();
+  if (q.length < 2) return;
+  suggestTimer = setTimeout(async () => {
+    try {
+      const r = await fetch('mealie/foods/suggest?q=' + encodeURIComponent(q));
+      if (!r.ok) return;
+      const d = await r.json();
+      document.getElementById('new-item-suggestions').innerHTML =
+        (d.suggestions || []).map(n => `<option value="${esc(n)}">`).join('');
+    } catch (_) {}
+  }, 250);
+}
+
+{% if shopping_backend == 'grocy' %}
+async function clearDone() {
+  await fetch('mealie/shopping/clear-done', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({list_id: String(currentListId || '')}),
+  });
+  load(currentListId);
+}
+
+// Restock suggestions: products used up recently that are now out of stock.
+async function loadSuggestions() {
+  const card = document.getElementById('suggestions-card');
+  const el = document.getElementById('suggestions');
+  if (!card || !el) return;
+  try {
+    const r = await fetch('grocy/suggestions');
+    if (!r.ok) return;
+    const data = await r.json();
+    if (!data.items || !data.items.length) return;
+    card.classList.remove('d-none');
+    el.innerHTML = data.items.map(s => `
+      <div class="list-group-item d-flex align-items-center justify-content-between">
+        <span class="small">${esc(s.product_name)}
+          <span class="text-secondary ms-1">(used ${s.consume_count}x / ${s.days}d)</span>
+        </span>
+        <button class="btn btn-sm btn-outline-primary btn-icon"
+                onclick="addSuggestion('${esc(s.product_name).replace(/'/g, "\\'")}')"
+                title="Add to list">
+          <i class="bi bi-plus-lg"></i>
+        </button>
+      </div>`).join('');
+  } catch (_) {}
+}
+
+async function addSuggestion(name) {
+  await fetch('mealie/shopping/items', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({list_id: String(currentListId || ''), note: name}),
+  });
+  load(currentListId);
+}
+
+loadSuggestions();
+{% endif %}
+
+{% if ai_configured %}
+// Receipt price capture: photo -> /receipt/analyze acks instantly and reads
+// the receipt in the background (it takes a minute or two, and the user is
+// free to leave the page). The finished result waits server-side, so this
+// page renders it on load, polls /receipt/status only while a read is
+// running, and /receipt/apply writes each confirmed price onto the matched
+// product's newest stock entry.
+let receiptItems = [];
+let receiptPollTimer = null;
+
+function receiptStatus(html, kind) {
+  const el = document.getElementById('receipt-status');
+  el.className = 'alert alert-' + (kind || 'info') + ' py-2 mb-2';
+  el.innerHTML = html;
+}
+
+function showReceiptDismiss(show) {
+  document.getElementById('receipt-dismiss').classList.toggle('d-none', !show);
+}
+
+function startReceiptPolling() {
+  if (receiptPollTimer) return;
+  receiptPollTimer = setInterval(() => { if (!document.hidden) checkReceiptStatus(); }, 5000);
+}
+
+function stopReceiptPolling() {
+  if (receiptPollTimer) { clearInterval(receiptPollTimer); receiptPollTimer = null; }
+}
+
+function showReceiptReading(message) {
+  document.getElementById('receipt-card').classList.remove('d-none');
+  document.getElementById('receipt-review').classList.add('d-none');
+  showReceiptDismiss(false);
+  receiptStatus('<i class="bi bi-hourglass-split me-1"></i>' +
+    esc(message || 'Reading your receipt. This takes a minute or two. You can leave this page.'));
+}
+
+async function receiptSelected(input) {
+  const file = input.files[0];
+  input.value = '';
+  if (!file) return;
+  document.getElementById('receipt-card').classList.remove('d-none');
+  document.getElementById('receipt-review').classList.add('d-none');
+  showReceiptDismiss(false);
+  document.getElementById('receipt-btn').disabled = true;
+  receiptStatus('Sending the photo…');
+  const fd = new FormData();
+  fd.append('file', file);
+  try {
+    const r = await fetch('receipt/analyze', { method: 'POST', body: fd });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || r.statusText);
+    showReceiptReading(data.message);
+    startReceiptPolling();
+  } catch (e) {
+    receiptStatus('Could not read the receipt: ' + esc(e.message), 'danger');
+    showReceiptDismiss(true);
+  } finally {
+    document.getElementById('receipt-btn').disabled = false;
+  }
+}
+
+// On load, and on each poll tick while a read is running: render whatever the
+// server holds, so navigating away and back never loses the results.
+async function checkReceiptStatus() {
+  let data = null;
+  try {
+    const r = await fetch('receipt/status', { cache: 'no-store' });
+    if (!r.ok) return;
+    data = await r.json();
+  } catch (_) { return; }
+  if (data.status === 'pending') {
+    showReceiptReading(data.message);
+    startReceiptPolling();
+    return;
+  }
+  stopReceiptPolling();
+  if (data.status === 'ready') {
+    document.getElementById('receipt-card').classList.remove('d-none');
+    renderReceiptReview(data);
+  } else if (data.status === 'failed') {
+    document.getElementById('receipt-card').classList.remove('d-none');
+    document.getElementById('receipt-review').classList.add('d-none');
+    receiptStatus(esc(data.message || 'The receipt could not be read.'), 'warning');
+    showReceiptDismiss(true);
+  } else {
+    // Nothing stored (dismissed or applied elsewhere): put the card away.
+    closeReceiptCard();
+  }
+}
+
+function renderReceiptReview(data) {
+  receiptItems = data.items || [];
+  showReceiptDismiss(false);
+  if (!receiptItems.length) {
+    receiptStatus('No priced items could be read from that photo. Try a sharper, straight-on shot.', 'warning');
+    showReceiptDismiss(true);
+    return;
+  }
+  document.getElementById('receipt-status').classList.add('d-none');
+  document.getElementById('receipt-store').textContent =
+    data.store ? 'Receipt from ' + data.store : 'Store name not readable on this receipt.';
+  document.getElementById('receipt-rows').innerHTML = receiptItems.map((it, idx) => {
+    const usable = it.product_id && it.price;
+    const price = it.price ? Number(it.price).toFixed(2) : null;
+    const target = it.product_id
+      ? '<i class="bi bi-arrow-right mx-1"></i>' + esc(it.product_name)
+      : '<span class="text-secondary ms-1">(no match in your pantry)</span>';
+    return `
+    <label class="list-group-item d-flex align-items-center gap-2 ${usable ? '' : 'opacity-50'}">
+      <input class="form-check-input receipt-check" type="checkbox" data-idx="${idx}"
+             ${usable ? 'checked' : 'disabled'}>
+      <span class="flex-grow-1">${esc(it.name)}${target}</span>
+      <span class="${price ? '' : 'text-secondary'}">${price ? price : 'no price'}</span>
+    </label>`;
+  }).join('');
+  document.getElementById('receipt-review').classList.remove('d-none');
+}
+
+async function applyReceiptPrices() {
+  const pairs = [...document.querySelectorAll('.receipt-check:checked')].map(cb => {
+    const it = receiptItems[Number(cb.dataset.idx)];
+    return { product_id: it.product_id, price: it.price, name: it.name };
+  });
+  if (!pairs.length) {
+    receiptStatus('Nothing is checked, so there is nothing to apply.', 'warning');
+    return;
+  }
+  const btn = document.getElementById('receipt-apply-btn');
+  btn.disabled = true;
+  try {
+    const r = await fetch('receipt/apply', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ pairs }),
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || r.statusText);
+    document.getElementById('receipt-review').classList.add('d-none');
+    receiptItems = [];
+    let html = `Recorded <strong>${data.applied}</strong> price(s) in Grocy.`;
+    if (data.failed && data.failed.length) {
+      html += '<ul class="mb-0 mt-1">' + data.failed.map(f =>
+        `<li>${esc(f.name)}: ${esc(f.reason)}</li>`).join('') + '</ul>';
+    }
+    receiptStatus(html, data.failed && data.failed.length ? 'warning' : 'success');
+    showReceiptDismiss(true);
+  } catch (e) {
+    receiptStatus('Could not apply the prices: ' + esc(e.message), 'danger');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// Clears the stored result server-side too (and archives its Review inbox
+// note), so the card does not come back on the next visit.
+async function dismissReceipt() {
+  stopReceiptPolling();
+  try { await fetch('receipt/dismiss', { method: 'POST' }); } catch (_) {}
+  closeReceiptCard();
+}
+
+function closeReceiptCard() {
+  stopReceiptPolling();
+  document.getElementById('receipt-card').classList.add('d-none');
+  document.getElementById('receipt-review').classList.add('d-none');
+  showReceiptDismiss(false);
+  receiptItems = [];
+}
+
+checkReceiptStatus();
+{% endif %}
+
+load();
+</script>
+{% endblock %}

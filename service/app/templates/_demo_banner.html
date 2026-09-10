@@ -1,0 +1,24 @@
+{# Read-only DEMO MODE banner (FoodAssistant-pxp0). Slim, brand-pink accented,
+   dismissible per page, and pinned to the very top so it never covers the kiosk
+   clock (which floats over the page centre). Shown only when demo_mode is on, so
+   a normal install renders nothing here. #}
+{% if demo_mode %}
+<div id="demoBanner" class="alert alert-dismissible d-flex align-items-center mb-0 rounded-0 py-1 px-3"
+     role="alert"
+     style="position:fixed;top:0;left:0;right:0;z-index:1050;font-size:0.85rem;
+            background:#F2006E;color:#fff;border:0;">
+  <i class="bi bi-eye-fill me-2"></i>
+  <span>You are exploring a live Pantry Raider demo. Feel free to click around, changes are disabled.</span>
+  <button type="button" class="btn-close btn-close-white ms-auto"
+          data-bs-dismiss="alert" aria-label="Dismiss"
+          onclick="document.body.classList.remove('demo-banner-on');"></button>
+</div>
+<style>
+  /* Nudge the fixed top navbar and body down by the banner height so the banner
+     sits above the bar without hiding the brand or the first row of content.
+     Scoped to demo mode via the body class below, so it is inert otherwise. */
+  body.demo-banner-on .navbar.fixed-top { top: 1.75rem; }
+  body.demo-banner-on { padding-top: calc(60px + 1.75rem); }
+</style>
+<script>(function () { document.body.classList.add('demo-banner-on'); })();</script>
+{% endif %}

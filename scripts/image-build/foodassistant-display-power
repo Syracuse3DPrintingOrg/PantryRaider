@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+# foodassistant-display-power -- blank or wake the kiosk display via the
+# compositor (FoodAssistant-8khi).
+#
+# Usage: foodassistant-display-power on|off
+#
+# On a cage/wlroots DRM kiosk, cutting the panel with `vcgencmd display_power 0`
+# powers HDMI/DSI off below the compositor. cage loses the output and the screen
+# drops to the Linux console, and `display_power 1` does not bring cage back, so
+# the display is stuck on the console until a reboot. The supported path is to
+# tell the compositor to turn the output off/on through the wlr-output-power
+# protocol, which keeps cage in control and recovers cleanly.
+#
+# This mirrors foodassistant-apply-rotation: it resolves the kiosk session's
+# Wayland socket and the connected output, then drives wlr-randr --off/--on. It
+# exits non-zero if the compositor or the tool is unreachable, so the caller can
+# fall back to a firmware/X11 method.
+set -uo pipefail
+
+action="${1:-}"
+case "$action" in
+  on)  flag="--on" ;;
+  off) flag="--off" ;;
+  *) echo "Usage: $0 on|off" >&2; exit 2 ;;
+esac
+
+# Preferred path: the panel backlight (FoodAssistant-r6ng).
+#
+# On a DSI panel under cage, wlr-randr --off powers the DRM output down, and
+# --on reports the output "Enabled: yes" again but the panel stays DARK until
+# the whole compositor restarts. A kiosk with only a touchscreen (no Stream
+# Deck, no motion or presence sensor) then has no way to wake: even a touch that
+# reaches the wake path only re-runs wlr-randr --on, which does not relight the
+# panel. Blanking the BACKLIGHT instead keeps the DRM output scanning and the
+# touchscreen alive, and relighting is instant and reliable (brightness is a
+# plain 0..max lever every backlight driver honors, unlike bl_power semantics
+# which differ between drivers). wlr-randr stays as the fallback for panels with
+# no backlight, which is the usual HDMI case.
+_bl=""
+for _d in /sys/class/backlight/*/; do
+  [ -e "${_d}brightness" ] && { _bl="$_d"; break; }
+done
+if [ -n "$_bl" ] && { [ -w "${_bl}brightness" ] || [ "$(id -u)" = "0" ]; }; then
+  _saved="/run/foodassistant/display-brightness"
+  _max="$(cat "${_bl}max_brightness" 2>/dev/null || echo 255)"
+  if [ "$action" = "off" ]; then
+    mkdir -p /run/foodassistant 2>/dev/null || true
+    _cur="$(cat "${_bl}brightness" 2>/dev/null || echo "$_max")"
+    # Remember a nonzero level so wake restores what the user actually had.
+    if [ "${_cur:-0}" -gt 0 ] 2>/dev/null; then printf '%s\n' "$_cur" > "$_saved" 2>/dev/null || true; fi
+    echo 0 > "${_bl}brightness" 2>/dev/null && { echo "Blanked backlight ${_bl}"; exit 0; }
+  else
+    _want="$(cat "$_saved" 2>/dev/null || true)"
+    [ -n "$_want" ] && [ "$_want" -gt 0 ] 2>/dev/null || _want="$_max"
+    # Clear any powered-down state some drivers latch, then restore brightness.
+    [ -w "${_bl}bl_power" ] && echo 0 > "${_bl}bl_power" 2>/dev/null || true
+    echo "$_want" > "${_bl}brightness" 2>/dev/null && { echo "Woke backlight ${_bl} to ${_want}"; exit 0; }
+  fi
+  # Backlight write did not take (permissions, odd driver): fall through to wlr-randr.
+fi
+
+if ! command -v wlr-randr >/dev/null 2>&1; then
+  echo "wlr-randr not installed; cannot drive the compositor display power" >&2
+  exit 1
+fi
+
+# Resolve the kiosk Wayland socket and the connected output. Unlike rotation
+# (run from ExecStartPost while cage starts), power toggles happen well after
+# boot, so a single short probe is enough.
+sock="$(ls /run/user/*/wayland-* 2>/dev/null | grep -v '\.lock$' | head -1 || true)"
+if [ -z "$sock" ]; then
+  echo "Could not reach the kiosk compositor (no Wayland socket)" >&2
+  exit 1
+fi
+export XDG_RUNTIME_DIR="$(dirname "$sock")"
+export WAYLAND_DISPLAY="$(basename "$sock")"
+
+# The connector line is the only one starting in column 0.
+out="$(wlr-randr 2>/dev/null | awk '/^[A-Za-z]/{print $1; exit}' || true)"
+if [ -z "$out" ]; then
+  echo "Could not find a connected output" >&2
+  exit 1
+fi
+
+wlr-randr --output "$out" "$flag"
+echo "Set $out power $action via the compositor"
