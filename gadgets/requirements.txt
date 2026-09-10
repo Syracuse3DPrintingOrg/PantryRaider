@@ -6,7 +6,7 @@
 # deployed Pi while a breaking major never does. bleak 1.0 reshaped the client
 # and scanner APIs daemon.py uses, which is what the ceiling holds back.
 bleak>=0.21,<1
-httpx>=0.24,<1
+httpx>=0.28.1,<1
 # The Cub status broadcast (advertiser.py) drives bluez advertising over
 # D-Bus with dbus-fast, which bleak already pulls in on Linux; pinned here
 # explicitly so the dependency is stated, not inherited by accident.
