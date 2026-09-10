@@ -1,0 +1,24 @@
+# Stream Deck controller dependencies. This file is the one place these pins
+# live; firstboot.sh installs from it and only falls back to an inline list
+# when the repo is not checked out yet.
+# Install into the same environment that runs the controller:
+#   pip install -r streamdeck/requirements.txt
+#
+# Every pin is a range: the controller updates by git pull, so a floor with a
+# next-major ceiling lets patch releases reach a deployed device while a
+# breaking major never does.
+
+# Pure-Python driver for Elgato Stream Deck / Stream Deck Module hardware.
+# 0.9.8 is the floor: it adds the USB product id 0x00ba used by current XL /
+# Module 32 hardware revisions. Older releases report "no Stream Deck found"
+# for those decks even though the kernel enumerates them.
+streamdeck>=0.9.8,<1
+
+# Key image rendering.
+Pillow>=10.4.0,<13
+
+# HTTP client for the FoodAssistant API.
+httpx>=0.27.0,<1
+
+# WebSocket client for Chrome DevTools Protocol (kiosk navigation).
+websockets>=12.0,<18

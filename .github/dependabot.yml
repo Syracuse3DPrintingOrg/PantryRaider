@@ -1,0 +1,64 @@
+version: 2
+updates:
+  - package-ecosystem: "pip"
+    directory: "/service"
+    schedule:
+      interval: "weekly"
+    groups:
+      pip-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  # The Forager cloud companion pins exactly, so nothing here moves unless
+  # Dependabot proposes it. gadgets and streamdeck use ranges, where these
+  # entries mostly surface security advisories.
+  - package-ecosystem: "pip"
+    directory: "/cloud"
+    schedule:
+      interval: "weekly"
+    groups:
+      pip-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  - package-ecosystem: "pip"
+    directory: "/gadgets"
+    schedule:
+      interval: "weekly"
+    groups:
+      pip-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  - package-ecosystem: "pip"
+    directory: "/streamdeck"
+    schedule:
+      interval: "weekly"
+    groups:
+      pip-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      actions-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  - package-ecosystem: "docker"
+    directory: "/service"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "docker"
+    directory: "/cloud"
+    schedule:
+      interval: "weekly"

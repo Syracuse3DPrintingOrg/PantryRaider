@@ -1,0 +1,186 @@
+# Bandit Cub common package: everything every Cub profile shares.
+#
+# Stacked under a profile package (tdisplay.yaml, tdisplay-s3.yaml,
+# touch7.yaml) by the top-level cub-<profile>.yaml build files. Substitutions
+# here are defaults; the build file (or your own YAML) overrides them.
+
+# READ-ONLY FOR THE BETA (FoodAssistant-11smp). A Cub listens to the kitchen's
+# BLE status broadcast and shows it. It does not pair, hold a key, poll, send
+# anything back, or update itself over the network. That is a deliberate step
+# back from what the firmware can do, taken because the read-write design had
+# a hole worth more than the features: a Cub found its server over
+# unauthenticated mDNS, accepted that server's word that pairing was approved,
+# and then installed whatever firmware that server offered, automatically. The
+# write features and a safe way back to them are tracked as a future feature.
+#
+# What this means in practice:
+#   - Firmware changes only by flashing over USB from /ui/cubs. There is no
+#     network path onto the device at all, which is what closes the hole.
+#   - The kitchen needs a Bluetooth radio and the broadcast turned on, which
+#     is what the gadgets agent does when cub_ble_advertise is set.
+#   - Buttons cannot control timers and the BLE relay is off, because both
+#     need to talk back to the server.
+
+substitutions:
+  name: bandit-cub
+  friendly_name: Bandit Cub
+  cub_profile: custom
+  cub_version: "0.18.36"
+  # How a Cub gets its kitchen state. "ble" is receive-only and the only
+  # supported value for the beta: it never pairs, never polls, and holds no
+  # key. "lan" and "auto" still exist in the component for the read-write work
+  # later, and a build of your own can select them, but they are not what
+  # ships.
+  pr_transport: ble
+  # Pin which install's broadcast this Cub listens to (8 hex characters). Left
+  # empty, the first broadcast heard wins and is remembered in flash, so pin
+  # it if a hostile broadcaster could plausibly be in radio range at first
+  # boot (FoodAssistant-ux9hs).
+  pr_install_tag: ""
+  # Starting publish interval for the on-device sensors. Nothing is polled;
+  # this only paces how often the screen and any HA sensors refresh from the
+  # last broadcast heard.
+  pr_poll: 15s
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+  # Every Cub gets a unique hostname out of the same factory image.
+  name_add_mac_suffix: true
+  min_version: 2026.6.0
+  # The version a Cub reports and compares against the server's. Without this
+  # the device would call itself by its ESPHome version and think every
+  # firmware on the server was a different one.
+  project:
+    name: pantryraider.bandit-cub
+    version: ${cub_version}
+  on_boot:
+    # Before the hub starts (its own setup runs at a lower priority), tell it
+    # how to point the firmware check at the server it finds. This is the only
+    # place the two components meet: the hub takes a callback and never names
+    # the update entity, so a custom YAML that leaves updates out still
+    # builds, and the hub simply has nobody to tell.
+    - priority: 600
+      then:
+        - lambda: |-
+            id(pantry)->set_ota_url_callback([](const std::string &url) {
+              id(cub_firmware)->set_source_url(url);
+              id(cub_firmware)->check();
+            });
+
+logger:
+
+# First-boot Wi-Fi: Improv over the USB cable used for flashing, Improv over
+# BLE from a phone, and a captive-portal fallback AP.
+#
+# reboot_timeout: 0s because a receive-only Cub does not need Wi-Fi at all: it
+# takes its state off the air. ESPHome's default is to reboot a device that
+# has not connected for fifteen minutes, which for a Cub sitting happily on
+# the broadcast with no credentials would be a reboot loop forever. Wi-Fi is
+# still worth joining (logs, the API, Improv), it just is not a reason to
+# restart the thing.
+wifi:
+  ap: {}
+  reboot_timeout: 0s
+
+captive_portal:
+
+improv_serial:
+
+esp32_improv:
+  authorizer: none
+
+# The stock native API block is what makes every pantry_raider sensor below a
+# Home Assistant entity too. A Cub works fine without HA; never reboot just
+# because no API client is connected.
+#
+# No encryption key here, and that is a deliberate limit of a shared factory
+# image rather than an oversight: every Cub flashed from the same published
+# binary would carry the same key, and a key printed in a public repository
+# protects nobody. What the API exposes is read only, the sensors and text
+# sensors defined below, so an unencrypted API on the home network means a
+# neighbour on that network could read kitchen status, never change anything.
+# A build of your own can and should set a key; cub-custom.example.yaml shows
+# how, and the Bandit Cubs docs page explains the trade.
+api:
+  reboot_timeout: 0s
+
+# NO NETWORK FIRMWARE PATH. Both halves are deliberately absent.
+#
+# The esphome OTA platform, which lets any machine on the network PUSH an
+# image to the device, was removed first: it cannot be password protected in a
+# shared factory image for the same reason the API key cannot, and an
+# unprotected push is arbitrary code execution on the Cub for anyone on the
+# network (FoodAssistant-ympla).
+#
+# The http_request platform and its update entity, which PULLED an image from
+# the paired server every six hours and installed it unattended, are gone for
+# the beta as well. They reached the same place by a longer road: the server
+# was found over unauthenticated mDNS, it approved its own pairing, and the
+# manifest URL followed it, so anything on the LAN could hand a Cub firmware
+# and the Cub would install it without anyone touching the device
+# (FoodAssistant-11smp). Closing one door and leaving the other open was worse
+# than closing neither, because it read as though the question had been
+# settled.
+#
+# Firmware therefore changes exactly one way: someone plugs the Cub into a
+# computer and flashes it from /ui/cubs. Signed images would let automatic
+# updates come back safely, and that is the road out, not this.
+
+# Timers tick locally between polls: remaining time is computed from each
+# timer's deadline_epoch against real (SNTP) time.
+time:
+  - platform: sntp
+    id: sntp_time
+
+# Listening only: a passive scan never transmits, so the Cub is not
+# discoverable and announces nothing about itself.
+esp32_ble_tracker:
+  scan_parameters:
+    active: false
+
+
+http_request:
+  id: pr_http
+  timeout: 10s
+  verify_ssl: false
+
+# The hub: listens for the kitchen's BLE status broadcast and feeds the
+# display from it. No server address, no API key, no pairing, and nothing
+# sent back. The component clears any key and address left in flash by an
+# earlier LAN build when it starts in this transport, so a Cub reflashed from
+# a previous life is receive-only too, not just a fresh one.
+pantry_raider:
+  id: pantry
+  transport: ${pr_transport}
+  install_tag: ${pr_install_tag}
+  profile: ${cub_profile}
+  device_name: ${friendly_name}
+  firmware_version: ${cub_version}
+  update_interval: ${pr_poll}
+
+sensor:
+  - platform: pantry_raider
+    expired:
+      name: Expired items
+    expiring_today:
+      name: Expiring today
+    expiring_soon:
+      name: Expiring soon
+    pending:
+      name: Pending scans
+    active_timers:
+      name: Active timers
+    next_timer_seconds:
+      name: Next timer remaining
+    probe_temperature:
+      name: Probe temperature
+
+text_sensor:
+  - platform: pantry_raider
+    view:
+      name: View
+    next_timer:
+      name: Next timer
+    pairing_code:
+      name: Pairing code
