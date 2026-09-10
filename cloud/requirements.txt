@@ -42,7 +42,7 @@ qrcode==8.2
 # py_webauthn package builds the registration/authentication options and
 # verifies attestations and assertions, so the app never hand-rolls CBOR/COSE.
 # It pulls in cryptography and cbor2; both are pure wheels on the target arch.
-webauthn==2.8.0
+webauthn==3.0.0
 
 # Fernet (symmetric authenticated encryption) for the two-factor authenticator
 # seed at rest (app/totp_crypto.py). Already present transitively via webauthn;
