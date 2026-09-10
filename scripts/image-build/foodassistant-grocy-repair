@@ -1,0 +1,166 @@
+#!/usr/bin/env bash
+# FoodAssistant appliance helper: repair Grocy's config.php after the Grocy 4.7 update.
+# =====================================================================================
+# Grocy 4.7.0 moved its auth middlewares into a Grocy\Middleware\Auth
+# sub-namespace. A config.php written by an earlier Grocy still says
+#   Setting('AUTH_CLASS', 'Grocy\Middleware\DefaultAuthMiddleware');
+# and once the image updates, Grocy answers every request (API included) with
+# an "Invalid setting in config.php" page, so the inventory stops loading.
+#
+# The stack's Grocy container also carries docker/grocy-init, which fixes this
+# at container start. This helper covers the container that is ALREADY running
+# on a deployed appliance (started before that mount existed, never recreated):
+# it reaches into the container with docker exec, reads config.php, and only
+# when the active AUTH_CLASS line names the old class AND the container ships
+# the new class file, backs config.php up (timestamped) and rewrites that one
+# line through PHP's literal str_replace (a literal sed as the fallback), then
+# reads it back to confirm.
+#
+# Invoked by foodassistant-update after every Pi Hosted update, and by the host
+# bridge (POST /grocy/repair-config) behind the inventory banner's Repair
+# button. Idempotent; exits 0 when there is nothing to do. Prints a short log
+# and, as its LAST line, one JSON object the bridge relays to the app:
+#   {"ok": bool, "action": "repaired"|"skipped"|"would-repair"|"failed",
+#    "reason": "...", "backup": "...", "dry_run": bool}
+#
+# Env overrides (tests run this against a stub docker on PATH):
+#   INSTALL_DIR            the compose project dir (default /opt/foodassistant)
+#   GROCY_SERVICE          compose service name (default grocy)
+#   GROCY_CONTAINER_NAMES  fallback container names when compose knows nothing
+#   GROCY_CONFIG           config.php path inside the container
+#   GROCY_NEW_CLASS_FILE   the 4.7 class file whose presence gates the edit
+#   GROCY_REPAIR_TOOL      "sed" forces the sed path inside the container
+#   DRY_RUN=1              decide and report, but change nothing
+set -uo pipefail
+
+INSTALL_DIR="${INSTALL_DIR:-/opt/foodassistant}"
+GROCY_SERVICE="${GROCY_SERVICE:-grocy}"
+GROCY_CONTAINER_NAMES="${GROCY_CONTAINER_NAMES:-foodassistant-grocy pantryraider-grocy grocy}"
+GROCY_CONFIG="${GROCY_CONFIG:-/config/data/config.php}"
+GROCY_NEW_CLASS_FILE="${GROCY_NEW_CLASS_FILE:-/app/www/middleware/Auth/DefaultAuthMiddleware.php}"
+GROCY_REPAIR_TOOL="${GROCY_REPAIR_TOOL:-}"
+DRY_RUN="${DRY_RUN:-0}"
+# Single quotes: the backslashes are literal.
+OLD_CLASS='Grocy\Middleware\DefaultAuthMiddleware'
+NEW_CLASS='Grocy\Middleware\Auth\DefaultAuthMiddleware'
+
+log() { echo "[grocy-repair] $*"; }
+
+_json_str() {
+  printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' | tr -d '\n'
+}
+
+# _result <ok> <action> <reason> [backup]: log the reason, print the JSON
+# summary line, and exit (0 unless the action failed).
+_result() {
+  local ok="$1" action="$2" reason="$3" backup="${4:-}" dry="false"
+  [ "$DRY_RUN" = "1" ] && dry="true"
+  log "$reason"
+  printf '{"ok":%s,"action":"%s","reason":"%s","backup":"%s","dry_run":%s}\n' \
+    "$ok" "$action" "$(_json_str "$reason")" "$(_json_str "$backup")" "$dry"
+  if [ "$ok" = "true" ]; then exit 0; else exit 1; fi
+}
+
+# The running Grocy container id: the compose service in the appliance stack,
+# else a container by one of the known names. Empty when none is running.
+find_container() {
+  local cid="" name
+  if [ -f "$INSTALL_DIR/docker-compose.yml" ]; then
+    cid="$(cd "$INSTALL_DIR" 2>/dev/null && docker compose ps -q "$GROCY_SERVICE" 2>/dev/null | head -n1)"
+  fi
+  if [ -z "$cid" ]; then
+    for name in $GROCY_CONTAINER_NAMES; do
+      cid="$(docker ps -q --filter "name=^${name}\$" 2>/dev/null | head -n1)"
+      [ -n "$cid" ] && break
+    done
+  fi
+  printf '%s' "$cid"
+}
+
+# The active AUTH_CLASS setting line from config text on stdin (comment lines
+# ignored), or nothing.
+active_auth_line() {
+  grep -F 'AUTH_CLASS' | grep -v -E '^[[:space:]]*(//|#|\*|/\*)' \
+    | grep -F 'Setting(' | head -n1
+}
+
+# Rewrite inside the container. Runs as a script on stdin so no quoting layer
+# on this side ever touches the backslashes; the class names travel as
+# arguments and then as environment variables into PHP. The sed fallback is a
+# single-quoted literal. Both keep the file's inode (owner, mode).
+rewrite_in_container() {
+  local cid="$1"
+  docker exec -i -e "GROCY_REPAIR_TOOL=$GROCY_REPAIR_TOOL" "$cid" sh -s -- "$GROCY_CONFIG" "$OLD_CLASS" "$NEW_CLASS" <<'EOF'
+f="$1"; old="$2"; new="$3"
+php_bin=""
+if [ "${GROCY_REPAIR_TOOL:-}" != "sed" ]; then
+  for p in php php83 php82 php81; do
+    if command -v "$p" >/dev/null 2>&1; then php_bin="$p"; break; fi
+  done
+fi
+if [ -n "$php_bin" ]; then
+  GROCY_REPAIR_FILE="$f" GROCY_REPAIR_OLD="$old" GROCY_REPAIR_NEW="$new" "$php_bin" -r '
+    $f = getenv("GROCY_REPAIR_FILE");
+    $s = file_get_contents($f);
+    if ($s === false) { exit(2); }
+    $n = str_replace(getenv("GROCY_REPAIR_OLD"), getenv("GROCY_REPAIR_NEW"), $s);
+    if ($n === $s) { exit(3); }
+    exit(file_put_contents($f, $n) === false ? 4 : 0);'
+  exit $?
+fi
+tmp="$f.repair-tmp"
+sed 's/Grocy\\Middleware\\DefaultAuthMiddleware/Grocy\\Middleware\\Auth\\DefaultAuthMiddleware/g' "$f" > "$tmp" \
+  && cat "$tmp" > "$f"
+rc=$?
+rm -f "$tmp"
+exit $rc
+EOF
+}
+
+command -v docker >/dev/null 2>&1 \
+  || _result true skipped "Docker is not installed here, so there is no Grocy container to check."
+
+cid="$(find_container)"
+[ -n "$cid" ] \
+  || _result true skipped "No running Grocy container was found, so there is nothing to repair."
+
+if ! config="$(docker exec "$cid" cat "$GROCY_CONFIG" 2>/dev/null)"; then
+  _result true skipped "Grocy has no config.php yet, so there is nothing to repair."
+fi
+line="$(printf '%s\n' "$config" | active_auth_line)"
+if [ -z "$line" ]; then
+  _result true skipped "config.php sets no AUTH_CLASS, so Grocy uses its own default; nothing to repair."
+fi
+case "$line" in
+  *"$NEW_CLASS"*)
+    _result true skipped "AUTH_CLASS already names $NEW_CLASS; nothing to repair." ;;
+  *"$OLD_CLASS"*)
+    : ;;
+  *)
+    _result true skipped "AUTH_CLASS is set to a custom class; leaving it alone." ;;
+esac
+if ! docker exec "$cid" test -f "$GROCY_NEW_CLASS_FILE" 2>/dev/null; then
+  _result true skipped "This Grocy is older than 4.7 (no $GROCY_NEW_CLASS_FILE), so the current AUTH_CLASS is still right."
+fi
+
+stamp="$(date +%Y%m%d-%H%M%S)"
+backup="$GROCY_CONFIG.bak-$stamp"
+if [ "$DRY_RUN" = "1" ]; then
+  _result true would-repair "DRY_RUN: would back up $GROCY_CONFIG to $backup and change AUTH_CLASS to $NEW_CLASS." "$backup"
+fi
+if ! docker exec "$cid" cp -p "$GROCY_CONFIG" "$backup" 2>/dev/null; then
+  _result false failed "Could not write the backup $backup inside the Grocy container; config.php was left untouched."
+fi
+log "Backed up $GROCY_CONFIG to $backup"
+if ! rewrite_in_container "$cid"; then
+  docker exec -i "$cid" sh -c 'cat "$1" > "$2"' sh "$backup" "$GROCY_CONFIG" 2>/dev/null || true
+  _result false failed "The rewrite inside the Grocy container failed; config.php was restored from $backup." "$backup"
+fi
+after="$(docker exec "$cid" cat "$GROCY_CONFIG" 2>/dev/null | active_auth_line)"
+case "$after" in
+  *"$NEW_CLASS"*)
+    _result true repaired "Changed AUTH_CLASS to $NEW_CLASS in Grocy's config.php (backup at $backup). Grocy re-reads it within a few seconds." "$backup" ;;
+  *)
+    docker exec -i "$cid" sh -c 'cat "$1" > "$2"' sh "$backup" "$GROCY_CONFIG" 2>/dev/null || true
+    _result false failed "The rewrite did not take; config.php was restored from $backup." "$backup" ;;
+esac

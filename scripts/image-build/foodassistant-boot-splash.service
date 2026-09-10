@@ -1,0 +1,32 @@
+# Pantry Raider boot splash (FoodAssistant-y8vj).
+# Paints the Pantry Raider mark straight to the framebuffer as soon as the
+# root filesystem is up, so a kiosk device shows the brand instead of boot
+# text until the compositor takes the display over. Fail-safe by design:
+# every Condition below turns a missing piece into a silent skip, the writer
+# itself always exits 0, and nothing is ordered after this unit, so it can
+# never hang or break a boot.
+
+[Unit]
+Description=Pantry Raider boot splash
+DefaultDependencies=no
+After=local-fs.target systemd-udev-trigger.service
+Conflicts=shutdown.target
+Before=shutdown.target
+# No framebuffer yet (headless box, or the display driver is still probing)
+# means skip this boot, never fail it.
+ConditionPathExists=/dev/fb0
+ConditionPathExists=/opt/foodassistant/boot-splash/splash.ppm.gz
+ConditionPathExists=/usr/local/bin/foodassistant-boot-splash
+# The opt-in Plymouth theme owns the boot display when "splash" is on the
+# kernel cmdline; stay out of its way.
+ConditionKernelCommandLine=!splash
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/foodassistant-boot-splash
+TimeoutStartSec=15
+StandardOutput=null
+StandardError=null
+
+[Install]
+WantedBy=sysinit.target

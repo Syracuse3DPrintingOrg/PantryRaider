@@ -1,0 +1,253 @@
+# Profile: tdisplay-s3 (LilyGo T-Display S3, ESP32-S3, ST7789 170x320 on an
+# 8-bit parallel bus, no touch)
+#
+# Two hardware buttons: the top button (GPIO14) cycles what the screen shows
+# (auto, expiring, timers, probe, clock); the bottom button (GPIO0) is a
+# general timer key (press to start/add a minute, hold to cancel).
+#
+# Both buttons are remappable from the build file: set cub_button1_action or
+# cub_button2_action to any Start Page action token (docs/esp-devices.md
+# lists them) to send that action instead. The special value "view_cycle"
+# keeps button 1 cycling the screen locally.
+
+substitutions:
+  cub_profile: tdisplay-s3
+  # Button 1 (GPIO14): "view_cycle" cycles the on-screen view; any other
+  # value is sent to the server as a pantry_raider.press action token.
+  cub_button1_action: view_cycle
+  # Button 2 (GPIO0): the action token pressed on tap, and long-pressed on
+  # hold. timer_1 means tap to start/add a minute, hold to cancel.
+  cub_button2_action: timer_1
+
+esp32:
+  board: esp32-s3-devkitc-1
+  flash_size: 16MB
+  framework:
+    type: esp-idf
+
+psram:
+  mode: octal
+  speed: 80MHz
+
+# The panel hangs off an 8-bit parallel bus, which ESPHome drives as an
+# octal SPI bus. Pins beyond these come from the T-DISPLAY-S3 model preset.
+spi:
+  - id: display_bus
+    type: octal
+    clk_pin: GPIO8
+    data_pins: [GPIO39, GPIO40, GPIO41, GPIO42, GPIO45, GPIO46, GPIO47, GPIO48]
+
+output:
+  - platform: ledc
+    pin: GPIO38
+    id: backlight_pwm
+
+light:
+  - platform: monochromatic
+    output: backlight_pwm
+    name: Backlight
+    restore_mode: ALWAYS_ON
+    entity_category: config
+
+font:
+  - file: gfonts://Roboto
+    id: font_small
+    size: 14
+  - file: gfonts://Roboto@700
+    id: font_med
+    size: 20
+  - file: gfonts://Roboto@700
+    id: font_big
+    size: 44
+
+globals:
+  # A button-selected view; empty string means "follow the server".
+  - id: g_view_override
+    type: std::string
+    restore_value: no
+
+binary_sensor:
+  - platform: gpio
+    id: btn_view
+    pin:
+      number: GPIO14
+      inverted: true
+      mode:
+        input: true
+        pullup: true
+    on_multi_click:
+      - timing:
+          - ON for at most 0.6s
+          - OFF for at least 0.1s
+        then:
+          - lambda: |-
+              // ${cub_button1_action} is substituted as plain text, so the
+              // branch below is a compile-time constant and folds away.
+              static const std::string ACT = "${cub_button1_action}";
+              if (ACT == "view_cycle") {
+                static const std::vector<std::string> ORDER = {"", "expiring", "timers", "probe", "clock"};
+                size_t i = 0;
+                for (; i < ORDER.size(); i++) {
+                  if (ORDER[i] == id(g_view_override))
+                    break;
+                }
+                id(g_view_override) = ORDER[(i + 1) % ORDER.size()];
+              } else {
+                id(pantry)->press(ACT, false);
+              }
+  - platform: gpio
+    id: btn_timer
+    pin:
+      number: GPIO0
+      inverted: true
+      mode:
+        input: true
+        pullup: true
+      ignore_strapping_warning: true
+    on_multi_click:
+      - timing:
+          - ON for at most 0.6s
+          - OFF for at least 0.1s
+        then:
+          - pantry_raider.press:
+              button: ${cub_button2_action}
+      - timing:
+          - ON for at least 1s
+        then:
+          - pantry_raider.press:
+              button: ${cub_button2_action}
+              long: true
+
+  # Optional external buttons. A Cub can carry a couple of shelf-style
+  # physical buttons of its own: wire a momentary switch between a free GPIO
+  # and GND, uncomment a block, and pick any Start Page action token
+  # (docs/esp-devices.md lists them; a custom key id like c1 can add an item
+  # to the shopping list). GPIO17 and GPIO18 are free on the T-Display S3
+  # header and support internal pull-ups.
+  # - platform: gpio
+  #   id: btn_ext_1
+  #   pin:
+  #     number: GPIO17
+  #     inverted: true
+  #     mode:
+  #       input: true
+  #       pullup: true
+  #   on_press:
+  #     - pantry_raider.press:
+  #         button: timer_eggs
+  # - platform: gpio
+  #   id: btn_ext_2
+  #   pin:
+  #     number: GPIO18
+  #     inverted: true
+  #     mode:
+  #       input: true
+  #       pullup: true
+  #   on_press:
+  #     - pantry_raider.press:
+  #         button: c1
+
+# Optional: Home Assistant Bluetooth proxy. Uncomment both blocks and this
+# Cub becomes a remote Bluetooth radio for Home Assistant, relaying BLE
+# devices near the kitchen (thermometers, plant sensors, buttons) to HA.
+# Off by default. The Bluetooth stack itself is already on board (Improv
+# BLE uses it); an active proxy adds runtime heap for continuous scanning
+# and GATT connections, which the S3 with PSRAM absorbs more comfortably
+# than the plain T-Display. Still only worth carrying if you use Home
+# Assistant and want the extra radio coverage.
+# esp32_ble_tracker:
+#   scan_parameters:
+#     active: true
+# bluetooth_proxy:
+#   active: true
+
+display:
+  - platform: mipi_spi
+    id: cub_display
+    model: T-DISPLAY-S3
+    rotation: 90
+    update_interval: 1s
+    lambda: |-
+      auto *hub = id(pantry);
+      const auto &st = hub->state();
+      const int W = it.get_width(), H = it.get_height();
+      const Color PINK(0xF2, 0x00, 0x6E);
+      const Color WHITE(255, 255, 255);
+      const Color GRAY(150, 150, 150);
+      const Color RED(255, 80, 80);
+      std::string view = id(g_view_override);
+      if (view.empty())
+        view = hub->effective_view();
+      if (view == "rotation") {
+        int dwell = st.settings.rotate_seconds > 0 ? st.settings.rotate_seconds : 12;
+        if (st.rotation.empty())
+          view = "clock";
+        else
+          view = st.rotation[(millis() / 1000 / dwell) % st.rotation.size()];
+      }
+      if (view == "pairing") {
+        it.print(W / 2, 4, id(font_small), PINK, TextAlign::TOP_CENTER, "PANTRY RAIDER");
+        if (hub->pairing_state() == esphome::pantry_raider::PAIRING_WAITING) {
+          it.print(W / 2, H / 2, id(font_big), WHITE, TextAlign::CENTER, hub->pairing_code().c_str());
+          it.print(W / 2, H - 4, id(font_small), GRAY, TextAlign::BOTTOM_CENTER, "Approve in Settings, Devices");
+        } else {
+          it.print(W / 2, H / 2, id(font_small), WHITE, TextAlign::CENTER, hub->pairing_line().c_str());
+        }
+      } else if (view == "offline") {
+        it.print(W / 2, H / 2, id(font_med), GRAY, TextAlign::CENTER, "Server unreachable");
+      } else if (view == "timers") {
+        int idx = hub->featured_timer();
+        if (idx < 0) {
+          it.print(W / 2, H / 2, id(font_med), GRAY, TextAlign::CENTER, "No timers");
+        } else {
+          const auto &t = st.timers[idx];
+          it.print(W / 2, 4, id(font_med), t.expired ? RED : WHITE, TextAlign::TOP_CENTER, t.label.c_str());
+          it.print(W / 2, H / 2 + 8, id(font_big), t.expired ? RED : PINK, TextAlign::CENTER,
+                   hub->format_remaining(t).c_str());
+          std::string more;
+          for (size_t i = 0; i < st.timers.size(); i++) {
+            if ((int) i == idx)
+              continue;
+            if (!more.empty())
+              more += "   ";
+            more += st.timers[i].label + " " + hub->format_remaining(st.timers[i]);
+          }
+          if (!more.empty())
+            it.print(W / 2, H - 4, id(font_small), GRAY, TextAlign::BOTTOM_CENTER, more.c_str());
+        }
+      } else if (view == "probe") {
+        if (st.probes.empty()) {
+          it.print(W / 2, H / 2, id(font_med), GRAY, TextAlign::CENTER, "No probes");
+        } else {
+          const auto &p = st.probes[0];
+          it.print(W / 2, 4, id(font_med), WHITE, TextAlign::TOP_CENTER, p.name.c_str());
+          it.printf(W / 2, H / 2 + 8, id(font_big), p.stale ? GRAY : PINK, TextAlign::CENTER, "%.0f%s",
+                    hub->probe_display_temp(p), hub->units_suffix());
+          if (!std::isnan(p.target_c)) {
+            float target = st.settings.units == "c" ? p.target_c : p.target_c * 9.0f / 5.0f + 32.0f;
+            it.printf(W / 2, H - 4, id(font_small), GRAY, TextAlign::BOTTOM_CENTER, "target %.0f%s", target,
+                      hub->units_suffix());
+          }
+        }
+      } else if (view == "pending") {
+        it.print(W / 2, 4, id(font_small), PINK, TextAlign::TOP_CENTER, "PENDING SCANS");
+        it.printf(W / 2, H / 2 + 8, id(font_big), WHITE, TextAlign::CENTER, "%d", st.pending);
+      } else if (view == "clock") {
+        it.print(W / 2, H / 2, id(font_big), WHITE, TextAlign::CENTER, hub->clock_text().c_str());
+      } else {  // expiring
+        it.print(W / 2, 2, id(font_small), PINK, TextAlign::TOP_CENTER, "EXPIRING");
+        it.printf(W / 2, 18, id(font_small), WHITE, TextAlign::TOP_CENTER, "%d past   %d today   %d soon",
+                  st.expired, st.today, st.soon);
+        int y = 38;
+        for (const auto &item : st.top) {
+          if (y > H - 16)
+            break;
+          Color c = item.days < 0 ? RED : (item.days == 0 ? PINK : WHITE);
+          it.print(4, y, id(font_small), c, TextAlign::TOP_LEFT, item.name.c_str());
+          std::string days = item.days < 0 ? "past" : (item.days == 0 ? "today" : (to_string(item.days) + "d"));
+          it.print(W - 4, y, id(font_small), c, TextAlign::TOP_RIGHT, days.c_str());
+          y += 18;
+        }
+        if (st.top.empty())
+          it.print(W / 2, H / 2 + 10, id(font_med), GRAY, TextAlign::CENTER, "Nothing expiring");
+      }
