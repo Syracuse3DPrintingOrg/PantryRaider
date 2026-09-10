@@ -1,0 +1,36 @@
+{# Shared outage banner (FoodAssistant-2cmm).
+
+   Rendered when a page's upstream service (Grocy, Mealie, or the main server
+   from a satellite) cannot be reached, or when Grocy is up but reports a
+   problem with its own setup. The page shell stays navigable; this banner
+   just says honestly what is wrong.
+
+   Include with a message from the caller:
+     {% with upstream_down_message = grocy_error %}{% include "_upstream_down.html" %}{% endwith %}
+   The message should be the user-forward copy raised by the service client
+   (services.grocy.unreachable_message / services.mealie.unreachable_message),
+   so every surface reports an outage with the same words.
+
+   Optional, for a Grocy-reported setup problem (services.grocy.error_payload):
+     upstream_hint    the fix in plain words (a config.php edit)
+     upstream_repair  true when this device can apply that fix itself (a Pi
+                      Hosted appliance with the host bridge); renders the
+                      Repair Grocy config button, wired by static/js/grocy-repair.js #}
+{% if upstream_down_message %}
+<div class="alert alert-warning d-flex align-items-start gap-2" role="alert">
+  <i class="bi bi-plug"></i>
+  <div>
+    <div>{{ upstream_down_message }}</div>
+    {% if upstream_hint %}
+    <div class="small mt-1">{{ upstream_hint }}</div>
+    {% endif %}
+    {% if upstream_repair %}
+    <button type="button" class="btn btn-sm btn-outline-warning mt-2"
+            data-grocy-repair onclick="repairGrocyConfig(this)">
+      <i class="bi bi-wrench-adjustable me-1"></i>Repair Grocy config
+    </button>
+    <div class="small mt-1 d-none" data-grocy-repair-result></div>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
