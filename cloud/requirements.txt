@@ -47,7 +47,7 @@ webauthn==2.8.0
 # Fernet (symmetric authenticated encryption) for the two-factor authenticator
 # seed at rest (app/totp_crypto.py). Already present transitively via webauthn;
 # pinned explicitly so this security dependency is intentional, not incidental.
-cryptography==49.0.0
+cryptography==50.0.1
 
 # Reading text out of an uploaded recipe PDF on the portal upload path. Pure
 # Python, no native deps; a scanned (image-only) PDF yields no text and the
