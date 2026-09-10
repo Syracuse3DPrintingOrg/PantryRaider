@@ -5,7 +5,7 @@
 # git pull, so a floor with a next-major ceiling lets a patch release reach a
 # deployed Pi while a breaking major never does. bleak 1.0 reshaped the client
 # and scanner APIs daemon.py uses, which is what the ceiling holds back.
-bleak>=0.21,<1
+bleak>=3.0.2,<4
 httpx>=0.24,<1
 # The Cub status broadcast (advertiser.py) drives bluez advertising over
 # D-Bus with dbus-fast, which bleak already pulls in on Linux; pinned here
