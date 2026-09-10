@@ -1,0 +1,18 @@
+# Recovery-hotspot watchdog. The script is a persistent loop (it checks
+# connectivity every minute for the whole uptime, not just once after boot),
+# so the unit is a plain always-restarted service. Installed by firstboot.sh
+# and kept current by foodassistant-update; the script lives at
+# /usr/local/sbin because every deployed unit points there (FoodAssistant-fuat).
+[Unit]
+Description=FoodAssistant Wi-Fi fallback AP watchdog
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=10
+ExecStart=/usr/local/sbin/foodassistant-ap-watchdog
+
+[Install]
+WantedBy=multi-user.target
