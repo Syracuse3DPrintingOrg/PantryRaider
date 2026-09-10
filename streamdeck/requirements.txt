@@ -12,7 +12,7 @@
 # 0.9.8 is the floor: it adds the USB product id 0x00ba used by current XL /
 # Module 32 hardware revisions. Older releases report "no Stream Deck found"
 # for those decks even though the kernel enumerates them.
-streamdeck>=0.9.8,<1
+streamdeck>=0.10.0,<1
 
 # Key image rendering.
 Pillow>=10.4.0,<13
