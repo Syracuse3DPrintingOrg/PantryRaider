@@ -1,0 +1,54 @@
+# Pantry Raider: Automations
+# Add these to your automations.yaml or import via the UI
+
+- alias: "Food - Alert: Items Expired"
+  id: food_alert_expired
+  trigger:
+    - platform: state
+      entity_id: sensor.food_expired
+  condition:
+    - condition: template
+      value_template: "{{ states('sensor.food_expired') | int > 0 }}"
+  action:
+    - service: notify.notify
+      data:
+        title: "🚨 Food Expired"
+        message: >
+          {{ states('sensor.food_expired') }} item(s) in your fridge have expired.
+          Check Grocy to remove them.
+
+- alias: "Food - Alert: Expiring Today"
+  id: food_alert_expiring_today
+  trigger:
+    - platform: time
+      at: "08:00:00"
+  condition:
+    - condition: template
+      value_template: "{{ states('sensor.food_expiring_today') | int > 0 }}"
+  action:
+    - service: notify.notify
+      data:
+        title: "⚠️ Food Expiring Today"
+        message: >
+          {{ states('sensor.food_expiring_today') }} item(s) expire today.
+          Use them up!
+
+- alias: "Food - Alert: Expiring in 3 Days"
+  id: food_alert_expiring_3d
+  trigger:
+    - platform: time
+      at: "08:00:00"
+  condition:
+    - condition: template
+      value_template: "{{ states('sensor.food_expiring_3_days') | int > 0 }}"
+    - condition: time
+      weekday:
+        - mon
+        - thu
+  action:
+    - service: notify.notify
+      data:
+        title: "🍗 Food Check"
+        message: >
+          {{ states('sensor.food_expiring_3_days') }} item(s) expire within 3 days.
+          Plan your meals accordingly.
