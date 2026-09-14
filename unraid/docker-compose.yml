@@ -1,0 +1,105 @@
+# Pantry Raider full stack for Unraid (Docker Compose Manager plugin)
+# ===================================================================
+# Runs Pantry Raider, Grocy, and (optionally) Mealie together, with all data
+# stored under /mnt/user/appdata so it survives updates and array restarts.
+#
+# How to use on Unraid:
+#   1. Install the "Docker Compose Manager" plugin from Community Applications.
+#   2. Docker tab, scroll to Compose Manager, Add New Stack, name it
+#      "pantryraider".
+#   3. Edit Stack, paste this file into the compose window, Save.
+#   4. (Optional) create a .env next to it to pin a version or timezone.
+#   4b. (Recommended) give Grocy its start-up self-heal, one time, from the
+#       Unraid terminal. It fixes Grocy's config.php on its own if a future
+#       Grocy update moves a setting (Grocy 4.7 did, and the inventory stops
+#       loading until the file is edited):
+#         mkdir -p /mnt/user/appdata/pantryraider-grocy-init
+#         curl -fsSL -o /mnt/user/appdata/pantryraider-grocy-init/10-repair-auth-class.sh \
+#           https://raw.githubusercontent.com/Syracuse3DPrintingOrg/PantryRaider/main/docker/grocy-init/10-repair-auth-class.sh
+#         chmod 755 /mnt/user/appdata/pantryraider-grocy-init/10-repair-auth-class.sh
+#       Skipping this is harmless: an empty folder means no script to run.
+#   5. Compose Up.
+#   6. Open http://YOUR-UNRAID-IP:9284/setup and finish the on-screen setup.
+#      The Grocy address to enter is http://YOUR-UNRAID-IP:9383 and, if you
+#      enable Mealie below, http://YOUR-UNRAID-IP:9285 .
+#
+# Prefer to run Pantry Raider on its own and point it at a Grocy and Mealie you
+# already installed from Community Applications? Use the single-container CA
+# template (unraid/pantryraider.xml) instead of this file.
+#
+# Mealie is commented out by default. Uncomment its block to add recipes, a meal
+# plan, and shopping lists.
+services:
+  pantryraider:
+    image: ghcr.io/syracuse3dprintingorg/pantryraider:${PANTRYRAIDER_TAG:-${FOODASSISTANT_TAG:-latest}}
+    container_name: pantryraider
+    environment:
+      - TZ=${TZ:-America/New_York}
+      # Filled in on the setup page, or pin them here / in a .env file. Leave
+      # them blank unless you want to pin a value: a blank one is ignored, so
+      # whatever you choose on the setup page survives every restart, while a
+      # value here always wins.
+      - GROCY_BASE_URL=${GROCY_BASE_URL:-}
+      - GROCY_API_KEY=${GROCY_API_KEY:-}
+      - VISION_PROVIDER=${VISION_PROVIDER:-}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - AUTH_REQUIRED=${AUTH_REQUIRED:-true}
+      - DEPLOYMENT_MODE=server
+    volumes:
+      - /mnt/user/appdata/pantryraider:/app/data
+    ports:
+      - "9284:8000"
+    restart: unless-stopped
+    # Keep the container log bounded. Docker's json-file driver grows without
+    # limit by default, and on an SD card that is a slow write on every line
+    # and, eventually, a full card. Three files of 10 MB is weeks of normal
+    # output now that per-request access lines are off by default.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    depends_on:
+      - grocy
+
+  grocy:
+    # Pinned on purpose; matches the project compose. Bump this tag only in a
+    # release that also carries the start-up self-heal mounted below, and
+    # check the new version's config-dist.php first: Grocy 4.7.0 moved
+    # AUTH_CLASS to Grocy\Middleware\Auth\DefaultAuthMiddleware, and a
+    # config.php still naming the old class makes Grocy answer every API call
+    # with an error page instead of data.
+    image: lscr.io/linuxserver/grocy:4.6.0
+    container_name: pantryraider-grocy
+    environment:
+      - PUID=99
+      - PGID=100
+      - TZ=${TZ:-America/New_York}
+    volumes:
+      - /mnt/user/appdata/pantryraider-grocy:/config
+      # Start-up self-heal (read-only): the script from step 4b above. The
+      # LinuxServer image runs every executable script in /custom-cont-init.d
+      # as root before Grocy comes up; an empty folder is harmless.
+      - /mnt/user/appdata/pantryraider-grocy-init:/custom-cont-init.d:ro
+    ports:
+      - "9383:80"
+    restart: unless-stopped
+
+  # Optional: recipes, meal plan, and shopping lists.
+  # Uncomment this whole block to enable Mealie, then Compose Up again.
+  # First run: open http://YOUR-UNRAID-IP:9285, log in
+  # (changeme@example.com / MyPassword, then change it), create an API token
+  # under User Profile then API Tokens, and paste it into the Pantry Raider
+  # setup page along with the address http://YOUR-UNRAID-IP:9285 .
+  # mealie:
+  #   image: ghcr.io/mealie-recipes/mealie:v3.19.2   # pinned; matches the project compose
+  #   container_name: pantryraider-mealie
+  #   environment:
+  #     - TZ=${TZ:-America/New_York}
+  #     - ALLOW_SIGNUP=false
+  #     - BASE_URL=http://YOUR-UNRAID-IP:9285
+  #   volumes:
+  #     - /mnt/user/appdata/pantryraider-mealie:/app/data
+  #   ports:
+  #     - "9285:9000"
+  #   restart: unless-stopped

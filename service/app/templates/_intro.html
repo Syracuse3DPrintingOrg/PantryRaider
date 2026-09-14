@@ -1,0 +1,24 @@
+{# Kiosk intro animation (FoodAssistant-a8xy). Included in the <head> of every
+   page a kiosk can land on (base.html plus the standalone start, setup, pin,
+   and login pages). The inline guard runs synchronously before first paint:
+   when the intro is due (kiosk mode, first load this boot), it blacks out the
+   page so the app never flashes for a frame before the overlay appears.
+   intro.js then plays the animation and removes the blackout; on a non-kiosk
+   browser, or after the intro has already played this boot, the guard does
+   nothing and intro.js exits immediately. #}
+<script>
+  (function () {
+    try {
+      if (localStorage.getItem('kioskMode') === 'true' &&
+          !sessionStorage.getItem('kioskIntroShown')) {
+        document.documentElement.classList.add('intro-pending');
+        var s = document.createElement('style');
+        s.id = 'intro-blackout';
+        s.textContent = 'html.intro-pending { background: #050505 !important; }' +
+                        'html.intro-pending body { visibility: hidden; }';
+        document.head.appendChild(s);
+      }
+    } catch (e) { /* no storage: no intro, no blackout */ }
+  })();
+</script>
+<script src="static/js/intro.js?v={{ app_version }}"></script>

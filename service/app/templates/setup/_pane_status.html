@@ -1,0 +1,62 @@
+{% from "setup/_macros.html" import panel, srow, pill with context %}
+{# Status (FoodAssistant-w00b): a health dashboard built on the dense
+   panel/row pattern. Each row shows a placeholder "Checking…" pill that
+   loadStatusSummary() (static/js/setup/status.js) fills from
+   /setup/status/summary, plus a Manage link into the pane that owns the
+   setting. Rows are gated by deployment mode exactly as the matching menu
+   pills and connections are, so a satellite drops Grocy/Forager and a server
+   drops the Pi-only device health. #}
+
+{% macro status_row(key, label, hint, fix_pane, fix_label='Manage') -%}
+  {% call srow(label, hint) %}
+    <div class="set-row-actions">
+      {{ pill('Checking…', 'neutral', pill_id='status-pill-' ~ key) }}
+      <button type="button" class="btn btn-link btn-sm p-0" onclick="openSettingsPane('{{ fix_pane }}')">{{ fix_label }}</button>
+    </div>
+    <div class="set-status-detail small text-secondary mt-1" id="status-detail-{{ key }}">Checking…</div>
+  {% endcall %}
+{%- endmacro %}
+
+<div class="tab-pane fade" id="pane-status">
+  <p class="pane-intro">A quick health check of this device and the services it talks to. Green is healthy, amber needs a look, red is a problem.
+    <button type="button" class="btn btn-outline-secondary btn-sm ms-2" onclick="loadStatusSummary()">
+      <i class="bi bi-arrow-repeat me-1"></i>Refresh
+    </button>
+  </p>
+
+  {% if is_pi %}
+  {% call panel('This device', 'The appliance itself: its health and how it reaches the network.') %}
+    {% if not features.satellite %}
+    {{ status_row('pi_health', 'Device health', 'Power, temperature, and storage.', 'pane-network') }}
+    {% endif %}
+    {{ status_row('connection', 'Connection', 'Wi-Fi or Ethernet.', 'pane-network') }}
+  {% endcall %}
+  {% endif %}
+
+  {% call panel('Software', 'Whether this install is on the latest version.') %}
+    {{ status_row('update', 'Updates', 'The version you are running.', 'pane-backups') }}
+  {% endcall %}
+
+  {% call panel('Cloud', 'Your Forager account and how the kitchen is reached from away.') %}
+    {% if features.satellite %}
+    {{ status_row('main_server', 'Main server', 'The Pantry Raider server this display follows.', 'pane-devices') }}
+    {% else %}
+    {{ status_row('forager', 'Forager account', 'Your cloud account.', 'pane-forager') }}
+    {{ status_row('remote_access', 'Remote access', 'Reaching the kitchen from outside home.', 'pane-forager') }}
+    {% endif %}
+  {% endcall %}
+
+  {% if not features.satellite or (s.streamdeck_ha_base_url and s.streamdeck_ha_token) %}
+  {% call panel('Services', 'The apps Pantry Raider connects to.') %}
+    {% if not features.satellite %}
+    {{ status_row('grocy', 'Grocy', 'Your inventory.', 'pane-inventory') }}
+    {% if s.mealie_api_key and s.mealie_base_url %}
+    {{ status_row('mealie', 'Mealie', 'Recipes and meal planning.', 'pane-personalization-recipes') }}
+    {% endif %}
+    {% endif %}
+    {% if s.streamdeck_ha_base_url and s.streamdeck_ha_token %}
+    {{ status_row('home_assistant', 'Home Assistant', 'Cameras and on-screen notifications.', 'pane-home-assistant') }}
+    {% endif %}
+  {% endcall %}
+  {% endif %}
+</div>
