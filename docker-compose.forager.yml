@@ -1,0 +1,37 @@
+# Forager remote access override.
+#
+# Remote access lets you reach your kitchen from outside the house. On a plain
+# server, Pantry Raider does that by running a WireGuard tunnel inside its own
+# container, and Linux only lets a container do that when it is given three
+# extra things: the NET_ADMIN capability, the /dev/net/tun device, and one
+# network sysctl. Those are deliberately not granted by default, because most
+# installs never leave the LAN and there is no reason to hand every install
+# privileges it will not use.
+#
+# Add this file to your compose command when you want remote access:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.forager.yml up -d
+#
+# with your profiles as usual, for example:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.forager.yml \
+#     --profile with-grocy up -d
+#
+# Everything else about the stack is unchanged. Without this file, remote
+# access simply reports that it is unavailable and the rest of the app works
+# exactly as before.
+#
+# A Raspberry Pi appliance does not need this file: it runs the tunnel on the
+# host through the host bridge instead of inside the container.
+#
+# Your host also needs the kernel WireGuard module, which is present on
+# virtually every current Linux, Unraid included.
+services:
+  service:
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - "/dev/net/tun:/dev/net/tun"
+    sysctls:
+      # wg-quick sets an fwmark for the split-tunnel route and wants this on.
+      - net.ipv4.conf.all.src_valid_mark=1

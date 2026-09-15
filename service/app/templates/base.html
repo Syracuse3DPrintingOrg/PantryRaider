@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="{{ theme_mode }}"
+      data-ui-scale="{{ ui_scale_factor | default(1.0) }}"
+      data-display-rotation="{{ display_rotation | default(0) }}"
+      data-rotation-mode="{{ 'compositor' if is_pi else 'css' }}"
+      data-display-margin-top="{{ display_margin_top | default(0) }}"
+      data-display-margin-right="{{ display_margin_right | default(0) }}"
+      data-display-margin-bottom="{{ display_margin_bottom | default(0) }}"
+      data-display-margin-left="{{ display_margin_left | default(0) }}"
+      data-is-pi="{{ '1' if is_pi else '0' }}"
+      data-quiet-mode="{{ 'true' if quiet_mode else 'false' }}"
+      data-clock-format="{{ clock_format | default('auto') }}">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- Resolve all relative links against the app root (or the HA Ingress prefix) -->
+  <base href="{{ ingress_path }}/">
+  <title>{% block title %}{{ app_name }}{% endblock %}</title>
+  <!-- PWA: manifest and service worker are served from the site root so the app
+       installs with scope "/" (FoodAssistant-fd3z). Absolute paths on purpose so
+       they resolve against the origin root, not the <base> prefix. -->
+  <link rel="manifest" href="/manifest.webmanifest">
+  <meta name="theme-color" content="#212529">
+  <link rel="icon" type="image/svg+xml" href="static/icons/favicon.svg">
+  <link rel="icon" type="image/png" sizes="32x32" href="static/icons/favicon-32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="static/icons/favicon-16.png">
+  <link rel="icon" type="image/x-icon" href="static/icons/favicon.ico">
+  <link rel="icon" type="image/png" sizes="192x192" href="static/icons/icon-192.png">
+  <link rel="apple-touch-icon" href="static/pwa/apple-touch-icon-180.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Pantry Raider">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="virtual-keyboard" content="overlays-content">
+  <script>
+    // Register the PWA service worker for an offline app shell and installability
+    // (FoodAssistant-fd3z). Guarded two ways: the browser must support workers,
+    // and the page must be a secure context (https) or localhost. Over plain-http
+    // on the LAN a worker cannot register, so this is a deliberate no-op there and
+    // the app behaves exactly as it does today. Registered from the origin root
+    // with scope "/" so it can control every page.
+    if ('serviceWorker' in navigator &&
+        (window.isSecureContext ||
+         location.hostname === 'localhost' ||
+         location.hostname === '127.0.0.1')) {
+      window.addEventListener('load', function () {
+        navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(function () {});
+      });
+    }
+  </script>
+  {% if theme_css %}
+  <link href="{{ theme_css }}" rel="stylesheet">
+  {% else %}
+  <link href="static/vendor/bootstrap.min.css" rel="stylesheet">
+  {% endif %}
+  {% if theme_overlay %}
+  <link href="{{ theme_overlay }}" rel="stylesheet">
+  {% endif %}
+  {% if custom_theme_active %}
+  {# Custom theme builder (FoodAssistant-hatd). Inline override layered after the
+     base Bootstrap stylesheet, mirroring how an overlay theme works but built
+     from the user's saved swatches rather than a vendored file. Maps the five
+     editable colours onto the most visible Bootstrap CSS variables plus a few
+     derived ones (rgb pairs for utilities, link colours, card/input surfaces) so
+     the result stays cohesive across the whole UI. data-bs-theme is already set
+     to custom_theme_base on <html>, so this only retints, it does not flip
+     light/dark. #}
+  <style>
+    :root,
+    [data-bs-theme="{{ theme_mode }}"] {
+      --bs-primary: {{ custom_theme_primary }};
+      --bs-link-color: {{ custom_theme_primary }};
+      --bs-link-hover-color: {{ custom_theme_primary }};
+      --bs-secondary: {{ custom_theme_accent }};
+      --bs-success: {{ custom_theme_accent }};
+      --bs-body-bg: {{ custom_theme_bg }};
+      --bs-body-color: {{ custom_theme_text }};
+      --bs-emphasis-color: {{ custom_theme_text }};
+      --bs-secondary-bg: {{ custom_theme_surface }};
+      --bs-tertiary-bg: {{ custom_theme_surface }};
+      --bs-border-color: {{ custom_theme_surface }};
+      --bs-card-bg: {{ custom_theme_surface }};
+      --bs-card-cap-bg: {{ custom_theme_surface }};
+      --bs-modal-bg: {{ custom_theme_surface }};
+      --bs-dropdown-bg: {{ custom_theme_surface }};
+      --bs-list-group-bg: {{ custom_theme_surface }};
+      --bs-input-bg: {{ custom_theme_surface }};
+    }
+    body { background-color: var(--bs-body-bg); color: var(--bs-body-color); }
+    .btn-primary { background-color: {{ custom_theme_primary }}; border-color: {{ custom_theme_primary }}; }
+    .btn-success { background-color: {{ custom_theme_accent }}; border-color: {{ custom_theme_accent }}; }
+    .nav-link.active, .float-nav-link.active { color: {{ custom_theme_primary }}; }
+  </style>
+  {% endif %}
+  {% if background_image_url %}
+  {# Background image (FoodAssistant-e2t6): a fixed full-viewport layer behind
+     everything via body::before, at an adjustable opacity. The body keeps its
+     theme background colour as the base the image sits on, so a partly-opaque
+     image blends with the theme and text on cards stays readable. #}
+  <style>
+    body::before {
+      content: ""; position: fixed; inset: 0; z-index: -1;
+      background: url("{{ background_image_url }}") center / cover no-repeat;
+      opacity: {{ background_opacity }};
+      pointer-events: none;
+    }
+  </style>
+  {% else %}
+  {# Default: a faint ghosted brand mark centred behind the app. Opacity is kept
+     very low and tuned per light/dark so the pink raccoon reads as a watermark
+     without ever competing with page text (cards sit on their own surface above
+     it). A user-set background image replaces it entirely. #}
+  <style>
+    body::before {
+      content: ""; position: fixed; inset: 0; z-index: -1;
+      background: url("static/icons/logo-mark.png") center center / min(58vmin, 460px) no-repeat;
+      opacity: {{ '0.04' if theme_mode == 'light' else '0.06' }};
+      pointer-events: none;
+    }
+  </style>
+  {% endif %}
+  <link href="static/vendor/bootstrap-icons.min.css" rel="stylesheet">
+  <script>
+    // Kiosk mode: load touch-target CSS before first paint to avoid reflow flash
+    if (localStorage.getItem('kioskMode') === 'true') {
+      var _kl = document.createElement('link');
+      _kl.rel = 'stylesheet';
+      _kl.href = 'static/css/kiosk.css?v={{ app_version }}';
+      document.head.appendChild(_kl);
+    }
+  </script>
+  <!-- ?v={{ app_version }} busts the browser cache on every update so a kiosk
+       picks up new CSS/JS instead of serving stale copies. -->
+  <!-- Applies scale + orientation on the attached kiosk display only. Loads
+       BEFORE the intro guard on purpose: this script latches kioskMode from
+       the kiosk's ?kiosk=1 boot URL, and the intro checks that flag. With the
+       old order the boot load saw no kiosk flag (no intro, no shown marker)
+       and the FIRST in-app navigation played the intro instead, which read as
+       a splash screen between menus (FoodAssistant-9dhh). For the same reason
+       this is the ONE head script that is deliberately NOT deferred
+       (FoodAssistant-0hwez): the intro guard runs inline at parse time, so
+       this must have latched the flag by then. -->
+  <script src="static/js/kiosk-display.js?v={{ app_version }}"></script>
+  {# Kiosk boot intro: pre-paint blackout guard + intro.js (FoodAssistant-a8xy) #}
+  {% include "_intro.html" %}
+  <!-- Every head script below is deferred (FoodAssistant-0hwez): about 160KB
+       of JS that used to block the first paint of every page on a Pi kiosk.
+       defer keeps their document order (kiosk-status.js still runs before its
+       consumers), and the inline blocks at the end of the body that look for
+       window.PRKioskStatus wait for DOMContentLoaded, which fires after the
+       deferred scripts have run. -->
+  <!-- Pi only: auto-enable kiosk mode when a display is attached, unless the
+       user has made an explicit choice (FoodAssistant-h437) -->
+  <script src="static/js/kiosk-auto.js?v={{ app_version }}" defer></script>
+  <!-- USB-keyboard navigation: number keys jump to nav tabs, "?" shows help -->
+  <script src="static/js/keyboard-nav.js?v={{ app_version }}" defer></script>
+  <!-- Kiosk only: report activity so the host bridge wakes the display/deck -->
+  <script src="static/js/kiosk-idle.js?v={{ app_version }}" defer></script>
+  <!-- Consolidated kiosk status poll (FoodAssistant-us1i): one loop that feeds
+       the timer chips, HA event toasts, nav counts, scanner mode, presence,
+       system health, and the kiosk hand-off/calibration flags, so an idle kiosk
+       makes one request per tick instead of one per surface. Loaded before the
+       consumers below (and the inline pollers at the end of the body) so
+       window.PRKioskStatus exists when they subscribe; each consumer keeps a
+       legacy direct-fetch fallback for a page or cached copy without it. -->
+  <script src="static/js/kiosk-status.js?v={{ app_version }}" defer></script>
+  {# Kiosk presence indicator (FoodAssistant-99vy): a small ghosted icon that
+     lights while the presence sensor sees someone, so the sensor can be
+     checked right on the glass. Server-gated on the Settings toggle so an
+     install with it off ships nothing; the script itself only mounts in kiosk
+     mode and only while the host bridge reports a readable sensor. #}
+  {% if presence_indicator_enabled %}
+  <script src="static/js/presence-indicator.js?v={{ app_version }}" defer></script>
+  {% endif %}
+  <!-- On-screen floating navigation menu: corner placement + drag to reposition -->
+  <script src="static/js/floating-nav.js?v={{ app_version }}" defer></script>
+  <!-- Floating timer chips: one chip per running server-side timer, every page -->
+  <script src="static/js/timer-chips.js?v={{ app_version }}" defer></script>
+  <!-- Discoverable "Install app" affordance when the PWA can be installed -->
+  <script src="static/js/pwa-install.js?v={{ app_version }}" defer></script>
+  {# On-screen "update available" popup (FoodAssistant-5wtc). A small dismissible
+     banner shown once per version per browser when a newer release is out. Left
+     off the Settings page (which has its own update check) and off demo mode.
+     The script throttles the check per browser and the server prefers its cached
+     result, so this never hammers GitHub even on the kiosk's frequent reloads. #}
+  {% if not demo_mode and active != 'setup' %}
+  <div id="update-notice-config" hidden></div>
+  <script src="static/js/update-notice.js?v={{ app_version }}" defer></script>
+  {% endif %}
+  {# On-screen Home Assistant event channel: notification toasts + camera
+     pop-ups. Rendered on every device so each can opt in or out for itself (a
+     per-device localStorage override of the server default); the poller exits
+     immediately and polls nothing when this device is not showing events. #}
+  <div id="ha-events-config" data-default="{{ '1' if ha_events_enabled else '0' }}" data-popup-seconds="{{ ha_camera_popup_seconds }}" hidden></div>
+  <script src="static/js/ha-events.js?v={{ app_version }}" defer></script>
+  {# Kiosk screensaver: after the configured idle minutes the page dims to a
+     floating clock; any touch dismisses it. Runs in kiosk mode (or in every
+     browser when data-all-clients is on) and only when a timeout is set
+     (FoodAssistant-y65x). #}
+  <div id="screensaver-config" data-minutes="{{ screensaver_minutes }}" data-speed="{{ screensaver_speed }}" data-pill-scale="{{ screensaver_pill_scale }}" data-photo-seconds="{{ screensaver_photo_seconds }}" data-ken-burns="{{ 'true' if screensaver_ken_burns else 'false' }}" data-ken-burns-speed="{{ screensaver_ken_burns_speed }}" data-mode="{{ screensaver_mode }}" data-all-clients="{{ 'true' if screensaver_all_clients else 'false' }}" hidden></div>
+  <script src="static/js/screensaver.js?v={{ app_version }}" defer></script>
+  {# Auto-return to the home page after inactivity on a kiosk (FoodAssistant-6e5m).
+     kiosk-home.js reads this, no-ops off a kiosk, and leaves the exempt pages
+     alone so the screen never jumps away mid-cook or while watching a camera. #}
+  {% if active != 'setup' %}
+  <div id="kiosk-home-config"
+       data-enabled="{{ '1' if kiosk_auto_home_enabled else '0' }}"
+       data-seconds="{{ kiosk_auto_home_seconds }}"
+       data-exempt="{{ kiosk_auto_home_exempt }}"
+       data-active="{{ active }}"
+       data-home="{{ nav_home_href() }}" hidden></div>
+  <script src="static/js/kiosk-home.js?v={{ app_version }}" defer></script>
+  {% endif %}
+  {# On-screen keyboard for kiosk touchscreens (FoodAssistant-wo9j) #}
+  {% include "_osk.html" %}
+  {# The shared page styles. Formerly a 16 KB inline block here; see
+     static/css/base.css for why it moved. The dynamic rules above stay. #}
+  <link rel="stylesheet" href="static/css/base.css?v={{ app_version }}">
+</head>
+<body>
+  {# prErrText/prReason: shared "why did that fail" wording, used by the page
+     scripts further down. Plain and first in the body rather than deferred in
+     the head: about 20 lines, no paint cost, and a page that loads its list on
+     the way past needs the helper to already exist. #}
+  <script src="static/js/err-text.js?v={{ app_version }}"></script>
+  {# Read-only DEMO MODE banner (FoodAssistant-pxp0), pinned above the navbar. #}
+  {% include "_demo_banner.html" %}
+  <nav class="navbar navbar-expand-lg bg-body-tertiary border-bottom fixed-top">
+    <div class="container-fluid">
+      <a class="navbar-brand d-flex align-items-center" href="ui/"><img src="static/icons/logo-mark.png" alt="" class="brand-logo me-2">{{ app_name }}</a>
+      {# Two-level navigation (FoodAssistant-gg33). The top row shows only
+         TOP-LEVEL pages as flat links; a page's sub-pages appear in the
+         in-header sub-pill row below the navbar. A heading top-level (no page of
+         its own, e.g. Time & Temp, Home Hub) links to its first child. The top
+         row lives OUTSIDE the collapse so it stays on the bar; it is hidden on a
+         phone (see the @media block) where the hamburger + sub-pill take over. #}
+      <ul class="navbar-nav nav-primary me-auto flex-row flex-nowrap">
+        {% for tab in nav_tree() if tab.key not in ['about', 'defaults'] %}
+        {%- set top_href = tab.href if tab.href else (tab.children[0].href if tab.children else '#') %}
+        {%- set is_active = (active == tab.key) or (tab.children | selectattr('key', 'equalto', active) | list) %}
+        <li class="nav-item">
+          <a class="nav-link {% if is_active %}active{% endif %}" href="{{ top_href }}"{% if tab.custom and '://' in top_href %} target="_blank" rel="noopener"{% endif %}>
+            <i class="bi {{ tab.icon }} me-1"></i>{{ tab.label }}
+            {%- if tab.key == 'pending' %}
+            {# Two overlaid counts on the Review tab: action items (red) and
+               pending scans (yellow), FoodAssistant-4se3. #}
+            <span class="badge rounded-pill text-bg-danger d-none" id="actions-nav-badge" title="Action items">0</span>
+            <span class="badge rounded-pill text-bg-warning d-none" id="pending-nav-badge" title="Pending scans">0</span>
+            {%- endif %}
+          </a>
+        </li>
+        {% endfor %}
+      </ul>
+      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#nav" aria-controls="nav" aria-expanded="false" aria-label="Toggle navigation">
+        <span class="navbar-toggler-icon"></span>
+      </button>
+      <div class="collapse navbar-collapse flex-grow-0" id="nav">
+        {# The hamburger holds every TOP-LEVEL page (FoodAssistant-gg33) so it is
+           the full navigation on a phone, where the top row is hidden. A heading
+           top-level links to its first child. Hidden on desktop (d-lg-none),
+           where the collapse expands inline and the top row already shows these.
+           Utility controls follow below. #}
+        <ul class="navbar-nav w-100 mb-2 hamburger-nav d-lg-none">
+          {% for tab in nav_tree() if tab.key not in ['about', 'defaults'] %}
+          {%- set h_href = tab.href if tab.href else (tab.children[0].href if tab.children else '#') %}
+          {%- set h_active = (active == tab.key) or (tab.children | selectattr('key', 'equalto', active) | list) %}
+          <li class="nav-item">
+            <a class="nav-link {% if h_active %}active{% endif %}" href="{{ h_href }}"{% if tab.custom and '://' in h_href %} target="_blank" rel="noopener"{% endif %}>
+              <i class="bi {{ tab.icon }} me-2"></i>{{ tab.label }}
+            </a>
+          </li>
+          {% endfor %}
+          <li><hr class="dropdown-divider"></li>
+        </ul>
+        <ul class="navbar-nav ms-auto">
+          {# Utility controls. Icon-only in the desktop bar to stay compact; in
+             the collapsed hamburger menu each carries a text label (d-lg-none)
+             so it is not a row of bare icons (FoodAssistant-2e0f, Dan). #}
+          <li class="nav-item">
+            <button class="nav-link btn btn-link text-start w-100" data-bs-toggle="modal" data-bs-target="#qrModal" title="Phone QR code">
+              <i class="bi bi-qr-code"></i><span class="d-lg-none ms-2">Phone QR code</span>
+            </button>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link" href="#" id="kioskToggle" title="Toggle kiosk (touch) mode"
+               onclick="toggleKioskMode(); return false;">
+              <i class="bi bi-tablet" id="kioskIcon"></i><span class="d-lg-none ms-2">Kiosk mode</span>
+            </a>
+          </li>
+          <!-- Dedicated Settings button, always visible in the bar (not only in
+               the overflow menu) so it is one tap away on a touch kiosk. -->
+          <li class="nav-item">
+            <a class="nav-link {% if active == 'setup' %}active{% endif %}" href="setup" title="Settings">
+              <i class="bi bi-gear"></i><span class="d-lg-none ms-2">Settings</span>
+            </a>
+          </li>
+          {% for g in auto_hidden_groups() %}
+          <li class="nav-item">
+            <a class="nav-link text-warning" href="{{ g.setup_href }}"
+               title="{{ g.tab_labels | join(', ') }}: configure {{ g.service | capitalize }} to unlock">
+              <i class="bi bi-lock-fill" style="font-size:0.85rem"></i>
+              <span class="d-none d-md-inline small ms-1">{{ g.service | capitalize }}</span>
+            </a>
+          </li>
+          {% endfor %}
+          <!-- System-health warning: hidden until the host bridge reports an
+               undervoltage/throttle/temp/disk condition on a Pi appliance. -->
+          <li class="nav-item d-none" id="sysHealthItem">
+            <a class="nav-link text-warning" href="setup" id="sysHealthLink" title="System warning">
+              <i class="bi bi-exclamation-triangle-fill"></i>
+            </a>
+          </li>
+          <!-- Overflow menu: less-used destinations live here to keep the bar
+               uncluttered, which matters most on the small pi_remote screen. -->
+          <li class="nav-item dropdown">
+            <a class="nav-link dropdown-toggle {% if active in ['setup', 'about', 'defaults'] %}active{% endif %}"
+               href="#" id="moreMenu" role="button" data-bs-toggle="dropdown" aria-expanded="false" title="More">
+              <i class="bi bi-three-dots-vertical"></i><span class="d-lg-none ms-2">More</span>
+            </a>
+            <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="moreMenu">
+              {# Every page tab is also listed here as a redundant way to reach it,
+                 in addition to the always-visible primary nav. #}
+              {# Headings (folders) have no page, so they are not reachable links
+                 and are skipped here; their children appear in their own right. #}
+              {% for tab in nav_tabs() if tab.key not in ['about', 'defaults'] and not tab.heading %}
+              <li>
+                <a class="dropdown-item {% if active == tab.key %}active{% endif %}" href="{{ tab.href }}"{% if tab.custom and '://' in tab.href %} target="_blank" rel="noopener"{% endif %}>
+                  <i class="bi {{ tab.icon }} me-2"></i>{{ tab.label }}
+                </a>
+              </li>
+              {% endfor %}
+              <li><hr class="dropdown-divider"></li>
+              <li><a class="dropdown-item {% if active == 'setup' %}active{% endif %}" href="setup"><i class="bi bi-gear me-2"></i>Settings</a></li>
+              <li class="kiosk-hide"><a class="dropdown-item {% if active == 'defaults' %}active{% endif %}" href="ui/defaults"><i class="bi bi-table me-2"></i>Defaults</a></li>
+              <li class="kiosk-hide"><a class="dropdown-item {% if active == 'about' %}active{% endif %}" href="ui/about"><i class="bi bi-info-circle me-2"></i>About</a></li>
+              <li class="kiosk-hide"><hr class="dropdown-divider"></li>
+              <li class="kiosk-hide"><a class="dropdown-item" href="https://docs.pantryraider.app" target="_blank" rel="noopener"><i class="bi bi-book me-2"></i>Documentation</a></li>
+              <li class="kiosk-hide"><a class="dropdown-item" href="docs" target="_blank"><i class="bi bi-code-square me-2"></i>API docs</a></li>
+              <li class="kiosk-hide"><a class="dropdown-item" href="#" onclick="if(window.__kbdNavHelp){window.__kbdNavHelp();}return false;"><i class="bi bi-keyboard me-2"></i>Keyboard shortcuts</a></li>
+            </ul>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link" href="ui/logout" title="Sign out">
+              <i class="bi bi-box-arrow-right"></i><span class="d-lg-none ms-2">Sign out</span>
+            </a>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </nav>
+
+  {# In-header sub-page pill row (FoodAssistant-gg33). For the active top-level
+     page, show its sub-pages as a full-width segmented pill row, so entering a
+     top-level page reveals its sub-selections (the pattern used by the Timers
+     view toggle). A PAGE parent (Inventory, Cook, Kitchen Guide) leads with its
+     own page; a HEADING parent (Time & Temp, Home Hub) shows just its children.
+     Hidden when the active top-level has no more than one sub-page. Full width,
+     directly under the top bar; hidden on the reference pages. #}
+  {%- set _subpill = namespace(node=none) %}
+  {%- for tab in nav_tree() if tab.key not in ['about', 'defaults'] %}
+    {%- if (active == tab.key) or (tab.children | selectattr('key', 'equalto', active) | list) %}
+      {%- set _subpill.node = tab %}
+    {%- endif %}
+  {%- endfor %}
+  {%- if _subpill.node %}
+    {%- set _node = _subpill.node %}
+    {# Build the pill list: parent's own page first (page parent only), then children. #}
+    {%- set _pills = [] %}
+    {%- if _node.href and not _node.heading %}
+      {%- set _ = _pills.append({'key': _node.key, 'label': _node.label, 'href': _node.href}) %}
+    {%- endif %}
+    {%- for c in _node.children %}
+      {%- set _ = _pills.append({'key': c.key, 'label': c.label, 'href': c.href}) %}
+    {%- endfor %}
+    {%- if _pills | length > 1 %}
+    <div class="subpill-bar" id="subPillBar">
+      <div class="subpill-inner" role="group" aria-label="{{ _node.label }} pages">
+        {%- for p in _pills %}
+        <a class="btn subpill-btn {% if active == p.key %}active{% endif %}"
+           data-key="{{ p.key }}" data-href="{{ p.href }}" href="{{ p.href }}">{{ p.label }}</a>
+        {%- endfor %}
+      </div>
+    </div>
+    {%- endif %}
+  {%- endif %}
+
+  <!-- On-screen navigation bar (FoodAssistant-bzuu, -i181). A FIXED bar docked
+       to a screen edge, placed by floating-nav.js from the saved position
+       (server default or per-device override). It reserves layout space so it
+       never overlaps content. Auto-hides when a Stream Deck is connected if the
+       option is set. -->
+  <div id="floatNav" class="float-nav d-none"
+       data-position="{{ floating_nav_position }}"
+       data-autohide-streamdeck="{{ '1' if floating_nav_autohide_streamdeck else '0' }}"
+       data-nav-hidden="{{ '1' if hide_nav_chrome else '0' }}"
+       data-has-streamdeck="{{ '1' if has_streamdeck else '0' }}">
+    {# Top-level pages only (float_nav_pages). The bar is icon-only with no room
+       for labels, so a flat list of every page would be a wall of unlabelled
+       glyphs that wraps to a second row on a small panel. A heading (folder)
+       lands on its first child; its other pages are one tap away on the labelled
+       sub-pill bar, and the button stays lit while you are on any of them. #}
+    {% for tab in float_nav_pages() %}
+    <a class="float-nav-link {% if active in tab.nav_keys %}active{% endif %}" href="{{ tab.href }}"
+       title="{{ tab.label }}"{% if tab.custom and '://' in tab.href %} target="_blank" rel="noopener"{% endif %}>
+      <i class="bi {{ tab.icon }}"></i>
+    </a>
+    {% endfor %}
+    <a class="float-nav-link" href="setup" title="Settings"><i class="bi bi-gear"></i></a>
+  </div>
+
+  <!-- Floating timer chips (FoodAssistant-kfda). Hidden until timer-chips.js
+       sees at least one running timer (GET /timers); a tap opens the Timers
+       page. data-chips-hidden is the server-resolved timer_chips setting
+       (auto keeps them off at large/xlarge scale), and when it is set the
+       script exits without polling anything. -->
+  <div id="timerChips" class="timer-chips d-none"
+       data-chips-hidden="{{ '1' if hide_timer_chips else '0' }}"></div>
+
+  <!-- QR deep-link modal: at body level so backdrop and focus work on all browsers -->
+  <div class="modal fade" id="qrModal" tabindex="-1" aria-labelledby="qrModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="qrModalLabel"><i class="bi bi-qr-code me-2"></i>Add items from your phone</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body text-center">
+          <img id="qr-img" data-src="ui/qr" alt="QR code" class="img-fluid mb-3" style="max-width: 240px; background:#fff; padding:8px; border-radius:4px;">
+          <p class="mb-2">Scan with your phone to add items</p>
+          <code id="qr-url" class="user-select-all small text-muted"></code>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Dismiss</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <script>
+    (function () {
+      // Nothing here runs until the dialog is opened: the code image and the
+      // address lookup are for a panel most page loads never show, and a
+      // display:none image is still fetched by most browsers.
+      var modal = document.getElementById('qrModal');
+      if (!modal) return;
+      var done = false;
+      modal.addEventListener('show.bs.modal', function () {
+        if (done) return;
+        done = true;
+        var img = document.getElementById('qr-img');
+        if (img && img.dataset.src && !img.getAttribute('src')) img.src = img.dataset.src;
+        var urlEl = document.getElementById('qr-url');
+        if (!urlEl) return;
+        // Fallback first, then the server's answer: the kiosk browser reaches
+        // the app at localhost, so the server computes the phone-reachable
+        // address that matches what the code actually encodes.
+        urlEl.textContent = 'http://' + window.location.host + '/ui/add';
+        fetch('ui/qr/url').then(function (r) { return r.json(); }).then(function (d) {
+          if (d && d.url) { urlEl.textContent = d.url; }
+        }).catch(function () {});
+      });
+    })();
+  </script>
+
+  {% if pin_readonly %}
+  <div class="alert alert-warning alert-dismissible d-flex align-items-center mb-0 rounded-0 py-2 px-3" role="alert"
+       style="position:fixed;top:56px;left:0;right:0;z-index:1040;">
+    <i class="bi bi-lock-fill me-2"></i>
+    <span>Locked &mdash; viewing read-only.</span>
+    <a href="ui/pin" class="btn btn-sm btn-warning ms-3">Tap to log in</a>
+    <button type="button" class="btn-close ms-auto" data-bs-dismiss="alert"></button>
+  </div>
+  {% endif %}
+  <div class="container-fluid px-4" id="pageContent" {% if pin_readonly %}style="margin-top:3rem"{% endif %}>
+    {% if message %}
+    <div class="flash">
+      <div class="alert alert-{{ message_type or 'success' }} alert-dismissible fade show" role="alert">
+        {{ message }}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+      </div>
+    </div>
+    {% endif %}
+    {% block content %}{% endblock %}
+  </div>
+
+  <script src="static/vendor/bootstrap.bundle.min.js"></script>
+  {# Shared page scripts, formerly six inline blocks here. Same position,
+     same order, not deferred; see static/js/base-page.js. #}
+  <script src="static/js/base-page.js?v={{ app_version }}"></script>
+  {% if barcode_global_capture and active != 'add' %}
+  <script src="static/js/barcode-capture.js?v={{ app_version }}"></script>
+  {% endif %}
+  {% block scripts %}{% endblock %}
+</body>
+</html>
