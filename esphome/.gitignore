@@ -1,0 +1,3 @@
+# ESPHome build output and local Wi-Fi credentials never belong in git.
+/.esphome/
+/secrets.yaml

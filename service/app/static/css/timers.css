@@ -1,0 +1,124 @@
+/* Timers & Temps page styles. Formerly a 5.5 KB inline <style> in timers.html,
+   re-parsed on every visit; as a static file it is cached for a year with ?v=
+   busting. Linked from the same place in the page, so the cascade is unchanged. */
+/* Scoped to the Timers page. kiosk.css and the shared theme are owned
+   elsewhere; the start-a-timer redesign lives here so it looks right with
+   and without kiosk.css, and stays consistent with the Manage Pantry tiles. */
+.timer-start-head { font-size: 1.15rem; font-weight: 600; }
+.timer-group + .timer-group { margin-top: 1rem; }
+.timer-group-label {
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--bs-secondary-color);
+  margin-bottom: 0.45rem;
+}
+
+/* Quick-minute presets: a tidy responsive grid, three across on a phone,
+   all six on one row from the small breakpoint up. */
+.timer-preset-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+@media (min-width: 576px) {
+  .timer-preset-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+}
+.timer-minute {
+  border: 1px solid var(--bs-border-color);
+  background: var(--bs-tertiary-bg, rgba(255, 255, 255, 0.03));
+  color: var(--bs-body-color);
+  font-weight: 600;
+  border-radius: 0.6rem;
+  padding: 0.6rem 0.5rem;
+  transition: border-color 0.15s, background 0.15s, transform 0.05s;
+  cursor: pointer;
+}
+.timer-minute:hover { border-color: var(--bs-primary); }
+.timer-minute:active { transform: scale(0.97); }
+.timer-minute:focus-visible { outline: 2px solid var(--bs-primary); outline-offset: 2px; }
+
+/* Custom timer: name + minutes + Start read as one control; the fields grow
+   to fill the row and wrap cleanly on a narrow phone. */
+.timer-custom-row { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.timer-custom-name { flex: 1 1 12rem; min-width: 0; }
+.timer-custom-min { flex: 1 1 7rem; min-width: 0; }
+.timer-custom-start { flex: 0 0 auto; }
+
+/* Common-food quick presets as a tile grid: name over duration, two across
+   on a phone, four across from the small breakpoint up. */
+.timer-food-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+@media (min-width: 576px) {
+  .timer-food-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+.timer-food-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.1rem;
+  border: 1px solid var(--bs-border-color);
+  background: var(--bs-tertiary-bg, rgba(255, 255, 255, 0.03));
+  color: var(--bs-body-color);
+  border-radius: 0.6rem;
+  padding: 0.55rem 0.4rem;
+  transition: border-color 0.15s, background 0.15s, transform 0.05s;
+  cursor: pointer;
+}
+.timer-food-tile:hover { border-color: var(--bs-primary); }
+.timer-food-tile:active { transform: scale(0.97); }
+.timer-food-tile:focus-visible { outline: 2px solid var(--bs-primary); outline-offset: 2px; }
+.timer-food-name { font-weight: 600; font-size: 0.95rem; line-height: 1.15; text-align: center; }
+.timer-food-time { font-size: 0.8rem; color: var(--bs-secondary-color); }
+
+.timer-card .timer-label {
+  font-size: 1.6rem;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.timer-card .timer-count {
+  font-size: 5.5rem;
+  font-weight: 700;
+  line-height: 1.05;
+  font-variant-numeric: tabular-nums;
+}
+.timer-card.timer-expired {
+  border-color: var(--bs-danger);
+  background-color: rgba(var(--bs-danger-rgb), 0.15);
+}
+.timer-card.timer-expired .timer-count { color: var(--bs-danger); }
+/* Compact per-device probe card (FoodAssistant-ypju): a device's probes are
+   stacked as rows inside ONE card instead of a big card each. The internal
+   (food) probe reads large and bold; the ambient probe is smaller and muted,
+   so the important temperature stands out and the pair takes far less height. */
+.probe-card .probe-row {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 0.5rem 0.75rem; flex-wrap: wrap; padding: 0.35rem 0;
+  border-top: 1px solid var(--bs-border-color, rgba(255, 255, 255, 0.08));
+}
+.probe-card .probe-row:first-of-type { border-top: 0; padding-top: 0; }
+.probe-card .probe-row-main { display: flex; align-items: baseline; gap: 0.6rem; min-width: 0; }
+.probe-card .probe-row-label { font-weight: 600; white-space: nowrap; }
+.probe-card .probe-row-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 0.4rem; }
+.probe-card .probe-temp {
+  font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums;
+}
+.probe-card .probe-temp-lg { font-size: 2.4rem; }
+.probe-card .probe-temp-sm { font-size: 1.4rem; font-weight: 600; color: var(--bs-secondary-color, #adb5bd); }
+.probe-card .probe-temp.probe-reached { color: var(--bs-danger); }
+/* Ambient row: muted so the internal reading is the one that draws the eye. */
+.probe-card .probe-row-ambient { opacity: 0.9; }
+.probe-card .probe-row-ambient .probe-row-label { color: var(--bs-secondary-color, #adb5bd); font-weight: 500; }
+.probe-card.probe-stale { opacity: 0.55; }
+.probe-card .probe-battery-low { color: var(--bs-danger); }
+/* Hygrometer cards (FoodAssistant-q97i) share the probe typography: the
+   temperature reads big, humidity beside it a size down and muted. */
+.hygro-card .probe-temp { font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; font-size: 2.4rem; }
+.hygro-card .hygro-humidity { font-size: 1.4rem; font-weight: 600; color: var(--bs-secondary-color, #adb5bd); }
+.hygro-card.probe-stale { opacity: 0.55; }
