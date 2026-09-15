@@ -1,0 +1,28 @@
+name: Pantry Raider
+version: "0.1.0"
+slug: foodassistant
+description: Food spoilage tracker with Grocy inventory and optional AI
+url: https://github.com/Syracuse3DPrintingOrg/PantryRaider
+arch:
+  - amd64
+  - aarch64
+init: false
+# Ingress puts the UI in the HA sidebar and lets HA handle authentication,
+# so no separate login or exposed port is needed.
+ingress: true
+ingress_port: 8000
+panel_icon: mdi:fridge-outline
+panel_title: Pantry Raider
+# The web server's data lives in the add-on's persistent /data dir (set via
+# DATA_DIR in the add-on Dockerfile), so settings survive restarts/updates.
+# Optional direct LAN port: left unmapped (secure) by default. Map it only if
+# you want the standalone HA REST sensors in homeassistant/ to reach the app;
+# if you do, set a UI password / API key in the setup wizard first.
+ports:
+  8000/tcp: null
+ports_description:
+  8000/tcp: Direct LAN access for REST sensors (set an API key in setup first)
+options:
+  TZ: America/New_York
+schema:
+  TZ: str?
