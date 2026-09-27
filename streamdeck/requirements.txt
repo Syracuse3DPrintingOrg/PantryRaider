@@ -25,4 +25,4 @@ websockets>=12.0,<18
 
 # TOML config reader for Python 3.10 (Ubuntu 22.04). Python 3.11 and newer
 # ship tomllib in the standard library, so this installs only on 3.10.
-tomli>=2,<3; python_version < '3.11'
+tomli>=2.4.1,<3; python_version < '3.11'
