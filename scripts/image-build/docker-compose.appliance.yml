@@ -75,7 +75,7 @@ services:
     # config.php still naming the old class makes Grocy answer every API call
     # with an error page instead of data. On an appliance the OTA helper also
     # repairs the running container (foodassistant-grocy-repair).
-    image: lscr.io/linuxserver/grocy:4.6.0
+    image: lscr.io/linuxserver/grocy:4.7.1
     container_name: foodassistant-grocy
     environment:
       - PUID=1000

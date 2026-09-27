@@ -63,7 +63,7 @@ services:
     # moved AUTH_CLASS to Grocy\Middleware\Auth\DefaultAuthMiddleware, and a
     # config.php still naming the old class makes Grocy answer every API call
     # with an error page instead of data.
-    image: lscr.io/linuxserver/grocy:4.6.0
+    image: lscr.io/linuxserver/grocy:4.7.1
     container_name: foodassistant-grocy
     profiles: ["with-grocy"]
     environment:
@@ -111,7 +111,7 @@ services:
   # container stays unprivileged). Config and queues live in the cups-config
   # named volume (seeded from the image) so added printers persist.
   cups:
-    image: olbat/cupsd@sha256:28c47cfe20d59c94e07c37c3759d469624ba209daa0e5821ed3b6b1d6f665bf5   # CUPS + cups-filters (rastertolabel); pinned. Our config is applied at start below.
+    image: olbat/cupsd@sha256:3a9d7c319f4153c87e16db4edb6ef6c317aa7e71f8abe65c3419cc9aca851194   # CUPS + cups-filters (rastertolabel); pinned. Our config is applied at start below.
     container_name: foodassistant-cups
     profiles: ["with-printing"]
     environment:
