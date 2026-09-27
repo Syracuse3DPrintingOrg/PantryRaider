@@ -1,0 +1,74 @@
+{% from "setup/_macros.html" import info, panel, srow, pill, toggle with context %}
+<!-- Recipe suggestions (FoodAssistant-ysj1): the personal taste tuning for
+             "What can I cook?" lives in its own pane, split off from the Mealie
+             and recipe-source connection settings under Recipes. Keeping the two
+             apart means saving your tastes here can never re-post or overwrite
+             the Mealie connection, and vice versa. The control ids, the appliance
+             checklist ids, and the appliance-group/appliance-chk classes are
+             unchanged from when this tuning lived in the Recipes pane; only the
+             surrounding pane moved, so the save wiring keeps working. -->
+        <div class="tab-pane fade" id="pane-recipe-tuning">
+          <p class="pane-intro">Your tastes and kitchen: how "What can I cook?" ranks recipes against your pantry, preferences, and the tools you own. These are personal settings; the Mealie connection and recipe sources live under Recipes.</p>
+
+          {% call panel('Suggestion tuning',
+                        'How "What can I cook?" ranks recipes against your pantry, tastes, and kitchen.') %}
+            {% call srow('Pantry staples', 'Assumed on hand even when not in stock.',
+                         'Comma-separated. Used by the "With Pantry Staples" tier of recipe suggestions. Leave empty for the built-in list (eggs, butter, flour, sugar, salt, pepper, oil, milk, garlic, onion, and other basics).') %}
+              <textarea class="form-control" id="staple_items" rows="3" style="max-width:560px"
+                        placeholder="empty = built-in list: eggs, butter, flour, sugar, salt, pepper, oil, milk, garlic, onion, vinegar, honey, mustard, ketchup, mayonnaise, soy sauce, common dried spices" {% if features.satellite %}readonly{% endif %}>{{ s.staple_items }}</textarea>
+            {% endcall %}
+            {% call srow('AI recipe preferences', 'Tastes, restrictions, cuisines.',
+                         'Sent to the AI when generating suggestions on the Cook page ("Ask AI"). For example: I prefer Italian and Mexican food, I don\'t eat pork, avoid nuts due to allergies.') %}
+              <textarea class="form-control" id="cook_ai_context" rows="3" style="max-width:560px"
+                        placeholder="e.g. I prefer Italian and Mexican food. I don't eat pork. My family loves spicy dishes. Avoid nuts due to allergies." {% if features.satellite %}readonly{% endif %}>{{ s.cook_ai_context }}</textarea>
+            {% endcall %}
+            {% call srow('My kitchen appliances', 'Steers AI to dishes you can make.',
+                         'Common items are pre-selected; turn off anything you don\'t have and add the rest. The AI uses this to suggest dishes this kitchen can actually cook.') %}
+              <div id="kitchen-appliances">
+                {% if not features.satellite %}
+                <div class="d-flex gap-2 mb-2">
+                  <button type="button" class="btn btn-outline-secondary btn-sm" onclick="applianceSelectAll(true)">Select all</button>
+                  <button type="button" class="btn btn-outline-secondary btn-sm" onclick="applianceSelectAll(false)">Clear</button>
+                </div>
+                {% endif %}
+                {% for group, title in [('major', 'Major appliances'), ('minor', 'Smaller tools and cookware'), ('attachment', 'Stand mixer attachments')] %}
+                <div class="mb-2 appliance-group" data-group="{{ group }}">
+                  <div class="text-secondary small text-uppercase mb-1">{{ title }}</div>
+                  <div class="row row-cols-2 row-cols-sm-3 row-cols-md-4 g-1">
+                    {% for a in appliance_groups[group] %}
+                    <div class="col">
+                      <div class="form-check">
+                        <input class="form-check-input appliance-chk" type="checkbox"
+                               id="appliance_{{ a.key }}" value="{{ a.key }}"
+                               {{ 'checked' if a.checked else '' }} {% if features.satellite %}disabled{% endif %}>
+                        <label class="form-check-label small" for="appliance_{{ a.key }}">{{ a.label }}</label>
+                      </div>
+                    </div>
+                    {% endfor %}
+                  </div>
+                </div>
+                {% endfor %}
+              </div>
+            {% endcall %}
+            {% call srow('Perishable window', 'Days.',
+                         'Non-refrigerated items expiring within this many days count as perishable.') %}
+              <input type="number" class="form-control" id="perishable_days" min="1" max="60" style="max-width:120px" value="{{ s.perishable_days }}" {% if features.satellite %}readonly{% endif %}>
+            {% endcall %}
+            {% call srow('Expiring soon', 'Days.',
+                         'The "Uses expiring" highlight threshold on the Cook page.') %}
+              <input type="number" class="form-control" id="expiring_soon_days" min="1" max="30" style="max-width:120px" value="{{ s.expiring_soon_days }}" {% if features.satellite %}readonly{% endif %}>
+            {% endcall %}
+            {% call srow('Suggestions per tier', 'Cards shown in each Cook tier.') %}
+              <input type="number" class="form-control" id="suggest_per_tier" min="1" max="20" style="max-width:120px" value="{{ s.suggest_per_tier }}" {% if features.satellite %}readonly{% endif %}>
+            {% endcall %}
+          {% endcall %}
+
+          {% if features.satellite %}
+          <div class="form-text"><i class="bi bi-hdd-network me-1"></i>Recipe settings are managed on the main server and synced here automatically. Edit them there, then Sync.</div>
+          {% else %}
+          <button type="button" class="btn btn-outline-info btn-sm" onclick="savePaneRecipePrefs(this)">
+            <i class="bi bi-check-lg me-1"></i>Save Recipe Suggestions
+          </button>
+          <div class="test-result mt-2" id="recipe-prefs-save-result"></div>
+          {% endif %}
+        </div>

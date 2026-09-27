@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="{{ theme_mode }}"
+      data-ui-scale="{{ ui_scale_factor | default(1.0) }}"
+      data-display-rotation="{{ display_rotation | default(0) }}"
+      data-rotation-mode="{{ 'compositor' if is_pi else 'css' }}"
+      data-is-pi="{{ '1' if is_pi else '0' }}">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <base href="{{ ingress_path }}/">
+  <title>Getting Ready: Pantry Raider</title>
+  {% if theme_css %}
+  <link href="{{ theme_css }}" rel="stylesheet">
+  {% else %}
+  <link href="static/vendor/bootstrap.min.css" rel="stylesheet">
+  {% endif %}
+  {% if theme_overlay %}
+  <link href="{{ theme_overlay }}" rel="stylesheet">
+  {% endif %}
+  <link href="static/vendor/bootstrap-icons.min.css" rel="stylesheet">
+  <link rel="icon" type="image/svg+xml" href="static/icons/favicon.svg">
+  {# ?v= is not optional (FoodAssistant-9k2v): a kiosk caches this file and
+   keeps running the copy it first saw, so panel scale, rotation, and
+   safe-area fixes never reach a page that omits it. #}
+  <script src="static/js/kiosk-display.js?v={{ app_version }}"></script>
+  <style>
+    html, body { overflow-x: hidden; }
+    body { box-sizing: border-box;
+           padding-top: var(--kiosk-inset-top, 0px);
+           padding-right: var(--kiosk-inset-right, 0px);
+           padding-bottom: var(--kiosk-inset-bottom, 0px);
+           padding-left: var(--kiosk-inset-left, 0px); }
+    .gr-step { display: flex; align-items: center; gap: .6rem; padding: .35rem 0; }
+    .gr-step .bi { font-size: 1.1rem; }
+  </style>
+</head>
+<body class="d-flex align-items-center justify-content-center" style="min-height:100vh">
+  <div class="card" style="width: 100%; max-width: 460px;">
+    <div class="card-body p-4 text-center">
+      <h5 class="card-title mb-1">
+        <img src="static/icons/logo-mark.png" alt="" style="height:28px;width:auto" class="me-2">Pantry Raider
+      </h5>
+      <p class="text-secondary mb-4">Your device is getting ready</p>
+
+      <div class="text-start mx-auto mb-3" style="max-width: 340px;" id="gr-steps">
+        <div class="gr-step"><i class="bi bi-check-circle-fill text-success"></i><span>Pantry Raider is running</span></div>
+        <div class="gr-step"><span class="spinner-border spinner-border-sm text-info"></span><span>Starting the inventory service</span></div>
+        <div class="gr-step"><i class="bi bi-circle text-secondary"></i><span>Connecting the inventory</span></div>
+      </div>
+
+      <p class="text-secondary small mb-4">The first start downloads and prepares
+        everything, which can take several minutes on a Raspberry Pi. Setup opens
+        by itself the moment the device is ready; nothing to press.</p>
+
+      <a class="btn btn-link btn-sm text-secondary" id="gr-skip"
+         href="setup?skip_ready=1{{ '&kiosk=1' if kiosk else '' }}">
+        Continue to setup without waiting
+      </a>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      var KIOSK = {{ '1' if kiosk else '0' }} === 1;
+      var box = document.getElementById('gr-steps');
+
+      function icon(state) {
+        if (state === 'done') return '<i class="bi bi-check-circle-fill text-success"></i>';
+        if (state === 'working') return '<span class="spinner-border spinner-border-sm text-info"></span>';
+        return '<i class="bi bi-circle text-secondary"></i>';
+      }
+
+      function render(steps) {
+        if (!box || !steps || !steps.length) return;
+        box.innerHTML = steps.map(function (s) {
+          return '<div class="gr-step">' + icon(s.state) + '<span>' +
+            String(s.label || '').replace(/[<>&"]/g, '') + '</span></div>';
+        }).join('');
+      }
+
+      function handoff() {
+        window.location.href = 'setup' + (KIOSK ? '?kiosk=1' : '');
+      }
+
+      async function poll() {
+        try {
+          var r = await fetch('ui/getting-ready/status', {cache: 'no-store'});
+          var d = await r.json();
+          if (d && d.steps) render(d.steps);
+          if (d && d.ready) { handoff(); return; }
+        } catch (e) { /* transient: keep polling */ }
+        setTimeout(poll, 3000);
+      }
+      setTimeout(poll, 3000);
+    })();
+  </script>
+</body>
+</html>

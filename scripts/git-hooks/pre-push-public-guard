@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+# Refuse a push of the development history to the public repo. The public repo
+# only ever carries clean snapshots: single root commits that
+# scripts/sync-public.sh builds with the private files stripped. Pushing a
+# normal branch there would publish the full development history. Installed
+# into the active pre-push hook by scripts/install-git-hooks.sh.
+#
+# Git passes the remote name as $1, its URL as $2, and one line per pushed ref
+# on stdin ("<local ref> <local sha> <remote ref> <remote sha>"). A push to the
+# public repo goes through only when every ref it sends is a clean snapshot,
+# such as a release tag on the snapshot commit. sync-public.sh sets
+# PR_SYNC_PUBLIC=1 on its own push, which skips the check.
+set -euo pipefail
+
+remote_name="${1:-}"
+remote_url="${2:-$remote_name}"
+
+if [ "${PR_SYNC_PUBLIC:-}" = "1" ]; then
+  exit 0
+fi
+
+if ! printf '%s\n' "$remote_url" \
+    | grep -Eiq '(^|[@/])github\.com[:/]Syracuse3DPrintingOrg/PantryRaider(\.git)?/?$'; then
+  exit 0
+fi
+
+# A clean snapshot peels to a commit with no parents whose tree holds none of
+# the private files. A branch delete (all-zero sha) is not one.
+is_snapshot() {
+  local commit p
+  commit="$(git rev-parse -q --verify "$1^{commit}" 2>/dev/null)" || return 1
+  [ "$(git rev-list --count --max-count=2 "$commit")" = "1" ] || return 1
+  for p in AGENTS.md CLAUDE.md .beads .agents .claude .codex; do
+    if git cat-file -e "$commit:$p" 2>/dev/null; then
+      return 1
+    fi
+  done
+  return 0
+}
+
+refs=0
+clean=1
+while read -r _local_ref local_sha _remote_ref _remote_sha; do
+  [ -n "${local_sha:-}" ] || continue
+  refs=$((refs + 1))
+  if ! is_snapshot "$local_sha"; then
+    clean=0
+  fi
+done
+
+if [ "$refs" -gt 0 ] && [ "$clean" -eq 1 ]; then
+  exit 0
+fi
+
+cat >&2 <<EOF
+Push refused: $remote_name ($remote_url) is the public Pantry Raider repo.
+It only takes clean snapshots, which scripts/sync-public.sh builds and pushes,
+and release tags on those snapshot commits. Push your work to the development
+remote instead (the branch's upstream, for example \`git push\` with no remote
+name).
+EOF
+exit 1

@@ -1,0 +1,14 @@
+{
+  "manifest_version": 3,
+  "name": "Pantry Raider kiosk return",
+  "version": "1.0.0",
+  "description": "A way back to Pantry Raider from external pages opened on the kiosk display.",
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["origin.js", "content.js"],
+      "run_at": "document_end",
+      "all_frames": false
+    }
+  ]
+}

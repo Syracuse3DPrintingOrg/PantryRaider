@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Delete your account: Forager{% endblock %}
+{% block main_class %}narrow{% endblock %}
+{% block content %}
+<h1>Delete your account</h1>
+<div class="card">
+  {% if error %}<div class="alert alert-error">{{ error }}</div>{% endif %}
+  <p>This permanently deletes the Forager account for
+  <strong>{{ email }}</strong>. There is no undo.</p>
+  <ul class="muted small">
+    <li>Any active subscription is cancelled immediately.</li>
+    <li>Your kitchens are signed out and their remote-access addresses stop
+    working. The Pantry Raider app in your kitchen keeps working on its own.</li>
+    <li>Your cloud backups are deleted, files included.</li>
+    <li>Your share links stop working, and your sign-in details, passkeys, and
+    usage history are erased.</li>
+    <li>Recipes you shared with the community stay available, without your
+    name.</li>
+  </ul>
+  <form method="post" action="/account/delete">
+    {% if has_password %}
+    <label for="credential">Your password</label>
+    <input type="password" id="credential" name="credential"
+           autocomplete="current-password" required>
+    {% else %}
+    <label for="credential">Type your email address to confirm it is you</label>
+    <input type="email" id="credential" name="credential"
+           autocomplete="off" placeholder="{{ email }}" required>
+    {% endif %}
+    {% if totp_enabled %}
+    <label for="totp">Code from your authenticator app</label>
+    <input type="text" id="totp" name="totp" autocomplete="one-time-code"
+           inputmode="text" required>
+    {% endif %}
+    <label for="confirm_text">Type <strong>delete</strong> to confirm</label>
+    <input type="text" id="confirm_text" name="confirm_text"
+           autocomplete="off" required>
+    <button class="btn btn-block" type="submit">Permanently delete my account</button>
+  </form>
+  <p style="margin-top:0.75rem; margin-bottom:0;">
+    <a class="muted small" href="/account">Never mind, keep my account</a>
+  </p>
+</div>
+{% endblock %}

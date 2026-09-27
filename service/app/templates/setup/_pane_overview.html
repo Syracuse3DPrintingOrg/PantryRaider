@@ -1,0 +1,75 @@
+{% from "setup/_macros.html" import ov_card with context %}
+<!-- Overview: the Settings landing (FoodAssistant-jcnh). A grid of category
+             cards grouped under the plain-language headings, mirroring the
+             side menu. Each card opens its section. Cards are shown or hidden by
+             deployment mode exactly as the matching menu pills are: a satellite
+             has no local inventory to configure and no local app to sign a
+             Forager account into, so it drops those cards. -->
+        <div class="tab-pane fade show active" id="pane-overview">
+          <p class="pane-intro">Everything you can set up, grouped by area. Pick a card to open that section, or use the menu on the left.</p>
+
+          <div class="ov-group">
+            <div class="ov-group-head">Kitchen</div>
+            <div class="ov-grid">
+              {% if not features.satellite %}
+              {{ ov_card('bi-fridge', 'Inventory', 'Your Grocy stock, locations, and expiry rules.', 'pane-inventory') }}
+              {% endif %}
+              {{ ov_card('bi-journal-richtext', 'Recipes', 'Your recipe library and where extra ideas come from.', 'pane-personalization-recipes') }}
+              {{ ov_card('bi-sliders', 'Recipe suggestions', 'Your tastes, staples, and kitchen tools for ranking ideas.', 'pane-recipe-tuning') }}
+              {{ ov_card('bi-upc-scan', 'Scanning & AI', 'Barcode scanner and the vision provider for photo scans.', 'pane-scanning') }}
+            </div>
+          </div>
+
+          <div class="ov-group">
+            <div class="ov-group-head">Devices</div>
+            <div class="ov-grid">
+              {{ ov_card('bi-hdd-stack', 'Bandit Remotes', 'Bandit displays, Bandit Cubs, and device pairing.', 'pane-devices') }}
+              {{ ov_card('bi-thermometer-half', 'Thermometers & Sensors', 'Cooking probes, fridge sensors, door sensors, and shelf buttons.', 'pane-gadgets') }}
+              {{ ov_card('bi-printer', 'Printing', 'Label and recipe printing, printers, and the label designer.', 'pane-printing') }}
+              {% if is_pi %}
+              {# The deck editor is a sub-area of the Start Page pane, not a
+                 pane of its own, so this card opens it directly, mirroring
+                 the Stream Deck entry in the side menu (FoodAssistant-gn6g). #}
+              <button type="button" class="ov-card" onclick="openStreamDeckSettings()">
+                <span class="ov-card-icon"><i class="bi bi-grid-3x3-gap"></i></span>
+                <span class="ov-card-main">
+                  <span class="ov-card-title">Stream Deck</span>
+                  <span class="ov-card-desc">Keys and layout for a Stream Deck on this appliance.</span>
+                </span>
+              </button>
+              {% endif %}
+            </div>
+          </div>
+
+          <div class="ov-group">
+            <div class="ov-group-head">This Device</div>
+            <div class="ov-grid">
+              {{ ov_card('bi-display', 'Display & Sleep', 'Screen size, rotation, and when the display sleeps.', 'pane-screen') }}
+              {{ ov_card('bi-wifi', 'Network', "Wi-Fi, Ethernet, and this device's name on the network.", 'pane-network') }}
+              {{ ov_card('bi-grid-3x3-gap', 'Start Page', 'The buttons on the kiosk start page.', 'pane-start-page') }}
+              {{ ov_card('bi-palette', 'Appearance', 'Theme, accent, and the look of the app.', 'pane-appearance') }}
+            </div>
+          </div>
+
+          <div class="ov-group">
+            <div class="ov-group-head">Connections</div>
+            <div class="ov-grid">
+              {{ ov_card('bi-house-gear', 'Home Assistant', 'Connect HA for cameras and on-screen notifications.', 'pane-home-assistant') }}
+              {{ ov_card('bi-camera-video', 'Cameras', 'IP cameras and the phone-scan QR code.', 'pane-connections') }}
+              {% if not features.satellite %}
+              {{ ov_card('bi-cloud', 'Forager', 'Your cloud account, plan, and remote access.', 'pane-forager') }}
+              {% endif %}
+            </div>
+          </div>
+
+          <div class="ov-group">
+            <div class="ov-group-head">System</div>
+            <div class="ov-grid">
+              {{ ov_card('bi-speedometer2', 'Resources', 'Live processor, memory, storage, and temperature for this device.', 'pane-resources') }}
+              {{ ov_card('bi-shield-lock', 'Security', 'Password, kitchen access, and API keys.', 'pane-security') }}
+              {{ ov_card('bi-cloud-arrow-down', 'Backups & Updates', 'Snapshot your data and manage updates.', 'pane-backups') }}
+              {{ ov_card('bi-heart-pulse', 'Status', 'A health check of this device and the services it talks to.', 'pane-status') }}
+              {{ ov_card('bi-tools', 'Advanced', 'Diagnostics and low-level options.', 'pane-advanced') }}
+            </div>
+          </div>
+        </div>

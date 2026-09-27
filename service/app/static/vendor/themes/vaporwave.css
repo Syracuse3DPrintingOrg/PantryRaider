@@ -1,0 +1,341 @@
+/*
+ * Vaporwave theme for Pantry Raider.
+ * Loaded as an overlay on top of Bootstrap 5 dark mode.
+ * A pastel-neon palette in the synthwave family: a soft purple twilight with
+ * candy pink and aqua cyan accents. Authored locally (no Bootswatch, no CDN).
+ */
+
+/* Core palette */
+:root,
+[data-bs-theme=dark] {
+  /* Backgrounds (soft purple twilight) */
+  --bs-body-bg:           #1a1033;
+  --bs-body-bg-rgb:       26, 16, 51;
+  --bs-secondary-bg:      #241848;
+  --bs-secondary-bg-rgb:  36, 24, 72;
+  --bs-tertiary-bg:       #2f205e;
+  --bs-tertiary-bg-rgb:   47, 32, 94;
+
+  /* Text */
+  --bs-body-color:        #f3e9ff;
+  --bs-body-color-rgb:    243, 233, 255;
+  --bs-secondary-color:   rgba(243, 233, 255, 0.74);
+  --bs-tertiary-color:    rgba(243, 233, 255, 0.50);
+  --bs-emphasis-color:    #ffffff;
+
+  /* Brand colours (pastel neon) */
+  --vw-pink:    #ff6ad5;
+  --vw-cyan:    #5ce1e6;
+  --vw-purple:  #c774e8;
+  --vw-mint:    #94f0c2;
+  --vw-peach:   #ff9e7d;
+  --vw-lemon:   #fff07c;
+
+  /* Bootstrap semantic overrides */
+  --bs-primary:           #ff6ad5;
+  --bs-primary-rgb:       255, 106, 213;
+  --bs-secondary:         #5ce1e6;
+  --bs-secondary-rgb:     92, 225, 230;
+  --bs-success:           #94f0c2;
+  --bs-success-rgb:       148, 240, 194;
+  --bs-info:              #c774e8;
+  --bs-info-rgb:          199, 116, 232;
+  --bs-warning:           #fff07c;
+  --bs-warning-rgb:       255, 240, 124;
+  --bs-danger:            #ff5d8f;
+  --bs-danger-rgb:        255, 93, 143;
+  --bs-light:             #3a2a70;
+  --bs-light-rgb:         58, 42, 112;
+  --bs-dark:              #1a1033;
+  --bs-dark-rgb:          26, 16, 51;
+
+  /* Text-emphasis colours (for text-bg-* utilities) */
+  --bs-primary-text-emphasis:   #ffa6e4;
+  --bs-secondary-text-emphasis: #9beef1;
+  --bs-success-text-emphasis:   #bdf6da;
+  --bs-info-text-emphasis:      #ddacf1;
+  --bs-warning-text-emphasis:   #fff6ae;
+  --bs-danger-text-emphasis:    #ff9bb8;
+
+  /* Borders */
+  --bs-border-color:        #463473;
+  --bs-border-color-translucent: rgba(255, 106, 213, 0.25);
+
+  /* Links */
+  --bs-link-color:        #5ce1e6;
+  --bs-link-color-rgb:    92, 225, 230;
+  --bs-link-hover-color:  #9beef1;
+
+  /* Cards / components */
+  --bs-card-bg:           #241848;
+  --bs-card-border-color: #463473;
+  --bs-modal-bg:          #241848;
+  --bs-dropdown-bg:       #241848;
+  --bs-dropdown-border-color: #463473;
+  --bs-input-bg:          #2f205e;
+  --bs-input-border-color: #463473;
+  --bs-input-color:       #f3e9ff;
+  --bs-list-group-bg:     #241848;
+  --bs-list-group-border-color: #463473;
+
+  /* Navbar */
+  --bs-navbar-color:       rgba(243, 233, 255, 0.86);
+  --bs-navbar-hover-color: #ff6ad5;
+  --bs-navbar-active-color: #ff6ad5;
+
+  /* Table */
+  --bs-table-bg:          transparent;
+  --bs-table-striped-bg:  rgba(255, 106, 213, 0.05);
+  --bs-table-hover-bg:    rgba(92, 225, 230, 0.07);
+  --bs-table-border-color: #463473;
+
+  color-scheme: dark;
+}
+
+/* Body & page chrome */
+body {
+  background-color: var(--bs-body-bg);
+  color: var(--bs-body-color);
+}
+
+/* Soft diagonal pink/cyan wash */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background: linear-gradient(135deg,
+    rgba(255, 106, 213, 0.06),
+    transparent 40%,
+    rgba(92, 225, 230, 0.06));
+}
+
+/* Navbar */
+.navbar {
+  background: #1a1033 !important;
+  border-bottom: 1px solid var(--vw-pink) !important;
+  box-shadow: 0 0 18px rgba(255, 106, 213, 0.30);
+}
+.navbar-brand {
+  color: var(--vw-cyan) !important;
+  text-shadow: 0 0 10px var(--vw-cyan), 0 0 22px rgba(92, 225, 230, 0.5);
+  letter-spacing: 0.5px;
+}
+.nav-link {
+  color: rgba(243, 233, 255, 0.84) !important;
+  transition: color 0.15s, text-shadow 0.15s;
+}
+.nav-link:hover,
+.nav-link.active {
+  color: var(--vw-pink) !important;
+  text-shadow: 0 0 8px rgba(255, 106, 213, 0.7);
+}
+
+/* Cards */
+.card {
+  background-color: #241848;
+  border-color: #463473;
+  box-shadow: 0 0 8px rgba(199, 116, 232, 0.15);
+}
+.card-header {
+  background-color: #2f205e;
+  border-bottom-color: #463473;
+  color: var(--vw-cyan);
+  text-shadow: 0 0 6px rgba(92, 225, 230, 0.4);
+}
+
+/* Buttons */
+.btn-primary {
+  background-color: var(--vw-pink);
+  border-color: var(--vw-pink);
+  color: #2a0033;
+  box-shadow: 0 0 10px rgba(255, 106, 213, 0.5);
+}
+.btn-primary:hover {
+  background-color: #ff8ade;
+  border-color: #ff8ade;
+  box-shadow: 0 0 18px rgba(255, 106, 213, 0.8);
+}
+.btn-secondary {
+  background-color: transparent;
+  border-color: var(--vw-cyan);
+  color: var(--vw-cyan);
+  box-shadow: 0 0 8px rgba(92, 225, 230, 0.3);
+}
+.btn-secondary:hover {
+  background-color: rgba(92, 225, 230, 0.12);
+  border-color: var(--vw-cyan);
+  color: var(--vw-cyan);
+  box-shadow: 0 0 16px rgba(92, 225, 230, 0.6);
+}
+.btn-success {
+  background-color: var(--vw-mint);
+  border-color: var(--vw-mint);
+  color: #06291c;
+  box-shadow: 0 0 10px rgba(148, 240, 194, 0.5);
+}
+.btn-success:hover {
+  background-color: #aef6d3;
+  border-color: #aef6d3;
+  box-shadow: 0 0 18px rgba(148, 240, 194, 0.75);
+}
+.btn-outline-primary {
+  border-color: var(--vw-pink);
+  color: var(--vw-pink);
+}
+.btn-outline-primary:hover {
+  background-color: var(--vw-pink);
+  color: #2a0033;
+  box-shadow: 0 0 14px rgba(255, 106, 213, 0.7);
+}
+.btn-outline-secondary {
+  border-color: var(--vw-cyan);
+  color: var(--vw-cyan);
+}
+.btn-outline-secondary:hover {
+  background-color: rgba(92, 225, 230, 0.12);
+  color: var(--vw-cyan);
+  box-shadow: 0 0 12px rgba(92, 225, 230, 0.5);
+}
+.btn-outline-danger {
+  border-color: #ff5d8f;
+  color: #ff89ad;
+}
+.btn-outline-danger:hover {
+  background-color: rgba(255, 93, 143, 0.15);
+  color: #ffa6c1;
+  box-shadow: 0 0 12px rgba(255, 93, 143, 0.5);
+}
+
+/* Forms */
+.form-control,
+.form-select {
+  background-color: #2f205e;
+  border-color: #463473;
+  color: #f3e9ff;
+}
+.form-control:focus,
+.form-select:focus {
+  background-color: #2f205e;
+  border-color: var(--vw-cyan);
+  color: #f3e9ff;
+  box-shadow: 0 0 0 0.25rem rgba(92, 225, 230, 0.25);
+}
+.form-control::placeholder { color: rgba(243, 233, 255, 0.45); }
+.form-check-input:checked {
+  background-color: var(--vw-pink);
+  border-color: var(--vw-pink);
+  box-shadow: 0 0 6px rgba(255, 106, 213, 0.6);
+}
+.input-group-text {
+  background-color: #2f205e;
+  border-color: #463473;
+  color: var(--vw-cyan);
+}
+
+/* Tables */
+.table {
+  color: var(--bs-body-color);
+  border-color: #463473;
+}
+.table > thead {
+  border-bottom: 2px solid var(--vw-pink);
+  color: var(--vw-cyan);
+}
+.table-hover > tbody > tr:hover {
+  background-color: rgba(92, 225, 230, 0.05);
+}
+
+/* Badges */
+.badge { font-weight: 600; letter-spacing: 0.02em; }
+.text-bg-primary   { background-color: var(--vw-pink)   !important; color: #2a0033 !important; text-shadow: none; }
+.text-bg-secondary { background-color: var(--vw-cyan)   !important; color: #052a2b !important; }
+.text-bg-success   { background-color: var(--vw-mint)   !important; color: #06291c !important; }
+.text-bg-info      { background-color: var(--vw-purple) !important; color: #2a0033 !important; }
+.text-bg-warning   { background-color: var(--vw-lemon)  !important; color: #332e00 !important; }
+.text-bg-danger    { background-color: #ff5d8f          !important; color: #2a0014 !important; }
+
+/* Alerts */
+.alert-success {
+  background-color: rgba(148, 240, 194, 0.12);
+  border-color: var(--vw-mint);
+  color: #bdf6da;
+}
+.alert-danger {
+  background-color: rgba(255, 93, 143, 0.12);
+  border-color: #ff5d8f;
+  color: #ff9bb8;
+}
+.alert-warning {
+  background-color: rgba(255, 240, 124, 0.10);
+  border-color: var(--vw-lemon);
+  color: #fff6ae;
+}
+.alert-info {
+  background-color: rgba(199, 116, 232, 0.14);
+  border-color: var(--vw-purple);
+  color: #ddacf1;
+}
+
+/* Dropdowns & modals */
+.dropdown-menu {
+  background-color: #241848;
+  border-color: #463473;
+  box-shadow: 0 0 20px rgba(199, 116, 232, 0.3);
+}
+.dropdown-item { color: #f3e9ff; }
+.dropdown-item:hover {
+  background-color: rgba(255, 106, 213, 0.15);
+  color: var(--vw-pink);
+}
+.modal-content {
+  background-color: #241848;
+  border-color: #463473;
+  box-shadow: 0 0 30px rgba(255, 106, 213, 0.4);
+}
+.modal-header { border-bottom-color: var(--vw-pink); color: var(--vw-cyan); }
+.modal-footer { border-top-color: #463473; }
+
+/* List groups */
+.list-group-item {
+  background-color: #241848;
+  border-color: #463473;
+  color: #f3e9ff;
+}
+.list-group-item-action:hover {
+  background-color: rgba(255, 106, 213, 0.12);
+  color: var(--vw-pink);
+}
+
+/* Nav tabs */
+.nav-tabs { border-bottom-color: #463473; }
+.nav-tabs .nav-link { color: rgba(243, 233, 255, 0.74) !important; }
+.nav-tabs .nav-link.active {
+  background-color: #2f205e;
+  border-color: var(--vw-pink) var(--vw-pink) #2f205e;
+  color: var(--vw-pink) !important;
+  text-shadow: 0 0 8px rgba(255, 106, 213, 0.6);
+}
+
+/* Urgency colours (override base.html) */
+.urgency-expired { color: #ff7da3; text-shadow: 0 0 6px rgba(255, 93, 143, 0.6); }
+.urgency-today   { color: var(--vw-peach); text-shadow: 0 0 6px rgba(255, 158, 125, 0.5); }
+.urgency-3d      { color: var(--vw-lemon); text-shadow: 0 0 6px rgba(255, 240, 124, 0.5); }
+.urgency-ok      { color: var(--vw-mint); text-shadow: 0 0 6px rgba(148, 240, 194, 0.4); }
+
+/* Scrollbar (Webkit) */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: #1a1033; }
+::-webkit-scrollbar-thumb { background: #463473; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--vw-pink); }
+
+/* Progress bars */
+.progress { background-color: #2f205e; }
+.progress-bar {
+  background-color: var(--vw-pink);
+  box-shadow: 0 0 8px rgba(255, 106, 213, 0.6);
+}
+
+/* contrast: dark badge text (FoodAssistant-tjlm) */
+.badge.bg-secondary, .badge.bg-info, .badge.bg-danger { color: #000 !important; }

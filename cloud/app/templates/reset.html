@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Choose a new password: Forager{% endblock %}
+{% block main_class %}narrow{% endblock %}
+{% block content %}
+<h1>Choose a new password</h1>
+<div class="card">
+  {% if not valid %}
+  <div class="alert alert-error">This reset link is no longer valid. It may
+  have expired or already been used.</div>
+  <p class="muted small"><a href="/forgot">Request a new link</a>.</p>
+  {% else %}
+  {% if error %}<div class="alert alert-error">{{ error }}</div>{% endif %}
+  <form method="post" action="/reset">
+    <input type="hidden" name="token" value="{{ token }}">
+    <label for="new_password">New password</label>
+    <input type="password" id="new_password" name="new_password"
+           autocomplete="new-password" minlength="10" required autofocus>
+    <label for="confirm_password">Confirm new password</label>
+    <input type="password" id="confirm_password" name="confirm_password"
+           autocomplete="new-password" minlength="10" required>
+    <button class="btn btn-block" type="submit">Set new password</button>
+  </form>
+  <p class="muted small" style="margin-top:0.9rem;">Setting a new password
+  signs you out everywhere else.</p>
+  {% endif %}
+</div>
+{% endblock %}

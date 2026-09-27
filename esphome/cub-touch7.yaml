@@ -1,0 +1,19 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Bandit Cub build: Waveshare ESP32-S3 Touch LCD 7 (touch7 profile).
+#   esphome run esphome/cub-touch7.yaml
+# Override any substitution from packages/cub-base.yaml here (names, the
+# install tag to listen to, the refresh interval).
+
+substitutions:
+  name: bandit-cub
+  friendly_name: Bandit Cub
+
+external_components:
+  - source:
+      type: local
+      path: components
+    components: [pantry_raider]
+
+packages:
+  base: !include packages/cub-base.yaml
+  profile: !include packages/touch7.yaml
