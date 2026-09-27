@@ -9,7 +9,7 @@ bleak>=0.21,<1
 httpx>=0.24,<1
 # config.py reads TOML with the standard library's tomllib, which arrived in
 # Python 3.11. On 3.10 (Ubuntu 22.04) the tomli backport stands in for it.
-tomli>=2,<3; python_version < '3.11'
+tomli>=2.4.1,<3; python_version < '3.11'
 # The Cub status broadcast (advertiser.py) drives bluez advertising over
 # D-Bus with dbus-fast, which bleak already pulls in on Linux; pinned here
 # explicitly so the dependency is stated, not inherited by accident.
