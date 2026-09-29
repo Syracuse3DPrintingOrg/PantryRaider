@@ -12,10 +12,10 @@
 # pin has to live here to reach them.
 fastapi==0.141.1
 starlette==1.7.0
-uvicorn[standard]==0.53.0
+uvicorn[standard]==0.54.0
 
 # Database ORM for SQLite inventory (required)
-sqlalchemy==2.0.54
+sqlalchemy==2.1.1
 
 # Data validation and settings management (required)
 pydantic==2.13.5
@@ -42,7 +42,7 @@ google-generativeai==0.8.6  # Gemini vision/enrichment provider
 # pip never resolves the legacy 1.0beta5prerelease2 wheel, whose non-normalized
 # version pip 25.3 hard-errors on (pypa/pip#12938).
 google-api-python-client==2.200.0
-anthropic==1.7.0             # Anthropic Claude vision/enrichment provider
+anthropic==1.8.0             # Anthropic Claude vision/enrichment provider
 # OpenAI is accessed via httpx directly - no SDK needed
 
 # Image resizing before sending to AI providers (required for photo analysis),
