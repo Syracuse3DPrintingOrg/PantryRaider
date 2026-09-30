@@ -1,0 +1,232 @@
+#!/usr/bin/env python3
+"""Pantry Raider boot splash writer (FoodAssistant-y8vj).
+
+Paints the Pantry Raider mark straight to the Linux framebuffer (/dev/fb0)
+so an appliance shows the brand instead of boot text from moments after
+power-on until the kiosk compositor takes the display over. Run by
+foodassistant-boot-splash.service as a oneshot very early in boot.
+
+Deliberately dependency-free: Python standard library only (gzip for the
+asset, sysfs for the framebuffer geometry), so it runs on a stock Pi OS Lite
+with nothing installed. The splash image ships as a gzipped binary PPM
+(P6, maxval 255) rendered at build time by make-boot-splash.py; this script
+centers it on whatever panel is actually attached, fades it in over three
+quick frames, and exits. The kiosk then simply takes the framebuffer.
+
+Fail-safe contract: ANY problem (no framebuffer, missing or corrupt asset,
+an unsupported pixel format, a write error) is swallowed and the process
+exits 0, so the worst case is always the plain quiet boot, never a hang or
+a failed unit blocking startup.
+
+Env test hooks (also usable for a manual run):
+  SPLASH_ASSET        path to the splash .ppm.gz
+  SPLASH_FB           framebuffer device to paint
+  SPLASH_FB_SYS       sysfs dir with virtual_size / bits_per_pixel / stride
+  SPLASH_FRAME_DELAY  seconds between fade frames (0 disables the pauses)
+"""
+import gzip
+import os
+import sys
+import time
+
+# The app's dark background (#212529), matching the kiosk browser's
+# --default-background-color so the handoff to the app shows no color jump.
+BG = (33, 37, 41)
+# Three-frame fade-in: dim, brighter, full. Honest but minimal animation;
+# after the last frame the mark simply holds until the compositor starts.
+FADE_ALPHAS = (0.35, 0.65, 1.0)
+FRAME_DELAY = 0.12
+
+DEFAULT_ASSET = "/opt/foodassistant/boot-splash/splash.ppm.gz"
+DEFAULT_FB = "/dev/fb0"
+DEFAULT_FB_SYS = "/sys/class/graphics/fb0"
+
+
+def _ppm_tokens(data, count):
+    """First `count` whitespace/comment-delimited header tokens of a PPM.
+    Returns (tokens, index of the last consumed byte + 1)."""
+    tokens = []
+    i, n = 0, len(data)
+    while len(tokens) < count and i < n:
+        c = data[i:i + 1]
+        if c.isspace():
+            i += 1
+        elif c == b"#":
+            while i < n and data[i:i + 1] not in (b"\n", b"\r"):
+                i += 1
+        else:
+            j = i
+            while j < n and not data[j:j + 1].isspace() and data[j:j + 1] != b"#":
+                j += 1
+            tokens.append(data[i:j])
+            i = j
+    return tokens, i
+
+
+def parse_ppm(data):
+    """Parse a binary P6 PPM with maxval 255. Returns (width, height, rgb)."""
+    tokens, i = _ppm_tokens(data, 4)
+    if len(tokens) < 4 or tokens[0] != b"P6" or tokens[3] != b"255":
+        raise ValueError("not a maxval-255 binary PPM")
+    width, height = int(tokens[1]), int(tokens[2])
+    if width <= 0 or height <= 0:
+        raise ValueError("bad PPM dimensions")
+    # Exactly one whitespace byte separates the maxval from the raster.
+    pixels = data[i + 1:i + 1 + width * height * 3]
+    if len(pixels) != width * height * 3:
+        raise ValueError("truncated PPM raster")
+    return width, height, pixels
+
+
+def fb_geometry(sys_dir):
+    """Framebuffer geometry from sysfs: (width, height, bpp, stride)."""
+    def read(name):
+        with open(os.path.join(sys_dir, name)) as f:
+            return f.read().strip()
+
+    width, height = (int(v) for v in read("virtual_size").split(","))
+    bpp = int(read("bits_per_pixel"))
+    try:
+        stride = int(read("stride"))
+    except (OSError, ValueError):
+        stride = width * ((bpp + 7) // 8)
+    return width, height, bpp, stride
+
+
+def center_canvas(rgb, width, height, fb_w, fb_h, bg=BG):
+    """RGB888 canvas of the framebuffer's size with the image centered on the
+    background color; a larger image is center-cropped instead."""
+    if (width, height) == (fb_w, fb_h):
+        return rgb
+    copy_w, copy_h = min(width, fb_w), min(height, fb_h)
+    src_x, src_y = (width - copy_w) // 2, (height - copy_h) // 2
+    dst_x, dst_y = (fb_w - copy_w) // 2, (fb_h - copy_h) // 2
+    canvas = bytearray(bytes(bg) * (fb_w * fb_h))
+    for row in range(copy_h):
+        src = ((src_y + row) * width + src_x) * 3
+        dst = ((dst_y + row) * fb_w + dst_x) * 3
+        canvas[dst:dst + copy_w * 3] = rgb[src:src + copy_w * 3]
+    return bytes(canvas)
+
+
+def fade_toward_bg(rgb, alpha, bg=BG):
+    """Blend every pixel toward the background color (alpha 1.0 = unchanged).
+    Per-channel 256-entry translate tables keep this C-speed."""
+    if alpha >= 1.0:
+        return rgb
+    out = bytearray(len(rgb))
+    for c in range(3):
+        table = bytes(
+            min(255, max(0, round(bg[c] + (v - bg[c]) * alpha)))
+            for v in range(256)
+        )
+        out[c::3] = rgb[c::3].translate(table)
+    return bytes(out)
+
+
+def _or_bytes(a, b):
+    """Bytewise OR of two equal-length byte strings at C speed."""
+    return (int.from_bytes(a, "big") | int.from_bytes(b, "big")).to_bytes(len(a), "big")
+
+
+_T_R_HI = bytes(v & 0xF8 for v in range(256))
+_T_G_HI = bytes(v >> 5 for v in range(256))
+_T_G_LO = bytes((v << 3) & 0xE0 for v in range(256))
+_T_B_LO = bytes(v >> 3 for v in range(256))
+
+
+def to_rgb565(rgb):
+    """RGB888 to little-endian RGB565 (2 bytes per pixel)."""
+    r, g, b = rgb[0::3], rgb[1::3], rgb[2::3]
+    hi = _or_bytes(r.translate(_T_R_HI), g.translate(_T_G_HI))
+    lo = _or_bytes(g.translate(_T_G_LO), b.translate(_T_B_LO))
+    out = bytearray(len(hi) * 2)
+    out[0::2] = lo
+    out[1::2] = hi
+    return bytes(out)
+
+
+def to_xrgb8888(rgb):
+    """RGB888 to little-endian XRGB8888 (4 bytes per pixel: B, G, R, X)."""
+    count = len(rgb) // 3
+    out = bytearray(count * 4)
+    out[0::4] = rgb[2::3]
+    out[1::4] = rgb[1::3]
+    out[2::4] = rgb[0::3]
+    out[3::4] = b"\xff" * count
+    return bytes(out)
+
+
+def to_bgr888(rgb):
+    """RGB888 to framebuffer BGR888 (3 bytes per pixel: B, G, R)."""
+    count = len(rgb) // 3
+    out = bytearray(count * 3)
+    out[0::3] = rgb[2::3]
+    out[1::3] = rgb[1::3]
+    out[2::3] = rgb[0::3]
+    return bytes(out)
+
+
+def pack_pixels(rgb, bpp):
+    """Pack an RGB888 buffer into the framebuffer's pixel format."""
+    if bpp == 16:
+        return to_rgb565(rgb)
+    if bpp == 32:
+        return to_xrgb8888(rgb)
+    if bpp == 24:
+        return to_bgr888(rgb)
+    raise ValueError("unsupported framebuffer depth: %d" % bpp)
+
+
+def pad_rows(pixels, fb_w, fb_h, bytes_per_px, stride):
+    """Insert per-row padding when the framebuffer stride exceeds the row."""
+    row = fb_w * bytes_per_px
+    if stride <= row:
+        return pixels
+    out = bytearray(stride * fb_h)
+    for y in range(fb_h):
+        out[y * stride:y * stride + row] = pixels[y * row:(y + 1) * row]
+    return bytes(out)
+
+
+def paint(asset, fb_dev, fb_sys, delay=FRAME_DELAY, alphas=FADE_ALPHAS):
+    """Fade the splash image onto the framebuffer, then leave it there."""
+    with gzip.open(asset, "rb") as f:
+        width, height, rgb = parse_ppm(f.read())
+    fb_w, fb_h, bpp, stride = fb_geometry(fb_sys)
+    if fb_w <= 0 or fb_h <= 0:
+        return
+    canvas = center_canvas(rgb, width, height, fb_w, fb_h)
+    bytes_per_px = (bpp + 7) // 8
+    with open(fb_dev, "r+b", buffering=0) as fb:
+        for i, alpha in enumerate(alphas):
+            frame = pad_rows(
+                pack_pixels(fade_toward_bg(canvas, alpha), bpp),
+                fb_w, fb_h, bytes_per_px, stride,
+            )
+            fb.seek(0)
+            fb.write(frame)
+            if delay > 0 and i + 1 < len(alphas):
+                time.sleep(delay)
+
+
+def main():
+    asset = os.environ.get("SPLASH_ASSET", DEFAULT_ASSET)
+    fb_dev = os.environ.get("SPLASH_FB", DEFAULT_FB)
+    fb_sys = os.environ.get("SPLASH_FB_SYS", DEFAULT_FB_SYS)
+    try:
+        delay = float(os.environ.get("SPLASH_FRAME_DELAY", str(FRAME_DELAY)))
+    except ValueError:
+        delay = FRAME_DELAY
+    try:
+        paint(asset, fb_dev, fb_sys, delay)
+    except Exception:
+        # Never fail or slow the boot: whatever went wrong (no framebuffer,
+        # missing asset, odd pixel format), skip silently. The worst case
+        # must always be the plain quiet boot.
+        pass
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

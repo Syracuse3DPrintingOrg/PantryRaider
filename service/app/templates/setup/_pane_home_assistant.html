@@ -1,0 +1,149 @@
+{% from "setup/_macros.html" import info, panel, srow, pill, toggle with context %}
+<!-- Home Assistant (FoodAssistant-jcnh): dense panel/row pattern. The
+             connection and the on-screen notifications are separate panels. The
+             ha-conn-status badge keeps its Bootstrap badge classes (JS resets
+             them on test), and all control ids (streamdeck_ha_base_url,
+             streamdeck_ha_token, ha_events_enabled, ha_events_device,
+             ha_camera_popup_seconds) and the setup snippet ids are unchanged. -->
+        <div class="tab-pane fade" id="pane-home-assistant">
+          <p class="pane-intro">Connect Home Assistant to power the Stream Deck Home Assistant keys, camera discovery, and on-screen notifications. The easiest way is the Pantry Raider integration inside Home Assistant, which sets this page up for you. Home Assistant is optional: everything else works without it.</p>
+
+          {% call panel('Home Assistant connection', 'How this device reaches Home Assistant.') %}
+            {% call srow('Status', 'Whether the connection is set up.') %}
+              {% if s.streamdeck_ha_base_url and has.streamdeck_ha_token %}
+              <span class="badge bg-success" id="ha-conn-status"><i class="bi bi-check-circle me-1"></i>Configured</span>
+              {% else %}
+              <span class="badge bg-secondary" id="ha-conn-status">Not configured</span>
+              {% endif %}
+            {% endcall %}
+            <p class="text-secondary small mt-2 mb-2">The recommended path runs from the Home Assistant side: install the <strong>Pantry Raider</strong> integration through HACS, add it in Home Assistant (it can find this device on your network by itself), and approve the pairing code shown on the kitchen screen. The connection here fills in automatically, and notifications and camera pop-ups work in Home Assistant out of the box: every Pantry Raider screen gets its own notify entity, no YAML needed. See the
+              <a href="https://docs.pantryraider.app/home-assistant-integration/" target="_blank" rel="noopener">Home Assistant integration guide</a> for the steps.</p>
+            <details id="ha-advanced-connection">
+              <summary class="small text-info" style="cursor:pointer">Advanced setup (manual address and token)</summary>
+              <p class="text-secondary small mt-2 mb-1">Manual entry is only needed when you are not using the Home Assistant integration.</p>
+            {% call srow('Address', 'Your Home Assistant server.',
+                         'Your Home Assistant address, for example http://homeassistant.local:8123.') %}
+              <input type="text" class="form-control form-control-sm" id="streamdeck_ha_base_url" style="max-width:420px"
+                     placeholder="http://homeassistant.local:8123" value="{{ s.streamdeck_ha_base_url or '' }}"
+                     {% if features.satellite %}readonly{% endif %}>
+            {% endcall %}
+            {% call srow('Access token', 'A long-lived token from your profile.',
+                         'Create a token in Home Assistant under your profile, Security, Long-lived access tokens, then paste it here.') %}
+              <input type="password" class="form-control form-control-sm" id="streamdeck_ha_token" autocomplete="off" style="max-width:420px"
+                     {% if features.satellite %}disabled{% endif %}
+                     placeholder="{% if has.streamdeck_ha_token %}(unchanged){% else %}(token){% endif %}">
+            {% endcall %}
+            {% call srow('Connection', 'Save, or check it reaches Home Assistant.') %}
+              {% if features.satellite %}
+              <div class="form-text mb-2"><i class="bi bi-hdd-network me-1"></i>Home Assistant is configured on the main server and syncs here automatically. Change it there.</div>
+              <button type="button" class="btn btn-outline-secondary btn-sm" onclick="_haTestConnection(this)">
+                <i class="bi bi-plug me-1"></i>Test connection
+              </button>
+              {% else %}
+              <div class="d-flex gap-2 flex-wrap">
+                <button type="button" class="btn btn-outline-info btn-sm" onclick="savePaneHomeAssistant(this)">
+                  <i class="bi bi-check-lg me-1"></i>Save Home Assistant
+                </button>
+                <button type="button" class="btn btn-outline-secondary btn-sm" onclick="_haTestConnection(this)">
+                  <i class="bi bi-plug me-1"></i>Test connection
+                </button>
+              </div>
+              {% endif %}
+              <div class="test-result mt-2" id="ha-result"></div>
+            {% endcall %}
+            </details>
+          {% endcall %}
+
+          {% call panel('On-screen notifications & camera pop-ups',
+                        'Show messages and camera pop-ups pushed from Home Assistant on this device\'s screen.') %}
+            {% call srow('Show notifications', 'The default for all devices.',
+                         'Notifications sent from Home Assistant appear on this device\'s screen and any open browser tab. With the Pantry Raider integration installed, an automation just uses this device\'s notify entity (or the Pantry Raider camera pop-up service); nothing to configure.') %}
+              {{ toggle('ha_events_enabled', checked=s.ha_events_enabled, disabled=features.satellite, label='Show Home Assistant notifications and camera pop-ups on screen') }}
+            {% endcall %}
+            {# Per-device override (FoodAssistant-vcuz): each device decides for
+               itself whether to show events. #}
+            {% call srow('This device', 'Override the default here.',
+                         'Stored on this device only. Use it on a headless server (never show) or to pick which Pi Remote displays pop-ups.') %}
+              <select class="form-select form-select-sm" id="ha_events_device" style="max-width:320px" onchange="_haSetDeviceEvents(this.value)">
+                <option value="default">This device: follow the default above</option>
+                <option value="1">This device: always show</option>
+                <option value="0">This device: never show</option>
+              </select>
+            {% endcall %}
+            {% call srow('Camera pop-up length', 'Seconds a pop-up stays up.') %}
+              <input type="number" min="3" max="300" class="form-control form-control-sm" style="max-width:120px"
+                     id="ha_camera_popup_seconds" value="{{ s.ha_camera_popup_seconds }}" {% if features.satellite %}disabled{% endif %}>
+            {% endcall %}
+            {% call srow('Notifications', 'Save, or send yourself a test.') %}
+              {% if features.satellite %}
+              <div class="form-text"><i class="bi bi-hdd-network me-1"></i>Configured on the main server and synced here. Point your Home Assistant automation at <strong>this device</strong> (the one with the screen).</div>
+              {% else %}
+              <div class="d-flex gap-2 flex-wrap">
+                <button type="button" class="btn btn-outline-info btn-sm" onclick="savePaneNotifications(this)">
+                  <i class="bi bi-check-lg me-1"></i>Save notifications
+                </button>
+                <button type="button" class="btn btn-outline-secondary btn-sm" onclick="_haSendTestEvent(this)">
+                  <i class="bi bi-send me-1"></i>Send test notification
+                </button>
+              </div>
+              <div class="test-result mt-2" id="ha-events-result"></div>
+              {% endif %}
+            {% endcall %}
+            <details class="mt-2" id="ha-setup-details">
+              <summary class="small text-info" style="cursor:pointer">Advanced setup (manual rest_command + automation)</summary>
+              <p class="text-secondary small mt-2 mb-1">This manual route is only needed when the Pantry Raider integration is not installed in Home Assistant; with the integration, notifications and camera pop-ups are built in.</p>
+              <p class="text-secondary small mt-2 mb-1">This device's URL is filled in below. Paste an API key from
+                <a href="#" onclick="document.querySelector('[data-bs-target=&quot;#pane-security&quot;]')?.click();return false;">Settings &gt; Security</a>
+                where the placeholder is, then add this to your Home Assistant <code>configuration.yaml</code>:
+                <button type="button" class="btn btn-outline-secondary btn-sm ms-1" onclick="_haCopySnippet('ha-snippet-rest', this)"><i class="bi bi-clipboard"></i> Copy</button></p>
+<pre class="small bg-body-tertiary border rounded p-2" id="ha-snippet-rest" style="white-space:pre-wrap">rest_command:
+  foodassistant_notify:
+    url: "http://THIS-DEVICE:9284/events/notify"
+    method: POST
+    headers:
+      X-API-Key: "YOUR_FOODASSISTANT_API_KEY"
+    content_type: "application/json"
+    payload: '{"title":"{{ title }}","message":"{{ message }}","level":"{{ level }}"}'
+  foodassistant_camera_popup:
+    url: "http://THIS-DEVICE:9284/events/camera-popup"
+    method: POST
+    headers:
+      X-API-Key: "YOUR_FOODASSISTANT_API_KEY"
+    content_type: "application/json"
+    payload: '{"camera":"{{ camera }}","seconds":{{ seconds }}}'
+  foodassistant_camera_detect:
+    url: "http://THIS-DEVICE:9284/events/camera-detect"
+    method: POST
+    headers:
+      X-API-Key: "YOUR_FOODASSISTANT_API_KEY"
+    content_type: "application/json"
+    payload: '{"camera":"{{ camera }}","detection_type":"{{ detection_type }}"}'</pre>
+              <p class="text-secondary small mt-2 mb-1">Then an automation, for example pop up the door camera on a person:
+                <button type="button" class="btn btn-outline-secondary btn-sm ms-1" onclick="_haCopySnippet('ha-snippet-auto', this)"><i class="bi bi-clipboard"></i> Copy</button></p>
+<pre class="small bg-body-tertiary border rounded p-2" id="ha-snippet-auto" style="white-space:pre-wrap">automation:
+  - alias: "Person at door -> pop up camera"
+    trigger:
+      - platform: state
+        entity_id: binary_sensor.front_door_person
+        to: "on"
+    action:
+      - service: rest_command.foodassistant_camera_popup
+        data:
+          camera: "Front Door"
+          seconds: 20</pre>
+              <p class="text-secondary small mt-2 mb-1">Or let one automation post every detection type your camera sees and let each camera's "Pop up this camera on" checkboxes (on the Cameras page) decide whether it actually pops up:
+                <button type="button" class="btn btn-outline-secondary btn-sm ms-1" onclick="_haCopySnippet('ha-snippet-detect', this)"><i class="bi bi-clipboard"></i> Copy</button></p>
+<pre class="small bg-body-tertiary border rounded p-2" id="ha-snippet-detect" style="white-space:pre-wrap">{% raw %}automation:
+  - alias: "Front door detection -> maybe pop up camera"
+    trigger:
+      - platform: state
+        entity_id: sensor.front_door_detection_type
+    action:
+      - service: rest_command.foodassistant_camera_detect
+        data:
+          camera: "Front Door"
+          detection_type: "{{ trigger.to_state.state }}"{% endraw %}</pre>
+              <p class="text-secondary small mb-0">The <code>camera</code> name must match one configured on the Cameras page. Notifications take <code>message</code>, optional <code>title</code>, and <code>level</code> (info/success/warning/error). <code>detection_type</code> is <code>person</code>, <code>vehicle</code>, <code>animal</code>, or <code>visitor</code> (a doorbell button press); a Reolink camera can also decide this itself without any Home Assistant automation, using the same per-camera checkboxes.</p>
+            </details>
+          {% endcall %}
+        </div>

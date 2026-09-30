@@ -1,0 +1,307 @@
+/*
+ * iOS Light theme for Pantry Raider.
+ * Loaded as an overlay on top of Bootstrap 5 light mode.
+ * A clean, Apple-like look: the iOS system font stack, generously rounded
+ * corners, neutral greys and the iOS system blue (#007aff) accent. Authored
+ * locally (no Bootswatch, no CDN).
+ */
+
+/* Core palette */
+:root,
+[data-bs-theme=light] {
+  /* Backgrounds (iOS grouped table view greys) */
+  --bs-body-bg:           #f2f2f7;
+  --bs-body-bg-rgb:       242, 242, 247;
+  --bs-secondary-bg:      #ffffff;
+  --bs-secondary-bg-rgb:  255, 255, 255;
+  --bs-tertiary-bg:       #e5e5ea;
+  --bs-tertiary-bg-rgb:   229, 229, 234;
+
+  /* Text (iOS label / secondary label) */
+  --bs-body-color:        #1c1c1e;
+  --bs-body-color-rgb:    28, 28, 30;
+  --bs-secondary-color:   rgba(60, 60, 67, 0.78);
+  --bs-tertiary-color:    rgba(60, 60, 67, 0.55);
+  --bs-emphasis-color:    #000000;
+
+  /* iOS system colours */
+  --ios-blue:    #007aff;
+  --ios-green:   #248a3d;
+  --ios-indigo:  #5856d6;
+  --ios-orange:  #c93400;
+  --ios-red:     #d70015;
+  --ios-teal:    #0071a4;
+
+  /* Bootstrap semantic overrides */
+  --bs-primary:           #007aff;
+  --bs-primary-rgb:       0, 122, 255;
+  --bs-secondary:         #6c6c70;
+  --bs-secondary-rgb:     108, 108, 112;
+  --bs-success:           #248a3d;
+  --bs-success-rgb:       36, 138, 61;
+  --bs-info:              #5856d6;
+  --bs-info-rgb:          88, 86, 214;
+  --bs-warning:           #b25000;
+  --bs-warning-rgb:       178, 80, 0;
+  --bs-danger:            #d70015;
+  --bs-danger-rgb:        215, 0, 21;
+  --bs-light:             #f2f2f7;
+  --bs-light-rgb:         242, 242, 247;
+  --bs-dark:              #1c1c1e;
+  --bs-dark-rgb:          28, 28, 30;
+
+  /* Text-emphasis colours (for text-bg-* utilities) */
+  --bs-primary-text-emphasis:   #0050a8;
+  --bs-secondary-text-emphasis: #48484a;
+  --bs-success-text-emphasis:   #186029;
+  --bs-info-text-emphasis:      #3c3a94;
+  --bs-warning-text-emphasis:   #7a3700;
+  --bs-danger-text-emphasis:    #93000e;
+
+  /* Borders (iOS hairline separators) */
+  --bs-border-color:        #d1d1d6;
+  --bs-border-color-translucent: rgba(60, 60, 67, 0.18);
+
+  /* Links */
+  --bs-link-color:        #007aff;
+  --bs-link-color-rgb:    0, 122, 255;
+  --bs-link-hover-color:  #0050a8;
+
+  /* Cards / components */
+  --bs-card-bg:           #ffffff;
+  --bs-card-border-color: #d1d1d6;
+  --bs-border-radius:        0.75rem;
+  --bs-border-radius-sm:     0.55rem;
+  --bs-border-radius-lg:     1rem;
+  --bs-modal-bg:          #ffffff;
+  --bs-dropdown-bg:       #ffffff;
+  --bs-dropdown-border-color: #d1d1d6;
+  --bs-input-bg:          #ffffff;
+  --bs-input-border-color: #d1d1d6;
+  --bs-input-color:       #1c1c1e;
+  --bs-list-group-bg:     #ffffff;
+  --bs-list-group-border-color: #d1d1d6;
+
+  /* Navbar */
+  --bs-navbar-color:       rgba(28, 28, 30, 0.82);
+  --bs-navbar-hover-color: #007aff;
+  --bs-navbar-active-color: #007aff;
+
+  /* Table */
+  --bs-table-bg:          transparent;
+  --bs-table-striped-bg:  rgba(0, 122, 255, 0.04);
+  --bs-table-hover-bg:    rgba(0, 122, 255, 0.06);
+  --bs-table-border-color: #d1d1d6;
+
+  color-scheme: light;
+}
+
+/* iOS system font stack on the whole document */
+body {
+  background-color: var(--bs-body-bg);
+  color: var(--bs-body-color);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display",
+               "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Rounded corners on the pill-shaped chrome iOS favours */
+.btn, .form-control, .form-select, .input-group-text, .card, .modal-content,
+.dropdown-menu, .alert, .list-group, .badge {
+  border-radius: var(--bs-border-radius);
+}
+
+/* Navbar */
+.navbar {
+  background: rgba(255, 255, 255, 0.92) !important;
+  border-bottom: 1px solid #d1d1d6 !important;
+  backdrop-filter: saturate(180%) blur(12px);
+}
+.navbar-brand {
+  color: var(--ios-blue) !important;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.nav-link {
+  color: rgba(28, 28, 30, 0.82) !important;
+}
+.nav-link:hover,
+.nav-link.active {
+  color: var(--ios-blue) !important;
+}
+
+/* Cards */
+.card {
+  background-color: #ffffff;
+  border-color: #d1d1d6;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+.card-header {
+  background-color: #f2f2f7;
+  border-bottom-color: #d1d1d6;
+  color: #1c1c1e;
+  font-weight: 600;
+}
+
+/* Buttons (iOS filled / tinted style) */
+.btn {
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.btn-primary {
+  background-color: var(--ios-blue);
+  border-color: var(--ios-blue);
+  color: #ffffff;
+}
+.btn-primary:hover {
+  background-color: #0062cc;
+  border-color: #0062cc;
+}
+.btn-secondary {
+  background-color: rgba(0, 122, 255, 0.10);
+  border-color: transparent;
+  color: var(--ios-blue);
+}
+.btn-secondary:hover {
+  background-color: rgba(0, 122, 255, 0.18);
+  border-color: transparent;
+  color: var(--ios-blue);
+}
+.btn-success {
+  background-color: var(--ios-green);
+  border-color: var(--ios-green);
+  color: #ffffff;
+}
+.btn-success:hover {
+  background-color: #1d7333;
+  border-color: #1d7333;
+}
+.btn-outline-primary {
+  border-color: var(--ios-blue);
+  color: var(--ios-blue);
+}
+.btn-outline-primary:hover {
+  background-color: var(--ios-blue);
+  color: #ffffff;
+}
+.btn-outline-danger {
+  border-color: var(--ios-red);
+  color: var(--ios-red);
+}
+.btn-outline-danger:hover {
+  background-color: var(--ios-red);
+  color: #ffffff;
+}
+
+/* Forms */
+.form-control,
+.form-select {
+  background-color: #ffffff;
+  border-color: #d1d1d6;
+  color: #1c1c1e;
+}
+.form-control:focus,
+.form-select:focus {
+  background-color: #ffffff;
+  border-color: var(--ios-blue);
+  color: #1c1c1e;
+  box-shadow: 0 0 0 0.2rem rgba(0, 122, 255, 0.22);
+}
+.form-control::placeholder { color: rgba(60, 60, 67, 0.5); }
+.form-check-input:checked {
+  background-color: var(--ios-blue);
+  border-color: var(--ios-blue);
+}
+.input-group-text {
+  background-color: #f2f2f7;
+  border-color: #d1d1d6;
+  color: rgba(60, 60, 67, 0.78);
+}
+
+/* Tables */
+.table {
+  color: var(--bs-body-color);
+  border-color: #d1d1d6;
+}
+.table > thead {
+  border-bottom: 2px solid #d1d1d6;
+  color: rgba(60, 60, 67, 0.78);
+}
+
+/* Badges */
+.text-bg-primary   { background-color: var(--ios-blue)   !important; color: #ffffff !important; }
+.text-bg-secondary { background-color: #6c6c70           !important; color: #ffffff !important; }
+.text-bg-success   { background-color: var(--ios-green)  !important; color: #ffffff !important; }
+.text-bg-info      { background-color: var(--ios-indigo) !important; color: #ffffff !important; }
+.text-bg-warning   { background-color: var(--ios-orange) !important; color: #ffffff !important; }
+.text-bg-danger    { background-color: var(--ios-red)    !important; color: #ffffff !important; }
+
+/* Alerts */
+.alert-success {
+  background-color: rgba(36, 138, 61, 0.10);
+  border-color: rgba(36, 138, 61, 0.30);
+  color: #186029;
+}
+.alert-danger {
+  background-color: rgba(215, 0, 21, 0.08);
+  border-color: rgba(215, 0, 21, 0.30);
+  color: #93000e;
+}
+.alert-warning {
+  background-color: rgba(178, 80, 0, 0.10);
+  border-color: rgba(178, 80, 0, 0.30);
+  color: #7a3700;
+}
+.alert-info {
+  background-color: rgba(88, 86, 214, 0.10);
+  border-color: rgba(88, 86, 214, 0.30);
+  color: #3c3a94;
+}
+
+/* Dropdowns & modals */
+.dropdown-menu {
+  background-color: #ffffff;
+  border-color: #d1d1d6;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.12);
+}
+.dropdown-item { color: #1c1c1e; }
+.dropdown-item:hover {
+  background-color: rgba(0, 122, 255, 0.10);
+  color: var(--ios-blue);
+}
+.modal-content {
+  background-color: #ffffff;
+  border-color: #d1d1d6;
+}
+.modal-header { border-bottom-color: #d1d1d6; color: #1c1c1e; }
+.modal-footer { border-top-color: #d1d1d6; }
+
+/* List groups */
+.list-group-item {
+  background-color: #ffffff;
+  border-color: #d1d1d6;
+  color: #1c1c1e;
+}
+.list-group-item-action:hover {
+  background-color: rgba(0, 122, 255, 0.06);
+  color: var(--ios-blue);
+}
+
+/* Nav tabs */
+.nav-tabs { border-bottom-color: #d1d1d6; }
+.nav-tabs .nav-link { color: rgba(60, 60, 67, 0.78) !important; }
+.nav-tabs .nav-link.active {
+  background-color: #ffffff;
+  border-color: #d1d1d6 #d1d1d6 #ffffff;
+  color: var(--ios-blue) !important;
+}
+
+/* Urgency colours (override base.html) */
+.urgency-expired { color: #d70015; }
+.urgency-today   { color: #c93400; }
+.urgency-3d      { color: #b25000; }
+.urgency-ok      { color: #248a3d; }
+
+/* Progress bars */
+.progress { background-color: #e5e5ea; }
+.progress-bar { background-color: var(--ios-blue); }

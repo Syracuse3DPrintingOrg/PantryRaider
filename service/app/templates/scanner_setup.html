@@ -1,0 +1,147 @@
+{% extends "base.html" %}
+{% block title %}Barcode scanner setup: Pantry Raider{% endblock %}
+
+{% block content %}
+<div class="mt-3 mb-3">
+  <h4><i class="bi bi-upc-scan me-2"></i>Barcode scanner setup</h4>
+  <p class="text-secondary mb-0">Programs a scan-engine reader by showing it its
+    own setup codes, one at a time. Point the reader at this screen and scan each
+    code as it comes up; the reader beeps to confirm and moves itself to the next
+    setting.</p>
+</div>
+
+<style>
+  /* The code has to be big and on solid white so the reader can read it off a
+     dark-theme screen from a few centimetres away. */
+  .scan-code-frame { background:#fff; border-radius:8px; padding:18px;
+    display:flex; align-items:center; justify-content:center; }
+  .scan-code-frame img { max-width:100%; height:auto; image-rendering:pixelated; }
+  .scan-step { display:none; }
+  .scan-step.active { display:block; }
+  .scan-qr img { background:#fff; padding:8px; border-radius:6px; max-width:180px; }
+</style>
+
+<div class="card mb-3">
+  <div class="card-body">
+    <div class="row g-3 align-items-end">
+      <div class="col-12 col-md-8">
+        <label class="form-label" for="scanner-model">Which reader are you setting up?</label>
+        <select id="scanner-model" class="form-select"
+                onchange="if(this.value){window.location.search='?model='+encodeURIComponent(this.value);}">
+          {% for m in models %}
+          <option value="{{ m.id }}" {{ 'selected' if m.id == model_id else '' }}>
+            {{ m.label }}{{ ' (recommended)' if m.recommended else '' }}
+          </option>
+          {% endfor %}
+        </select>
+        <p class="form-text mb-0">{{ model.blurb }}</p>
+      </div>
+      <div class="col-12 col-md-4 text-md-end">
+        <div class="scan-qr d-inline-block">
+          <img src="ui/qr?url={{ wizard_lan_url | urlencode }}" alt="QR code to open this wizard on a phone">
+          <p class="form-text mb-0">Scan to run this on a phone by the reader.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{# The whole sequence is rendered; the buttons below reveal one step at a time. #}
+<div id="scan-steps" data-count="{{ model.steps | length }}">
+  {% for step in model.steps %}
+  <div class="scan-step {{ 'active' if loop.first else '' }}" data-step="{{ loop.index0 }}"
+       id="scan-step-{{ step.key }}">
+    <div class="card mb-3">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-{{ 'check2-circle' if step.key == 'save' else 'upc' }} me-2"></i>{{ step.title }}</span>
+        <span class="badge text-bg-secondary">Step {{ loop.index }} of {{ model.steps | length }}</span>
+      </div>
+      <div class="card-body">
+        <p>{{ step.explain }}</p>
+        {% if step.image %}
+        <div class="scan-code-frame mb-2">
+          <img src="{{ step.image }}" alt="Configuration code: {{ step.title }}" style="max-width:360px;">
+        </div>
+        <p class="text-secondary small mb-0"><i class="bi bi-info-circle me-1"></i>Hold the
+          reader 4 to 15 cm from the screen, steady, until it beeps.</p>
+        {% endif %}
+        {% if step.alternatives %}
+        <div class="mt-3">
+          <button class="btn btn-outline-secondary btn-sm" type="button" data-bs-toggle="collapse"
+                  data-bs-target="#alts-{{ step.key }}">
+            <i class="bi bi-sliders me-1"></i>Other options for this step
+          </button>
+          <div class="collapse mt-2" id="alts-{{ step.key }}">
+            <p class="text-secondary small">The code above is the recommended choice.
+              Scan one of these instead only if it suits your setup better.</p>
+            {% for alt in step.alternatives %}
+            <div class="border rounded p-2 mb-2">
+              <div class="fw-semibold">{{ alt.title }}</div>
+              <p class="small mb-2">{{ alt.explain }}</p>
+              <div class="scan-code-frame" style="max-width:260px;">
+                <img src="{{ alt.image }}" alt="Alternative code: {{ alt.title }}" style="max-width:220px;">
+              </div>
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+
+  {# The finish card, revealed after the last step. #}
+  <div class="scan-step" data-step="{{ model.steps | length }}" id="scan-step-done">
+    <div class="card mb-3 border-success">
+      <div class="card-header text-bg-success"><i class="bi bi-check2-all me-2"></i>All set</div>
+      <div class="card-body">
+        <p class="mb-2">Your reader is programmed. Give it a try: open
+          <a href="ui/add">Manage Pantry</a>, pick the <strong>Stock up</strong> tab,
+          and present a barcode. It should land on the Pending list without you
+          clicking into any field first.</p>
+        <p class="text-secondary small mb-3">Nothing showing up? Come back and pick
+          <em>Waveshare module: it stopped typing</em> from the reader menu above to
+          put it back into keyboard mode, or scan the start-over code and run through
+          again.</p>
+        <button class="btn btn-outline-secondary" type="button" onclick="scanGoto(0)">
+          <i class="bi bi-arrow-counterclockwise me-1"></i>Run it again from the start
+        </button>
+        <a class="btn btn-primary" href="setup#pane-scanning">
+          <i class="bi bi-gear me-1"></i>Back to scanner settings
+        </a>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="d-flex justify-content-between mb-4">
+  <button class="btn btn-outline-secondary" type="button" id="scan-back" onclick="scanStep(-1)" disabled>
+    <i class="bi bi-arrow-left me-1"></i>Back
+  </button>
+  <button class="btn btn-primary" type="button" id="scan-next" onclick="scanStep(1)">
+    Next<i class="bi bi-arrow-right ms-1"></i>
+  </button>
+</div>
+
+<script>
+  // Reveal the sequence one step at a time. The final card (index == count) is
+  // the "all set" confirmation, so Next stops there and Back walks it in reverse.
+  (function () {
+    var steps = Array.prototype.slice.call(document.querySelectorAll('#scan-steps .scan-step'));
+    var last = steps.length - 1;
+    var cur = 0;
+    function show(i) {
+      cur = Math.max(0, Math.min(last, i));
+      steps.forEach(function (el, idx) { el.classList.toggle('active', idx === cur); });
+      document.getElementById('scan-back').disabled = (cur === 0);
+      var next = document.getElementById('scan-next');
+      next.classList.toggle('d-none', cur === last);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+    window.scanStep = function (delta) { show(cur + delta); };
+    window.scanGoto = function (i) { show(i); };
+    show(0);
+  })();
+</script>
+{% endblock %}

@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Enter your code: Forager{% endblock %}
+{% block main_class %}narrow{% endblock %}
+{% block content %}
+<h1>One more step</h1>
+<div class="card">
+  {% if error %}<div class="alert alert-error">{{ error }}</div>{% endif %}
+  <p class="muted small">Enter the 6-digit code from your authenticator app. If
+  you cannot get to your app, you can use one of your recovery codes instead.</p>
+  <form method="post" action="/login/2fa">
+    <label for="code">Code from your authenticator app</label>
+    <input type="text" id="code" name="code" inputmode="text"
+           autocomplete="one-time-code" required autofocus>
+    <button class="btn btn-block" type="submit">Continue</button>
+  </form>
+</div>
+<p class="muted small"><a href="/login">Back to log in</a></p>
+{% endblock %}

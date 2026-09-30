@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Read-only token: nothing here writes to the repository.
+permissions:
+  contents: read
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    # Every interpreter the app meets, with the pinned service/requirements.txt:
+    # 3.12 is what the shipped image runs, 3.11 is what a Debian bookworm box
+    # installs, and 3.13 is what a Trixie satellite or host agent runs. This is
+    # the only job that exercises the real dependency set. tests.yml
+    # deliberately covers something else (the minimal import-time floor).
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    # The app creates its data dir at import time (database.py). The default
+    # /app/data is not writable on the runner, so point it at a writable path.
+    env:
+      DATA_DIR: /tmp/foodassistant-data
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r service/requirements.txt
+          pip install ruff pytest pytest-cov anyio
+
+      - name: Lint (ruff)
+        run: ruff check .
+
+      # The extensionless Python helpers in scripts/image-build (the host
+      # bridge and friends) run on the device's own interpreter, so parse them
+      # on every version in the matrix. Picked by shebang, not by name.
+      - name: Syntax-check the Python provisioning helpers
+        run: |
+          set -e
+          files=""
+          for f in scripts/image-build/*; do
+            case "$f" in *.*) continue ;; esac
+            [ -f "$f" ] || continue
+            if head -1 "$f" | grep -q python; then
+              files="$files $f"
+            fi
+          done
+          echo "Checking:$files"
+          [ -n "$files" ] || { echo "No Python helpers found in scripts/image-build." >&2; exit 1; }
+          python -c "import ast,sys; [ast.parse(open(f).read(), f) for f in sys.argv[1:]]" $files
+
+      - name: Tests (pytest)
+        run: python -m pytest tests/ -q --cov=service/app --cov-report=term-missing

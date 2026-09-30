@@ -1,0 +1,368 @@
+name: Build Cub firmware
+
+# Compiles the Bandit Cub ESPHome firmware for every supported board profile
+# and attaches two images per profile to the GitHub release for the pushed
+# tag: the factory image the browser flasher writes over USB, and the app-only
+# image an over-the-air update flashes. The server fetches these exact assets,
+# so the names must stay bandit-cub-<profile>-<version>.factory.bin and
+# bandit-cub-<profile>-<version>.ota.bin on the release tagged v<APP_VERSION>
+# (see service/app/services/cub.py firmware_asset_name, ota_asset_name,
+# release_download_url, and ota_release_download_url).
+#
+# Like publish-image.yml, this workflow ships in the repo and runs where the
+# tag is pushed. Release assets only make sense on the public repo
+# (Syracuse3DPrintingOrg/PantryRaider), the one the fleet and the flasher
+# page pull from, so the publish job is gated to that repo explicitly rather
+# than derived from context. Building still runs everywhere as a compile
+# check.
+#
+# A broken profile must never block the others: fail-fast is off, so the other
+# boards keep building, and the publish job runs regardless (always()) and
+# reports what it did and did not attach. The run itself still goes red, which
+# is the point: a profile that stops compiling is a release the fleet cannot
+# flash. Re-run via workflow_dispatch with the tag input to backfill a profile
+# after a fix lands.
+#
+# Pushes to main that touch the firmware run the build job too, never the
+# publish job. That is a compile check, and it is also what fills the cache: a
+# tag run can restore a cache saved on the default branch but not one saved by
+# an earlier tag, so without these runs every release rebuilt ESP-IDF from
+# nothing.
+
+on:
+  push:
+    tags: ["v*"]
+    # Path filters apply to the branch push only; a tag push always runs.
+    branches: [main]
+    paths:
+      - "esphome/**"
+      - ".github/workflows/build-cub-firmware.yml"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to build and publish for (e.g. v0.18.40); blank builds the tree's APP_VERSION without publishing"
+        required: false
+        default: ""
+
+permissions:
+  contents: write # attach assets to the release
+
+env:
+  # Pinned to the release validated against the repo's ESPHome YAML
+  # (packages/cub-base.yaml declares min_version 2026.6.0; 2026.6.5 is what
+  # the firmware was built and flashed with locally). Bump deliberately,
+  # after a local build, never by floating to latest.
+  ESPHOME_VERSION: "2026.6.5"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    # No continue-on-error: all three profiles compile (the touch7 LVGL break,
+    # FoodAssistant-5f9m, shipped in 0.18.42), so a compile failure here is a
+    # real regression and has to fail the run. fail-fast below still lets the
+    # healthy boards finish and publish.
+    strategy:
+      fail-fast: false
+      # relay-check is compile-only: the T-Display build with the BLE relay
+      # switched on (esphome/tests/relay-check.yaml), so the relay code the
+      # shipped Cubs leave out still has to build. Its image is never uploaded
+      # or published, and it shares the T-Display cache (same board, same
+      # toolchain) rather than storing another copy of ESP-IDF.
+      matrix:
+        include:
+          - profile: tdisplay
+            config: esphome/cub-tdisplay.yaml
+            ship: true
+          - profile: tdisplay-s3
+            config: esphome/cub-tdisplay-s3.yaml
+            ship: true
+          - profile: touch7
+            config: esphome/cub-touch7.yaml
+            ship: true
+          - profile: relay-check
+            config: esphome/tests/relay-check.yaml
+            ship: false
+            cache: tdisplay
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      # ESPHome 2026.x keeps ESP-IDF under ~/.cache/esphome (about 1.9 GB),
+      # which is most of what a cold build downloads.
+      - name: Cache pip, PlatformIO and ESP-IDF
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/pip
+            ~/.cache/esphome
+            ~/.platformio
+          key: cub-fw-${{ runner.os }}-esphome-${{ env.ESPHOME_VERSION }}-${{ matrix.cache || matrix.profile }}
+          restore-keys: |
+            cub-fw-${{ runner.os }}-esphome-${{ env.ESPHOME_VERSION }}-
+
+      - name: Install ESPHome
+        run: pip install "esphome==${ESPHOME_VERSION}"
+
+      - name: Determine firmware version
+        id: ver
+        run: |
+          set -euo pipefail
+          RAW=""
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            RAW="${GITHUB_REF_NAME}"
+          elif [ -n "${{ inputs.tag }}" ]; then
+            RAW="${{ inputs.tag }}"
+          else
+            # A main push or a manual run without a tag: compile check
+            # against the tree's version; nothing is published.
+            RAW="v$(grep -oE 'APP_VERSION = "[0-9.]+"' service/app/config.py | grep -oE '[0-9.]+')"
+          fi
+          VERSION="${RAW#v}"
+          if [ -z "$VERSION" ]; then
+            echo "Could not determine a firmware version." >&2
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Building ${{ matrix.profile }} at version $VERSION"
+
+      - name: Compile firmware
+        run: |
+          set -euo pipefail
+          # -s overrides the cub_version substitution from
+          # packages/cub-base.yaml at build time (command-line substitutions
+          # win over YAML), so the binary reports the release version without
+          # editing the tree.
+          esphome -s cub_version "${{ steps.ver.outputs.version }}" \
+            compile "${{ matrix.config }}"
+
+      # A Cub has no network path onto it: the firmware changes only over USB.
+      # ESPHome brings its unauthenticated web upload in with the captive
+      # portal (and with web_server OTA), so fail the build if either one
+      # comes back through a package or a component default.
+      - name: Check the build has no network firmware path
+        run: |
+          set -euo pipefail
+          DEFINES="$(find esphome -path '*/.esphome/build/*/src/esphome/core/defines.h' 2>/dev/null | head -n1 || true)"
+          if [ -z "$DEFINES" ]; then
+            echo "No defines.h found for ${{ matrix.profile }}; cannot check the build." >&2
+            exit 1
+          fi
+          echo "Checking $DEFINES"
+          if grep -nE 'USE_CAPTIVE_PORTAL|USE_WEBSERVER_OTA' "$DEFINES"; then
+            echo "${{ matrix.profile }} builds in a network firmware upload (captive portal or web server OTA)." >&2
+            exit 1
+          fi
+          if [ "${{ matrix.profile }}" = "relay-check" ] \
+             && ! grep -q 'PR_USE_BLE_RELAY' "$DEFINES"; then
+            echo "relay-check compiled without PR_USE_BLE_RELAY, so the relay code was not built." >&2
+            exit 1
+          fi
+
+      - name: Collect firmware images
+        if: matrix.ship
+        id: collect
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.ver.outputs.version }}"
+          mkdir -p out
+
+          # Find one of ESPHome's build outputs by name. The build dir has
+          # moved between ESPHome versions, so try the known layouts first and
+          # sweep the tree as a last resort.
+          find_build_file() {
+            local name="$1" hit=""
+            hit="$(find esphome/.esphome/build .esphome/build -name "$name" 2>/dev/null | head -n1 || true)"
+            if [ -z "$hit" ]; then
+              hit="$(find . -name "$name" -not -path './.git/*' 2>/dev/null | head -n1 || true)"
+            fi
+            printf '%s' "$hit"
+          }
+
+          BIN="$(find_build_file firmware.factory.bin)"
+          if [ -z "$BIN" ]; then
+            echo "No firmware.factory.bin produced for ${{ matrix.profile }}." >&2
+            exit 1
+          fi
+          OUT="bandit-cub-${{ matrix.profile }}-${VERSION}.factory.bin"
+          cp -f "$BIN" "out/$OUT"
+          ls -lh "out/$OUT"
+          echo "asset=$OUT" >> "$GITHUB_OUTPUT"
+          echo "- built \`$OUT\`" >> "$GITHUB_STEP_SUMMARY"
+
+          # The app-only image an over-the-air update flashes. Publishing it
+          # is what lets the server hand a Cub ESPHome's own OTA image instead
+          # of slicing the app out of the factory image at a fixed offset
+          # (service/app/services/cub.py). Missing it is not fatal: the server
+          # falls back to the slice, so a build that somehow lacks the file
+          # still ships a flashable release.
+          OTABIN="$(find_build_file firmware.ota.bin)"
+          if [ -n "$OTABIN" ]; then
+            OTAOUT="bandit-cub-${{ matrix.profile }}-${VERSION}.ota.bin"
+            cp -f "$OTABIN" "out/$OTAOUT"
+            ls -lh "out/$OTAOUT"
+            echo "- built \`$OTAOUT\`" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "- no \`firmware.ota.bin\` for ${{ matrix.profile }}; the server will slice the factory image instead." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload build artifact
+        if: matrix.ship
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: cub-firmware-${{ matrix.profile }}
+          path: out/*.bin
+          if-no-files-found: error
+
+  publish:
+    # Runs even when a matrix leg failed (always()), attaches whatever was
+    # built, and says plainly what is missing. Publishing is pinned to the
+    # public repo: assets anywhere else would never be seen by the flasher
+    # page or the fleet.
+    needs: build
+    if: >-
+      always() &&
+      github.repository == 'Syracuse3DPrintingOrg/PantryRaider' &&
+      (github.ref_type == 'tag' ||
+       (github.event_name == 'workflow_dispatch' && inputs.tag != ''))
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      # Only for scripts/release-notes.sh and the tagged CHANGELOG.md.
+      - name: Checkout the tagged tree
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.ref_type == 'tag' && github.ref_name || inputs.tag }}
+
+      - name: Download built firmware
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: cub-firmware-*
+          path: firmware
+          merge-multiple: true
+
+      - name: Attach firmware to the release
+        run: |
+          set -euo pipefail
+          REPO="${GITHUB_REPOSITORY}"
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            TAG="${GITHUB_REF_NAME}"
+          else
+            TAG="${{ inputs.tag }}"
+          fi
+          echo "Publishing to release $TAG on $REPO"
+          # The release description: the CHANGELOG entry plus the firmware's
+          # GPL notice. release-image.yml writes the same body from the same
+          # script, so whichever workflow finishes last leaves identical text.
+          # A backfill for a tag older than the script leaves the body alone.
+          NOTES="$RUNNER_TEMP/release-notes.md"
+          if [ -f scripts/release-notes.sh ]; then
+            bash scripts/release-notes.sh "$TAG" > "$NOTES"
+          else
+            : > "$NOTES"
+          fi
+
+          # Find the release id with drafts included. The releases/tags/<tag>
+          # endpoint never returns drafts, and the release for this tag may
+          # still be a draft (or not exist yet: release-image.yml creates it
+          # on the same tag push and bakes an SD image first, which is slow).
+          find_release_id() {
+            gh api "repos/$REPO/releases?per_page=100" \
+              --jq ".[] | select(.tag_name == \"$TAG\") | .id" | head -n1
+          }
+          # The id can lag behind the release itself: the create call prints a
+          # URL before the releases list serves the new row, and a release
+          # created concurrently by release-image.yml shows up on its own
+          # schedule. So every lookup is a poll with backoff, never a single
+          # shot. This is what used to fail on the first run of every release.
+          poll_release_id() {
+            local tries="$1" delay="$2" id=""
+            for _ in $(seq 1 "$tries"); do
+              id="$(find_release_id || true)"
+              if [ -n "$id" ]; then
+                printf '%s' "$id"
+                return 0
+              fi
+              sleep "$delay"
+            done
+            return 1
+          }
+
+          RID="$(find_release_id || true)"
+          if [ -z "$RID" ]; then
+            # Give a concurrently created release a moment to appear, then
+            # create it ourselves. softprops/action-gh-release (used by
+            # release-image.yml) attaches to an existing release by tag, so
+            # creating it here does not conflict with that workflow; a lost
+            # creation race just means re-fetching the id.
+            RID="$(poll_release_id 6 10 || true)"
+          fi
+          if [ -z "$RID" ]; then
+            # Losing the creation race is a success, not a failure: whoever
+            # won created the release we were going to create. gh says so with
+            # an "already_exists" validation error, so treat that exactly like
+            # our own create succeeding and go look the id up either way.
+            create_log="$(mktemp)"
+            if gh release create "$TAG" --repo "$REPO" --title "$TAG" \
+                 --notes-file "$NOTES" > "$create_log" 2>&1; then
+              echo "Created release $TAG."
+            elif grep -qi 'already_exists\|already exists' "$create_log"; then
+              echo "Release $TAG already exists (created by another workflow); using it."
+            else
+              echo "gh release create did not succeed; will still look for an existing release." >&2
+            fi
+            cat "$create_log"
+            # Either way the release should exist now, but the list endpoint
+            # can take a few seconds to catch up with it.
+            RID="$(poll_release_id 12 5 || true)"
+          fi
+          if [ -z "$RID" ]; then
+            echo "Could not find or create a release for $TAG." >&2
+            exit 1
+          fi
+          echo "Using release id $RID for $TAG."
+          # Set the body by id, which also works on a draft, whoever created
+          # the release.
+          if [ -s "$NOTES" ]; then
+            gh api --method PATCH "repos/$REPO/releases/$RID" -F "body=@$NOTES" > /dev/null
+          fi
+
+          echo "## Cub firmware for $TAG" >> "$GITHUB_STEP_SUMMARY"
+          published=0
+          shopt -s nullglob
+          for f in firmware/*.bin; do
+            name="$(basename "$f")"
+            # Clobber by hand via the release id so this also works while the
+            # release is still a draft (gh release upload --clobber resolves
+            # non-draft tags only in some gh versions; the API path is exact).
+            aid="$(gh api "repos/$REPO/releases/$RID/assets?per_page=100" \
+              --jq ".[] | select(.name == \"$name\") | .id" | head -n1 || true)"
+            if [ -n "$aid" ]; then
+              gh api --method DELETE "repos/$REPO/releases/$RID/assets/$aid"
+            fi
+            curl -sSf -X POST \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H "Content-Type: application/octet-stream" \
+              --data-binary "@$f" \
+              "https://uploads.github.com/repos/$REPO/releases/$RID/assets?name=$name" \
+              > /dev/null
+            echo "- published \`$name\`" >> "$GITHUB_STEP_SUMMARY"
+            published=$((published + 1))
+          done
+
+          # Say plainly which boards have no firmware on this release.
+          for profile in tdisplay tdisplay-s3 touch7; do
+            hits=(firmware/bandit-cub-"$profile"-*.factory.bin)
+            if [ ${#hits[@]} -eq 0 ]; then
+              echo "- MISSING: \`$profile\` did not build; no asset attached. Re-run this workflow (workflow_dispatch with tag $TAG) after the fix lands." >> "$GITHUB_STEP_SUMMARY"
+            fi
+          done
+          if [ "$published" -eq 0 ]; then
+            echo "No firmware was built; nothing attached." >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi

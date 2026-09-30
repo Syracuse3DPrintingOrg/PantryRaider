@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+{# Two-pane split view for ultrawide and tall kiosk panels (FoodAssistant-dqpq).
+
+   A standalone wrapper (no base.html): two same-origin iframes share the
+   display, side by side in landscape and stacked in portrait, so a bar panel
+   like the Waveshare 480x1920 can keep Glance up on one half while the other
+   half browses the full app. Navigation inside a pane stays inside that pane
+   naturally; the wrapper itself never navigates. A locked first pane snaps
+   back to its page whenever something carries it away, so it holds as an
+   always-on status panel.
+
+   The screensaver and the kiosk idle reporter load HERE, on the wrapper, so
+   the saver overlays the whole display above both panes; the framed pages'
+   own screensaver.js stands down inside a frame. Because iframe input never
+   bubbles to the wrapper, a small relay below forwards pane activity so the
+   wrapper's idle countdown resets while someone is using either pane.
+
+   Like start.html this page must carry the kiosk display attributes itself.
+   data-ui-scale is pinned to 1.0 ON PURPOSE: each pane's page applies the
+   configured interface scale to its own content, so scaling the wrapper too
+   would compound the zoom and push the panes off screen. #}
+<html lang="en" data-bs-theme="{{ theme_mode }}"
+      data-ui-scale="1.0"
+      data-display-rotation="{{ display_rotation | default(0) }}"
+      data-rotation-mode="{{ 'compositor' if is_pi else 'css' }}"
+      data-is-pi="{{ '1' if is_pi else '0' }}"
+      data-display-margin-top="{{ display_margin_top | default(0) }}"
+      data-display-margin-right="{{ display_margin_right | default(0) }}"
+      data-display-margin-bottom="{{ display_margin_bottom | default(0) }}"
+      data-display-margin-left="{{ display_margin_left | default(0) }}">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <base href="{{ ingress_path }}/">
+  <title>Split View: Pantry Raider</title>
+  <link rel="icon" type="image/svg+xml" href="static/icons/favicon.svg">
+  {# Latches kiosk mode from ?kiosk=1 and applies rotation plus the panel
+     safe-area insets to this standalone page (FoodAssistant-2e0f). #}
+  <script src="static/js/kiosk-display.js?v={{ app_version }}"></script>
+  <style>
+    html, body { height: 100%; margin: 0; overflow: hidden;
+      background: {{ '#dee2e6' if theme_mode == 'light' else '#000' }}; }
+    /* Pad by the panel safe-area insets (set on <html> by kiosk-display.js)
+       so neither pane runs off a clipped panel edge; 0 on a normal browser. */
+    .split-wrap { position: fixed; inset: 0; display: flex; gap: 2px;
+      flex-direction: row;
+      padding: var(--kiosk-inset-top, 0px) var(--kiosk-inset-right, 0px)
+               var(--kiosk-inset-bottom, 0px) var(--kiosk-inset-left, 0px); }
+    /* Orientation decides the split: a wide panel sits the panes side by
+       side, a tall one stacks them. */
+    @media (orientation: portrait) { .split-wrap { flex-direction: column; } }
+    .split-pane { flex: 1 1 50%; min-width: 0; min-height: 0;
+      width: 100%; height: 100%; border: 0; display: block; }
+  </style>
+</head>
+<body>
+  <div class="split-wrap">
+    <iframe class="split-pane" id="pane-primary" src="{{ primary_src }}"
+            data-locked="{{ '1' if lock_primary else '0' }}"
+            title="First pane"></iframe>
+    <iframe class="split-pane" id="pane-secondary" src="{{ secondary_src }}"
+            title="Second pane"></iframe>
+  </div>
+
+  <script>
+    (function () {
+      var primary = document.getElementById('pane-primary');
+      var secondary = document.getElementById('pane-secondary');
+
+      // Activity relay: input inside an iframe never reaches the wrapper, so
+      // without this the wrapper's screensaver would count someone actively
+      // using a pane as idle. On every pane load (a fresh document each
+      // navigation) listeners go onto the pane's window and forward activity
+      // as a synthetic mousemove on the wrapper, which screensaver.js already
+      // treats as activity. Throttled; same-origin, so the try never fires.
+      var EVENTS = ['pointerdown', 'touchstart', 'mousedown', 'keydown',
+                    'mousemove', 'wheel'];
+      var lastRelay = 0;
+      function relay() {
+        var now = Date.now();
+        if (now - lastRelay < 1000) return;
+        lastRelay = now;
+        try { window.dispatchEvent(new Event('mousemove')); } catch (e) { }
+      }
+      function wireActivity(frame) {
+        if (!frame) return;
+        frame.addEventListener('load', function () {
+          try {
+            var win = frame.contentWindow;
+            for (var i = 0; i < EVENTS.length; i++) {
+              win.addEventListener(EVENTS[i], relay,
+                                   { capture: true, passive: true });
+            }
+          } catch (e) { /* surprise cross-origin page: skip the relay */ }
+        });
+      }
+      wireActivity(primary);
+      wireActivity(secondary);
+
+      // Locked pane (FoodAssistant-dqpq): the first pane's page is remembered
+      // from its first load, and any navigation that carries the pane to a
+      // different page snaps it straight back, so a stray tap can never lose
+      // the always-on panel. location.replace keeps the pane's history flat.
+      if (primary && primary.getAttribute('data-locked') === '1') {
+        var homeHref = null;
+        var homePath = null;
+        primary.addEventListener('load', function () {
+          try {
+            var loc = primary.contentWindow.location;
+            if (homeHref === null) {
+              homeHref = loc.href;
+              homePath = loc.pathname;
+              return;
+            }
+            if (loc.pathname !== homePath) loc.replace(homeHref);
+          } catch (e) { /* cross-origin: leave it; the pane stays usable */ }
+        });
+      }
+    })();
+  </script>
+
+  {# Kiosk activity reporter: tells the host bridge the user is active so the
+     panel wakes and does not blank mid-use, same as every kiosk page. #}
+  <script src="static/js/kiosk-idle.js?v={{ app_version }}"></script>
+  {# The screensaver lives on the WRAPPER so its overlay spans the entire
+     display, above both panes; the framed pages never start their own. #}
+  <div id="screensaver-config" data-minutes="{{ screensaver_minutes }}" data-speed="{{ screensaver_speed }}" data-pill-scale="{{ screensaver_pill_scale }}" data-photo-seconds="{{ screensaver_photo_seconds }}" data-ken-burns="{{ 'true' if screensaver_ken_burns else 'false' }}" data-ken-burns-speed="{{ screensaver_ken_burns_speed }}" data-mode="{{ screensaver_mode }}" data-all-clients="{{ 'true' if screensaver_all_clients else 'false' }}" hidden></div>
+  <script src="static/js/screensaver.js?v={{ app_version }}"></script>
+</body>
+</html>

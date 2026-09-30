@@ -1,0 +1,64 @@
+# Forager (Pantry Raider's cloud service): app + Postgres in Docker.
+# Caddy (TLS), WireGuard, and the tunnel agent run on the VPS HOST, since a
+# containerized Caddy could not reach the tunnel peers on wg0. See cloud/vps.
+# Copy .env.example to .env and fill in the secrets before `docker compose up -d`.
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    # Every CLOUD_* setting in .env flows through here, so adding a new one
+    # (an admin email, a Stripe price id, the Google OAuth client) needs no
+    # compose edit. Only the database URL is computed, since it interpolates
+    # the Postgres password.
+    env_file: .env
+    environment:
+      CLOUD_DATABASE_URL: postgresql+psycopg2://pantry:${POSTGRES_PASSWORD:?set in .env}@db:5432/pantrycloud
+      CLOUD_AI_FORWARDER: ${CLOUD_AI_FORWARDER:-gemini}
+    # Reach the host-run tunnel agent by its fixed gateway address on the
+    # pinned network below (an internal-only IP, never public).
+    extra_hosts:
+      - "host-gateway:host-gateway"
+    depends_on:
+      db:
+        condition: service_healthy
+    # Persist app data (Premium cloud backups live here, FoodAssistant-kzjz) so
+    # it survives a container rebuild. Everything else is in Postgres.
+    volumes:
+      - cloud_data:/app/data
+    # Published on loopback only so the host's Caddy (which terminates TLS and
+    # also proxies the kitchen tunnels) can reach it, while nothing outside the
+    # VPS can hit the app directly. Caddy is not a compose service: a
+    # containerized Caddy could not reach the WireGuard tunnel peers on wg0.
+    ports:
+      - "127.0.0.1:8000:8000"
+
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: pantry
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in .env}
+      POSTGRES_DB: pantrycloud
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pantry -d pantrycloud"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+
+volumes:
+  pgdata:
+  cloud_data:
+
+# Pinned subnet so the gateway IP is deterministic: the host-run tunnel agent
+# binds 172.28.0.1:9300 (FORAGER_TUNNEL_AGENT_HOST), reachable from the app
+# container at http://172.28.0.1:9300 (CLOUD_TUNNEL_AGENT_URL) but never from
+# the public internet.
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
+          gateway: 172.28.0.1

@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Check your recipe: Forager{% endblock %}
+{% block content %}
+<h1>Check your recipe</h1>
+<p class="muted">Here is your recipe, tidied up. Read it over and fix anything
+that is off. Nothing is shared until you confirm.</p>
+
+{% if error %}<div class="alert alert-error">{{ error }}</div>{% endif %}
+
+<div class="card">
+  <form method="post" action="/recipes/upload/confirm">
+    <label for="title">Recipe name</label>
+    <input type="text" id="title" name="title" value="{{ title }}" maxlength="200"
+           required>
+    <label for="ingredients">Ingredients (one per line)</label>
+    <textarea id="ingredients" name="ingredients" rows="8">{{ ingredients_text }}</textarea>
+    <label for="steps">Steps (one per line)</label>
+    <textarea id="steps" name="steps" rows="8">{{ steps_text }}</textarea>
+    <label for="attribution">Credit</label>
+    <input type="text" id="attribution" name="attribution" value="{{ attribution }}"
+           maxlength="500" required>
+
+    {# Honeypot carried onto the confirm step too. #}
+    <div class="hp-field" aria-hidden="true">
+      <label for="website">Website</label>
+      <input type="text" id="website" name="website" tabindex="-1" autocomplete="off">
+    </div>
+
+    <div class="plan-buttons">
+      <button class="btn" type="submit">Share this recipe</button>
+      <a class="btn btn-quiet" href="/recipes/upload">Start over</a>
+    </div>
+  </form>
+</div>
+
+<style>
+  textarea {
+    width: 100%; padding: 0.6rem 0.8rem; margin-bottom: 1rem;
+    background: var(--bg); color: var(--text);
+    border: 1px solid var(--border); border-radius: 0.45rem;
+    font-size: 1rem; font-family: inherit; line-height: 1.5;
+  }
+  textarea:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-soft); }
+</style>
+{% endblock %}

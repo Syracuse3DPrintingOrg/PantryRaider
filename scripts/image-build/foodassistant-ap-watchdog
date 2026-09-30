@@ -1,0 +1,150 @@
+#!/bin/bash
+# Continuous recovery-hotspot watchdog for Pi appliances.
+#
+# This used to be a one-shot check 30 seconds after boot, which meant a device
+# that lost its network LATER (a router replaced, a Wi-Fi password changed, the
+# appliance carried to a new house) never raised the hotspot and stayed
+# unreachable until a power cycle happened to boot it with no network. It is
+# now a persistent loop: every CHECK_INTERVAL seconds it re-evaluates the same
+# no-network criteria the one-shot used, raises the hotspot only after
+# FAILS_NEEDED consecutive failed checks (about three minutes, so a rebooting
+# router never flaps the AP up), holds off entirely while NetworkManager has a
+# connection attempt in flight, and stands the hotspot down again on its own
+# once real connectivity returns.
+#
+# Shape: a plain loop under a Type=simple, Restart=always unit rather than a
+# systemd timer firing one-shot checks. The debounce needs state (the count of
+# consecutive failed checks); a loop keeps that in a shell variable, while a
+# timer-fired oneshot would have to persist and re-read a counter file in /run
+# for no gain. A single long-running service also matches how the repo's other
+# resident host helper (foodassistant-host-bridge) runs.
+#
+# Ownership: this loop is the single owner of raising and standing down the
+# hotspot. The host bridge keeps its explicit POST /ap/disable endpoint for the
+# user's own "turn it off" action, and its GET /ap/status only reports state
+# (it no longer stands the AP down itself), so the two can never fight over
+# hostapd. Both judge connectivity by the same criteria.
+
+AP_FLAG="${AP_FLAG:-/run/foodassistant-ap-active}"
+CHECK_INTERVAL="${CHECK_INTERVAL:-60}"
+FAILS_NEEDED="${FAILS_NEEDED:-3}"
+STARTUP_DELAY="${STARTUP_DELAY:-30}"
+
+# --- connectivity probes (the same criteria the boot-time check used) --------
+
+has_connectivity() {
+  # Associated to a Wi-Fi network: the device is (or is about to be) online.
+  if iw dev wlan0 link 2>/dev/null | grep -q "Connected"; then return 0; fi
+  # A default route via any interface means we have a gateway. The hotspot
+  # itself assigns wlan0 a static address but never a default route, so a
+  # genuinely stranded device still fails this while the AP is legitimately up.
+  if ip route show default 2>/dev/null | grep -q .; then return 0; fi
+  # A wired interface that is up with an IPv4 address means LAN connectivity
+  # (the appliance is reachable on the network), so the hotspot is not needed.
+  local dev name
+  for dev in /sys/class/net/*; do
+    name=$(basename "$dev")
+    # Skip loopback, Wi-Fi (handled above), and virtual interfaces (docker,
+    # bridges, veth, tun/tap) so only a real wired link counts as connectivity.
+    case "$name" in lo|wlan*|docker*|br-*|veth*|tun*|tap*|vir*) continue;; esac
+    if [ "$(cat "$dev/carrier" 2>/dev/null)" = "1" ] \
+       && ip -4 addr show dev "$name" 2>/dev/null | grep -q "inet "; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+nm_connecting() {
+  # A join attempt in flight (the user typing a new Wi-Fi password through the
+  # app, say). The hotspot must never rise mid-attempt: hostapd grabbing wlan0
+  # would kill the very connection being set up. Device state is checked with
+  # the colon prefix so "disconnecting" can never read as "connecting".
+  nmcli -t -f DEVICE,TYPE,STATE device 2>/dev/null | grep -q ":connecting" && return 0
+  nmcli -t -f STATE general 2>/dev/null | grep -q "^connecting" && return 0
+  return 1
+}
+
+# --- the pure debounce decision ----------------------------------------------
+# ap_watchdog_decide <connected 0|1> <connecting 0|1> <ap_active 0|1> <fails>
+# Prints "<new fail count> <action>" where action is none, raise, or standdown.
+# Free of side effects so its truth table is unit-testable on its own
+# (tests/test_ap_watchdog.py sources just this file with AP_WATCHDOG_NO_MAIN=1).
+ap_watchdog_decide() {
+  local connected="$1" connecting="$2" ap_active="$3" fails="$4"
+  if [ "$connected" = "1" ]; then
+    # Real connectivity: the count resets, and a raised hotspot stands down.
+    if [ "$ap_active" = "1" ]; then echo "0 standdown"; else echo "0 none"; fi
+    return 0
+  fi
+  if [ "$connecting" = "1" ]; then
+    # An attempt is in flight: hold the count where it is and never raise.
+    echo "$fails none"
+    return 0
+  fi
+  if [ "$ap_active" = "1" ]; then
+    # Already broadcasting; nothing to do until connectivity returns.
+    echo "$fails none"
+    return 0
+  fi
+  fails=$((fails + 1))
+  if [ "$fails" -ge "$FAILS_NEEDED" ]; then
+    # Raise, and reset the count so a failed hostapd start is retried after
+    # another full debounce window instead of hammering it every check.
+    echo "0 raise"
+  else
+    echo "$fails none"
+  fi
+}
+
+raise_ap() {
+  ip addr add 192.168.99.1/24 dev wlan0 2>/dev/null || true
+  systemctl start hostapd
+  systemctl start dnsmasq
+  # Only advertise the AP as active when hostapd actually came up. If its
+  # config is missing (an un-reprovisioned device) or the unit failed, hostapd
+  # stays down; marking the flag anyway would make /ap/status report an AP that
+  # is not broadcasting and hand out credentials for it.
+  if systemctl is-active --quiet hostapd; then
+    touch "$AP_FLAG"
+  fi
+}
+
+stand_down_ap() {
+  # Mirror of the bridge's _ap_stand_down, so either path (this loop or the
+  # explicit POST /ap/disable) leaves the same clean state behind.
+  systemctl stop hostapd 2>/dev/null
+  systemctl stop dnsmasq 2>/dev/null
+  ip addr del 192.168.99.1/24 dev wlan0 2>/dev/null || true
+  rm -f "$AP_FLAG"
+}
+
+main() {
+  local fails=0 connected connecting ap_active decision action
+  # Give the normal boot-time connection a head start before the first check.
+  sleep "$STARTUP_DELAY"
+  while :; do
+    connected=0; has_connectivity && connected=1
+    connecting=0; nm_connecting && connecting=1
+    ap_active=0; [ -e "$AP_FLAG" ] && ap_active=1
+    decision="$(ap_watchdog_decide "$connected" "$connecting" "$ap_active" "$fails")"
+    fails="${decision%% *}"
+    action="${decision##* }"
+    case "$action" in
+      raise)
+        echo "no network for $FAILS_NEEDED consecutive checks; raising the recovery hotspot"
+        raise_ap
+        ;;
+      standdown)
+        echo "network connectivity is back; standing the recovery hotspot down"
+        stand_down_ap
+        ;;
+    esac
+    sleep "$CHECK_INTERVAL"
+  done
+}
+
+# Tests source this file to reach ap_watchdog_decide without starting the loop.
+if [ "${AP_WATCHDOG_NO_MAIN:-0}" != "1" ]; then
+  main
+fi

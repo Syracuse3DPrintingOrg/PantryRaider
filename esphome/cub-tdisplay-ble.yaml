@@ -1,0 +1,55 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Bandit Cub build: LilyGo T-Display with BLE receive (tdisplay profile).
+#   esphome run esphome/cub-tdisplay-ble.yaml
+#
+# The Cub passively scans for the Pantry Raider status broadcast (the
+# cub_ble_advertise setting on the sending side, off by default) and shows
+# it. It never pairs and needs no Wi-Fi network at all. The broadcast carries
+# counts, the soonest timer, and one probe temperature; item names do not
+# travel. Every Cub already carries the Bluetooth stack for Improv BLE, so the
+# listener's static cost is small; the real cost is runtime heap for the
+# continuous scan, which the plain ESP32 shares with the display.
+#
+# The relay is the other use for the same radio: a Cub that forwards the
+# advertisements of the kitchen sensors near it to the server, which is what
+# gives a server with no Bluetooth radio (a Docker box on a NAS) the fridge
+# and freezer sensors in the kitchen. It is off for the beta, because
+# forwarding means posting to the server. To try it, add relay: true under
+# pantry_raider: in a build of your own, with transport set to lan or auto
+# and the pairing that comes with them.
+#
+# The T-Display S3 build (cub-tdisplay-s3.yaml) listens the same way.
+
+# For the beta this build is the same as cub-tdisplay.yaml: every Cub is now
+# receive-only over the broadcast, so there is no longer a plain build and a
+# Bluetooth build to choose between. The file stays because the flasher
+# manifest, the docs and people's bookmarks all name it, and because it earns
+# its name back when the read-write work returns.
+
+substitutions:
+  name: bandit-cub
+  friendly_name: Bandit Cub
+  # Optional: pin which install this Cub listens to. 8 hex characters, the
+  # first 4 bytes of sha256 of the broadcasting install's device id, shown in
+  # Settings, Devices, under Bandit Cubs. Empty means the first sender heard
+  # wins and is remembered until the device is erased, which is the right
+  # default for a one-server home.
+  pr_install_tag: ""
+
+external_components:
+  - source:
+      type: local
+      path: components
+    components: [pantry_raider]
+
+packages:
+  base: !include packages/cub-base.yaml
+  profile: !include packages/tdisplay.yaml
+
+# Passive scan: listen only, never connect. The broadcast repeats every
+# second, so a generous interval/window still catches it quickly.
+pantry_raider:
+  # transport and install_tag both come from the base package now. The relay
+  # option is deliberately not set: forwarding what this Cub hears means
+  # posting it to the server, which a receive-only Cub does not do.
+  install_tag: ${pr_install_tag}

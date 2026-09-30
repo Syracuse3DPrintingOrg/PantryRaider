@@ -1,0 +1,587 @@
+[
+ {
+  "backend": "grocy",
+  "method": "DELETE",
+  "template": "api/objects/shopping_list/{x}",
+  "path": "api/objects/shopping_list/12",
+  "first": "v0.17.8",
+  "last": "HEAD",
+  "count": 145
+ },
+ {
+  "backend": "grocy",
+  "method": "DELETE",
+  "template": "api/objects/shopping_list_items/{x}",
+  "path": "api/objects/shopping_list_items/12",
+  "first": "v0.6.0",
+  "last": "v0.17.7",
+  "count": 78
+ },
+ {
+  "backend": "grocy",
+  "method": "GET",
+  "template": "api/objects/locations",
+  "path": "api/objects/locations",
+  "first": "v0.6.0",
+  "last": "HEAD",
+  "count": 223
+ },
+ {
+  "backend": "grocy",
+  "method": "GET",
+  "template": "api/objects/product_barcodes",
+  "path": "api/objects/product_barcodes",
+  "first": "v0.8.0",
+  "last": "HEAD",
+  "count": 222
+ },
+ {
+  "backend": "grocy",
+  "method": "GET",
+  "template": "api/objects/product_groups",
+  "path": "api/objects/product_groups",
+  "first": "v0.6.0",
+  "last": "HEAD",
+  "count": 223
+ },
+ {
+  "backend": "grocy",
+  "method": "GET",
+  "template": "api/objects/products",
+  "path": "api/objects/products",
+  "first": "v0.6.0",
+  "last": "HEAD",
+  "count": 223
+ },
+ {
+  "backend": "grocy",
+  "method": "GET",
+  "template": "api/objects/quantity_unit_conversions",
+  "path": "api/objects/quantity_unit_conversions",
+  "first": "v0.18.93",
+  "last": "HEAD",
+  "count": 19
+ },
+ {
+  "backend": "grocy",
+  "method": "GET",
+  "template": "api/objects/quantity_units",
+  "path": "api/objects/quantity_units",
+  "first": "v0.6.0",
+  "last": "HEAD",
+  "count": 223
+ },
+ {
+  "backend": "grocy",
+  "method": "GET",
+  "template": "api/objects/shopping_list",
+  "path": "api/objects/shopping_list",
+  "first": "v0.17.8",
+  "last": "HEAD",
+  "count": 145
+ },
+ {
+  "backend": "grocy",
+  "method": "GET",
+  "template": "api/objects/shopping_list/{x}",
+  "path": "api/objects/shopping_list/12",
+  "first": "v0.17.8",
+  "last": "v0.19.6",
+  "count": 143
+ },
+ {
+  "backend": "grocy",
+  "method": "GET",
+  "template": "api/objects/shopping_list_items",
+  "path": "api/objects/shopping_list_items",
+  "first": "v0.6.0",
+  "last": "v0.17.7",
+  "count": 78
+ },
+ {
+  "backend": "grocy",
+  "method": "GET",
+  "template": "api/objects/shopping_list_items/{x}",
+  "path": "api/objects/shopping_list_items/12",
+  "first": "v0.6.0",
+  "last": "v0.17.7",
+  "count": 78
+ },
+ {
+  "backend": "grocy",
+  "method": "GET",
+  "template": "api/objects/shopping_lists",
+  "path": "api/objects/shopping_lists",
+  "first": "v0.6.0",
+  "last": "HEAD",
+  "count": 223
+ },
+ {
+  "backend": "grocy",
+  "method": "GET",
+  "template": "api/objects/stock",
+  "path": "api/objects/stock",
+  "first": "v0.6.0",
+  "last": "HEAD",
+  "count": 223
+ },
+ {
+  "backend": "grocy",
+  "method": "GET",
+  "template": "api/objects/stock_log",
+  "path": "api/objects/stock_log",
+  "first": "v0.6.0",
+  "last": "HEAD",
+  "count": 223
+ },
+ {
+  "backend": "grocy",
+  "method": "GET",
+  "template": "api/stock",
+  "path": "api/stock",
+  "first": "v0.6.0",
+  "last": "HEAD",
+  "count": 223
+ },
+ {
+  "backend": "grocy",
+  "method": "GET",
+  "template": "api/stock/products/{x}/entries",
+  "path": "api/stock/products/12/entries",
+  "first": "v0.6.0",
+  "last": "HEAD",
+  "count": 223
+ },
+ {
+  "backend": "grocy",
+  "method": "GET",
+  "template": "api/system/info",
+  "path": "api/system/info",
+  "first": "v0.6.0",
+  "last": "HEAD",
+  "count": 223
+ },
+ {
+  "backend": "grocy",
+  "method": "POST",
+  "template": "api/objects/locations",
+  "path": "api/objects/locations",
+  "first": "v0.6.0",
+  "last": "HEAD",
+  "count": 223
+ },
+ {
+  "backend": "grocy",
+  "method": "POST",
+  "template": "api/objects/product_barcodes",
+  "path": "api/objects/product_barcodes",
+  "first": "v0.8.0",
+  "last": "HEAD",
+  "count": 222
+ },
+ {
+  "backend": "grocy",
+  "method": "POST",
+  "template": "api/objects/product_groups",
+  "path": "api/objects/product_groups",
+  "first": "v0.6.0",
+  "last": "HEAD",
+  "count": 223
+ },
+ {
+  "backend": "grocy",
+  "method": "POST",
+  "template": "api/objects/products",
+  "path": "api/objects/products",
+  "first": "v0.6.0",
+  "last": "HEAD",
+  "count": 223
+ },
+ {
+  "backend": "grocy",
+  "method": "POST",
+  "template": "api/objects/quantity_units",
+  "path": "api/objects/quantity_units",
+  "first": "v0.6.0",
+  "last": "HEAD",
+  "count": 223
+ },
+ {
+  "backend": "grocy",
+  "method": "POST",
+  "template": "api/objects/shopping_list",
+  "path": "api/objects/shopping_list",
+  "first": "v0.17.8",
+  "last": "HEAD",
+  "count": 145
+ },
+ {
+  "backend": "grocy",
+  "method": "POST",
+  "template": "api/objects/shopping_list_items",
+  "path": "api/objects/shopping_list_items",
+  "first": "v0.6.0",
+  "last": "v0.17.7",
+  "count": 78
+ },
+ {
+  "backend": "grocy",
+  "method": "POST",
+  "template": "api/objects/shopping_lists",
+  "path": "api/objects/shopping_lists",
+  "first": "v0.6.0",
+  "last": "HEAD",
+  "count": 223
+ },
+ {
+  "backend": "grocy",
+  "method": "POST",
+  "template": "api/stock/products/by-barcode/{x}/consume",
+  "path": "api/stock/products/by-barcode/4006381 333931/consume",
+  "first": "v0.8.0",
+  "last": "HEAD",
+  "count": 222
+ },
+ {
+  "backend": "grocy",
+  "method": "POST",
+  "template": "api/stock/products/{x}/add",
+  "path": "api/stock/products/12/add",
+  "first": "v0.6.0",
+  "last": "HEAD",
+  "count": 223
+ },
+ {
+  "backend": "grocy",
+  "method": "POST",
+  "template": "api/stock/products/{x}/consume",
+  "path": "api/stock/products/12/consume",
+  "first": "v0.6.0",
+  "last": "HEAD",
+  "count": 223
+ },
+ {
+  "backend": "grocy",
+  "method": "POST",
+  "template": "api/stock/products/{x}/inventory",
+  "path": "api/stock/products/12/inventory",
+  "first": "v0.18.90",
+  "last": "HEAD",
+  "count": 22
+ },
+ {
+  "backend": "grocy",
+  "method": "POST",
+  "template": "api/stock/products/{x}/open",
+  "path": "api/stock/products/12/open",
+  "first": "v0.18.90",
+  "last": "HEAD",
+  "count": 22
+ },
+ {
+  "backend": "grocy",
+  "method": "POST",
+  "template": "api/stock/products/{x}/transfer",
+  "path": "api/stock/products/12/transfer",
+  "first": "v0.6.0",
+  "last": "HEAD",
+  "count": 223
+ },
+ {
+  "backend": "grocy",
+  "method": "PUT",
+  "template": "api/objects/products/{x}",
+  "path": "api/objects/products/12",
+  "first": "v0.6.0",
+  "last": "HEAD",
+  "count": 223
+ },
+ {
+  "backend": "grocy",
+  "method": "PUT",
+  "template": "api/objects/shopping_list/{x}",
+  "path": "api/objects/shopping_list/12",
+  "first": "v0.17.8",
+  "last": "HEAD",
+  "count": 145
+ },
+ {
+  "backend": "grocy",
+  "method": "PUT",
+  "template": "api/objects/shopping_list_items/{x}",
+  "path": "api/objects/shopping_list_items/12",
+  "first": "v0.6.0",
+  "last": "v0.17.7",
+  "count": 78
+ },
+ {
+  "backend": "grocy",
+  "method": "PUT",
+  "template": "api/objects/stock/{x}",
+  "path": "api/objects/stock/12",
+  "first": "v0.6.0",
+  "last": "v0.18.98",
+  "count": 210
+ },
+ {
+  "backend": "grocy",
+  "method": "PUT",
+  "template": "api/stock/entry/{x}",
+  "path": "api/stock/entry/12",
+  "first": "v0.18.85",
+  "last": "HEAD",
+  "count": 27
+ },
+ {
+  "backend": "mealie",
+  "method": "DELETE",
+  "template": "api/groups/mealplans/{x}",
+  "path": "api/groups/mealplans/3f2a9c1e-5b7d-4e8a-9c0b-1d2e3f4a5b6c",
+  "first": "v0.6.0",
+  "last": "HEAD",
+  "count": 223
+ },
+ {
+  "backend": "mealie",
+  "method": "DELETE",
+  "template": "api/groups/shopping/items/{x}",
+  "path": "api/groups/shopping/items/3f2a9c1e-5b7d-4e8a-9c0b-1d2e3f4a5b6c",
+  "first": "v0.6.0",
+  "last": "HEAD",
+  "count": 223
+ },
+ {
+  "backend": "mealie",
+  "method": "DELETE",
+  "template": "api/households/mealplans/{x}",
+  "path": "api/households/mealplans/3f2a9c1e-5b7d-4e8a-9c0b-1d2e3f4a5b6c",
+  "first": "v0.6.0",
+  "last": "HEAD",
+  "count": 223
+ },
+ {
+  "backend": "mealie",
+  "method": "DELETE",
+  "template": "api/households/shopping/items/{x}",
+  "path": "api/households/shopping/items/3f2a9c1e-5b7d-4e8a-9c0b-1d2e3f4a5b6c",
+  "first": "v0.6.0",
+  "last": "HEAD",
+  "count": 223
+ },
+ {
+  "backend": "mealie",
+  "method": "GET",
+  "template": "api/foods",
+  "path": "api/foods",
+  "first": "v0.15.7",
+  "last": "HEAD",
+  "count": 200
+ },
+ {
+  "backend": "mealie",
+  "method": "GET",
+  "template": "api/groups/mealplans",
+  "path": "api/groups/mealplans",
+  "first": "v0.6.0",
+  "last": "HEAD",
+  "count": 223
+ },
+ {
+  "backend": "mealie",
+  "method": "GET",
+  "template": "api/groups/shopping/lists",
+  "path": "api/groups/shopping/lists",
+  "first": "v0.6.0",
+  "last": "HEAD",
+  "count": 223
+ },
+ {
+  "backend": "mealie",
+  "method": "GET",
+  "template": "api/groups/shopping/lists/{x}",
+  "path": "api/groups/shopping/lists/3f2a9c1e-5b7d-4e8a-9c0b-1d2e3f4a5b6c",
+  "first": "v0.6.0",
+  "last": "HEAD",
+  "count": 223
+ },
+ {
+  "backend": "mealie",
+  "method": "GET",
+  "template": "api/households/mealplans",
+  "path": "api/households/mealplans",
+  "first": "v0.6.0",
+  "last": "HEAD",
+  "count": 223
+ },
+ {
+  "backend": "mealie",
+  "method": "GET",
+  "template": "api/households/shopping/lists",
+  "path": "api/households/shopping/lists",
+  "first": "v0.6.0",
+  "last": "HEAD",
+  "count": 223
+ },
+ {
+  "backend": "mealie",
+  "method": "GET",
+  "template": "api/households/shopping/lists/{x}",
+  "path": "api/households/shopping/lists/3f2a9c1e-5b7d-4e8a-9c0b-1d2e3f4a5b6c",
+  "first": "v0.6.0",
+  "last": "HEAD",
+  "count": 223
+ },
+ {
+  "backend": "mealie",
+  "method": "GET",
+  "template": "api/media/recipes/{x}/images/original.webp",
+  "path": "api/media/recipes/3f2a9c1e-5b7d-4e8a-9c0b-1d2e3f4a5b6c/images/original.webp",
+  "first": "v0.15.1",
+  "last": "HEAD",
+  "count": 206
+ },
+ {
+  "backend": "mealie",
+  "method": "GET",
+  "template": "api/recipes",
+  "path": "api/recipes",
+  "first": "v0.6.0",
+  "last": "HEAD",
+  "count": 223
+ },
+ {
+  "backend": "mealie",
+  "method": "GET",
+  "template": "api/recipes/{x}",
+  "path": "api/recipes/chili-con-carne",
+  "first": "v0.6.0",
+  "last": "HEAD",
+  "count": 223
+ },
+ {
+  "backend": "mealie",
+  "method": "GET",
+  "template": "api/units",
+  "path": "api/units",
+  "first": "v0.15.7",
+  "last": "HEAD",
+  "count": 200
+ },
+ {
+  "backend": "mealie",
+  "method": "GET",
+  "template": "api/users/self",
+  "path": "api/users/self",
+  "first": "v0.6.0",
+  "last": "HEAD",
+  "count": 223
+ },
+ {
+  "backend": "mealie",
+  "method": "PATCH",
+  "template": "api/recipes/{x}",
+  "path": "api/recipes/chili-con-carne",
+  "first": "v0.6.0",
+  "last": "HEAD",
+  "count": 223
+ },
+ {
+  "backend": "mealie",
+  "method": "POST",
+  "template": "api/foods",
+  "path": "api/foods",
+  "first": "v0.15.7",
+  "last": "HEAD",
+  "count": 200
+ },
+ {
+  "backend": "mealie",
+  "method": "POST",
+  "template": "api/groups/mealplans",
+  "path": "api/groups/mealplans",
+  "first": "v0.6.0",
+  "last": "HEAD",
+  "count": 223
+ },
+ {
+  "backend": "mealie",
+  "method": "POST",
+  "template": "api/groups/shopping/items",
+  "path": "api/groups/shopping/items",
+  "first": "v0.6.0",
+  "last": "HEAD",
+  "count": 223
+ },
+ {
+  "backend": "mealie",
+  "method": "POST",
+  "template": "api/households/mealplans",
+  "path": "api/households/mealplans",
+  "first": "v0.6.0",
+  "last": "HEAD",
+  "count": 223
+ },
+ {
+  "backend": "mealie",
+  "method": "POST",
+  "template": "api/households/shopping/items",
+  "path": "api/households/shopping/items",
+  "first": "v0.6.0",
+  "last": "HEAD",
+  "count": 223
+ },
+ {
+  "backend": "mealie",
+  "method": "POST",
+  "template": "api/recipes",
+  "path": "api/recipes",
+  "first": "v0.6.0",
+  "last": "HEAD",
+  "count": 223
+ },
+ {
+  "backend": "mealie",
+  "method": "POST",
+  "template": "api/recipes/create-url",
+  "path": "api/recipes/create-url",
+  "first": "v0.6.0",
+  "last": "HEAD",
+  "count": 223
+ },
+ {
+  "backend": "mealie",
+  "method": "POST",
+  "template": "api/recipes/create/url",
+  "path": "api/recipes/create/url",
+  "first": "v0.6.0",
+  "last": "HEAD",
+  "count": 223
+ },
+ {
+  "backend": "mealie",
+  "method": "POST",
+  "template": "api/units",
+  "path": "api/units",
+  "first": "v0.15.7",
+  "last": "HEAD",
+  "count": 200
+ },
+ {
+  "backend": "mealie",
+  "method": "PUT",
+  "template": "api/groups/shopping/items/{x}",
+  "path": "api/groups/shopping/items/3f2a9c1e-5b7d-4e8a-9c0b-1d2e3f4a5b6c",
+  "first": "v0.6.0",
+  "last": "HEAD",
+  "count": 223
+ },
+ {
+  "backend": "mealie",
+  "method": "PUT",
+  "template": "api/households/shopping/items/{x}",
+  "path": "api/households/shopping/items/3f2a9c1e-5b7d-4e8a-9c0b-1d2e3f4a5b6c",
+  "first": "v0.6.0",
+  "last": "HEAD",
+  "count": 223
+ }
+]

@@ -1,0 +1,30 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Compile check for the BLE relay, not a build anyone flashes.
+#
+# The shipped Cubs leave the relay off, so without this file nothing ever
+# compiles the PR_USE_BLE_RELAY code and it could rot unseen until someone
+# turns it on in a build of their own. This is the T-Display build from
+# cub-tdisplay.yaml with the relay switched on, the way the docs describe
+# doing it: relay: true under pantry_raider:, with the auto transport the
+# relay needs to reach a server. CI runs esphome compile on it and throws the
+# result away; it is never uploaded or attached to a release.
+#
+#   esphome compile esphome/tests/relay-check.yaml
+
+substitutions:
+  name: bandit-cub-relay-check
+  friendly_name: Bandit Cub relay check
+  pr_transport: auto
+
+external_components:
+  - source:
+      type: local
+      path: ../components
+    components: [pantry_raider]
+
+packages:
+  base: !include ../packages/cub-base.yaml
+  profile: !include ../packages/tdisplay.yaml
+
+pantry_raider:
+  relay: true

@@ -1,0 +1,58 @@
+{% extends "admin_base.html" %}
+{% block title %}Stats: Forager admin{% endblock %}
+{% block admin_content %}
+<div class="dash-head">
+  <h1 style="margin-bottom:0.25rem;">Stats</h1>
+  <a class="btn btn-outline" href="/admin">Back to overview</a>
+</div>
+<p class="muted">High-level numbers for {{ totals.month }}. Read-only.</p>
+
+<div class="stats">
+  <div class="stat">
+    <div class="label">Total accounts</div>
+    <div class="value">{{ totals.accounts }}</div>
+  </div>
+  <div class="stat">
+    <div class="label">Verified accounts</div>
+    <div class="value">{{ totals.verified }}</div>
+  </div>
+  <div class="stat">
+    <div class="label">Active paid subs</div>
+    <div class="value">{{ totals.active_subs }}</div>
+  </div>
+  <div class="stat">
+    <div class="label">Kitchens</div>
+    <div class="value">{{ totals.kitchens }}</div>
+  </div>
+  <div class="stat">
+    <div class="label">Tokens ({{ totals.month }})</div>
+    <div class="value">{{ "{:,}".format(totals.month_tokens) }}</div>
+  </div>
+  <div class="stat">
+    <div class="label">Est. Gemini cost</div>
+    <div class="value">${{ totals.est_cost }}</div>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Accounts by plan</h2>
+  <p class="muted small">Where every account sits right now, using the same
+  resolution the proxy and account page use. An account with nothing active
+  counts as expired.</p>
+  <div class="table-wrap">
+    <table class="admin">
+      <thead>
+        <tr><th>Plan</th><th class="num">Accounts</th></tr>
+      </thead>
+      <tbody>
+        {% for row in plan_breakdown %}
+        <tr>
+          <td>{{ row.plan }}</td>
+          <td class="num">{{ row.count }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

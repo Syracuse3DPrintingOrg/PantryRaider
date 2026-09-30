@@ -1,0 +1,122 @@
+name: Build appliance SD image
+
+# Bakes the Pantry Raider first-boot provisioner into the official Raspberry Pi
+# OS Lite (64-bit) image and publishes a ready-to-flash .img.xz. Imager's OS
+# customization is off for a third-party image, so a customer flashes it, sets
+# Wi-Fi and the login account in the cloud-init files on the boot partition
+# (network-config and user-data, see docs/hardware/sd-image.md), and boots: no
+# terminal. The provisioner auto-detects the display and Stream Deck, and takes
+# its timezone from TZ= in foodassistant.config.env on the boot partition (the
+# base OS alone runs on UK time).
+#
+# The base OS is pinned (PIOS_URL below) and checked against its published
+# .sha256, so a release never changes Debian underneath the app by surprise.
+# Move the pin on purpose, after a test flash of the new base.
+#
+# Triggers:
+#   - Pushing a version tag (v*): builds the image, creates the GitHub Release
+#     for that tag if needed, and attaches the image to it.
+#   - Manual run (workflow_dispatch): the image is uploaded as a build artifact.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      pios_url:
+        description: "Override Raspberry Pi OS Lite arm64 .img.xz URL (blank = the pinned base; a .sha256 must sit next to it)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write   # attach assets to the release
+
+env:
+  # The pinned base image. Raspberry Pi publishes a .sha256 beside every image,
+  # and the download step refuses an image that does not match it.
+  PIOS_URL: https://downloads.raspberrypi.com/raspios_lite_arm64/images/raspios_lite_arm64-2026-09-15/2026-09-15-raspios-trixie-arm64-lite.img.xz
+
+jobs:
+  build-image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Free up disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android "$AGENT_TOOLSDIRECTORY" || true
+          df -h /
+
+      - name: Download and verify Raspberry Pi OS Lite (64-bit)
+        env:
+          PIOS_OVERRIDE: ${{ github.event.inputs.pios_url }}
+        run: |
+          set -euo pipefail
+          URL="${PIOS_OVERRIDE:-$PIOS_URL}"
+          NAME="$(basename "$URL")"
+          echo "Downloading $URL"
+          curl -fL "$URL" -o "$NAME"
+          # The .sha256 names the image by its file name, so check it in place.
+          curl -fL "$URL.sha256" -o "$NAME.sha256"
+          sha256sum -c "$NAME.sha256"
+          mv -f "$NAME" raspios.img.xz
+          ls -lh raspios.img.xz
+          {
+            echo "## Base image"
+            echo ""
+            echo "- \`$NAME\` (sha256 verified: \`$(cut -d' ' -f1 "$NAME.sha256")\`)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Decompress
+        run: |
+          set -euo pipefail
+          xz -d -T0 raspios.img.xz
+          # The decompressed file keeps the .img name.
+          mv raspios.img base.img || true
+          ls -lh base.img
+
+      - name: Bake in the Pantry Raider provisioner
+        run: |
+          set -euo pipefail
+          sudo scripts/image-build/prepare-image.sh --image "$PWD/base.img"
+
+      - name: Name and compress the output
+        id: pack
+        run: |
+          set -euo pipefail
+          VER="${{ github.ref_type == 'tag' && github.ref_name || '' }}"
+          [ -n "$VER" ] || VER="$(date -u +%Y%m%d)"
+          OUT="foodassistant-appliance-${VER}-arm64.img"
+          mv base.img "$OUT"
+          xz -z -T0 -6 "$OUT"
+          sha256sum "${OUT}.xz" | tee "${OUT}.xz.sha256"
+          echo "artifact=${OUT}.xz" >> "$GITHUB_OUTPUT"
+          echo "checksum=${OUT}.xz.sha256" >> "$GITHUB_OUTPUT"
+          ls -lh "${OUT}.xz"
+
+      # The release description is the CHANGELOG entry plus the Cub firmware
+      # license note. build-cub-firmware.yml writes the same body from the same
+      # script, so whichever workflow finishes last leaves identical text.
+      - name: Write the release notes (tag push)
+        if: github.ref_type == 'tag'
+        run: bash scripts/release-notes.sh "${GITHUB_REF_NAME}" > release-notes.md
+
+      - name: Create the release and attach the image (tag push)
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64  # v3.0.3
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          body_path: release-notes.md
+          files: |
+            ${{ steps.pack.outputs.artifact }}
+            ${{ steps.pack.outputs.checksum }}
+
+      - name: Upload as a build artifact (manual runs)
+        if: github.ref_type != 'tag'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: appliance-image
+          path: |
+            ${{ steps.pack.outputs.artifact }}
+            ${{ steps.pack.outputs.checksum }}

@@ -1,0 +1,294 @@
+/*
+ * Forest theme for Pantry Raider.
+ * Loaded as an overlay on top of Bootstrap 5 dark mode.
+ * A soft, deep-green palette with warm amber and clay accents, authored locally
+ * (no Bootswatch, no CDN).
+ */
+
+/* Core palette */
+:root,
+[data-bs-theme=dark] {
+  /* Backgrounds (deep moss / pine) */
+  --bs-body-bg:           #0e1611;
+  --bs-body-bg-rgb:       14, 22, 17;
+  --bs-secondary-bg:      #16241b;
+  --bs-secondary-bg-rgb:  22, 36, 27;
+  --bs-tertiary-bg:       #1d3024;
+  --bs-tertiary-bg-rgb:   29, 48, 36;
+
+  /* Text (warm parchment) */
+  --bs-body-color:        #e3ecd9;
+  --bs-body-color-rgb:    227, 236, 217;
+  --bs-secondary-color:   rgba(227, 236, 217, 0.72);
+  --bs-tertiary-color:    rgba(227, 236, 217, 0.46);
+  --bs-emphasis-color:    #ffffff;
+
+  /* Accents */
+  --for-leaf:    #5fb872;
+  --for-sage:    #8fbf9f;
+  --for-lime:    #9ccc5a;
+  --for-amber:   #e0a93b;
+  --for-clay:    #d2693f;
+  --for-rust:    #c2502e;
+
+  /* Bootstrap semantic overrides */
+  --bs-primary:           #5fb872;
+  --bs-primary-rgb:       95, 184, 114;
+  --bs-secondary:         #8fbf9f;
+  --bs-secondary-rgb:     143, 191, 159;
+  --bs-success:           #9ccc5a;
+  --bs-success-rgb:       156, 204, 90;
+  --bs-info:              #6fae9b;
+  --bs-info-rgb:          111, 174, 155;
+  --bs-warning:           #e0a93b;
+  --bs-warning-rgb:       224, 169, 59;
+  --bs-danger:            #c2502e;
+  --bs-danger-rgb:        194, 80, 46;
+  --bs-light:             #1d3024;
+  --bs-light-rgb:         29, 48, 36;
+  --bs-dark:              #0e1611;
+  --bs-dark-rgb:          14, 22, 17;
+
+  /* Text-emphasis colours (for text-bg-* utilities) */
+  --bs-primary-text-emphasis:   #9bd6a8;
+  --bs-secondary-text-emphasis: #bcd9c5;
+  --bs-success-text-emphasis:   #c4e294;
+  --bs-info-text-emphasis:      #a8d2c4;
+  --bs-warning-text-emphasis:   #efcd86;
+  --bs-danger-text-emphasis:    #e09277;
+
+  /* Borders */
+  --bs-border-color:        #2a4533;
+  --bs-border-color-translucent: rgba(95, 184, 114, 0.22);
+
+  /* Links */
+  --bs-link-color:        #8fbf9f;
+  --bs-link-color-rgb:    143, 191, 159;
+  --bs-link-hover-color:  #bcd9c5;
+
+  /* Cards / components */
+  --bs-card-bg:           #16241b;
+  --bs-card-border-color: #2a4533;
+  --bs-modal-bg:          #16241b;
+  --bs-dropdown-bg:       #16241b;
+  --bs-dropdown-border-color: #2a4533;
+  --bs-input-bg:          #1d3024;
+  --bs-input-border-color: #2a4533;
+  --bs-input-color:       #e3ecd9;
+  --bs-list-group-bg:     #16241b;
+  --bs-list-group-border-color: #2a4533;
+
+  /* Navbar */
+  --bs-navbar-color:       rgba(227, 236, 217, 0.82);
+  --bs-navbar-hover-color: #5fb872;
+  --bs-navbar-active-color: #5fb872;
+
+  /* Table */
+  --bs-table-bg:          transparent;
+  --bs-table-striped-bg:  rgba(95, 184, 114, 0.05);
+  --bs-table-hover-bg:    rgba(143, 191, 159, 0.07);
+  --bs-table-border-color: #2a4533;
+
+  color-scheme: dark;
+}
+
+/* Body & page chrome */
+body {
+  background-color: var(--bs-body-bg);
+  color: var(--bs-body-color);
+}
+
+/* Navbar */
+.navbar {
+  background: #0e1611 !important;
+  border-bottom: 1px solid #2a4533 !important;
+}
+.navbar-brand {
+  color: var(--for-lime) !important;
+  letter-spacing: 0.3px;
+}
+.nav-link {
+  color: rgba(227, 236, 217, 0.80) !important;
+}
+.nav-link:hover,
+.nav-link.active {
+  color: var(--for-leaf) !important;
+}
+
+/* Cards */
+.card {
+  background-color: #16241b;
+  border-color: #2a4533;
+}
+.card-header {
+  background-color: #1d3024;
+  border-bottom-color: #2a4533;
+  color: var(--for-lime);
+}
+
+/* Buttons */
+.btn-primary {
+  background-color: var(--for-leaf);
+  border-color: var(--for-leaf);
+  color: #0e1611;
+}
+.btn-primary:hover {
+  background-color: #76c888;
+  border-color: #76c888;
+}
+.btn-secondary {
+  background-color: transparent;
+  border-color: var(--for-sage);
+  color: var(--for-sage);
+}
+.btn-secondary:hover {
+  background-color: rgba(143, 191, 159, 0.12);
+  color: var(--for-sage);
+}
+.btn-success {
+  background-color: var(--for-lime);
+  border-color: var(--for-lime);
+  color: #0e1611;
+}
+.btn-success:hover {
+  background-color: #aed873;
+  border-color: #aed873;
+}
+.btn-outline-primary {
+  border-color: var(--for-leaf);
+  color: var(--for-leaf);
+}
+.btn-outline-primary:hover {
+  background-color: var(--for-leaf);
+  color: #0e1611;
+}
+.btn-outline-danger {
+  border-color: var(--for-rust);
+  color: var(--for-clay);
+}
+.btn-outline-danger:hover {
+  background-color: rgba(194, 80, 46, 0.15);
+  color: var(--for-clay);
+}
+
+/* Forms */
+.form-control,
+.form-select {
+  background-color: #1d3024;
+  border-color: #2a4533;
+  color: #e3ecd9;
+}
+.form-control:focus,
+.form-select:focus {
+  background-color: #1d3024;
+  border-color: var(--for-leaf);
+  color: #e3ecd9;
+  box-shadow: 0 0 0 0.25rem rgba(95, 184, 114, 0.25);
+}
+.form-control::placeholder { color: rgba(227, 236, 217, 0.42); }
+.form-check-input:checked {
+  background-color: var(--for-leaf);
+  border-color: var(--for-leaf);
+}
+.input-group-text {
+  background-color: #1d3024;
+  border-color: #2a4533;
+  color: var(--for-sage);
+}
+
+/* Tables */
+.table {
+  color: var(--bs-body-color);
+  border-color: #2a4533;
+}
+.table > thead {
+  border-bottom: 2px solid var(--for-leaf);
+  color: var(--for-lime);
+}
+
+/* Badges */
+.text-bg-primary   { background-color: var(--for-leaf)  !important; color: #0e1611 !important; }
+.text-bg-secondary { background-color: var(--for-sage)  !important; color: #0e1611 !important; }
+.text-bg-success   { background-color: var(--for-lime)  !important; color: #0e1611 !important; }
+.text-bg-info      { background-color: #6fae9b          !important; color: #0e1611 !important; }
+.text-bg-warning   { background-color: var(--for-amber) !important; color: #0e1611 !important; }
+.text-bg-danger    { background-color: var(--for-rust)  !important; color: #ffffff !important; }
+
+/* Alerts */
+.alert-success {
+  background-color: rgba(156, 204, 90, 0.12);
+  border-color: var(--for-lime);
+  color: #c4e294;
+}
+.alert-danger {
+  background-color: rgba(194, 80, 46, 0.14);
+  border-color: var(--for-rust);
+  color: #e09277;
+}
+.alert-warning {
+  background-color: rgba(224, 169, 59, 0.12);
+  border-color: var(--for-amber);
+  color: #efcd86;
+}
+.alert-info {
+  background-color: rgba(111, 174, 155, 0.12);
+  border-color: #6fae9b;
+  color: #a8d2c4;
+}
+
+/* Dropdowns & modals */
+.dropdown-menu {
+  background-color: #16241b;
+  border-color: #2a4533;
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.5);
+}
+.dropdown-item { color: #e3ecd9; }
+.dropdown-item:hover {
+  background-color: rgba(95, 184, 114, 0.14);
+  color: var(--for-leaf);
+}
+.modal-content {
+  background-color: #16241b;
+  border-color: #2a4533;
+}
+.modal-header { border-bottom-color: #2a4533; color: var(--for-lime); }
+.modal-footer { border-top-color: #2a4533; }
+
+/* List groups */
+.list-group-item {
+  background-color: #16241b;
+  border-color: #2a4533;
+  color: #e3ecd9;
+}
+.list-group-item-action:hover {
+  background-color: rgba(95, 184, 114, 0.12);
+  color: var(--for-leaf);
+}
+
+/* Nav tabs */
+.nav-tabs { border-bottom-color: #2a4533; }
+.nav-tabs .nav-link { color: rgba(227, 236, 217, 0.72) !important; }
+.nav-tabs .nav-link.active {
+  background-color: #1d3024;
+  border-color: #2a4533 #2a4533 #1d3024;
+  color: var(--for-leaf) !important;
+}
+
+/* Urgency colours (override base.html) */
+.urgency-expired { color: #e0775a; }
+.urgency-today   { color: var(--for-clay); }
+.urgency-3d      { color: var(--for-amber); }
+.urgency-ok      { color: var(--for-lime); }
+
+/* Scrollbar (Webkit) */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: #0e1611; }
+::-webkit-scrollbar-thumb { background: #2a4533; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--for-leaf); }
+
+/* Progress bars */
+.progress { background-color: #1d3024; }
+.progress-bar { background-color: var(--for-leaf); }
+
+/* contrast: dark badge text (FoodAssistant-tjlm) */
+.badge.bg-secondary, .badge.bg-info { color: #000 !important; }

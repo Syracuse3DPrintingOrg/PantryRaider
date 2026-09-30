@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Email confirmed: Forager{% endblock %}
+{% block main_class %}narrow{% endblock %}
+{% block content %}
+{% if verified %}
+<h1>You are all set</h1>
+<div class="card">
+  <div class="alert alert-notice">Thanks! Your email address is confirmed.</div>
+  <p class="muted">You can head back to your account whenever you like.</p>
+  <a class="btn btn-block" href="/account">Go to my account</a>
+</div>
+{% else %}
+<h1>Link not valid</h1>
+<div class="card">
+  <div class="alert alert-error">This confirmation link is no longer valid. It
+  may have expired or already been used.</div>
+  <p class="muted small">Sign in and use the resend button on your account page
+  to get a fresh one.</p>
+  <a class="btn btn-block" href="/account">Go to my account</a>
+</div>
+{% endif %}
+{% endblock %}

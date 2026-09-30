@@ -1,0 +1,5 @@
+# ESPHome build output and local Wi-Fi credentials never belong in git. The
+# build folder is matched at any depth, so a local build of a config under
+# tests/ stays out too.
+.esphome/
+/secrets.yaml

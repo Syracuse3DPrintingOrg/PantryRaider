@@ -1,0 +1,181 @@
+# FoodAssistant appliance compose
+# ================================
+# Adapted from docker-compose.prod.yml for the SD-card image. It is dropped
+# into INSTALL_DIR by the first-boot provisioner (firstboot.sh), which also
+# writes a .env beside it from image/config.env. Optional backends are gated
+# behind compose profiles, toggled by ENABLE_MEALIE / ENABLE_OLLAMA.
+#
+# Differences from docker-compose.prod.yml:
+#   - Grocy runs by default (no profile): the appliance is useless without it.
+#   - Mealie/Ollama still profile-gated (with-mealie / with-ollama).
+
+# Every container below keeps its log bounded with this one setting. Docker's
+# json-file driver grows without limit by default, and on an SD card that is a
+# slow write on every line and, eventually, a full card. Three files of 10 MB
+# is weeks of normal output now that per-request access lines are off by
+# default.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  service:
+    image: ghcr.io/syracuse3dprintingorg/pantryraider:${FOODASSISTANT_TAG:-latest}
+    # Local-source fallback: if the GHCR pull fails (image not yet public, no
+    # auth, or no internet), run "docker compose build service" to build from the
+    # on-device clone at REPO_DIR (default /home/foodassistant/FoodAssistant).
+    # firstboot.sh tries the pull first and falls back to this build context
+    # automatically. The build: block is ignored when the image pulls cleanly.
+    build:
+      context: ${REPO_DIR:-/home/foodassistant/FoodAssistant}
+      dockerfile: service/Dockerfile
+    container_name: foodassistant-service
+    # Host networking lets the kiosk browser and local daemons (stream deck)
+    # reach the API as 127.0.0.1 inside the container, enabling the auth
+    # bypass for on-device clients without needing a password or API key.
+    # Side effect: Grocy must be reached via localhost:9383, not by container
+    # name. Set GROCY_BASE_URL=http://localhost:9383 (or use /setup).
+    network_mode: "host"
+    # --no-proxy-headers: with host networking the app trusts a loopback client
+    # for the password-free kiosk, so uvicorn must not rewrite the client from a
+    # spoofable X-Forwarded-For (which would be an auth bypass). The app never
+    # reads that header. See service/Dockerfile.
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "9284", "--no-proxy-headers"]
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      - TZ=${TZ:-America/New_York}
+      - FOODASSISTANT_FORCE_MODEL=Raspberry Pi
+    volumes:
+      - ./data:/app/data
+      # Touch calibration runs evtest against the panel's input device, so the
+      # container needs to read /dev/input/event*. The container runs as root,
+      # so the bind mount plus the input-class device cgroup rule below grants
+      # read access (FoodAssistant-mox4). A Pi with any display always has
+      # /dev/input (HDMI alone creates CEC input devices), so the mount source
+      # exists.
+      - /dev/input:/dev/input
+    device_cgroup_rules:
+      - 'c 13:* rmw'   # char major 13 = /dev/input/* (event, mouse, js)
+    restart: unless-stopped
+    logging: *default-logging
+    depends_on:
+      grocy:
+        condition: service_started
+        required: false
+
+  grocy:
+    # Pinned on purpose; matches docker-compose.prod.yml. Bump this tag only in
+    # a release that also carries the start-up self-heal mounted below, and
+    # check the new version's config-dist.php first: Grocy 4.7.0 moved
+    # AUTH_CLASS to Grocy\Middleware\Auth\DefaultAuthMiddleware, and a
+    # config.php still naming the old class makes Grocy answer every API call
+    # with an error page instead of data. On an appliance the OTA helper also
+    # repairs the running container (foodassistant-grocy-repair).
+    image: lscr.io/linuxserver/grocy:4.6.0
+    container_name: foodassistant-grocy
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=${TZ:-America/New_York}
+    volumes:
+      - ./grocy:/config
+      # Start-up self-heal (read-only). The LinuxServer image runs every
+      # executable script in /custom-cont-init.d as root before Grocy comes
+      # up; docker/grocy-init/10-repair-auth-class.sh in the on-device
+      # checkout (the same REPO_DIR as the build context above) fixes the
+      # AUTH_CLASS line when a Grocy update moves it, backup first, and does
+      # nothing otherwise. A missing folder just means no scripts to run.
+      - ${REPO_DIR:-/home/foodassistant/FoodAssistant}/docker/grocy-init:/custom-cont-init.d:ro
+    ports:
+      - "9383:80"
+    restart: unless-stopped
+    logging: *default-logging
+
+  mealie:
+    image: ghcr.io/mealie-recipes/mealie:v3.28.0   # pinned; matches docker-compose.prod.yml
+    container_name: foodassistant-mealie
+    profiles: ["with-mealie"]
+    environment:
+      - TZ=${TZ:-America/New_York}
+      - ALLOW_SIGNUP=false
+      - BASE_URL=http://localhost:9285
+    volumes:
+      - ./mealie:/app/data
+    ports:
+      - "9285:9000"
+    restart: unless-stopped
+    logging: *default-logging
+
+  ollama:
+    image: ollama/ollama:0.34.4   # pinned; matches docker-compose.prod.yml
+    container_name: foodassistant-ollama
+    profiles: ["with-ollama"]
+    volumes:
+      - ./ollama:/root/.ollama
+    ports:
+      # Only this Pi can reach it (Ollama has no password); Pantry Raider here
+      # uses http://localhost:11434. To use it from other computers, change
+      # this to "11434:11434".
+      - "127.0.0.1:11434:11434"
+    restart: unless-stopped
+    logging: *default-logging
+
+  # Optional Beszel monitoring hub (FoodAssistant-4kz2), matches
+  # docker-compose.prod.yml. Off by default; turn it on with:
+  #   docker compose --profile with-beszel up -d
+  # First run:
+  #   1. Open http://THIS-PI:8090 and create the admin account.
+  #   2. Choose Add System and enter /beszel_socket/beszel.sock as the Host / IP
+  #      (no port): the hub reaches the agent below through a socket in the
+  #      shared ./beszel_socket folder, not over the network.
+  #   3. Copy the Public Key the dialog shows into BESZEL_AGENT_KEY= in the
+  #      .env next to this file, then add the system.
+  #   4. Run docker compose --profile with-beszel up -d again so the agent
+  #      starts with that key.
+  # Then paste the hub URL into Settings > Resources in the app.
+  beszel:
+    image: henrygd/beszel:0.20.0   # pinned; check github.com/henrygd/beszel/releases before bumping
+    container_name: foodassistant-beszel
+    profiles: ["with-beszel"]
+    environment:
+      - TZ=${TZ:-America/New_York}
+    volumes:
+      - ./beszel:/beszel_data
+      - ./beszel_socket:/beszel_socket
+    ports:
+      - "8090:8090"
+    restart: unless-stopped
+    logging: *default-logging
+
+  # Reports this Pi's own metrics to the hub above. Host networking and the
+  # host PID namespace let it see the real hardware, and it reads the Docker
+  # socket (read-only) for per-container stats; opt in only if you want this
+  # appliance monitored. It answers the hub on a socket in ./beszel_socket
+  # rather than a network port. BESZEL_AGENT_KEY is the public key the hub
+  # shows when you add this system; set it in .env rather than editing this
+  # file. The agent does not start until it is set.
+  beszel-agent:
+    image: henrygd/beszel-agent:0.20.0   # pinned; check github.com/henrygd/beszel/releases before bumping
+    container_name: foodassistant-beszel-agent
+    profiles: ["with-beszel"]
+    network_mode: host
+    pid: host
+    environment:
+      - TZ=${TZ:-America/New_York}
+      - LISTEN=/beszel_socket/beszel.sock
+      - KEY=${BESZEL_AGENT_KEY:-}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./beszel_socket:/beszel_socket
+      - beszel-agent-data:/var/lib/beszel-agent
+    restart: unless-stopped
+    logging: *default-logging
+
+volumes:
+  # The Beszel agent's own state (with-beszel profile). Named so a recreate
+  # reuses it instead of leaving an unnamed volume behind each time.
+  beszel-agent-data:

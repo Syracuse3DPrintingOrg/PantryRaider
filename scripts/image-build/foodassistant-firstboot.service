@@ -1,0 +1,21 @@
+[Unit]
+Description=FoodAssistant first-boot provisioner
+# Wait for network so Docker can pull images and avahi can publish.
+After=network-online.target
+Wants=network-online.target
+# Only run until the marker exists (firstboot.sh also self-disables on success).
+ConditionPathExists=!/var/lib/foodassistant/firstboot.done
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# Assets are baked into /opt/foodassistant-setup by prepare-image.sh.
+ExecStart=/opt/foodassistant-setup/firstboot.sh
+# Generous timeout: first run pulls Docker + several container images.
+TimeoutStartSec=1800
+# Retry on transient failure (e.g. network not ready yet).
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target
