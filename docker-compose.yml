@@ -63,7 +63,7 @@ services:
     # moved AUTH_CLASS to Grocy\Middleware\Auth\DefaultAuthMiddleware, and a
     # config.php still naming the old class makes Grocy answer every API call
     # with an error page instead of data.
-    image: lscr.io/linuxserver/grocy:4.6.0
+    image: lscr.io/linuxserver/grocy:4.7.1
     container_name: foodassistant-grocy
     profiles: ["with-grocy"]
     environment:
@@ -111,7 +111,7 @@ services:
   # container stays unprivileged). Config and queues live in the cups-config
   # named volume (seeded from the image) so added printers persist.
   cups:
-    image: olbat/cupsd@sha256:28c47cfe20d59c94e07c37c3759d469624ba209daa0e5821ed3b6b1d6f665bf5   # CUPS + cups-filters (rastertolabel); pinned. Our config is applied at start below.
+    image: olbat/cupsd@sha256:3a9d7c319f4153c87e16db4edb6ef6c317aa7e71f8abe65c3419cc9aca851194   # CUPS + cups-filters (rastertolabel); pinned. Our config is applied at start below.
     container_name: foodassistant-cups
     profiles: ["with-printing"]
     environment:
@@ -156,7 +156,7 @@ services:
   # After starting, pull a vision model:
   #   docker exec foodassistant-ollama ollama pull llava:7b
   ollama:
-    image: ollama/ollama:0.34.4   # pinned; see "Upgrading pinned images" in README
+    image: ollama/ollama:0.35.1   # pinned; see "Upgrading pinned images" in README
     container_name: foodassistant-ollama
     profiles: ["with-ollama"]
     volumes:
@@ -188,7 +188,7 @@ services:
   # Paste the hub URL into Settings > Resources in the app to add the "Open
   # the Beszel dashboard" link there.
   beszel:
-    image: henrygd/beszel:0.20.0   # pinned; check github.com/henrygd/beszel/releases before bumping
+    image: henrygd/beszel:0.21.0   # pinned; check github.com/henrygd/beszel/releases before bumping
     container_name: foodassistant-beszel
     profiles: ["with-beszel"]
     environment:
@@ -210,7 +210,7 @@ services:
   # you add this system; set it in .env rather than editing this file. The
   # agent does not start until it is set.
   beszel-agent:
-    image: henrygd/beszel-agent:0.20.0   # pinned; check github.com/henrygd/beszel/releases before bumping
+    image: henrygd/beszel-agent:0.21.0   # pinned; check github.com/henrygd/beszel/releases before bumping
     container_name: foodassistant-beszel-agent
     profiles: ["with-beszel"]
     network_mode: host

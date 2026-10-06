@@ -75,7 +75,7 @@ services:
     # config.php still naming the old class makes Grocy answer every API call
     # with an error page instead of data. On an appliance the OTA helper also
     # repairs the running container (foodassistant-grocy-repair).
-    image: lscr.io/linuxserver/grocy:4.6.0
+    image: lscr.io/linuxserver/grocy:4.7.1
     container_name: foodassistant-grocy
     environment:
       - PUID=1000
@@ -111,7 +111,7 @@ services:
     logging: *default-logging
 
   ollama:
-    image: ollama/ollama:0.34.4   # pinned; matches docker-compose.prod.yml
+    image: ollama/ollama:0.35.1   # pinned; matches docker-compose.prod.yml
     container_name: foodassistant-ollama
     profiles: ["with-ollama"]
     volumes:
@@ -138,7 +138,7 @@ services:
   #      starts with that key.
   # Then paste the hub URL into Settings > Resources in the app.
   beszel:
-    image: henrygd/beszel:0.20.0   # pinned; check github.com/henrygd/beszel/releases before bumping
+    image: henrygd/beszel:0.21.0   # pinned; check github.com/henrygd/beszel/releases before bumping
     container_name: foodassistant-beszel
     profiles: ["with-beszel"]
     environment:
@@ -159,7 +159,7 @@ services:
   # shows when you add this system; set it in .env rather than editing this
   # file. The agent does not start until it is set.
   beszel-agent:
-    image: henrygd/beszel-agent:0.20.0   # pinned; check github.com/henrygd/beszel/releases before bumping
+    image: henrygd/beszel-agent:0.21.0   # pinned; check github.com/henrygd/beszel/releases before bumping
     container_name: foodassistant-beszel-agent
     profiles: ["with-beszel"]
     network_mode: host
