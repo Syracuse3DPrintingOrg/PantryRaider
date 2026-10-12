@@ -706,6 +706,19 @@ def test_small_screen_nav_markup_present(client):
     assert 'id="nav"' in page
 
 
+def test_inventory_dashboard_url_respects_ingress_prefix(client):
+    """The inventory API request stays under Home Assistant's Ingress prefix."""
+    response = client.get(
+        "/ui/inventory",
+        headers={"X-Ingress-Path": "/api/hassio_ingress/test-token"},
+    )
+
+    assert response.status_code == 200
+    assert '<base href="/api/hassio_ingress/test-token/">' in response.text
+    assert "fetch(`inventory/dashboard?sort=${sort}`)" in response.text
+    assert "fetch(`/inventory/dashboard?sort=${sort}`)" not in response.text
+
+
 def test_kiosk_auto_enable_hooks_present(client):
     """Pi display auto-enable (FoodAssistant-h437).
 

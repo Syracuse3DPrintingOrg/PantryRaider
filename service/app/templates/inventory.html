@@ -443,7 +443,7 @@ async function loadDashboard() {
   document.getElementById('loading-spinner').style.display = '';
   const status = document.getElementById('inventory-status');
   try {
-    const r = await fetch(`/inventory/dashboard?sort=${sort}`);
+    const r = await fetch(`inventory/dashboard?sort=${sort}`);
     if (!r.ok) {
       // Outages answer with a JSON detail written for people ("Your inventory
       // is not reachable right now..."), so surface that, never a raw error
