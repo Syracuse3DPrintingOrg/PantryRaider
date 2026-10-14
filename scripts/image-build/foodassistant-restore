@@ -1,0 +1,492 @@
+#!/usr/bin/env bash
+# FoodAssistant full-stack snapshot restore helper (Pi appliance).
+# ======================================================================
+# Restores the FULL stack snapshot (the three bind-mounted data dirs) from a
+# .tar.gz that already lives on the device, or one pulled first from the
+# configured rclone remote. Both snapshot layouts are accepted: the appliance
+# one the bridge's USB backup writes (data, grocy, mealie) and the server one
+# scripts/backup.sh writes (service/data, grocy/config, mealie/data). Each is
+# restored into the dirs this device's compose file mounts, whichever layout
+# made it; an archive that mixes the two or matches neither is refused. This is the appliance counterpart of scripts/restore.sh: it stops the
+# container stack, moves the current data aside (suffixed .pre-restore-<stamp>,
+# never deleted), unpacks the archive, and restarts.
+#
+# It is invoked by the host bridge (POST /restore), which runs as root, so it
+# can stop/start the docker stack and write under the install dir. It prints a
+# short human log to stdout and, as its LAST line, a single JSON object the
+# bridge parses and relays to the web UI. EVERY exit path emits that JSON line.
+#
+# Source argument (first positional arg, or the SOURCE env var):
+#   /abs/path/to/foo.tar.gz   restore a snapshot already on the device
+#   rclone:remote:bucket/foo.tar.gz
+#                             pull that object from the configured rclone remote
+#                             into a temp file first, then restore it
+#
+# Safety guarantees:
+#   - Nothing is ever deleted. Current data is MOVED to .pre-restore-<stamp>.
+#   - We validate the archive (readable gzip tar containing the expected top
+#     level dirs) BEFORE stopping the stack. A bad source fails fast with the
+#     stack still up.
+#   - The archive is CONFINED to the expected data dirs (FoodAssistant-ifmt):
+#     members with absolute paths or "..", members outside those dirs, device
+#     nodes, and links pointing outside them are all rejected up front, and
+#     the unpack happens in a staging dir from which only the whitelisted
+#     dirs are moved into place. A snapshot can never replace the compose
+#     file, .env, or anything else outside the data dirs.
+#   - If a failure happens mid-restore (after the stack is stopped) we attempt
+#     to restart so the device is never left down, and report the error.
+#
+# Env overrides (so it is testable in a sandbox, mirroring foodassistant-update):
+#   REPO_DIR / INSTALL_DIR  the compose project dir (where the data dirs live)
+#   COMPOSE                 the docker compose invocation (default below)
+#   RCLONE_CONFIG           rclone config file (default: <install>/data/rclone.conf)
+#   RCLONE                  the rclone binary (default: rclone)
+set -uo pipefail
+
+# The compose project lives under the install dir on an appliance; restore.sh
+# uses the repo checkout. Accept either name, install dir first.
+PROJECT_DIR="${INSTALL_DIR:-${REPO_DIR:-/opt/foodassistant}}"
+# The three profiles backup.sh / restore.sh use so every container in the stack
+# is stopped and started, not just the always-on ones.
+COMPOSE="${COMPOSE:-docker compose --profile with-grocy --profile with-mealie --profile with-ollama}"
+RCLONE="${RCLONE:-rclone}"
+RCLONE_CONFIG="${RCLONE_CONFIG:-$PROJECT_DIR/data/rclone.conf}"
+
+STAMP="$(date +%Y%m%d-%H%M%S)"
+
+# Plain stdout log (the bridge tails stdout for a human summary too).
+log() { printf '%s\n' "$*"; }
+
+# Emit the final JSON result line and exit. A python one-liner does the JSON
+# encoding so log text with quotes is escaped correctly. The process exit code
+# mirrors ok (0 on success).
+_result() {
+  local ok="$1" error="$2" source="$3" restored="$4" snapshot="$5" restarted="$6"
+  OK="$ok" ERR="$error" SRC="$source" RESTORED="$restored" SNAP="$snapshot" \
+  RESTARTED="$restarted" python3 -c '
+import json, os
+print(json.dumps({
+    "ok": os.environ["OK"] == "1",
+    "error": os.environ.get("ERR", ""),
+    "source": os.environ.get("SRC", ""),
+    "restored_dirs": [d for d in os.environ.get("RESTORED", "").split() if d],
+    "snapshot": os.environ.get("SNAP", ""),
+    "restarted": os.environ.get("RESTARTED", "") == "1",
+}))'
+  if [ "$ok" = "1" ]; then exit 0; fi
+  exit 1
+}
+
+# Start the stack back up. Returns 0 when compose reported success.
+_start_stack() {
+  if (cd "$PROJECT_DIR" && $COMPOSE start) >/dev/null 2>&1; then
+    log "Restarted the container stack."
+    return 0
+  fi
+  log "WARN: failed to restart the container stack."
+  return 1
+}
+
+SOURCE_ARG="${1:-${SOURCE:-}}"
+if [ -z "$SOURCE_ARG" ]; then
+  log "No source given."
+  _result 0 "No restore source given." "" "" "" 0
+fi
+
+# --- Resolve the source to a local archive path (validate before touching the
+#     stack). An rclone: source is pulled into a temp file first. --------------
+ARCHIVE=""
+TMP_PULL=""
+UNPACK_DIR=""
+cleanup() {
+  [ -n "$TMP_PULL" ] && rm -f "$TMP_PULL" 2>/dev/null
+  [ -n "$UNPACK_DIR" ] && rm -rf "$UNPACK_DIR" 2>/dev/null
+  return 0
+}
+trap cleanup EXIT
+
+case "$SOURCE_ARG" in
+  rclone:*)
+    remote="${SOURCE_ARG#rclone:}"
+    if [ -z "$remote" ]; then
+      _result 0 "Empty rclone remote path." "$SOURCE_ARG" "" "" 0
+    fi
+    if ! command -v "$RCLONE" >/dev/null 2>&1; then
+      _result 0 "rclone is not installed on this device." "$SOURCE_ARG" "" "" 0
+    fi
+    TMP_PULL="$(mktemp /tmp/foodassistant-restore-XXXXXX.tar.gz)"
+    log "Pulling $remote from the rclone remote..."
+    if ! RCLONE_CONFIG="$RCLONE_CONFIG" "$RCLONE" copyto "$remote" "$TMP_PULL" 2>&1 | while IFS= read -r l; do log "  $l"; done; then
+      :
+    fi
+    if [ ! -s "$TMP_PULL" ]; then
+      _result 0 "rclone pull produced no file (check the remote path and rclone.conf)." "$SOURCE_ARG" "" "" 0
+    fi
+    ARCHIVE="$TMP_PULL"
+    ;;
+  /*)
+    ARCHIVE="$SOURCE_ARG"
+    ;;
+  *)
+    _result 0 "Source must be an absolute path or an rclone:remote path." "$SOURCE_ARG" "" "" 0
+    ;;
+esac
+
+if [ ! -f "$ARCHIVE" ]; then
+  _result 0 "Archive not found: $ARCHIVE" "$SOURCE_ARG" "" "" 0
+fi
+
+if [ ! -d "$PROJECT_DIR" ]; then
+  _result 0 "Compose project dir not found: $PROJECT_DIR" "$SOURCE_ARG" "" "" 0
+fi
+
+# --- Where each kind of data lives (FoodAssistant-7qw44) --------------------
+# Two layouts exist, and a snapshot from either may be restored onto either:
+#   appliance  the Pi install dir: ./data (app), ./grocy, ./mealie, the dirs
+#              the bridge's USB backup tars
+#   server     a repo checkout: service/data, grocy/config, mealie/data, the
+#              dirs scripts/backup.sh tars
+# _layout_dir maps a layout and a role (app, grocy, mealie) to its dir.
+_layout_dir() {
+  case "$1:$2" in
+    server:app) printf 'service/data' ;;
+    server:grocy) printf 'grocy/config' ;;
+    server:mealie) printf 'mealie/data' ;;
+    appliance:app) printf 'data' ;;
+    appliance:grocy) printf 'grocy' ;;
+    appliance:mealie) printf 'mealie' ;;
+    *) return 1 ;;
+  esac
+}
+
+# The layout this device's stack actually mounts. The compose file in the
+# project dir says so directly (./data:/app/data on an appliance,
+# ./service/data:/app/data in a checkout); without one, the app data dir that
+# exists decides. Prints nothing when neither tells.
+_device_layout() {
+  local compose="$PROJECT_DIR/docker-compose.yml"
+  if [ -f "$compose" ]; then
+    if grep -Eq '^[[:space:]]*-[[:space:]]*["'"'"']?\./service/data:/app/data' "$compose"; then
+      printf 'server'; return 0
+    fi
+    if grep -Eq '^[[:space:]]*-[[:space:]]*["'"'"']?\./data:/app/data' "$compose"; then
+      printf 'appliance'; return 0
+    fi
+  fi
+  if [ -d "$PROJECT_DIR/service/data" ]; then
+    printf 'server'
+  elif [ -d "$PROJECT_DIR/data" ]; then
+    printf 'appliance'
+  fi
+  return 0
+}
+
+DEVICE_LAYOUT="$(_device_layout)"
+if [ -z "$DEVICE_LAYOUT" ]; then
+  _result 0 "Could not tell where this device keeps its data under $PROJECT_DIR; nothing was changed." "$SOURCE_ARG" "" "" 0
+fi
+
+# Verify it is a readable gzip tar, recognize which layout made it, and check
+# that every member is CONFINED to that layout's data dirs (no absolute paths,
+# no "..", no symlink or hardlink that points outside them, no device nodes).
+# Restores run as root, so an unconfined archive could otherwise drop a
+# replacement compose file or escape the install dir entirely
+# (FoodAssistant-ifmt). An archive that mixes both layouts, or matches
+# neither, is refused whole: a restore is all or nothing. This catches a
+# wrong/corrupt/malicious file BEFORE we stop the stack. Mirrors the app's own
+# zip-slip restore guard (service/app/routers/admin.py).
+log "Verifying archive $ARCHIVE..."
+screen="$(ARCHIVE="$ARCHIVE" python3 - <<'PYEOF'
+import os
+import tarfile
+
+LAYOUTS = {
+    "server": {"app": "service/data", "grocy": "grocy/config", "mealie": "mealie/data"},
+    "appliance": {"app": "data", "grocy": "grocy", "mealie": "mealie"},
+}
+ROLES = ("app", "grocy", "mealie")
+
+
+def clean_parts(name):
+    """Path components of a tar member name, or None when the name is
+    absolute or steps upward. "."/empty components are dropped."""
+    if name.startswith("/"):
+        return None
+    parts = [p for p in name.split("/") if p not in ("", ".")]
+    if ".." in parts:
+        return None
+    return parts
+
+
+def under(clean, d):
+    return clean == d or clean.startswith(d + "/")
+
+
+def member_error(name, member, allowed):
+    """Why this member may not be restored, or None when it is safe."""
+    parts = clean_parts(name)
+    if parts is None:
+        return "path escapes the restore dir"
+    if not parts:
+        return "empty member name"
+    clean = "/".join(parts)
+    if not any(under(clean, d) for d in allowed):
+        # A bare parent of a data dir (the "service" above service/data) is
+        # harmless: only the data dirs themselves are ever moved into place.
+        if member.isdir() and any(d.startswith(clean + "/") for d in allowed):
+            return None
+        return "outside the restored data dirs"
+    if member.isdev() or member.isfifo():
+        return "device or fifo member"
+    if member.issym():
+        target = member.linkname
+        if not target or target.startswith("/") or clean_parts(target) is None:
+            return "symlink points outside the restore dir"
+    elif member.islnk():
+        target = clean_parts(member.linkname)
+        if target is None or not any(under("/".join(target), d) for d in allowed):
+            return "hardlink points outside the restored data dirs"
+    elif not (member.isreg() or member.isdir()):
+        return "unsupported member type"
+    return None
+
+
+def signals(cleans):
+    """Which layout each part of the archive points at. The app data dir
+    names it outright; Grocy and Mealie point at the server layout only when
+    everything under them sits in grocy/config or mealie/data."""
+    found = set()
+    for c in cleans:
+        if under(c, "service"):
+            found.add("server")
+        elif under(c, "data"):
+            found.add("appliance")
+    for top, inner in (("grocy", "grocy/config"), ("mealie", "mealie/data")):
+        below = [c for c in cleans if c.startswith(top + "/")]
+        if below:
+            found.add("server" if all(under(c, inner) for c in below) else "appliance")
+    return found
+
+
+try:
+    tf = tarfile.open(os.environ["ARCHIVE"], mode="r:gz")
+except Exception:
+    print("ERR archive is not a readable .tar.gz")
+    raise SystemExit(0)
+try:
+    with tf:
+        members = tf.getmembers()
+except (tarfile.TarError, EOFError, OSError):
+    print("ERR archive is not a readable .tar.gz")
+    raise SystemExit(0)
+
+cleans = []
+for member in members:
+    parts = clean_parts(member.name)
+    if parts is None:
+        print("ERR unsafe member %r: path escapes the restore dir" % member.name)
+        raise SystemExit(0)
+    if parts:
+        cleans.append("/".join(parts))
+
+found = signals(cleans)
+if len(found) > 1:
+    print("ERR it mixes the appliance layout (data, grocy, mealie) with the "
+          "server layout (service/data, grocy/config, mealie/data)")
+    raise SystemExit(0)
+if not found:
+    print("ERR it holds no Pantry Raider data dirs (data, grocy, mealie from a "
+          "device, or service/data, grocy/config, mealie/data from a server)")
+    raise SystemExit(0)
+layout = found.pop()
+dirs = LAYOUTS[layout]
+allowed = list(dirs.values())
+for member in members:
+    err = member_error(member.name, member, allowed)
+    if err:
+        print("ERR unsafe member %r: %s" % (member.name, err))
+        raise SystemExit(0)
+roles = [r for r in ROLES if any(under(c, dirs[r]) for c in cleans)]
+print("OK " + layout + " " + " ".join(roles))
+PYEOF
+)" || screen="ERR archive screening failed"
+SNAP_LAYOUT=""
+roles=""
+case "$screen" in
+  "OK "*)
+    rest="${screen#OK }"
+    SNAP_LAYOUT="${rest%% *}"
+    [ "$rest" != "$SNAP_LAYOUT" ] && roles="${rest#* }"
+    ;;
+  ERR*)
+    _result 0 "Archive rejected: ${screen#ERR }." "$SOURCE_ARG" "" "" 0
+    ;;
+  *)
+    _result 0 "Archive screening produced no verdict." "$SOURCE_ARG" "" "" 0
+    ;;
+esac
+if [ -z "${roles// /}" ] || ! _layout_dir "$SNAP_LAYOUT" app >/dev/null; then
+  _result 0 "Archive does not contain any expected data dir." "$SOURCE_ARG" "" "" 0
+fi
+
+# Each role the snapshot carries, as "<dir in the snapshot> <dir on this
+# device>". The device side is what this device's compose mounts, so a
+# snapshot from the other layout lands where the stack reads it.
+matched=""
+for r in $roles; do
+  matched="$matched $(_layout_dir "$DEVICE_LAYOUT" "$r")"
+done
+log "Archive looks valid ($SNAP_LAYOUT layout); contains:$(for r in $roles; do printf ' %s' "$(_layout_dir "$SNAP_LAYOUT" "$r")"; done)"
+if [ "$SNAP_LAYOUT" != "$DEVICE_LAYOUT" ]; then
+  log "This device uses the $DEVICE_LAYOUT layout; restoring into:$matched"
+fi
+
+# Unpack into a private staging dir first, while the stack is still up. Only
+# the whitelisted data dirs are moved into place afterwards, so nothing in the
+# archive can ever land outside them (and a failed unpack costs no downtime).
+UNPACK_DIR="$(mktemp -d "$PROJECT_DIR/.restore-unpack-XXXXXX" 2>/dev/null)" || UNPACK_DIR=""
+if [ -z "$UNPACK_DIR" ]; then
+  _result 0 "Could not create a staging dir under $PROJECT_DIR." "$SOURCE_ARG" "" "" 0
+fi
+chmod 700 "$UNPACK_DIR" 2>/dev/null || true
+log "Unpacking $ARCHIVE into a staging area..."
+if ! tar_out="$(tar -xzf "$ARCHIVE" -C "$UNPACK_DIR" 2>&1)"; then
+  [ -n "$tar_out" ] && log "  $tar_out"
+  _result 0 "Unpack failed; nothing was changed." "$SOURCE_ARG" "" "" 0
+fi
+for r in $roles; do
+  s="$(_layout_dir "$SNAP_LAYOUT" "$r")"
+  if [ ! -d "$UNPACK_DIR/$s" ]; then
+    _result 0 "Unpack did not produce $s; nothing was changed." "$SOURCE_ARG" "" "" 0
+  fi
+done
+# The staged copy of a role (in the snapshot's layout) and its live dir (in
+# this device's layout).
+_src() { printf '%s/%s' "$UNPACK_DIR" "$(_layout_dir "$SNAP_LAYOUT" "$1")"; }
+_dst() { printf '%s/%s' "$PROJECT_DIR" "$(_layout_dir "$DEVICE_LAYOUT" "$1")"; }
+
+# Files that belong to this one device, never to the user's data: the host
+# bridge's token and its markers, the access state, kiosk tickets, the setup
+# code, the device key and the like. A snapshot from another device (or an
+# older one of this device) must never replace them, or the app and the
+# bridge stop trusting each other and the access history is lost. The in-app
+# restore skips the same list. Keep it equal to DEVICE_LOCAL_FILES in
+# service/app/routers/admin.py (a test checks it). Matched at the top of the
+# app data dir, in any letter case.
+DEVICE_LOCAL_FILES="bridge-token bridge-token-enforced bridge-token-grace-started
+bridge-identity-verified auth-state.json kiosk-launch-nonces.json setup-code
+device.key deck-push.json pairing.json restore-note-pending"
+# Name of the note the app reads on its next start (auth_state.RESTORE_MARKER).
+RESTORE_MARKER="restore-note-pending"
+
+_has_role() {
+  case " $roles " in *" $1 "*) return 0 ;; esac
+  return 1
+}
+
+if _has_role app; then
+  for f in $DEVICE_LOCAL_FILES; do
+    find "$(_src app)" -mindepth 1 -maxdepth 1 -iname "$f" -exec rm -rf {} + 2>/dev/null || true
+  done
+fi
+
+# --- From here on the stack may be stopped; on any failure try to restart. ---
+log "Stopping the container stack..."
+if ! (cd "$PROJECT_DIR" && $COMPOSE stop) >/dev/null 2>&1; then
+  # Could not stop cleanly; the stack should still be up, so do not proceed.
+  _start_stack
+  _result 0 "Could not stop the container stack; nothing was changed." "$SOURCE_ARG" "" "" 1
+fi
+
+# With the stack stopped, carry the device's own copies of its device-local
+# files into the restored app data, and leave the app a note to record the
+# restore in its access state when the snapshot's settings differ.
+if _has_role app; then
+  src_app="$(_src app)"
+  dst_app="$(_dst app)"
+  app_rel="$(_layout_dir "$DEVICE_LAYOUT" app)"
+  for f in $DEVICE_LOCAL_FILES; do
+    [ "$f" = "$RESTORE_MARKER" ] && continue
+    if [ -e "$dst_app/$f" ] || [ -L "$dst_app/$f" ]; then
+      if ! cp -a "$dst_app/$f" "$src_app/$f"; then
+        log "WARN: could not keep this device's $app_rel/$f; nothing was changed."
+        _start_stack && restarted=1 || restarted=0
+        _result 0 "Could not keep this device's own $f; nothing was changed." "$SOURCE_ARG" "" "" "$restarted"
+      fi
+      log "  kept this device's $app_rel/$f"
+    fi
+  done
+  if [ -f "$src_app/settings.json" ] \
+      && ! cmp -s "$src_app/settings.json" "$dst_app/settings.json"; then
+    if date +%s > "$src_app/$RESTORE_MARKER" 2>/dev/null; then
+      log "  settings changed; the app records the restore on its next start"
+    else
+      log "WARN: could not leave the restore note for the app in $app_rel."
+    fi
+  fi
+fi
+
+# Only the dirs the snapshot actually carries are touched. A data dir the
+# archive does not include is LEFT IN PLACE, never moved aside, so a partial
+# snapshot (e.g. an app-data-only backup, or one from a server that never ran
+# Mealie) can never orphan the Grocy or Mealie data a running Pi still depends
+# on. Existing installs are production; a restore must never silently strand
+# live data.
+#
+# Roll back everything on any failure so the device always comes up
+# consistent: dirs already restored go back to staging, and every set-aside
+# original returns to its live path.
+placed=""   # roles whose restored copy is now in place
+moved=""    # roles whose live copy was set aside to .pre-restore-$STAMP
+_rollback_restore() {
+  local r
+  for r in $placed; do
+    mv -f "$(_dst "$r")" "$(_src "$r")" 2>/dev/null || true
+  done
+  for r in $moved; do
+    if [ -d "$(_dst "$r").pre-restore-$STAMP" ]; then
+      mv -f "$(_dst "$r").pre-restore-$STAMP" "$(_dst "$r")" 2>/dev/null || true
+    fi
+  done
+}
+
+log "Setting aside current data..."
+for r in $roles; do
+  d="$(_layout_dir "$DEVICE_LAYOUT" "$r")"
+  if [ -d "$PROJECT_DIR/$d" ]; then
+    if mv "$PROJECT_DIR/$d" "$PROJECT_DIR/$d.pre-restore-$STAMP"; then
+      log "  $d -> $d.pre-restore-$STAMP"
+      moved="$moved $r"
+    else
+      log "WARN: could not move $d aside; rolling back and restarting."
+      _rollback_restore
+      _start_stack && restarted=1 || restarted=0
+      _result 0 "Could not set aside $d; the previous data is intact." "$SOURCE_ARG" "" "$STAMP" "$restarted"
+    fi
+  fi
+done
+
+log "Moving the restored data into place..."
+move_ok=1
+for r in $roles; do
+  mkdir -p "$(dirname "$(_dst "$r")")" 2>/dev/null || true
+  if mv -f "$(_src "$r")" "$(_dst "$r")"; then
+    placed="$placed $r"
+  else
+    move_ok=0
+    break
+  fi
+done
+if [ "$move_ok" != "1" ]; then
+  log "Could not move the restored data into place; rolling back and restarting."
+  _rollback_restore
+  _start_stack && restarted=1 || restarted=0
+  _result 0 "Restore failed while moving data into place; the previous data was restored." "$SOURCE_ARG" "" "$STAMP" "$restarted"
+fi
+
+log "Restarting the container stack..."
+restarted=0
+_start_stack && restarted=1
+
+log "Restore complete (source=$SOURCE_ARG layout=$SNAP_LAYOUT restored=$matched snapshot=$STAMP restarted=$restarted)."
+_result 1 "" "$SOURCE_ARG" "$matched" "$STAMP" "$restarted"

@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+{% block title %}Shop: Pantry Raider{% endblock %}
+
+{% block content %}
+<div class="mt-3 mb-3">
+  <h4><i class="bi bi-bag me-2"></i>Recommended Kitchen Products</h4>
+  <p class="text-secondary mb-0">Appliances, cookware, gadgets, and storage picked for your kitchen.
+    Items you have not marked as owned (and anything a recipe needs) are listed first.</p>
+</div>
+
+<div class="alert alert-secondary py-2 small d-flex align-items-center" role="note">
+  <i class="bi bi-info-circle me-2"></i>
+  <span>{{ disclosure }}</span>
+</div>
+
+{% if storefront_url %}
+<a class="btn btn-warning btn-sm mb-3 d-inline-flex align-items-center"
+   href="{{ storefront_url }}" target="_blank" rel="noopener nofollow sponsored">
+  <i class="bi bi-shop-window me-2"></i>Browse our recommended items on Amazon
+</a>
+{% endif %}
+
+{% if our_picks %}
+<div class="card border-primary mb-4">
+  <div class="card-header bg-primary-subtle d-flex align-items-center">
+    <i class="bi bi-stars me-2"></i><span class="fw-semibold">Our Picks</span>
+    <span class="ms-2 small text-secondary">hardware for building a Pantry Raider display</span>
+  </div>
+  <div class="card-body">
+    <p class="text-secondary small mb-3">{{ our_picks_disclosure }}</p>
+    {% for group in our_picks %}
+    <div class="mb-3">
+      <h6 class="text-uppercase text-secondary small mb-2"><i class="bi bi-cpu me-1"></i>{{ group.category }}</h6>
+      <div class="row row-cols-1 row-cols-sm-2 row-cols-lg-3 g-2">
+        {% for item in group.products %}
+        <div class="col">
+          <div class="card h-100 bg-body-tertiary">
+            {% if item.image %}
+            <img src="{{ item.image }}" class="card-img-top" alt="{{ item.name }}" style="object-fit:contain;max-height:140px">
+            {% endif %}
+            <div class="card-body d-flex flex-column p-3">
+              <span class="fw-semibold">{{ item.name }}</span>
+              <span class="small text-secondary mt-1">{{ item.description }}</span>
+              {% if item.note %}
+              <span class="small text-body-secondary mt-1"><i class="bi bi-hand-thumbs-up me-1"></i>{{ item.note }}</span>
+              {% endif %}
+              <a class="btn btn-warning btn-sm mt-auto align-self-start mt-3 d-inline-flex align-items-center"
+                 href="{{ item.url }}" target="_blank" rel="noopener nofollow sponsored">
+                <i class="bi bi-box-arrow-up-right me-1"></i>View on Amazon
+              </a>
+            </div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+{% if recipe_missing %}
+<div class="alert alert-info py-2 small">
+  <i class="bi bi-fire me-1"></i>Your active recipe needs equipment you may not own:
+  <strong>{{ recipe_missing | join(', ') }}</strong>. Those picks are pinned to the top.
+</div>
+{% endif %}
+
+{% if top_picks %}
+<div class="card border-warning mb-4">
+  <div class="card-header bg-warning-subtle d-flex align-items-center">
+    <i class="bi bi-stars me-2"></i><span class="fw-semibold">Recommended for you</span>
+    <span class="ms-2 small text-secondary">picks for your kitchen and active recipe</span>
+  </div>
+  <div class="card-body p-2">
+    <div class="row row-cols-1 row-cols-sm-2 row-cols-lg-3 g-2">
+      {% for item in top_picks %}
+      <div class="col">
+        <a class="d-flex flex-column h-100 text-decoration-none card border-warning bg-body-tertiary p-2"
+           href="{{ item.url }}" target="_blank" rel="noopener nofollow sponsored">
+          <span class="fw-semibold d-flex justify-content-between align-items-start gap-2">
+            <span>{{ item.name }}</span>
+            <span class="badge bg-warning text-dark flex-shrink-0">Recommended</span>
+          </span>
+          <span class="small text-secondary">{{ item.reason }}</span>
+          <span class="small text-info mt-1"><i class="bi bi-box-arrow-up-right me-1"></i>View on Amazon</span>
+        </a>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+{% endif %}
+
+{% for group in groups %}
+<div class="card mb-3">
+  <div class="card-header"><i class="bi bi-grid me-2"></i>{{ group.label }}</div>
+  <div class="card-body p-2">
+    <div class="row row-cols-1 row-cols-sm-2 row-cols-lg-3 g-2">
+      {% for item in group.products %}
+      <div class="col">
+        <a class="d-flex flex-column h-100 text-decoration-none card {{ 'border-warning' if item.highlighted else 'bg-body-tertiary' }} {{ 'bg-body-tertiary' if item.highlighted else '' }} p-2"
+           href="{{ item.url }}" target="_blank" rel="noopener nofollow sponsored">
+          <span class="fw-semibold d-flex justify-content-between align-items-start gap-2">
+            <span>{{ item.name }}</span>
+            {% if item.highlighted %}<span class="badge bg-warning text-dark flex-shrink-0">Recommended</span>{% endif %}
+          </span>
+          <span class="small text-secondary">{{ item.reason }}</span>
+          <span class="small text-info mt-1"><i class="bi bi-box-arrow-up-right me-1"></i>View on Amazon</span>
+        </a>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+{% endfor %}
+
+<p class="text-secondary small mt-3 mb-4">{{ disclosure }}</p>
+{% endblock %}

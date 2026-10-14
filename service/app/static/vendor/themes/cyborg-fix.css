@@ -1,0 +1,70 @@
+/*
+ * Cyborg readability fix (FoodAssistant-4t5y).
+ * Loaded as an overlay after the vendored cyborg.min.css. Cyborg gives text
+ * fields a white background but leaves the placeholder in a light grey meant
+ * for dark surfaces, so hints (and some typed text) wash out against the field.
+ * This only corrects form control contrast; it does not restyle the theme.
+ */
+
+.form-control,
+.form-select,
+input.form-control,
+textarea.form-control,
+input[type="text"],
+input[type="search"],
+input[type="email"],
+input[type="url"],
+input[type="tel"],
+input[type="number"],
+input[type="password"],
+input[type="date"],
+input[type="time"],
+input[type="datetime-local"],
+textarea {
+  background-color: #ffffff;
+  color: #1a1d21;
+}
+
+.form-control:focus,
+.form-select:focus,
+input.form-control:focus,
+textarea.form-control:focus,
+textarea:focus {
+  background-color: #ffffff;
+  color: #1a1d21;
+}
+
+/* Readable placeholder: a medium grey with clear contrast on the white field
+   instead of Cyborg's near-white --bs-secondary-color. */
+.form-control::placeholder,
+.form-select::placeholder,
+input::placeholder,
+textarea::placeholder {
+  color: #6c757d;
+  opacity: 1;
+}
+.form-control::-webkit-input-placeholder,
+input::-webkit-input-placeholder,
+textarea::-webkit-input-placeholder {
+  color: #6c757d;
+  opacity: 1;
+}
+.form-control::-moz-placeholder,
+input::-moz-placeholder,
+textarea::-moz-placeholder {
+  color: #6c757d;
+  opacity: 1;
+}
+
+/* Input group add-ons sit next to the fields; keep their text dark on the
+   light add-on background so labels like the search icon stay legible. */
+.input-group-text {
+  color: #1a1d21;
+}
+
+/* Disabled fields keep dark text so read-only values stay readable. */
+.form-control:disabled,
+.form-select:disabled,
+.form-control[readonly] {
+  color: #1a1d21;
+}

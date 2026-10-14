@@ -1,0 +1,217 @@
+{% extends "base.html" %}
+{% block title %}Inventory: Pantry Raider{% endblock %}
+{% block content %}
+<style>
+  .panel-header {
+    font-size: 0.95rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    padding: 0.6rem 1rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    border-radius: 0.5rem 0.5rem 0 0;
+    cursor: pointer;
+    user-select: none;
+  }
+  .panel-header .chevron { transition: transform 0.2s; margin-left: 0.25rem; }
+  .panel-collapsed .chevron { transform: rotate(-90deg); }
+  .panel-collapsed .panel-body { display: none; }
+  .panel-collapsed { border-radius: 0.5rem !important; }
+  .panel-count {
+    font-size: 0.75rem;
+    font-weight: 500;
+    margin-left: auto;
+    padding: 0.15rem 0.5rem;
+    border-radius: 999px;
+    background: rgba(255,255,255,0.15);
+  }
+  .panel-body {
+    max-height: 60vh;
+    overflow-y: auto;
+  }
+  .item-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.45rem 0.75rem;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+    font-size: 0.875rem;
+  }
+  .item-row:last-child { border-bottom: none; }
+  .item-name { flex: 1; min-width: 0; }
+  .item-name-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .item-qty {
+    font-size: 0.78rem;
+    color: var(--bs-secondary-color);
+    white-space: nowrap;
+  }
+  .expiry-badge {
+    font-size: 0.72rem;
+    padding: 0.15rem 0.45rem;
+    border-radius: 999px;
+    white-space: nowrap;
+    font-weight: 500;
+  }
+  .badge-expired  { background:#4d1010; color:#ff6b6b; }
+  .badge-today    { background:#4d2a0a; color:#ffa94d; }
+  .badge-3d       { background:#3d3000; color:#ffd43b; }
+  .badge-7d       { background:#1a2e10; color:#69db7c; }
+  .badge-ok       { background:#0f2010; color:#69db7c; }
+  .badge-unknown  { background:#1e1e2e; color:#888; }
+  .badge-opened   { background:#0b2a3d; color:#4dabf7; }
+  .panel-empty {
+    text-align: center;
+    color: var(--bs-secondary-color);
+    font-size: 0.85rem;
+    padding: 2rem 1rem;
+  }
+  .item-row[draggable="true"] { cursor: grab; }
+  .item-row.dragging { opacity: 0.4; }
+  .drop-target {
+    outline: 2px dashed var(--bs-primary);
+    outline-offset: -2px;
+    background: rgba(13,110,253,0.08);
+  }
+  {% for c in panels %}
+  .panel-{{ c.key }} .panel-header { background: {{ c.bg }}; color: {{ c.color }}; }
+  .panel-{{ c.key }} { border-color: {{ c.bg }} !important; }
+  {% endfor %}
+  #loading-spinner { display: none; }
+</style>
+
+<!-- Top bar: sort + refresh -->
+<div class="d-flex justify-content-between align-items-center my-3 flex-wrap gap-2">
+  <h4 class="mb-0"><i class="bi bi-grid me-2"></i>Inventory</h4>
+  <div class="d-flex align-items-center flex-wrap gap-2">
+    <label class="form-label mb-0 me-1 text-nowrap" for="sortSelect">Sort by:</label>
+    <select class="form-select" id="sortSelect" style="width:auto" data-on-change="loadDashboard()">
+      <option value="expiry_asc">Expiring soonest</option>
+      <option value="expiry_desc">Expiring latest</option>
+      <option value="added_desc">Recently added (newest)</option>
+      <option value="added_asc">Recently added (oldest)</option>
+      <option value="name_asc">Name A → Z</option>
+      <option value="name_desc">Name Z → A</option>
+      <option value="qty_desc">Quantity (most first)</option>
+      <option value="qty_asc">Quantity (least first)</option>
+    </select>
+    <a class="btn btn-outline-secondary" href="ui/journal" title="Stock journal">
+      <i class="bi bi-journal-text"></i>
+    </a>
+    <button class="btn btn-outline-secondary" data-on-click="loadDashboard()" title="Refresh">
+      <i class="bi bi-arrow-clockwise"></i>
+    </button>
+    <span id="loading-spinner" class="spinner-border spinner-border-sm text-secondary"></span>
+  </div>
+</div>
+
+<!-- Outage banner (FoodAssistant-2cmm): shown when the inventory data cannot
+     be fetched, with the honest reason from the API. The page stays up. -->
+<div class="alert alert-warning d-none align-items-start gap-2" id="inventory-status" role="alert">
+  <i class="bi bi-plug"></i>
+  <div>
+    <div id="inventory-status-text"></div>
+    {# A Grocy-reported setup problem adds the fix in plain words, and the
+       one-click repair on a Pi Hosted appliance (static/js/grocy-repair.js). #}
+    <div class="small mt-1 d-none" id="inventory-status-hint"></div>
+    <button type="button" class="btn btn-sm btn-outline-warning mt-2 d-none"
+            id="inventory-repair" data-grocy-repair data-on-click="repairGrocyConfig(this)">
+      <i class="bi bi-wrench-adjustable me-1"></i>Repair inventory connection
+    </button>
+    <div class="small mt-1 d-none" data-grocy-repair-result></div>
+  </div>
+</div>
+
+<div class="row g-3" id="panels">
+  {% for c in panels %}
+  <div class="col-md-6" id="col-{{ c.key }}">
+    <div class="border rounded panel-{{ c.key }}" style="border-width:1px !important"
+         data-bucket="{{ c.key }}"
+         {% if c.key != 'other' %}data-on-dragover="dragOver(event)" data-on-dragleave="dragLeave(event)" data-on-drop="dropItem(event)"{% endif %}>
+      {# The bucket id rides in a data attribute rather than inside an onclick
+         string: a custom category key from settings could otherwise close the
+         handler and run as script. Delegated listeners are at the end of the
+         script block. #}
+      <div class="panel-header" data-toggle-panel="{{ c.key }}">
+        <i class="bi {{ c.icon }}"></i> {{ c.label }}
+        <span class="panel-count" id="count-{{ c.key }}">–</span>
+        <i class="bi bi-chevron-down chevron" id="chevron-{{ c.key }}"></i>
+      </div>
+      <div class="panel-body" id="panel-{{ c.key }}"><div class="panel-empty">Loading…</div></div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+<!-- Move-item modal (tap-friendly alternative to drag & drop) -->
+<div class="modal fade" id="moveModal" tabindex="-1">
+  <div class="modal-dialog modal-sm modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h6 class="modal-title">Move <span id="moveModalName"></span> to…</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body d-grid gap-2">
+        {% for c in categories %}
+        <button class="btn" style="border:1px solid {{ c.color }}; color:{{ c.color }}"
+                data-move-to="{{ c.key }}">
+          <i class="bi {{ c.icon }} me-1"></i>{{ c.label }}
+        </button>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Edit-item modal -->
+<div class="modal fade" id="editModal" tabindex="-1">
+  <div class="modal-dialog modal-sm modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h6 class="modal-title"><i class="bi bi-pencil me-1"></i><span id="editModalName"></span></h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Category</label>
+          <select class="form-select" id="editCategory">
+            <option value="">(unchanged)</option>
+            <option>Poultry</option><option>Meat</option><option>Seafood</option>
+            <option>Dairy</option><option>Produce</option><option>Grains</option>
+            <option>Condiments</option><option>Beverages</option><option>Snacks</option>
+            <option>Frozen</option><option>Canned</option><option>Other</option>
+          </select>
+        </div>
+        <div class="mb-1">
+          <label class="form-label fw-semibold">Best By Date</label>
+          <input type="date" class="form-control" id="editBestBy">
+          <div class="form-text">Applies to all open stock entries for this product.</div>
+        </div>
+      </div>
+      <div class="modal-footer py-2">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-primary" id="editSaveBtn" data-on-click="saveEdit()">
+          <i class="bi bi-check2 me-1"></i>Save
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Consume confirmation toast -->
+<div class="position-fixed bottom-0 end-0 p-3" style="z-index:9999">
+  <div id="consumeToast" class="toast align-items-center text-bg-success border-0" role="alert">
+    <div class="d-flex">
+      <div class="toast-body" id="toastMsg">Consumed.</div>
+      <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script src="static/js/grocy-repair.js?v={{ app_version }}" defer></script>
+<script type="application/json" id="inventory-data">{{ ({'printing_enabled': true if printing_enabled else false, 'panels': panels}) | tojson }}</script>
+<script src="static/js/pages/inventory.js?v={{ app_version }}"></script>
+{% endblock %}

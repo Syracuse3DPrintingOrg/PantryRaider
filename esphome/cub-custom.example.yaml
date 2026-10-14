@@ -1,0 +1,159 @@
+# Bandit Cub on your own board: the YAML escape hatch.
+#
+# Copy this file, fill in your board and display, and build it with your own
+# ESPHome dashboard or CLI. The pantry_raider component gives you the same
+# hub and sensors the prebuilt Cubs use; only the hardware wiring is yours to
+# write.
+#
+# As written this is a receive-only Cub, the same as the prebuilt ones: it
+# listens for your kitchen's Bluetooth status broadcast (Settings, Devices,
+# Bandit Cubs, "Broadcast kitchen status over Bluetooth") and shows it. It
+# never pairs, holds no key, and sends nothing back.
+#
+# The pinned source below fetches the component from the public repo. If you
+# are building from a checkout of this repository, swap it for:
+#   external_components:
+#     - source:
+#         type: local
+#         path: components
+#       components: [pantry_raider]
+
+substitutions:
+  name: my-cub
+  friendly_name: My Cub
+  # Which install's broadcast to listen to: 8 hex characters. Your main
+  # server shows its tag in Settings, Devices, under Bandit Cubs, next to the
+  # broadcast setting (a satellite broadcasts its main server's tag, so use
+  # that one near a satellite too). Left empty, the first broadcast this Cub
+  # hears wins and is remembered until the device is erased.
+  pr_install_tag: ""
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+
+# Your board here.
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+
+external_components:
+  - source: github://Syracuse3DPrintingOrg/PantryRaider@main
+    components: [pantry_raider]
+
+logger:
+
+# No fallback access point and no captive_portal here. ESPHome's captive
+# portal carries a web firmware upload that asks for no password, so anyone
+# who joins the setup network while it is up could flash this Cub. Set Wi-Fi
+# in secrets.yaml, or over USB with improv_serial.
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  reboot_timeout: 0s
+
+improv_serial:
+
+# A build of your own is not a shared image, so unlike the published factory
+# firmware it can hold real secrets. Both blocks below are worth filling in.
+#
+# An encryption key stops anyone else on the network reading this Cub's
+# sensors. Generate one with `esphome secrets` or any 32 byte base64 value,
+# keep it in secrets.yaml, and give the same key to Home Assistant when it
+# asks. Leave the block out entirely and the API stays readable on the LAN.
+api:
+  reboot_timeout: 0s
+  encryption:
+    key: !secret cub_api_key
+
+# The esphome platform lets a machine on the network push firmware to this
+# device. That is convenient while you are developing and dangerous without a
+# password, so set one, or leave the block out and flash over USB only, the
+# way the published factory firmware works.
+ota:
+  - platform: esphome
+    password: !secret cub_ota_password
+
+time:
+  - platform: sntp
+    id: sntp_time
+
+# The hub needs http_request in the build even when it never makes a request.
+http_request:
+  id: pr_http
+  timeout: 10s
+  verify_ssl: false
+
+# Listening only: a passive scan never transmits.
+esp32_ble_tracker:
+  scan_parameters:
+    active: false
+
+pantry_raider:
+  id: pantry
+  transport: ble
+  install_tag: ${pr_install_tag}
+  profile: custom
+  device_name: ${friendly_name}
+  # A LAN build instead: set transport to lan (or auto, which falls back to
+  # the broadcast), and the Cub pairs with your server and polls it over
+  # Wi-Fi. That is what the press, timer_extend and timer_dismiss actions and
+  # the sensor relay (relay: true) need. Leave server empty to discover it
+  # over mDNS, or pin it, and leave api_key empty to pair from the screen
+  # (show pairing_line() on your display):
+  #   transport: lan
+  #   server: 192.168.1.50
+  #   port: 9284
+  #   api_key: ""
+
+# Every one of these is optional; each becomes a Home Assistant entity too.
+sensor:
+  - platform: pantry_raider
+    expiring_soon:
+      name: Expiring soon
+    active_timers:
+      name: Active timers
+
+text_sensor:
+  - platform: pantry_raider
+    view:
+      name: View
+    next_timer:
+      name: Next timer
+    pairing_code:
+      name: Pairing code
+
+# A physical button that starts a shared kitchen timer (press again to add a
+# minute, hold to cancel), using the same action names as docs/esp-devices.md.
+# It posts to your server, so it only works in a LAN build (see the hub block
+# above); on a receive-only Cub it does nothing.
+# binary_sensor:
+#   - platform: gpio
+#     pin:
+#       number: GPIO5
+#       inverted: true
+#       mode:
+#         input: true
+#         pullup: true
+#     name: Timer button
+#     on_multi_click:
+#       - timing:
+#           - ON for at most 0.6s
+#           - OFF for at least 0.1s
+#         then:
+#           - pantry_raider.press:
+#               button: timer_eggs
+#       - timing:
+#           - ON for at least 1s
+#         then:
+#           - pantry_raider.press:
+#               button: timer_eggs
+#               long: true
+
+# Your display here. Everything the hub knows is available in the lambda:
+#   id(pantry)->state()            the last kitchen state (timers, probes, counts)
+#   id(pantry)->effective_view()   what to show right now
+#   id(pantry)->pairing_line()     the listening or pairing status line
+#   id(pantry)->format_remaining(t)  live countdown text per timer
+# See packages/tdisplay.yaml for a complete rendering example.

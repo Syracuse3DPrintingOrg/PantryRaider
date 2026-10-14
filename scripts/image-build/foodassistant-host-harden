@@ -1,0 +1,968 @@
+#!/usr/bin/python3
+"""Put this device's local credentials in place.
+
+    sudo foodassistant-host-harden local-credentials [--dry-run]
+    sudo foodassistant-host-harden kiosk-url-local [--dry-run]
+    sudo foodassistant-host-harden boot-wifi-psk [--dry-run]
+    sudo foodassistant-host-harden boot-password-hash [--dry-run]
+
+local-credentials sets up what lets the services on this device prove
+themselves to the app without the app trusting every local request:
+
+- the Stream Deck and the thermometer reader get their own keys (a drop-in
+  that runs foodassistant-agent-key before each start);
+- the kitchen screen gets a one-time sign-in ticket at each start and the
+  kiosk launcher, which signs it in and lets the Stream Deck steer it without
+  the open debugging port. A screen whose page is not on this device itself
+  is left exactly as it is (reported as kiosk-url-not-local): a ticket could
+  not sign it in;
+- an older boot wait asks the app's /health instead of the kiosk page;
+- a Bandit's web service stops reading forwarding headers
+  (--no-proxy-headers), and its AUTH_REQUIRED=false pin goes once a password
+  is set.
+
+kiosk-url-local points a screen that shows the app through another address
+back at this device (http://localhost:9284/ui/?kiosk=1, or
+http://localhost/ui/?kiosk=1 on a Bandit), with its boot wait and return
+button, then runs local-credentials and restarts the screen.
+
+boot-wifi-psk removes the home Wi-Fi password from the SD card's
+network-config (the FAT boot partition, which anything that mounts the card
+can read) once this device keeps it itself. It only acts after cloud-init has
+finished its first boot and the same password is found in the device's own
+network configuration (/etc/netplan or NetworkManager's connections), and
+it first tells cloud-init never to render the network again, so a later boot
+can never apply the blanked file. The network name stays. Anything short of
+that leaves the file alone and is reported as skipped.
+
+boot-password-hash removes the account password hash from the SD card's
+cloud-init user-data the same way. It only acts after cloud-init has finished
+its first boot and each account named there exists on the device with that
+same hash, and it first tells cloud-init never to treat the device as new
+(manual_cache_clean), so the accounts are never set up from the blanked file.
+The account names and everything else in the file stay.
+
+Every unit edit keeps a .bak copy and is checked afterwards; an edit that
+does not come out as expected is put back. Idempotent. The last line printed
+is a JSON summary {"changed": [...], "skipped": [...]}. Never prints a key.
+Always exits 0.
+
+Standard library only (Python 3.9 and later).
+"""
+from __future__ import annotations
+
+import json
+import os
+import re
+import shutil
+import socket
+import subprocess
+import sys
+import tempfile
+import urllib.parse
+
+LAUNCHER = "/usr/local/bin/foodassistant-kiosk-launch"
+LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+KIOSK_UNIT = "foodassistant-kiosk.service"
+REMOTE_UNIT = "foodassistant-remote.service"
+BOOT_DROPIN = "10-foodassistant-boot.conf"
+LAUNCH_DROPIN = "20-foodassistant-launch.conf"
+KEY_DROPIN = "20-foodassistant-key.conf"
+LOCAL_URL = "http://localhost:9284/ui/?kiosk=1"
+LOCAL_URL_BANDIT = "http://localhost/ui/?kiosk=1"
+SAFE_ORIGIN_RE = re.compile(
+    r"^https?://[A-Za-z0-9._:-]+$|^https?://\[[0-9A-Fa-f:.]+\](:[0-9]+)?$")
+DEBUG_PORT_RE = re.compile(r" --remote-debugging-port=9222(?=\s|\\|$)")
+
+
+def log(msg):
+    print(msg, file=sys.stderr, flush=True)
+
+
+def unit_dir():
+    return os.environ.get("UNIT_DIR", "/etc/systemd/system")
+
+
+def bin_dir():
+    return os.environ.get("BIN_DIR", "/usr/local/bin")
+
+
+def install_dir():
+    return os.environ.get("INSTALL_DIR", "/opt/foodassistant")
+
+
+def systemctl_cmd():
+    return os.environ.get("SYSTEMCTL", "systemctl")
+
+
+def python3_path():
+    return os.environ.get("FA_PYTHON3", "/usr/bin/python3")
+
+
+def device_hostname():
+    try:
+        return socket.gethostname()
+    except OSError:
+        return ""
+
+
+# --- pure helpers -----------------------------------------------------------
+
+def agent_dropin(agent):
+    return ("[Service]\n"
+            f"ExecStartPre=+/usr/local/bin/foodassistant-agent-key {agent}\n"
+            f"EnvironmentFile=-/run/foodassistant-agents/{agent}.env\n")
+
+
+LAUNCH_DROPIN_TEXT = ("[Service]\n"
+                      "RuntimeDirectory=foodassistant-kiosk\n"
+                      "RuntimeDirectoryMode=0711\n"
+                      "ExecStartPre=+/usr/local/bin/foodassistant-kiosk-ticket\n")
+
+
+def is_local_kiosk_host(host, hostname=None):
+    """True when a kiosk URL's host is this device: 127.0.0.1, localhost,
+    ::1 or this device's bare host name (a single label, which Debian maps to
+    127.0.1.1). A '.local' name is not: mDNS answers it with the LAN address.
+    The same rule the kiosk launcher, the bridge and the Stream Deck use."""
+    h = str(host or "").strip().lower()
+    if h.startswith("[") and h.endswith("]"):
+        h = h[1:-1]
+    h = h.rstrip(".")
+    if not h:
+        return False
+    if h in LOOPBACK_HOSTS:
+        return True
+    if hostname is None:
+        hostname = device_hostname()
+    bare = str(hostname or "").strip().lower().rstrip(".")
+    return bool(bare) and "." not in bare and h == bare
+
+
+def url_host(url):
+    try:
+        return (urllib.parse.urlsplit(url or "").hostname or "").lower()
+    except ValueError:
+        return ""
+
+
+def origin_of(url):
+    try:
+        parts = urllib.parse.urlsplit(url or "")
+        if parts.scheme.lower() not in ("http", "https") or not parts.hostname:
+            return ""
+        parts.port  # noqa: B018 - raises ValueError for a bad port
+    except ValueError:
+        return ""
+    return f"{parts.scheme.lower()}://{parts.netloc.rsplit('@', 1)[-1]}"
+
+
+def execstart_span(lines):
+    """(first, last) line indexes of the unit's ExecStart= command, its
+    continuation lines included, or None."""
+    i = 0
+    found = None
+    while i < len(lines):
+        if lines[i].strip().startswith("ExecStart="):
+            start = i
+            while lines[i].rstrip().endswith("\\") and i + 1 < len(lines):
+                i += 1
+            found = (start, i)
+        i += 1
+    return found
+
+
+def kiosk_url_from_unit(text):
+    """The kiosk URL: the last http:// or https:// argument of the ExecStart
+    command (continuation lines joined), or ''."""
+    lines = (text or "").splitlines()
+    span = execstart_span(lines)
+    if span is None:
+        return ""
+    joined = " ".join(lines[span[0]:span[1] + 1]).replace("\\", " ")
+    joined = joined.split("=", 1)[1] if "=" in joined else joined
+    urls = [a for a in joined.split() if a.startswith(("http://", "https://"))]
+    return urls[-1] if urls else ""
+
+
+def patch_kiosk_execstart(text):
+    """The unit text with the kiosk launcher inserted after the first ' -- '
+    of its ExecStart= line and every ' --remote-debugging-port=9222' of that
+    command removed, or None when the unit is not in the expected form."""
+    lines = text.split("\n")
+    span = execstart_span(lines)
+    if span is None:
+        return None
+    first, last = span
+    line = lines[first]
+    pos = line.find(" -- ")
+    if pos < 0 or not _cage_runs_chromium(line, pos):
+        return None
+    lines[first] = line[:pos + 4] + LAUNCHER + " " + line[pos + 4:]
+    for i in range(first, last + 1):
+        lines[i] = DEBUG_PORT_RE.sub("", lines[i])
+    new = "\n".join(lines)
+    return new if kiosk_launch_ok(text, new) else None
+
+
+def _cage_runs_chromium(line, pos):
+    """True when the ExecStart= line starts cage and the command after its
+    ' -- ' is a Chromium build, the only form the launcher belongs in (the
+    ' -- ' of another command, such as xinit's, means something else)."""
+    before = line.strip()[len("ExecStart="):] if line.strip().startswith("ExecStart=") else ""
+    words = before.split()
+    after = line[pos + 4:].split()
+    if not words or not after:
+        return False
+    cage = os.path.basename(words[0].lstrip("-@:+!"))
+    browser = os.path.basename(after[0]).lower()
+    return cage == "cage" and "chrom" in browser
+
+
+def kiosk_launch_ok(old, new):
+    """The patched unit names the launcher exactly once, opens no debugging
+    port and keeps the same kiosk URL last."""
+    url = kiosk_url_from_unit(old)
+    return (new.count("foodassistant-kiosk-launch") == 1
+            and "--remote-debugging-port=" not in new
+            and bool(url) and kiosk_url_from_unit(new) == url)
+
+
+def replace_kiosk_url(text, old_url, new_url):
+    """The unit text with exactly the kiosk URL token of its ExecStart
+    command replaced, or None."""
+    lines = text.split("\n")
+    span = execstart_span(lines)
+    if span is None:
+        return None
+    for i in range(span[1], span[0] - 1, -1):
+        tokens = list(re.finditer(r"\S+", lines[i]))
+        for m in reversed(tokens):
+            tok = m.group(0)
+            if tok.startswith("ExecStart="):
+                tok_start = m.start() + len("ExecStart=")
+                tok = tok[len("ExecStart="):]
+            else:
+                tok_start = m.start()
+            if tok == old_url:
+                lines[i] = lines[i][:tok_start] + new_url + lines[i][tok_start + len(tok):]
+                new = "\n".join(lines)
+                if kiosk_url_from_unit(new) != new_url or \
+                        not _same_but_url(text, new, old_url, new_url):
+                    return None
+                return new
+            if tok.startswith(("http://", "https://")):
+                return None
+    return None
+
+
+def _same_but_url(old, new, old_url, new_url):
+    """Every byte of new equals old except one old_url swapped for new_url."""
+    for m in re.finditer(re.escape(old_url), old):
+        if old[:m.start()] + new_url + old[m.end():] == new:
+            return True
+    return False
+
+
+def move_unit_wait(text, old_origin, new_origin):
+    """The kiosk unit with its own boot wait (an ExecStartPre= line that
+    curls "<old_origin>/health", as firstboot writes it) pointed at
+    new_origin/health. Only that quoted target changes."""
+    if not old_origin or old_origin == new_origin \
+            or not SAFE_ORIGIN_RE.match(new_origin or ""):
+        return text
+    old_t, new_t = f'"{old_origin}/health"', f'"{new_origin}/health"'
+    lines = text.split("\n")
+    for i, line in enumerate(lines):
+        if line.lstrip().startswith("ExecStartPre=") and old_t in line:
+            lines[i] = line.replace(old_t, new_t)
+    return "\n".join(lines)
+
+
+def _only_wait_moved(old, new, old_origin, new_origin):
+    """Every line of new equals old, except ExecStartPre= lines whose quoted
+    "<old_origin>/health" became "<new_origin>/health"."""
+    a, b = old.split("\n"), new.split("\n")
+    if len(a) != len(b):
+        return False
+    old_t, new_t = f'"{old_origin}/health"', f'"{new_origin}/health"'
+    for x, y in zip(a, b):
+        if x != y and not (x.lstrip().startswith("ExecStartPre=")
+                           and x.replace(old_t, new_t) == y):
+            return False
+    return True
+
+
+def rewrite_boot_wait(text, origin):
+    """The boot drop-in with every curl target pointed at origin/health, or
+    the same text when there is nothing to change (or the origin is not a
+    plain scheme, host and port)."""
+    if not SAFE_ORIGIN_RE.match(origin or ""):
+        return text
+    target = origin + "/health"
+
+    def repl(m):
+        return m.group(1) + '"' + target + '"'
+    return re.sub(r'(curl\s[^"\n]*?)"(https?://[^"\s]+)"', repl, text)
+
+
+def add_no_proxy_headers(text):
+    """The remote unit with ' --no-proxy-headers' added once to its uvicorn
+    ExecStart= line, the same text when it is already there, or None when
+    there is no such line."""
+    lines = text.split("\n")
+    for i, line in enumerate(lines):
+        if line.strip().startswith("ExecStart=") and "uvicorn" in line:
+            if "--no-proxy-headers" in line:
+                return text
+            stripped = line.rstrip()
+            if stripped.endswith("\\"):
+                lines[i] = stripped[:-1].rstrip() + " --no-proxy-headers \\"
+            else:
+                lines[i] = stripped + " --no-proxy-headers"
+            new = "\n".join(lines)
+            if new.count("--no-proxy-headers") != text.count("--no-proxy-headers") + 1:
+                return None
+            return new
+    return None
+
+
+def drop_auth_pin(text):
+    """remote.env without lines that are exactly AUTH_REQUIRED=false."""
+    lines = text.split("\n")
+    kept = [ln for ln in lines if ln.rstrip("\r") != "AUTH_REQUIRED=false"]
+    return "\n".join(kept)
+
+
+def has_password(settings_path):
+    try:
+        with open(settings_path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return False
+    return isinstance(data, dict) and isinstance(data.get("auth_password"), str) \
+        and bool(data["auth_password"].strip())
+
+
+# --- file edits -------------------------------------------------------------
+
+def _read(path):
+    try:
+        with open(path, encoding="utf-8") as f:
+            return f.read()
+    except (OSError, UnicodeDecodeError):
+        return None
+
+
+def _write(path, text, mode=None):
+    """Write text atomically, keeping the old file's mode (or ``mode``)."""
+    d = os.path.dirname(path) or "."
+    try:
+        keep = os.stat(path).st_mode & 0o7777
+    except OSError:
+        keep = mode if mode is not None else 0o644
+    fd, tmp = tempfile.mkstemp(prefix="." + os.path.basename(path) + ".", dir=d)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        os.chmod(tmp, keep)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def _executable(path):
+    return os.path.isfile(path) and os.access(path, os.X_OK)
+
+
+def write_dropin(path, content, dry_run):
+    """True when the drop-in is (or would be) written."""
+    if _read(path) == content:
+        return False
+    if not dry_run:
+        os.makedirs(os.path.dirname(path), mode=0o755, exist_ok=True)
+        _write(path, content, 0o644)
+    return True
+
+
+def edit_unit(path, old, new, check, dry_run):
+    """Replace the unit's text with new, keeping <unit>.bak, then read it
+    back and check it; on any failure the .bak is put back. True when the
+    edit holds (or would)."""
+    if dry_run:
+        return True
+    bak = path + ".bak"
+    shutil.copy2(path, bak)
+    try:
+        _write(path, new)
+        back = _read(path)
+        if back == new and check(back):
+            return True
+    except OSError as e:
+        log(f"could not edit {path}: {e.strerror}")
+    shutil.copy2(bak, path)
+    return False
+
+
+class Run:
+    def __init__(self, dry_run):
+        self.dry_run = dry_run
+        self.changed = []
+        self.skipped = []
+
+    def add(self, name):
+        if name not in self.changed:
+            self.changed.append(name)
+
+    def skip(self, name):
+        if name not in self.skipped:
+            self.skipped.append(name)
+
+    def summary(self):
+        return json.dumps({"changed": self.changed, "skipped": self.skipped})
+
+
+def _unit(name):
+    return os.path.join(unit_dir(), name)
+
+
+def kiosk_boot_wait(run, origin):
+    path = os.path.join(_unit(KIOSK_UNIT) + ".d", BOOT_DROPIN)
+    text = _read(path)
+    if text is None:
+        return
+    new = rewrite_boot_wait(text, origin)
+    if new == text:
+        return
+    if not run.dry_run:
+        _write(path, new)
+    run.add("kiosk-boot-wait")
+
+
+def local_credentials(run, kiosk_text=None):
+    """The local-credentials pass. kiosk_text stands in for the kiosk unit's
+    text (a dry run of kiosk-url-local)."""
+    agent_key = _executable(os.path.join(bin_dir(), "foodassistant-agent-key"))
+    for agent in ("streamdeck", "gadgets"):
+        unit = _unit(f"foodassistant-{agent}.service")
+        if not os.path.exists(unit):
+            continue
+        if not agent_key:
+            run.skip(f"{agent}-key (foodassistant-agent-key is not installed)")
+            continue
+        if write_dropin(os.path.join(unit + ".d", KEY_DROPIN), agent_dropin(agent),
+                        run.dry_run):
+            run.add(f"{agent}-key")
+
+    kunit = _unit(KIOSK_UNIT)
+    if os.path.exists(kunit):
+        text = kiosk_text if kiosk_text is not None else _read(kunit)
+        url = kiosk_url_from_unit(text or "")
+        if not url:
+            run.skip("kiosk-launch (no kiosk URL in the unit)")
+        elif not is_local_kiosk_host(url_host(url)):
+            run.skip("kiosk-url-not-local")
+        else:
+            if _executable(os.path.join(bin_dir(), "foodassistant-kiosk-ticket")):
+                if write_dropin(os.path.join(kunit + ".d", LAUNCH_DROPIN),
+                                LAUNCH_DROPIN_TEXT, run.dry_run):
+                    run.add("kiosk-launch-dropin")
+            if (_executable(os.path.join(bin_dir(), "foodassistant-kiosk-launch"))
+                    and os.path.exists(python3_path())
+                    and "foodassistant-kiosk-launch" not in text):
+                new = patch_kiosk_execstart(text)
+                if new is not None and edit_unit(
+                        kunit, text, new, lambda back: kiosk_launch_ok(text, back),
+                        run.dry_run):
+                    run.add("kiosk-launch")
+                else:
+                    run.skip("kiosk-launch (unit not in the expected form)")
+            kiosk_boot_wait(run, origin_of(url))
+
+    runit = _unit(REMOTE_UNIT)
+    if os.path.exists(runit):
+        text = _read(runit)
+        new = add_no_proxy_headers(text) if text is not None else None
+        if new is None:
+            run.skip("remote-proxy-headers (unit not in the expected form)")
+        elif new != text:
+            if edit_unit(runit, text, new,
+                         lambda back: back.count("--no-proxy-headers") == 1,
+                         run.dry_run):
+                run.add("remote-proxy-headers")
+            else:
+                run.skip("remote-proxy-headers (unit not in the expected form)")
+
+    env_path = os.path.join(install_dir(), "remote.env")
+    env = _read(env_path)
+    if env is not None:
+        new = drop_auth_pin(env)
+        if new != env:
+            if has_password(os.path.join(install_dir(), "data", "settings.json")):
+                if not run.dry_run:
+                    _write(env_path, new, 0o600)
+                run.add("remote-auth-pin")
+            else:
+                run.skip("remote-auth-pin (no password is set)")
+
+
+def daemon_reload(run):
+    if run.changed and not run.dry_run:
+        _systemctl("daemon-reload")
+
+
+def _systemctl(*args):
+    try:
+        r = subprocess.run([systemctl_cmd(), *args], capture_output=True,
+                           text=True, timeout=60)
+    except (OSError, subprocess.SubprocessError) as e:
+        log(f"systemctl {' '.join(args)}: {type(e).__name__}")
+        return False
+    if r.returncode != 0:
+        log(f"systemctl {' '.join(args)} failed: {r.stderr.strip()[:200]}")
+    return r.returncode == 0
+
+
+def cmd_local_credentials(run):
+    local_credentials(run)
+    daemon_reload(run)
+
+
+def cmd_kiosk_url_local(run):
+    kunit = _unit(KIOSK_UNIT)
+    text = _read(kunit) if os.path.exists(kunit) else None
+    if text is None:
+        run.skip("kiosk-url (no kiosk unit)")
+        return
+    old_url = kiosk_url_from_unit(text)
+    if not old_url:
+        run.skip("kiosk-url (unit not in the expected form)")
+        return
+    if is_local_kiosk_host(url_host(old_url)):
+        return
+    new_url = LOCAL_URL_BANDIT if os.path.exists(_unit(REMOTE_UNIT)) else LOCAL_URL
+    # The unit's own boot wait (firstboot puts it on the kiosk page's origin)
+    # follows the page, so the screen never waits on the old address.
+    old_origin, new_origin = origin_of(old_url), origin_of(new_url)
+    base = move_unit_wait(text, old_origin, new_origin)
+    if not _only_wait_moved(text, base, old_origin, new_origin):
+        base = text
+    new = replace_kiosk_url(base, old_url, new_url)
+
+    def check(back):
+        return kiosk_url_from_unit(back) == new_url and \
+            _same_but_url(base, back, old_url, new_url)
+
+    if new is None or not edit_unit(kunit, text, new, check, run.dry_run):
+        run.skip("kiosk-url (unit not in the expected form)")
+        return
+    run.add("kiosk-url")
+    log(f"The kitchen screen now opens {new_url}.")
+
+    origin_js = os.path.join(install_dir(), "kiosk-exit-extension", "origin.js")
+    js = _read(origin_js)
+    if js is not None and old_url in js and not run.dry_run:
+        _write(origin_js, js.replace(old_url, new_url))
+
+    kiosk_boot_wait(run, origin_of(new_url))
+    local_credentials(run, kiosk_text=new if run.dry_run else None)
+    if not run.dry_run:
+        _systemctl("daemon-reload")
+        _systemctl("restart", KIOSK_UNIT)
+
+
+# --- boot-wifi-psk ------------------------------------------------------------
+
+NETWORK_CONFIG = "network-config"
+CLOUD_NET_DROPIN = "99-foodassistant-network.cfg"
+CLOUD_NET_DROPIN_TEXT = (
+    "# Written by foodassistant-host-harden boot-wifi-psk. The Wi-Fi password\n"
+    "# has been removed from the SD card's network-config, so cloud-init must\n"
+    "# never render the network from it again. The device keeps its own copy.\n"
+    "network: {config: disabled}\n"
+)
+PSK_REMOVED_COMMENT = "# Wi-Fi password removed after first start; this device keeps its own copy."
+_PASSWORD_LINE = re.compile(r"^(\s*)password:\s*(.*?)\s*$")
+_PSK_LINE = re.compile(r"^\s*psk\s*=(.*?)\s*$")
+
+
+def boot_dirs():
+    env = os.environ.get("BOOT_DIRS")
+    return env.split(":") if env else ["/boot/firmware", "/boot"]
+
+
+def netplan_dir():
+    return os.environ.get("NETPLAN_DIR", "/etc/netplan")
+
+
+def nm_conn_dir():
+    return os.environ.get("NM_CONN_DIR", "/etc/NetworkManager/system-connections")
+
+
+def cloud_cfg_dir():
+    return os.environ.get("CLOUD_CFG_DIR", "/etc/cloud/cloud.cfg.d")
+
+
+def cloud_boot_finished():
+    return os.environ.get("CLOUD_BOOT_FINISHED",
+                          "/var/lib/cloud/instance/boot-finished")
+
+
+def yaml_scalar(raw):
+    """The value of a one-line YAML scalar: quotes removed, a trailing
+    comment dropped from a plain value. None for anything else (a block
+    scalar, an anchor, an empty value)."""
+    raw = (raw or "").strip()
+    if not raw or raw[0] in "|>&*!{[":
+        return None
+    if raw[0] == '"':
+        end = raw.find('"', 1)
+        while end != -1 and raw[end - 1] == "\\":
+            end = raw.find('"', end + 1)
+        if end == -1:
+            return None
+        body = raw[1:end]
+        if "\\" in body:
+            try:
+                body = json.loads('"' + body + '"')
+            except ValueError:
+                return None
+        return body or None
+    if raw[0] == "'":
+        end = 1
+        out = []
+        while end < len(raw):
+            c = raw[end]
+            if c == "'":
+                if raw[end + 1:end + 2] == "'":
+                    out.append("'")
+                    end += 2
+                    continue
+                return "".join(out) or None
+            out.append(c)
+            end += 1
+        return None
+    value = re.split(r"\s+#", raw, maxsplit=1)[0].strip()
+    return value or None
+
+
+def config_passwords(text):
+    """[(line index, indent, password)] for each uncommented password: line
+    in a cloud-init network-config or netplan file."""
+    found = []
+    for i, line in enumerate((text or "").splitlines()):
+        if line.lstrip().startswith("#"):
+            continue
+        m = _PASSWORD_LINE.match(line)
+        if not m:
+            continue
+        value = yaml_scalar(m.group(2))
+        if value is not None:
+            found.append((i, m.group(1), value))
+    return found
+
+
+def strip_passwords(text, keep_values):
+    """network-config text with every password line whose value is in
+    keep_values replaced by a comment. The network names and everything
+    else stay as they were."""
+    lines = text.splitlines(keepends=True)
+    for i, indent, value in reversed(config_passwords(text)):
+        if value in keep_values:
+            end = "\n" if lines[i].endswith("\n") else ""
+            lines[i] = indent + PSK_REMOVED_COMMENT + end
+    return "".join(lines)
+
+
+def device_passwords():
+    """Every Wi-Fi password the device's own network configuration holds:
+    netplan files and NetworkManager keyfiles."""
+    out = set()
+    for d, suffixes in ((netplan_dir(), (".yaml", ".yml")),
+                        (nm_conn_dir(), (".nmconnection",))):
+        try:
+            names = sorted(os.listdir(d))
+        except OSError:
+            continue
+        for name in names:
+            if not name.endswith(suffixes):
+                continue
+            text = _read(os.path.join(d, name))
+            if not text:
+                continue
+            if name.endswith(".nmconnection"):
+                for line in text.splitlines():
+                    m = _PSK_LINE.match(line)
+                    if m and m.group(1):
+                        out.add(m.group(1))
+            else:
+                out.update(v for _, _, v in config_passwords(text))
+    return out
+
+
+def _write_boot(path, text):
+    """Replace a file on the FAT boot partition: temp file, fsync, rename,
+    then fsync the directory, so a power cut leaves the old file or the new
+    one. FAT has no per-file modes to keep (the mount decides them)."""
+    d = os.path.dirname(path) or "."
+    fd, tmp = tempfile.mkstemp(prefix=".nc-", dir=d)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+    try:
+        dfd = os.open(d, os.O_RDONLY)
+        try:
+            os.fsync(dfd)
+        finally:
+            os.close(dfd)
+    except OSError:
+        pass
+
+
+def boot_network_config():
+    for d in boot_dirs():
+        path = os.path.join(d, NETWORK_CONFIG)
+        if os.path.isfile(path):
+            return path
+    return None
+
+
+def boot_wifi_psk(run):
+    path = boot_network_config()
+    if not path:
+        return
+    text = _read(path)
+    if text is None:
+        run.skip("boot-wifi-psk (network-config unreadable)")
+        return
+    on_card = {v for _, _, v in config_passwords(text)}
+    if not on_card:
+        return
+    if not os.path.exists(cloud_boot_finished()):
+        run.skip("boot-wifi-psk (cloud-init has not finished yet)")
+        return
+    kept = on_card & device_passwords()
+    missing = on_card - kept
+    if missing:
+        # Not (or not yet) in the device's own configuration: the card may
+        # still be what brings the Wi-Fi up, so leave it alone.
+        log(f"The Wi-Fi password in {path} is not saved on the device yet; leaving it.")
+        run.skip("boot-wifi-psk (not saved on the device)")
+        return
+    new = strip_passwords(text, kept)
+    if config_passwords(new) or new == text:
+        run.skip("boot-wifi-psk (network-config not in the expected form)")
+        return
+    if run.dry_run:
+        run.add("boot-wifi-psk")
+        return
+    dropin = os.path.join(cloud_cfg_dir(), CLOUD_NET_DROPIN)
+    try:
+        write_dropin(dropin, CLOUD_NET_DROPIN_TEXT, False)
+    except OSError as e:
+        log(f"Could not tell cloud-init to leave the network alone ({e}); "
+            "the Wi-Fi password stays on the SD card.")
+        run.skip("boot-wifi-psk (cloud-init drop-in not written)")
+        return
+    try:
+        _write_boot(path, new)
+    except OSError as e:
+        log(f"Could not update {path} ({e}); the Wi-Fi password stays on the SD card.")
+        run.skip("boot-wifi-psk (network-config not writable)")
+        return
+    if _read(path) != new:
+        run.skip("boot-wifi-psk (network-config did not change)")
+        return
+    log(f"Removed the Wi-Fi password from {path}; the network name and the "
+        "device's own saved copy are unchanged.")
+    run.add("boot-wifi-psk")
+
+
+def cmd_boot_wifi_psk(run):
+    boot_wifi_psk(run)
+
+
+# --- boot-password-hash -------------------------------------------------------
+
+USER_DATA = "user-data"
+CLOUD_USERS_DROPIN = "99-foodassistant-users.cfg"
+CLOUD_USERS_DROPIN_TEXT = (
+    "# Written by foodassistant-host-harden boot-password-hash. The account\n"
+    "# password hash has been removed from the SD card's user-data, so cloud-init\n"
+    "# must never take this for a new device and set the accounts up from that\n"
+    "# file again. The device keeps its own copy in /etc/shadow.\n"
+    "manual_cache_clean: true\n"
+)
+HASH_REMOVED_COMMENT = "# Password hash removed after first start; this device keeps its own copy."
+_HASH_LINE = re.compile(r"^(\s*)(?:passwd|hashed_passwd):\s*(.*?)\s*$")
+_NAME_LINE = re.compile(r"^\s*(?:-\s+)?name:\s*(.*?)\s*$")
+
+
+def shadow_file():
+    return os.environ.get("SHADOW_FILE", "/etc/shadow")
+
+
+def user_data_hashes(text):
+    """[(line index, indent, account, hash)] for each uncommented passwd: or
+    hashed_passwd: line in a cloud-init user-data file whose value is a crypt
+    hash. The account is the name: of the users entry above it (None when
+    there is none)."""
+    found = []
+    name = None
+    for i, line in enumerate((text or "").splitlines()):
+        if line.lstrip().startswith("#"):
+            continue
+        m = _NAME_LINE.match(line)
+        if m:
+            name = yaml_scalar(m.group(1))
+            continue
+        m = _HASH_LINE.match(line)
+        if not m:
+            continue
+        value = yaml_scalar(m.group(2))
+        if value and value.startswith("$"):
+            found.append((i, m.group(1), name, value))
+    return found
+
+
+def strip_hashes(text, lines_to_blank):
+    """user-data text with the given password lines replaced by a comment.
+    Everything else stays as it was."""
+    lines = text.splitlines(keepends=True)
+    for i, indent in lines_to_blank:
+        end = "\n" if lines[i].endswith("\n") else ""
+        lines[i] = indent + HASH_REMOVED_COMMENT + end
+    return "".join(lines)
+
+
+def shadow_hashes():
+    """{account: hash} from the device's shadow file, or None when it cannot
+    be read."""
+    text = _read(shadow_file())
+    if text is None:
+        return None
+    out = {}
+    for line in text.splitlines():
+        parts = line.split(":")
+        if len(parts) >= 2 and parts[0]:
+            out[parts[0]] = parts[1]
+    return out
+
+
+def boot_user_data():
+    for d in boot_dirs():
+        path = os.path.join(d, USER_DATA)
+        if os.path.isfile(path):
+            return path
+    return None
+
+
+def boot_password_hash(run):
+    path = boot_user_data()
+    if not path:
+        return
+    text = _read(path)
+    if text is None:
+        run.skip("boot-password-hash (user-data unreadable)")
+        return
+    found = user_data_hashes(text)
+    if not found:
+        return
+    if not os.path.exists(cloud_boot_finished()):
+        run.skip("boot-password-hash (cloud-init has not finished yet)")
+        return
+    if any(name is None for _, _, name, _ in found):
+        run.skip("boot-password-hash (user-data not in the expected form)")
+        return
+    shadow = shadow_hashes()
+    if shadow is None:
+        log("Could not read the device's accounts; the password hash stays on the SD card.")
+        run.skip("boot-password-hash (accounts unreadable)")
+        return
+    for _, _, name, value in found:
+        if shadow.get(name) != value:
+            # The account is missing, or holds another password: the card's
+            # copy was not (or not only) what set it up, so leave it alone.
+            log(f"The account {name} on this device does not hold the password "
+                f"set in {path}; leaving it.")
+            run.skip("boot-password-hash (not set on the device)")
+            return
+    new = strip_hashes(text, [(i, indent) for i, indent, _, _ in found])
+    if user_data_hashes(new) or new == text:
+        run.skip("boot-password-hash (user-data not in the expected form)")
+        return
+    if run.dry_run:
+        run.add("boot-password-hash")
+        return
+    dropin = os.path.join(cloud_cfg_dir(), CLOUD_USERS_DROPIN)
+    try:
+        write_dropin(dropin, CLOUD_USERS_DROPIN_TEXT, False)
+    except OSError as e:
+        log(f"Could not tell cloud-init to leave the accounts alone ({e}); "
+            "the password hash stays on the SD card.")
+        run.skip("boot-password-hash (cloud-init drop-in not written)")
+        return
+    try:
+        _write_boot(path, new)
+    except OSError as e:
+        log(f"Could not update {path} ({e}); the password hash stays on the SD card.")
+        run.skip("boot-password-hash (user-data not writable)")
+        return
+    if _read(path) != new:
+        run.skip("boot-password-hash (user-data did not change)")
+        return
+    log(f"Removed the account password hash from {path}; the account and its "
+        "password on the device are unchanged.")
+    run.add("boot-password-hash")
+
+
+def cmd_boot_password_hash(run):
+    boot_password_hash(run)
+
+
+COMMANDS = {
+    "local-credentials": cmd_local_credentials,
+    "kiosk-url-local": cmd_kiosk_url_local,
+    "boot-wifi-psk": cmd_boot_wifi_psk,
+    "boot-password-hash": cmd_boot_password_hash,
+}
+
+
+def main(argv=None):
+    argv = sys.argv[1:] if argv is None else argv
+    args = [a for a in argv if a != "--dry-run"]
+    run = Run(dry_run="--dry-run" in argv)
+    if len(args) != 1 or args[0] not in COMMANDS:
+        log("usage: foodassistant-host-harden "
+            "local-credentials|kiosk-url-local|boot-wifi-psk|boot-password-hash "
+            "[--dry-run]")
+        print(run.summary(), flush=True)
+        return 0
+    try:
+        COMMANDS[args[0]](run)
+    except Exception as e:  # noqa: BLE001 - never fail the caller
+        log(f"host-harden {args[0]}: stopped early ({type(e).__name__}: {e})")
+        if isinstance(e, PermissionError):
+            log("Run this with sudo.")
+        run.skip(f"error ({type(e).__name__})")
+    print(run.summary(), flush=True)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

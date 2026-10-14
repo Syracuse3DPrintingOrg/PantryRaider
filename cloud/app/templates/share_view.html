@@ -1,0 +1,164 @@
+{% extends "base.html" %}
+{% block title %}{{ title }}: a recipe shared with you{% endblock %}
+{% block head %}
+  <meta property="og:type" content="article">
+  <meta property="og:site_name" content="Pantry Raider">
+  <meta property="og:title" content="{{ title }}">
+  <meta property="og:description" content="{{ og_description }}">
+  <meta property="og:url" content="{{ page_url }}">
+  {% if image_url %}<meta property="og:image" content="{{ image_url }}">{% endif %}
+  <meta name="twitter:card" content="{{ 'summary_large_image' if image_url else 'summary' }}">
+  <meta name="twitter:title" content="{{ title }}">
+  <meta name="twitter:description" content="{{ og_description }}">
+  {% if image_url %}<meta name="twitter:image" content="{{ image_url }}">{% endif %}
+  <style>
+    /* This page is the one strangers see, so it gets its own care: generous
+       type, a clear two-column recipe layout, and the brand accent used
+       sparingly. Scoped under .share-page so nothing else changes. */
+    .share-page { max-width: 780px; margin: 0 auto; }
+    .share-kicker {
+      display: inline-flex; align-items: center; gap: 0.45rem;
+      text-transform: uppercase; letter-spacing: 0.08em;
+      font-size: 0.72rem; font-weight: 700; color: var(--primary);
+      margin-bottom: 0.75rem;
+    }
+    .share-page h1 { font-size: 2.4rem; margin: 0 0 0.5rem; }
+    .share-byline { color: var(--muted); margin-bottom: 1.5rem; }
+    .share-desc { font-size: 1.1rem; color: var(--muted); max-width: 60ch; margin-bottom: 1.75rem; }
+    .share-photo {
+      width: 100%; max-height: 420px; object-fit: cover;
+      border-radius: var(--radius-lg); border: 1px solid var(--border-soft);
+      margin-bottom: 1.75rem; display: block;
+    }
+    .share-actions { display: flex; gap: 0.6rem; flex-wrap: wrap; margin-bottom: 2.25rem; }
+    .share-cols { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 1.25rem; align-items: start; }
+    @media (max-width: 640px) { .share-cols { grid-template-columns: 1fr; } }
+    .share-cols .card { margin-bottom: 0; }
+    ul.share-ingredients { list-style: none; margin: 0; padding: 0; }
+    ul.share-ingredients li {
+      padding: 0.5rem 0 0.5rem 1.4rem; position: relative;
+      border-top: 1px solid var(--border-soft); overflow-wrap: anywhere;
+    }
+    ul.share-ingredients li:first-child { border-top: none; }
+    ul.share-ingredients li::before {
+      content: ""; position: absolute; left: 0; top: 1.05rem;
+      width: 0.45rem; height: 0.45rem; border-radius: 50%;
+      background: var(--primary);
+    }
+    ol.share-steps { list-style: none; margin: 0; padding: 0; counter-reset: sstep; }
+    ol.share-steps li {
+      counter-increment: sstep; position: relative;
+      padding: 0.65rem 0 0.65rem 2.6rem; overflow-wrap: anywhere;
+      border-top: 1px solid var(--border-soft);
+    }
+    ol.share-steps li:first-child { border-top: none; }
+    ol.share-steps li::before {
+      content: counter(sstep); position: absolute; left: 0; top: 0.7rem;
+      width: 1.8rem; height: 1.8rem; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      background: var(--primary-soft); color: var(--primary);
+      font-weight: 800; font-size: 0.9rem;
+    }
+    .share-foot {
+      margin-top: 2.5rem; padding-top: 1.5rem;
+      border-top: 1px solid var(--border-soft);
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 1rem; flex-wrap: wrap;
+    }
+    .share-foot .report-form { margin: 0; }
+    .share-foot .report-btn {
+      background: none; border: none; padding: 0; cursor: pointer;
+      color: var(--muted); font-size: 0.82rem; text-decoration: underline;
+      font-family: inherit;
+    }
+    .share-foot .report-btn:hover { color: var(--danger); }
+
+    /* The share page respects the reader's system theme: the portal palette
+       is dark, so a light-mode visitor gets these variable overrides. The
+       toggle rides on the same custom properties every base style uses, so
+       header and footer follow along coherently. */
+    @media (prefers-color-scheme: light) {
+      :root {
+        --bg: #f7f7f8; --surface: #ffffff; --surface-2: #f0f0f2;
+        --border: #c9ced4; --border-soft: #e2e5e9;
+        --text: #212529; --muted: #5c636a;
+        --primary-soft: rgba(242,0,110,0.08);
+        --shadow: 0 1px 2px rgba(0,0,0,0.08), 0 8px 24px rgba(0,0,0,0.06);
+        --shadow-sm: 0 1px 2px rgba(0,0,0,0.08);
+      }
+      header.nav { background: rgba(255,255,255,0.94); }
+      .alert-error { background: #fdeaec; color: #a02531; }
+      .alert-notice { background: #e8f5ee; color: #14663d; }
+    }
+
+    /* People print recipes: keep the recipe, drop the chrome, black on white. */
+    @media print {
+      header.nav, footer, .share-actions, .share-foot, .alert { display: none !important; }
+      body { background: #fff; color: #000; }
+      .share-page h1, .share-cols .card h2 { color: #000; }
+      .share-cols { display: block; }
+      .share-cols .card {
+        background: none; border: none; padding: 0; margin: 0 0 1.5rem;
+        color: #000;
+      }
+      ul.share-ingredients li, ol.share-steps li { color: #000; border-color: #ddd; }
+      .share-desc, .share-byline { color: #333; }
+      ol.share-steps li::before { background: none; color: #000; border: 1px solid #000; }
+      ul.share-ingredients li::before { background: #000; }
+    }
+  </style>
+{% endblock %}
+{% block content %}
+<article class="share-page">
+  {% if saved %}
+  <div class="alert alert-notice">Saved to your account. You will find it under
+  "Shared with you" on your account page.</div>
+  {% endif %}
+  {% if reported %}
+  <div class="alert alert-notice">Thanks for letting us know. We will take a
+  look.</div>
+  {% endif %}
+
+  <span class="share-kicker">A recipe shared with you</span>
+  <h1>{{ title }}</h1>
+  <p class="share-byline">Shared by {{ attribution }}</p>
+  {% if description %}<p class="share-desc">{{ description }}</p>{% endif %}
+  {% if image_url %}<img class="share-photo" src="{{ image_url }}" alt="Photo of {{ title }}">{% endif %}
+
+  <div class="share-actions">
+    <a class="btn" href="/r/{{ token }}/download"
+       aria-label="Download this recipe as a file">Download recipe</a>
+    {% if signed_in %}
+    <form method="post" action="/r/{{ token }}/save" style="margin:0">
+      <button class="btn btn-outline" type="submit">Save to my account</button>
+    </form>
+    {% endif %}
+  </div>
+
+  <div class="share-cols">
+    <div class="card">
+      <h2>Ingredients</h2>
+      <ul class="share-ingredients">
+        {% for item in ingredients %}<li>{{ item }}</li>{% endfor %}
+      </ul>
+    </div>
+    <div class="card">
+      <h2>Steps</h2>
+      <ol class="share-steps">
+        {% for step in steps %}<li>{{ step }}</li>{% endfor %}
+      </ol>
+    </div>
+  </div>
+
+  <div class="share-foot">
+    <p class="muted small" style="margin:0">Recipes like this one travel with
+      <a href="https://pantryraider.app">Pantry Raider</a>, the free and open
+      source food tracker. <a href="https://pantryraider.app">Get Pantry
+      Raider</a> and the download above imports in one step.</p>
+    <form class="report-form" method="post" action="/r/{{ token }}/report">
+      <button class="report-btn" type="submit"
+              aria-label="Report this shared recipe">Report this page</button>
+    </form>
+  </div>
+</article>
+{% endblock %}

@@ -1,0 +1,65 @@
+name: Dependency audit
+
+# Reports known vulnerabilities in every pinned Python dependency set: the
+# hash-locked sets the app and Forager images actually install, plus the gadgets
+# reader and the Stream Deck controller.
+#
+# Weekly, never a gate on push or a pull request: an upstream advisory with no
+# fixed release would otherwise wedge every commit and every release until
+# someone else shipped a patch. A finding does turn the run red, though, so the
+# owner gets the failure email instead of a green run nobody opens. Read the
+# run summary, then decide. Findings that matter become a bead.
+on:
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Install pip-audit
+        run: |
+          python -m pip install --upgrade pip
+          pip install pip-audit
+
+      # Every audit runs and lands in the summary before the step decides, so
+      # one finding never hides the others.
+      - name: Audit pinned requirements
+        run: |
+          echo "## Dependency audit" >> "$GITHUB_STEP_SUMMARY"
+          failed=""
+          audit() {
+            local f="$1"; shift
+            [ -f "$f" ] || return 0
+            echo "### $f" >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            pip-audit "$@" -r "$f" --progress-spinner off 2>&1 \
+              | tee -a "$GITHUB_STEP_SUMMARY"
+            local rc="${PIPESTATUS[0]}"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            if [ "$rc" -ne 0 ]; then
+              failed="$failed $f"
+            fi
+          }
+          # The images install these locks with --require-hashes, so audit
+          # exactly what ships: every pin is already resolved, no pip needed.
+          audit service/requirements.lock --disable-pip --no-deps
+          audit cloud/requirements.lock --disable-pip --no-deps
+          audit gadgets/requirements.txt
+          audit streamdeck/requirements.txt
+          if [ -n "$failed" ]; then
+            echo "Known vulnerabilities (or an audit error) in:$failed" | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          echo "No known vulnerabilities." >> "$GITHUB_STEP_SUMMARY"

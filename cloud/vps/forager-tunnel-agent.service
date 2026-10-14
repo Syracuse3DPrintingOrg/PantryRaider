@@ -1,0 +1,23 @@
+[Unit]
+Description=Forager tunnel agent (WireGuard + Caddy route manager)
+After=network-online.target wg-quick@wg0.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Runs as root: it programs wg0 and reloads Caddy, both of which need
+# privilege. It listens only on 127.0.0.1:9300 and requires the shared token
+# on every state-changing route, so the surface stays small.
+ExecStart=/usr/local/bin/forager-tunnel-agent
+Restart=on-failure
+RestartSec=3
+# Hardening: the agent only ever touches its own state, the Caddy include,
+# and the wg/caddy tools, so keep the rest of the filesystem read-only.
+# The two paths it must write: the WireGuard config (wg-quick save persists
+# peers) and the Caddy per-kitchen include it regenerates.
+ProtectSystem=full
+ReadWritePaths=/etc/wireguard /etc/caddy /etc/forager
+NoNewPrivileges=false
+
+[Install]
+WantedBy=multi-user.target
