@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% import "_marketing.html" as m %}
+{% block title %}Features: how Forager works{% endblock %}
+{% block content %}
+
+<section class="hero" style="padding-bottom:0;">
+  <span class="eyebrow">Features</span>
+  <h1 style="max-width:20ch; margin-left:auto; margin-right:auto;">The easy button for your kitchen</h1>
+  <p class="lead">Forager is the optional cloud companion for Pantry Raider. It
+  handles the parts that are fiddly to run yourself, so you can just scan and
+  go.</p>
+</section>
+
+{{ m.how_it_works() }}
+
+{{ m.features_grid() }}
+
+{{ m.pricing_section() }}
+
+{{ m.closing_cta() }}
+
+{% endblock %}

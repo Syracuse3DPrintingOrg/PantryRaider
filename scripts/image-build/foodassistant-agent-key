@@ -1,0 +1,431 @@
+#!/usr/bin/python3
+"""Give a local Pantry Raider helper (the Stream Deck or the thermometer
+reader) its own key for the app on this device.
+
+    foodassistant-agent-key streamdeck|gadgets
+
+Runs as root from the helper's unit (ExecStartPre=+) before the helper
+starts. The key is derived from this device's bridge token, so the app can
+check it without anything being stored: 'pra1.<agent>.' followed by the hex
+HMAC-SHA256 of 'pr-agent-v1', a newline and the agent name.
+
+The key goes to /run/foodassistant-agents/<agent>.env (directory 0700, file
+0600, both root), which the unit loads with EnvironmentFile=-. It is written
+only when the helper talks to the app on this device (a loopback base URL)
+and the owner has not given the helper a key of their own. In every other
+case the file is removed, so the helper keeps exactly the setup it had.
+
+The unit's settings are read from systemd (systemctl show), never from this
+process's environment: systemd loads the EnvironmentFile before every
+command, so our own key from the previous start is already in os.environ
+when this runs, and it must not count as the owner's.
+
+Standard library only (Python 3.9 and later, no app venv). Never prints the
+key. Always exits 0, so the helper's unit never fails to start because of it.
+"""
+from __future__ import annotations
+
+import hashlib
+import hmac
+import os
+import re
+import shlex
+import stat
+import subprocess
+import sys
+import urllib.parse
+
+AGENTS = ("streamdeck", "gadgets")
+KEY_PREFIX = "pra1."
+AGENT_LABEL = b"pr-agent-v1"
+DEFAULT_BASE_URL = "http://127.0.0.1:9284"
+LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+CONFIG_ENV = {
+    "streamdeck": "FOODASSISTANT_STREAMDECK_CONFIG",
+    "gadgets": "FOODASSISTANT_GADGETS_CONFIG",
+}
+# A deck or reader config is a few kilobytes; anything far larger is not one.
+MAX_CONFIG_BYTES = 1024 * 1024
+# The path the drop-in names, skipped even when AGENT_ENV_DIR is moved.
+DEFAULT_AGENT_ENV_DIR = "/run/foodassistant-agents"
+
+
+def log(msg):
+    print(msg, file=sys.stderr, flush=True)
+
+
+def install_dir():
+    return os.environ.get("INSTALL_DIR", "/opt/foodassistant")
+
+
+def agent_env_dir():
+    return os.environ.get("AGENT_ENV_DIR", DEFAULT_AGENT_ENV_DIR)
+
+
+def systemctl_cmd():
+    return os.environ.get("SYSTEMCTL", "systemctl")
+
+
+# --- pure helpers -----------------------------------------------------------
+
+def agent_key(token, agent):
+    """The I-5 agent key for ``agent`` under the bridge token ``token``."""
+    mac = hmac.new(token.encode("utf-8"), AGENT_LABEL + b"\n" + agent.encode("utf-8"),
+                   hashlib.sha256).hexdigest()
+    return KEY_PREFIX + agent + "." + mac
+
+
+def parse_environment_value(text):
+    """KEY=VALUE pairs from 'systemctl show -p Environment --value'."""
+    env = {}
+    try:
+        words = shlex.split(text or "")
+    except ValueError:
+        words = (text or "").split()
+    for word in words:
+        if "=" in word:
+            k, v = word.split("=", 1)
+            if k:
+                env[k] = v
+    return env
+
+
+def parse_environment_files(text):
+    """Paths from 'systemctl show -p EnvironmentFiles' output, one
+    'EnvironmentFiles=<path> (ignore_errors=...)' line each."""
+    paths = []
+    for line in (text or "").splitlines():
+        line = line.strip()
+        if not line.startswith("EnvironmentFiles="):
+            continue
+        value = line[len("EnvironmentFiles="):]
+        value = re.sub(r"\s*\(ignore_errors=[a-z]+\)\s*$", "", value).strip()
+        if value:
+            paths.append(value)
+    return paths
+
+
+def parse_env_file(text):
+    """KEY=VALUE lines the way systemd reads an EnvironmentFile: blank lines
+    and # or ; comments skipped, surrounding quotes stripped."""
+    env = {}
+    for raw in (text or "").splitlines():
+        line = raw.strip()
+        if not line or line.startswith(("#", ";")):
+            continue
+        if line.startswith("export "):
+            line = line[len("export "):].lstrip()
+        if "=" not in line:
+            continue
+        k, v = line.split("=", 1)
+        k = k.strip()
+        v = v.strip()
+        if len(v) >= 2 and v[0] == v[-1] and v[0] in ("'", '"'):
+            v = v[1:-1]
+        if k:
+            env[k] = v
+    return env
+
+
+def config_from_execstart(text):
+    """The argument after --config in 'systemctl show -p ExecStart' output
+    (its argv[]= part), or ''."""
+    m = re.search(r"argv\[\]=(.*?)(?: ;|$)", text or "", re.M)
+    if not m:
+        return ""
+    try:
+        argv = shlex.split(m.group(1))
+    except ValueError:
+        argv = m.group(1).split()
+    for i, arg in enumerate(argv):
+        if arg == "--config" and i + 1 < len(argv):
+            return argv[i + 1]
+        if arg.startswith("--config="):
+            return arg[len("--config="):]
+    return ""
+
+
+_TOML_ESCAPES = {"b": "\b", "t": "\t", "n": "\n", "f": "\f", "r": "\r",
+                 '"': '"', "\\": "\\", "e": "\x1b"}
+
+
+def _basic_string(s, i):
+    """Read a TOML basic string whose opening quote is at s[i - 1].
+    Returns the value, or None when it is not closed or not valid."""
+    out = []
+    while i < len(s):
+        c = s[i]
+        if c == '"':
+            return "".join(out)
+        if c == "\\":
+            if i + 1 >= len(s):
+                return None
+            e = s[i + 1]
+            if e in _TOML_ESCAPES:
+                out.append(_TOML_ESCAPES[e])
+                i += 2
+                continue
+            width = 4 if e == "u" else 8 if e == "U" else 0
+            hexpart = s[i + 2:i + 2 + width]
+            if width and len(hexpart) == width and re.fullmatch(r"[0-9A-Fa-f]+", hexpart):
+                try:
+                    out.append(chr(int(hexpart, 16)))
+                except ValueError:
+                    return None
+                i += 2 + width
+                continue
+            return None
+        out.append(c)
+        i += 1
+    return None
+
+
+def read_toml_strings_fallback(text, keys=("base_url", "api_key")):
+    """The top-level string values of ``keys`` from TOML text, for a Python
+    without tomllib or tomli. Understands key = "basic string" (with TOML
+    escapes) and key = 'literal string', stops at the first [table] header
+    and ignores anything it cannot read."""
+    found = {}
+    for raw in (text or "").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("["):
+            break
+        m = re.match(r"([A-Za-z0-9_-]+)\s*=\s*(.*)$", line)
+        if not m or m.group(1) not in keys:
+            continue
+        rest = m.group(2)
+        value = None
+        if rest.startswith('"""') or rest.startswith("'''"):
+            continue
+        if rest.startswith('"'):
+            value = _basic_string(rest, 1)
+        elif rest.startswith("'"):
+            end = rest.find("'", 1)
+            if end > 0:
+                value = rest[1:end]
+        if value is not None and m.group(1) not in found:
+            found[m.group(1)] = value
+    return found
+
+
+def read_config_strings(path, keys=("base_url", "api_key")):
+    """base_url and api_key from a TOML config file, as strings. A missing or
+    unreadable file, or a value that is not a string, counts as unset."""
+    # Only a regular file, opened without blocking: the config file may be
+    # writable by the helper's own account, and a FIFO or device there must
+    # not hold up the unit's start.
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+    except OSError:
+        return {}
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            return {}
+        with os.fdopen(fd, "rb") as f:
+            fd = -1
+            data = f.read(MAX_CONFIG_BYTES + 1)
+    except OSError:
+        return {}
+    finally:
+        if fd >= 0:
+            os.close(fd)
+    if len(data) > MAX_CONFIG_BYTES:
+        return {}
+    loader = None
+    try:
+        import tomllib as loader  # Python 3.11 and later
+    except ImportError:
+        try:
+            import tomli as loader  # noqa: F811
+        except ImportError:
+            loader = None
+    if loader is not None:
+        try:
+            parsed = loader.loads(data.decode("utf-8"))
+        except Exception:  # noqa: BLE001 - an unreadable file is unset
+            return {}
+        return {k: parsed[k] for k in keys if isinstance(parsed.get(k), str)}
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError:
+        return {}
+    return read_toml_strings_fallback(text, keys)
+
+
+def is_loopback_url(url):
+    try:
+        host = urllib.parse.urlsplit(url or "").hostname or ""
+    except ValueError:
+        return False
+    return host.lower() in LOOPBACK_HOSTS
+
+
+def is_owner_key(value):
+    """A key the owner set: non-empty and not one of ours ('pra1.')."""
+    v = (value or "").strip()
+    return bool(v) and not v.startswith(KEY_PREFIX)
+
+
+def decide(merged_env, config_values):
+    """(write, reason) from the unit's merged environment and the config's
+    base_url and api_key. reason is '' when writing."""
+    if is_owner_key(merged_env.get("FOODASSISTANT_API_KEY")) or \
+            is_owner_key(config_values.get("api_key")):
+        return False, "an owner key is set"
+    base = (merged_env.get("FOODASSISTANT_BASE_URL") or "").strip() \
+        or (config_values.get("base_url") or "").strip() or DEFAULT_BASE_URL
+    if not is_loopback_url(base):
+        return False, "not a loopback address"
+    return True, ""
+
+
+# --- host side --------------------------------------------------------------
+
+class UnitUnreadable(Exception):
+    """systemctl show gave no answer, so the unit's settings are unknown."""
+
+
+def _show(unit, *args):
+    try:
+        r = subprocess.run([systemctl_cmd(), "show", *args, unit],
+                           capture_output=True, text=True, timeout=15)
+    except (OSError, subprocess.SubprocessError) as e:
+        raise UnitUnreadable() from e
+    if r.returncode != 0:
+        raise UnitUnreadable()
+    return r.stdout
+
+
+def _own_env_paths(agent):
+    return {os.path.normpath(os.path.join(agent_env_dir(), agent + ".env")),
+            os.path.normpath(os.path.join(DEFAULT_AGENT_ENV_DIR, agent + ".env"))}
+
+
+def unit_environment(agent, unit):
+    """The unit's environment as systemd gives it: Environment= values, then
+    each EnvironmentFile on top (skipping our own file and missing files)."""
+    env = parse_environment_value(_show(unit, "-p", "Environment", "--value"))
+    own = _own_env_paths(agent)
+    for path in parse_environment_files(_show(unit, "-p", "EnvironmentFiles")):
+        if path.startswith("-"):
+            path = path[1:]
+        if os.path.normpath(path) in own:
+            continue
+        try:
+            with open(path, encoding="utf-8", errors="replace") as f:
+                env.update(parse_env_file(f.read()))
+        except OSError:
+            continue
+    return env
+
+
+def config_path(agent, unit, merged_env):
+    path = config_from_execstart(_show(unit, "-p", "ExecStart"))
+    if not path:
+        path = (merged_env.get(CONFIG_ENV[agent]) or "").strip()
+    return path or os.path.join(install_dir(), "config.toml")
+
+
+def read_token():
+    try:
+        with open(os.path.join(install_dir(), "data", "bridge-token"),
+                  encoding="utf-8") as f:
+            return f.read().strip()
+    except (OSError, UnicodeDecodeError):
+        return ""
+
+
+def remove_env_file(path):
+    try:
+        os.unlink(path)
+    except FileNotFoundError:
+        pass
+    except OSError as e:
+        log(f"agent key: could not remove {path}: {e.strerror}")
+
+
+def write_env_file(path, content):
+    """Write ``content`` 0600 from the first byte, atomically. Returns True
+    when the file changed."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            if f.read() == content:
+                st = os.stat(path)
+                if (st.st_mode & 0o777) != 0o600:
+                    os.chmod(path, 0o600)
+                return False
+    except (OSError, UnicodeDecodeError):
+        pass
+    tmp = f"{path}.{os.getpid()}.tmp"
+    try:
+        os.unlink(tmp)
+    except OSError:
+        pass
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(content)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+    return True
+
+
+def ensure_dir(path):
+    os.makedirs(path, mode=0o700, exist_ok=True)
+    st = os.stat(path)
+    if (st.st_mode & 0o777) != 0o700:
+        os.chmod(path, 0o700)
+
+
+def run(agent):
+    unit = f"foodassistant-{agent}.service"
+    env_path = os.path.join(agent_env_dir(), agent + ".env")
+    token = read_token()
+    if not token:
+        remove_env_file(env_path)
+        log(f"agent key for {agent}: not used (no bridge token)")
+        return
+    try:
+        merged = unit_environment(agent, unit)
+        path = config_path(agent, unit, merged)
+    except UnitUnreadable:
+        # Without the unit's settings an owner key could go unseen, and our
+        # file would take its place. Leave the helper as the owner set it.
+        remove_env_file(env_path)
+        log(f"agent key for {agent}: not used (the unit's settings could not be read)")
+        return
+    config = read_config_strings(path)
+    write, reason = decide(merged, config)
+    if not write:
+        remove_env_file(env_path)
+        log(f"agent key for {agent}: not used ({reason})")
+        return
+    ensure_dir(agent_env_dir())
+    write_env_file(env_path, f"FOODASSISTANT_API_KEY={agent_key(token, agent)}\n")
+    log(f"agent key for {agent}: written")
+
+
+def main(argv=None):
+    argv = sys.argv[1:] if argv is None else argv
+    agent = argv[0] if argv else ""
+    if agent not in AGENTS:
+        log("usage: foodassistant-agent-key streamdeck|gadgets")
+        return 0
+    try:
+        run(agent)
+    except Exception as e:  # noqa: BLE001 - never fail the unit
+        log(f"agent key for {agent}: not used ({type(e).__name__})")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

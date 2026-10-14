@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Stock Journal: Pantry Raider{% endblock %}
+{% block content %}
+
+<div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mt-3 mb-3">
+  <h4 class="mb-0"><i class="bi bi-journal-text me-2"></i>Stock Journal</h4>
+  <div class="d-flex gap-2 align-items-center">
+    <select class="form-select form-select-sm" id="limit-select" style="width:auto" aria-label="How many entries"
+            data-on-change="load()">
+      <option value="50">Last 50</option>
+      <option value="100">Last 100</option>
+      <option value="200">Last 200</option>
+    </select>
+    <input type="text" class="form-control form-control-sm" id="filter-input" aria-label="Filter by product"
+           placeholder="Filter by product…" style="width:180px"
+           data-on-input="applyFilter()">
+    <a class="btn btn-sm btn-outline-secondary" href="ui/">
+      <i class="bi bi-arrow-left me-1"></i>Inventory
+    </a>
+  </div>
+</div>
+
+<div id="journal-table-wrap">
+  <div class="text-secondary"><span class="spinner-border spinner-border-sm me-2"></span>Loading…</div>
+</div>
+
+{% endblock %}
+{% block scripts %}
+<script src="static/js/pages/journal.js?v={{ app_version }}"></script>
+{% endblock %}

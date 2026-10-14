@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/Syracuse3DPrintingOrg/PantryRaider/blob/main/SECURITY.md
+    about: Please report security vulnerabilities privately. Do not open a public issue.
+  - name: Documentation and how-to guides
+    url: https://docs.pantryraider.app
+    about: Setup guides, troubleshooting, and answers to common questions.

@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="{{ theme_mode }}"
+      data-ui-scale="{{ ui_scale_factor | default(1.0) }}"
+      data-display-rotation="{{ display_rotation | default(0) }}"
+      data-rotation-mode="{{ 'compositor' if is_pi else 'css' }}"
+      data-is-pi="{{ '1' if is_pi else '0' }}">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- Resolve all relative links against the app root (or the HA Ingress prefix) -->
+  <base href="{{ ingress_path }}/">
+  <title>Sign In: Pantry Raider</title>
+  {% if theme_css %}
+  <link href="{{ theme_css }}" rel="stylesheet">
+  {% else %}
+  <link href="static/vendor/bootstrap.min.css" rel="stylesheet">
+  {% endif %}
+  {% if theme_overlay %}
+  <link href="{{ theme_overlay }}" rel="stylesheet">
+  {% endif %}
+  <link href="static/vendor/bootstrap-icons.min.css" rel="stylesheet">
+  <link rel="icon" type="image/svg+xml" href="static/icons/favicon.svg">
+  <link rel="icon" type="image/png" sizes="32x32" href="static/icons/favicon-32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="static/icons/favicon-16.png">
+  <link rel="icon" type="image/x-icon" href="static/icons/favicon.ico">
+  <link rel="apple-touch-icon" href="static/pwa/apple-touch-icon-180.png">
+  {# PWA install from the login screen (FoodAssistant-fd3z): manifest + worker are
+     served from the origin root so the app installs with scope "/". The worker
+     only registers in a secure context or on localhost, a no-op over plain-http.
+     Under Home Assistant Ingress the manifest path carries the Ingress prefix
+     and no worker registers, since the origin root belongs to Home Assistant. #}
+  <link rel="manifest" href="{{ ingress_path }}/manifest.webmanifest">
+  <meta name="theme-color" content="#212529">
+  <script src="static/js/head-boot.js?v={{ app_version }}" data-sw="{{ 'off' if ingress_path else 'on' }}"></script>
+  {# ?v= is not optional (FoodAssistant-9k2v): a kiosk caches this file and
+   keeps running the copy it first saw, so panel scale, rotation, and
+   safe-area fixes never reach a page that omits it. #}
+  <script src="static/js/kiosk-display.js?v={{ app_version }}"></script>
+  <style>
+    /* Panel safe-area insets (FoodAssistant-t9lj): kiosk-display.js publishes
+       --kiosk-inset-* on <html> for panels that clip an edge. This page is
+       standalone (no kiosk.css), so it must apply the insets itself or its
+       right edge is cut off on such panels. */
+    html, body { overflow-x: hidden; }
+    body { box-sizing: border-box;
+           padding-top: var(--kiosk-inset-top, 0px);
+           padding-right: var(--kiosk-inset-right, 0px);
+           padding-bottom: var(--kiosk-inset-bottom, 0px);
+           padding-left: var(--kiosk-inset-left, 0px); }
+  </style>
+  {# Kiosk boot intro: pre-paint blackout guard + intro.js (FoodAssistant-a8xy) #}
+  {% include "_intro.html" %}
+  {# On-screen keyboard for kiosk touchscreens (FoodAssistant-wo9j) #}
+  {% include "_osk.html" %}
+</head>
+<body class="d-flex align-items-center justify-content-center" style="min-height:100vh">
+  <div class="card" style="width: 100%; max-width: 360px;">
+    <div class="card-body p-4">
+      <h5 class="card-title text-center mb-4">
+        <img src="static/icons/logo-mark.png" alt="" class="me-2" style="height:28px;width:auto;vertical-align:-6px">Pantry Raider
+      </h5>
+      {% if error %}
+      <div class="alert alert-danger py-2">{{ error }}</div>
+      {% elif setup_done %}
+      <div class="alert alert-success py-2 small">Setup is done. Sign in with the password you just chose.</div>
+      {% endif %}
+
+      {% macro setup_code_form(form_mode) %}
+      {# The setup code form, shared by the setup-code step and the refusal
+         pages. form_mode: setup, open or rescue. #}
+      <form method="post" action="ui/setup-code" class="mb-2">
+        <div class="mb-2">
+          <label for="sc-code" class="form-label small mb-1">Setup code</label>
+          <input type="text" class="form-control font-monospace" id="sc-code" name="code"
+                 autocomplete="off" spellcheck="false" required>
+        </div>
+        {% if form_mode == 'open' and sc_keyless_note %}
+        <div class="alert alert-warning py-2 small">{{ ac.KEYLESS_SETUP_CODE_NOTE }}</div>
+        {% endif %}
+        {% if form_mode == 'rescue' %}
+        <div class="mb-2">
+          <label for="sc-password" class="form-label small mb-1">Your password</label>
+          <input type="password" class="form-control" id="sc-password" name="password"
+                 autocomplete="current-password" required>
+        </div>
+        {% elif form_mode == 'open' or (form_mode == 'setup' and sc_needs_password) %}
+        <div class="mb-2">
+          <label for="sc-password" class="form-label small mb-1">New password</label>
+          <input type="password" class="form-control" id="sc-password" name="password"
+                 autocomplete="new-password" minlength="8" required>
+        </div>
+        <div class="mb-2">
+          <label for="sc-confirm" class="form-label small mb-1">Confirm the new password</label>
+          <input type="password" class="form-control" id="sc-confirm" name="confirm"
+                 autocomplete="new-password" minlength="8" required>
+        </div>
+        {% endif %}
+        <button type="submit" class="btn btn-primary w-100">
+          <i class="bi bi-key me-1"></i>Continue
+        </button>
+      </form>
+      {% if sc_outside %}
+      <p class="text-secondary small mb-2">{{ ac.RESCUE_2FA }}</p>
+      {% endif %}
+      {% endmacro %}
+
+      {% macro home_addresses_block() %}
+      {% if sc_home_addresses %}
+      <ul class="small mb-2">
+        {% for addr in sc_home_addresses %}<li class="font-monospace">{{ addr }}</li>{% endfor %}
+      </ul>
+      {% endif %}
+      {% endmacro %}
+
+      {% if step == 'setup_code' %}
+      <h6 class="mb-2">Enter the setup code</h6>
+      <p class="small mb-2">{{ sc_intro }}</p>
+      <p class="text-secondary small mb-3">{{ ac.SETUP_CODE_WHERE }}</p>
+      {{ setup_code_form(sc_mode) }}
+
+      {% elif step == 'open_refused' %}
+      <h6 class="mb-2">This kitchen has no password</h6>
+      <p class="small mb-3">{{ ac.OPEN_REFUSAL_MSG }}</p>
+      <p class="small mb-1">{{ ac.SETUP_CODE_INTRO_OPEN }}</p>
+      <p class="text-secondary small mb-2">{{ ac.SETUP_CODE_WHERE }}</p>
+      {{ setup_code_form('open') }}
+      <hr>
+      <p class="small mb-1">At home, open this kitchen at:</p>
+      {{ home_addresses_block() }}
+      <p class="small mb-2">Then turn on two-factor and set a password in Settings, Security.</p>
+      {% if sc_in_container %}
+      <p class="text-secondary small mb-2">{{ ac.RESCUE_ENV }}</p>
+      {% endif %}
+      <p class="text-secondary small mb-0">{{ ac.RESCUE_LAN_CIDRS }}</p>
+
+      {% elif step == 'name_refused' %}
+      <h6 class="mb-2">Open this kitchen by its home address</h6>
+      <p class="small mb-2">{{ ac.NAME_REFUSAL_MSG }}</p>
+      {{ home_addresses_block() }}
+      <p class="text-secondary small mb-3">{{ ac.NAME_ALLOW_HINT }}</p>
+      <p class="small mb-1">{{ ac.SETUP_CODE_INTRO_OPEN }}</p>
+      <p class="text-secondary small mb-2">{{ ac.SETUP_CODE_WHERE }}</p>
+      {{ setup_code_form('open') }}
+
+      {% elif step == 'totp' %}
+      <p class="text-secondary small text-center mb-3">Enter the 6-digit code from your authenticator app,
+        or one of your recovery codes.</p>
+      <form method="post" action="ui/login">
+        <div class="mb-3">
+          <label for="login-totp-code" class="visually-hidden">Authentication code</label>
+          <input type="text" class="form-control text-center fs-4 font-monospace"
+                 id="login-totp-code" name="totp_code" placeholder="000000"
+                 inputmode="numeric" autocomplete="one-time-code"
+                 autofocus required>
+        </div>
+        <button type="submit" class="btn btn-primary w-100">
+          <i class="bi bi-shield-check me-1"></i>Verify
+        </button>
+      </form>
+      {% else %}
+      <form method="post" action="ui/login">
+        <input type="hidden" name="mode" value="local">
+        <div class="mb-3">
+          <label for="login-password" class="visually-hidden">Password</label>
+          <input type="password" class="form-control" id="login-password" name="password"
+                 placeholder="Password" autofocus required>
+        </div>
+        <button type="submit" class="btn btn-primary w-100">
+          <i class="bi bi-unlock me-1"></i>Sign In
+        </button>
+      </form>
+      {% if setup_code_link %}
+      <p class="small mt-2 mb-0"><a href="ui/setup-code">{{ setup_code_link_text or 'Use the setup code instead' }}</a></p>
+      {% endif %}
+      <div id="kiosk-relaunch-note" class="alert alert-info py-2 small mt-2 d-none">Signing this screen in again.</div>
+      {# Kitchen screen self-heal: a screen on this device that finds itself
+         signed out asks the device to start it again, which signs it in with
+         a fresh launch ticket. At most once every 10 minutes; the password
+         form above stays usable either way. #}
+      <script src="static/js/pages/login.js?v={{ app_version }}"></script>
+
+      {% if cloud_linked %}
+      <div class="d-flex align-items-center my-3 text-secondary small">
+        <hr class="flex-grow-1"><span class="px-2">or</span><hr class="flex-grow-1">
+      </div>
+
+      {# These two ways to sign in are separate. The device password above works
+         offline; the Forager sign-in below is a convenience that needs the
+         Forager server (FoodAssistant-vg1f). #}
+      <p class="text-secondary small mb-3">Your device password above always works,
+        even if Forager is offline. Sign in with Forager is an added convenience,
+        using your Forager account.</p>
+
+      {% if forager_error %}
+      <div class="alert alert-danger py-2 small">{{ forager_error }}</div>
+      {% endif %}
+      {% if forager_notice %}
+      <div class="alert alert-info py-2 small">{{ forager_notice }}</div>
+      {% endif %}
+
+      <form method="post" action="ui/login">
+        <input type="hidden" name="mode" value="forager">
+        <p class="text-secondary small mb-2">Sign in with your Forager email and
+          password.</p>
+        <div class="mb-2">
+          <label for="forager-email" class="visually-hidden">Forager email</label>
+          <input type="email" class="form-control" id="forager-email" name="email"
+                 placeholder="Forager email" autocomplete="username"
+                 value="{{ forager_email }}"
+                 {% if forager_need_code %}readonly{% endif %} required>
+        </div>
+        <div class="mb-2">
+          <label for="forager-password" class="visually-hidden">Forager password</label>
+          <input type="password" class="form-control" id="forager-password" name="fpass"
+                 placeholder="Forager password" autocomplete="current-password"
+                 {% if forager_need_code %}value="{{ forager_password }}"{% endif %} required>
+        </div>
+        {% if forager_need_code %}
+        <div class="mb-2">
+          <label for="forager-code" class="visually-hidden">Forager verification code</label>
+          <input type="text" class="form-control text-center font-monospace"
+                 id="forager-code" name="fcode" placeholder="000000"
+                 inputmode="numeric" autocomplete="one-time-code" autofocus required>
+        </div>
+        {% endif %}
+        <button type="submit" class="btn btn-outline-primary w-100">
+          <i class="bi bi-box-arrow-in-right me-1"></i>Sign in with Forager
+        </button>
+      </form>
+
+      {# Offered only when the server-side capability check said the Forager
+         service supports the unlock flow, so the button never leads anywhere
+         that cannot finish. The link's only job is to leave for Forager's own
+         Google sign-in; the return lands back on this page. #}
+      {% if google_unlock %}
+      <a class="btn btn-outline-primary w-100 mt-2" href="ui/login?google=start">
+        <i class="bi bi-google me-1"></i>Sign in with Google
+      </a>
+      <p class="text-secondary small mt-2 mb-0">Created your Forager account
+        with Google? Use the Google button; it signs in to the same Forager
+        account this kitchen is connected to.</p>
+      {% else %}
+      <p class="text-secondary small mt-2 mb-0">Created your Forager account
+        with Google? Set a password on the Forager site first (under your
+        account), or use your device password above.</p>
+      {% endif %}
+      {% endif %}
+      {% endif %}
+    </div>
+  </div>
+</body>
+</html>

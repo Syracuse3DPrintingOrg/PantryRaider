@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+# Open or close the kitchen screen browser's debugging port (9222).
+#
+#   sudo foodassistant-kiosk-devtools on      open it and restart the screen
+#   sudo foodassistant-kiosk-devtools off     close it and restart the screen
+#   foodassistant-kiosk-devtools status       say whether it is open
+#
+# The port lets a computer on this device inspect the screen's browser, for
+# example through 'ssh -L 9222:localhost:9222'. It stays closed normally: the
+# Stream Deck steers the screen through the kiosk launcher instead. The switch
+# lives on a RAM disk, so a reboot closes the port again.
+#
+# Env overrides (for tests): FA_DEVTOOLS_FLAG, SYSTEMCTL.
+set -uo pipefail
+
+FLAG="${FA_DEVTOOLS_FLAG:-/run/foodassistant-kiosk-devtools}"
+SYSTEMCTL="${SYSTEMCTL:-systemctl}"
+UNIT="foodassistant-kiosk.service"
+
+port_open() {
+  if command -v ss >/dev/null 2>&1; then
+    ss -ltnH 'sport = :9222' 2>/dev/null | grep -q . && return 0
+    return 1
+  fi
+  # 9222 is 0x2406; state 0A is LISTEN.
+  awk 'NR > 1 && $2 ~ /:2406$/ && $4 == "0A" { found = 1 } END { exit found ? 0 : 1 }' \
+    /proc/net/tcp /proc/net/tcp6 2>/dev/null
+}
+
+restart_kiosk() {
+  if "$SYSTEMCTL" restart "$UNIT"; then
+    echo "The kitchen screen is restarting."
+  else
+    echo "The kitchen screen could not be restarted; run 'sudo systemctl restart $UNIT'." >&2
+  fi
+}
+
+case "${1:-status}" in
+  on)
+    if ! touch "$FLAG" 2>/dev/null; then
+      echo "Could not turn the debugging port on. Run this with sudo." >&2
+      exit 1
+    fi
+    echo "Opening the browser debugging port 9222 until the next reboot."
+    restart_kiosk
+    ;;
+  off)
+    if ! rm -f "$FLAG" 2>/dev/null; then
+      echo "Could not turn the debugging port off. Run this with sudo." >&2
+      exit 1
+    fi
+    echo "Closing the browser debugging port 9222."
+    restart_kiosk
+    ;;
+  status)
+    if port_open; then
+      echo "The browser debugging port 9222 is open."
+    else
+      echo "The browser debugging port 9222 is closed."
+    fi
+    ;;
+  *)
+    echo "usage: foodassistant-kiosk-devtools on|off|status" >&2
+    exit 2
+    ;;
+esac

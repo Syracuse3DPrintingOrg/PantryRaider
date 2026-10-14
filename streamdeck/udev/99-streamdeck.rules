@@ -1,0 +1,11 @@
+# Allow non-root access to Elgato Stream Deck devices for the plugdev group.
+# Install:
+#   sudo cp streamdeck/udev/99-streamdeck.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload-rules && sudo udevadm trigger
+# The user running the controller must be in the plugdev group:
+#   sudo usermod -aG plugdev <user>   (then log out and back in)
+#
+# 0fd9 is Elgato Systems. These cover Mini, Original, MK.2, XL, and the
+# embedded Stream Deck Module variants.
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0fd9", MODE="0660", GROUP="plugdev"
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0fd9", MODE="0660", GROUP="plugdev"
