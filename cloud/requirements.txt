@@ -4,13 +4,13 @@
 # parsing, and it carries the URL and form security fixes. Newer fastapi on an
 # older Starlette lets a few hundred kilobytes of junk form keys posted to
 # /signup hold the worker for tens of seconds.
-fastapi==0.141.1
+fastapi==0.143.0
 starlette==1.7.0
-uvicorn[standard]==0.53.0
+uvicorn[standard]==0.54.0
 
 # Database ORM (required); psycopg2 is the production Postgres driver.
 # Tests run on SQLite and do not need it.
-sqlalchemy==2.0.54
+sqlalchemy==2.1.4
 psycopg2-binary==2.9.13
 
 # Schema migrations. Startup runs `alembic upgrade head` for a database
@@ -18,7 +18,7 @@ psycopg2-binary==2.9.13
 alembic==1.20.0
 
 # Settings management (required)
-pydantic==2.13.5
+pydantic==2.14.0
 pydantic-settings==2.15.0
 
 # Templates for the web portal (required). 3.1.6 carries the 2024-2025
@@ -49,7 +49,7 @@ webauthn==2.8.0
 # Fernet (symmetric authenticated encryption) for the two-factor authenticator
 # seed at rest (app/totp_crypto.py). Already present transitively via webauthn;
 # pinned explicitly so this security dependency is intentional, not incidental.
-cryptography==50.0.1
+cryptography==50.0.2
 
 # Reading text out of an uploaded recipe PDF on the portal upload path. Pure
 # Python, no native deps; a scanned (image-only) PDF yields no text and the
@@ -57,4 +57,4 @@ cryptography==50.0.1
 # required: it carries the FlateDecode and LZWDecode fixes for the crafted
 # PDFs that could exhaust memory in 5.x, and this parses stranger-supplied
 # files. The API used here (PdfReader, .pages, .extract_text) is unchanged.
-pypdf==6.19.0
+pypdf==6.20.0
