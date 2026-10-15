@@ -1,0 +1,140 @@
+{% extends "base.html" %}
+{% block title %}Log in: Forager{% endblock %}
+{% block main_class %}narrow{% endblock %}
+{% block content %}
+<h1>Welcome back</h1>
+<div class="card">
+  {% if notice %}<div class="alert alert-notice">{{ notice }}</div>{% endif %}
+  {% if error %}<div class="alert alert-error">{{ error }}</div>{% endif %}
+  <form method="post" action="/login">
+    <label for="email">Email</label>
+    <input type="email" id="email" name="email" value="{{ email or '' }}"
+           autocomplete="email" required autofocus>
+    <label for="password">Password</label>
+    <input type="password" id="password" name="password"
+           autocomplete="current-password" required>
+    {# Honeypot: hidden from people; only a bot fills it, and the server
+       refuses any non-empty value. #}
+    <div class="hp-field" aria-hidden="true">
+      <label for="website">Website</label>
+      <input type="text" id="website" name="website" tabindex="-1" autocomplete="off">
+    </div>
+    <button class="btn btn-block" type="submit">Log in</button>
+  </form>
+
+  <div id="passkey-row" style="display:none;">
+    <div class="or-divider"><span>or</span></div>
+    <div id="passkey-msg" class="alert alert-error" role="status"
+         style="display:none;margin-bottom:0.75rem;"></div>
+    <button class="btn btn-outline btn-block" type="button" id="passkey-btn"
+            onclick="signInWithPasskey()">Sign in with a passkey</button>
+    <p class="muted small" style="margin-top:0.6rem;margin-bottom:0;">Use your
+      fingerprint, face, or screen lock. Nothing to type.</p>
+  </div>
+
+  {% if email_enabled %}
+  <p class="muted small" style="margin-top:0.9rem;margin-bottom:0;">
+    <a href="/forgot">Forgot your password?</a>
+  </p>
+  {% endif %}
+  {% if google %}
+  <div class="or-divider"><span>or</span></div>
+  <a class="btn btn-outline btn-block" href="/auth/google/start?intent=signin">Continue with Google</a>
+  {% endif %}
+</div>
+<p class="muted small">No account yet? <a href="/signup">Sign up free</a>.</p>
+
+<script>
+  // base64url <-> bytes, inline. The server sends request options with the
+  // challenge and any allowed credential ids base64url-encoded; the browser
+  // needs ArrayBuffers, and hands back buffers we re-encode to post.
+  function b64urlToBytes(s) {
+    s = (s || "").replace(/-/g, "+").replace(/_/g, "/");
+    var pad = s.length % 4;
+    if (pad) s += "====".slice(pad);
+    var bin = atob(s), out = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  }
+  function bytesToB64url(buf) {
+    var bytes = new Uint8Array(buf), bin = "";
+    for (var i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+    return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  }
+
+  (function () {
+    // Only offer the passkey button when the browser can actually run the
+    // ceremony; otherwise the password form is the whole story.
+    if (window.PublicKeyCredential && navigator.credentials &&
+        navigator.credentials.get) {
+      document.getElementById("passkey-row").style.display = "block";
+    }
+  })();
+
+  function _msg(text) {
+    var el = document.getElementById("passkey-msg");
+    el.textContent = text;
+    el.style.display = text ? "block" : "none";
+  }
+
+  async function signInWithPasskey() {
+    _msg("");
+    try {
+      var email = (document.getElementById("email") || {}).value || "";
+      var begin = await fetch("/login/passkey/begin", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({email: email})
+      });
+      if (!begin.ok) {
+        var eb = await begin.json().catch(function () { return {}; });
+        _msg(eb.error || "Could not start. Please try again.");
+        return;
+      }
+      var options = JSON.parse((await begin.json()).options);
+      options.challenge = b64urlToBytes(options.challenge);
+      (options.allowCredentials || []).forEach(function (c) {
+        c.id = b64urlToBytes(c.id);
+      });
+      var assertion;
+      try {
+        assertion = await navigator.credentials.get({publicKey: options});
+      } catch (err) {
+        _msg("No passkey was used. You can try again, or sign in with your "
+             + "password above.");
+        return;
+      }
+      var payload = {
+        credential: {
+          id: assertion.id,
+          rawId: bytesToB64url(assertion.rawId),
+          type: assertion.type,
+          response: {
+            clientDataJSON: bytesToB64url(assertion.response.clientDataJSON),
+            authenticatorData: bytesToB64url(assertion.response.authenticatorData),
+            signature: bytesToB64url(assertion.response.signature),
+            userHandle: assertion.response.userHandle
+              ? bytesToB64url(assertion.response.userHandle) : null
+          },
+          clientExtensionResults: assertion.getClientExtensionResults
+            ? assertion.getClientExtensionResults() : {}
+        }
+      };
+      var finish = await fetch("/login/passkey/finish", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify(payload)
+      });
+      if (finish.ok) {
+        var data = await finish.json().catch(function () { return {}; });
+        window.location.href = data.next || "/account";
+      } else {
+        var ef = await finish.json().catch(function () { return {}; });
+        _msg(ef.error || "That did not work. Please try again.");
+      }
+    } catch (e) {
+      _msg("Something went wrong. Please try again.");
+    }
+  }
+</script>
+{% endblock %}

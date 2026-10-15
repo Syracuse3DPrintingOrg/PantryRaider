@@ -1,0 +1,38 @@
+#!/bin/sh
+# Keep kitchen tunnel peers off the Forager host.
+#
+# Caddy on the host opens connections to each kitchen over wg0; a kitchen never
+# needs to open one to the host, a container or anything routed through it. So
+# on wg0 only answers to the host's own connections come in. Idempotent: each
+# rule is added once, at the top of its chain, ahead of ufw and Docker's own.
+#
+#   forager-wg0-firewall          add the rules (run at boot by the unit)
+#   forager-wg0-firewall check    say whether they are in place
+set -eu
+IF="${FORAGER_WG_IF:-wg0}"
+
+rule() { # chain position rule...
+  chain="$1"; pos="$2"; shift 2
+  if ! iptables -C "$chain" "$@" 2>/dev/null; then
+    iptables -I "$chain" "$pos" "$@"
+  fi
+}
+
+if [ "${1:-}" = check ]; then
+  ok=0
+  iptables -C INPUT -i "$IF" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || ok=1
+  iptables -C INPUT -i "$IF" -j DROP 2>/dev/null || ok=1
+  iptables -C FORWARD -i "$IF" -j DROP 2>/dev/null || ok=1
+  iptables -C DOCKER-USER -i "$IF" -j DROP 2>/dev/null || ok=1
+  [ "$ok" = 0 ] && echo "wg0 firewall: in place" || echo "wg0 firewall: missing rules"
+  exit "$ok"
+fi
+
+# Order matters: the ACCEPT for answers must sit above the DROP.
+rule INPUT 1 -i "$IF" -j DROP
+rule INPUT 1 -i "$IF" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+rule FORWARD 1 -i "$IF" -j DROP
+if iptables -L DOCKER-USER -n >/dev/null 2>&1; then
+  rule DOCKER-USER 1 -i "$IF" -j DROP
+fi
+echo "wg0 firewall: rules in place"

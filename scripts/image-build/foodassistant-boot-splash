@@ -1,0 +1,904 @@
+#!/usr/bin/env python3
+"""Pantry Raider boot screen (FoodAssistant-y8vj).
+
+Holds the panel from early boot until the kiosk takes over: the Pantry Raider
+mark floating gently on the app's dark background, the wordmark, and a
+progress bar. Started by foodassistant-boot-splash.service as a long oneshot
+right after the root filesystem mounts.
+
+How it keeps the screen:
+- tty1 goes to KD_GRAPHICS, so the kernel console draws nothing over the
+  frames, and back to KD_TEXT on every way out (SIGTERM included).
+- tty1 is put in VT_PROCESS mode. The kiosk unit runs `chvt 7` just before
+  cage starts; the kernel then asks this process to let go (SIGUSR1), it
+  answers VT_RELDISP and ends, and the switch completes. getty@tty1 is
+  ordered after this unit, so its terminal reset never lands mid-animation.
+- It plays only when the active VT is tty1 and the kiosk unit carries that
+  chvt, and gives up by itself after GIVE_UP seconds.
+
+How it stays fast in pure Python: frames are drawn in landscape ("logical")
+coordinates into a buffer already packed in the framebuffer's pixel format;
+only the boxes that changed are redrawn, turned for a portrait panel at
+copy-out with strided memoryview copies, and written with pwrite. The mark
+and wordmark come prebuilt as 8-bit palette images (make-boot-splash.py), so
+a sprite becomes packed pixels with one bytes.translate() per output byte.
+
+The progress bar is a guess from the last boot's time to the app's /health
+(saved in STATE_FILE), held at 97% until /health answers (polled in a
+thread), then filled. It never goes backwards.
+
+Fail-safe: any problem (no framebuffer, wrong VT, missing art, an odd pixel
+format, an ioctl failure) means no boot screen and exit 0, so the worst case
+is the plain quiet boot. Standard library only.
+
+Env hooks (tests, or a manual run):
+  SPLASH_ASSET        the art (.gz from make-boot-splash.py)
+  SPLASH_FB           framebuffer device or a plain file standing in for it
+  SPLASH_FB_SYS       sysfs dir with virtual_size, bits_per_pixel, stride
+                      (used when FBIOGET_VSCREENINFO is unavailable)
+  SPLASH_VT           "off" skips every console ioctl and the VT checks
+  SPLASH_TTY          the console to hold (default /dev/tty1)
+  SPLASH_VT_ACTIVE    file naming the active VT (default sysfs tty0/active)
+  SPLASH_KIOSK_UNIT   the kiosk unit checked for its chvt line
+  SPLASH_CHVT         the chvt binary that must exist
+  SPLASH_ROTATION     normal, 90, 180 or 270 (else read from the kiosk files)
+  SPLASH_STATE        where the learned boot time is kept
+  SPLASH_HEALTH_URL   the app's /health (else read from the kiosk unit)
+  SPLASH_GIVE_UP      seconds before giving up (default 300)
+  SPLASH_FB_WAIT      seconds to wait for the framebuffer (default 15)
+  SPLASH_UPTIME       fixed boot-clock start (seconds), for tests
+"""
+import fcntl
+import gzip
+import json
+import math
+import os
+import re
+import signal
+import socket
+import struct
+import sys
+import threading
+import time
+
+BG = (33, 37, 41)          # #212529, the kiosk browser's default background
+BAR_FILL = (242, 0, 110)   # #F2006E, the brand pink
+BAR_TRACK = (52, 58, 64)   # #343A40
+# Layout, as fractions of the screen's short side. MARK_FRAC and WORD_FRAC
+# match make-boot-splash.py.
+MARK_FRAC = 0.42
+WORD_FRAC = 0.068
+GAP_MARK_WORD = 0.05
+GAP_WORD_BAR = 0.075
+BAR_W_FRAC = 0.56
+BAR_H_FRAC = 0.0125
+BOB_FRAC = 0.012           # float amplitude of the mark
+BOB_PERIOD = 3.2           # seconds per float cycle
+FADE_S = 0.45              # fade in over this long ...
+FADE_LEVELS = 9            # ... in this many steps
+FPS = 30
+CAP = 0.97                 # the bar waits here until /health answers
+FILL_S = 0.5               # then fills over this long
+DEFAULT_BOOT_S = 60.0
+GIVE_UP = 300.0
+
+DEFAULT_ASSET = "/opt/foodassistant/boot-splash/splash-art.gz"
+DEFAULT_FB = "/dev/fb0"
+DEFAULT_FB_SYS = "/sys/class/graphics/fb0"
+DEFAULT_TTY = "/dev/tty1"
+DEFAULT_VT_ACTIVE = "/sys/class/tty/tty0/active"
+DEFAULT_KIOSK_UNIT = "/etc/systemd/system/foodassistant-kiosk.service"
+DEFAULT_CHVT = "/usr/bin/chvt"
+ROTATION_FILE = "/etc/foodassistant/kiosk-rotation"
+KIOSK_ENV = "/etc/foodassistant/kiosk-env"
+STATE_FILE = "/var/lib/foodassistant/boot-splash.json"
+DEFAULT_HEALTH = "http://127.0.0.1:9284/health"
+
+# Console and framebuffer ioctls (linux/kd.h, linux/vt.h, linux/fb.h).
+KDSETMODE, KDGETMODE = 0x4B3A, 0x4B3B
+KD_TEXT, KD_GRAPHICS = 0, 1
+VT_GETMODE, VT_SETMODE, VT_RELDISP = 0x5601, 0x5602, 0x5605
+VT_AUTO, VT_PROCESS, VT_ACKACQ = 0, 1, 2
+FBIOGET_VSCREENINFO = 0x4600
+VT_MODE_FMT = "bbhhh"
+
+
+def log(msg):
+    print("boot screen: " + msg, file=sys.stderr, flush=True)
+
+
+# -- art ----------------------------------------------------------------------
+
+def load_art(path):
+    """{unit: {"mark": (w, h, idx, palette), "word": ...}} from the asset."""
+    with gzip.open(path, "rb") as f:
+        data = f.read()
+    if not data.startswith(b"PRSPLASH2\n"):
+        raise ValueError("not boot screen art")
+    (n,) = struct.unpack_from("<I", data, 10)
+    header = json.loads(data[14:14 + n].decode())
+    blob = memoryview(data)[14 + n:]
+    sets = {}
+    for s in header["sets"]:
+        sprites = {}
+        for name, sp in s["sprites"].items():
+            w, h, off = int(sp["w"]), int(sp["h"]), int(sp["off"])
+            idx = bytes(blob[off:off + w * h])
+            hexpal = bytes.fromhex(sp["palette"])
+            if len(idx) != w * h or len(hexpal) != 768:
+                raise ValueError("truncated art")
+            pal = [tuple(hexpal[i:i + 3]) for i in range(0, 768, 3)]
+            sprites[name] = (w, h, idx, pal)
+        sets[int(s["unit"])] = sprites
+    if not sets:
+        raise ValueError("empty art")
+    return sets
+
+
+def pick_set(sets, unit):
+    """The largest set built for a short side no bigger than this screen's
+    (with 10% slack), else the smallest set."""
+    fits = [u for u in sets if u <= unit * 1.1]
+    return sets[max(fits)] if fits else sets[min(sets)]
+
+
+# -- pixel formats ------------------------------------------------------------
+
+class PixelFormat:
+    """Packs RGB into the framebuffer's pixel layout (little-endian words).
+    Bits no colour uses (the X of XRGB8888) are set, as fbdev expects for an
+    opaque pixel when they are alpha."""
+
+    def __init__(self, bpp, red, green, blue):
+        if bpp not in (16, 32):
+            raise ValueError("unsupported framebuffer depth: %d" % bpp)
+        self.bpp = bpp
+        self.bytes = bpp // 8
+        self.fields = (red, green, blue)
+        used = 0
+        for off, length in self.fields:
+            if not 0 < length <= 8 or off + length > bpp:
+                raise ValueError("unsupported colour layout")
+            used |= ((1 << length) - 1) << off
+        self.spare = ((1 << bpp) - 1) & ~used
+
+    @classmethod
+    def rgb565(cls):
+        return cls(16, (11, 5), (5, 6), (0, 5))
+
+    @classmethod
+    def xrgb8888(cls):
+        return cls(32, (16, 8), (8, 8), (0, 8))
+
+    def value(self, rgb):
+        v = self.spare
+        for c, (off, length) in zip(rgb, self.fields):
+            v |= (c >> (8 - length)) << off
+        return v
+
+    def pack(self, rgb):
+        return self.value(rgb).to_bytes(self.bytes, "little")
+
+
+def blend(fg, bg, a):
+    return tuple(round(bg[i] + (fg[i] - bg[i]) * a) for i in range(3))
+
+
+# -- turning for a portrait panel --------------------------------------------
+
+def logical_size(xres, yres, rotation):
+    """The landscape canvas a panel of xres x yres shows at this rotation."""
+    return (yres, xres) if rotation in (90, 270) else (xres, yres)
+
+
+def map_point(x, y, xres, yres, rotation):
+    """Where logical (x, y) lands on the framebuffer. 270 is the turn
+    fbcon=rotate:1 gives, 90 is rotate:3."""
+    if rotation == 270:
+        return xres - 1 - y, x
+    if rotation == 90:
+        return y, yres - 1 - x
+    if rotation == 180:
+        return xres - 1 - x, yres - 1 - y
+    return x, y
+
+
+def parse_rotation(text):
+    t = (text or "").strip().lower()
+    if t.startswith("wlr_output_transform="):
+        t = t.split("=", 1)[1].strip().strip("'\"")
+    return {"90": 90, "180": 180, "270": 270}.get(t, 0)
+
+
+def read_rotation():
+    env = os.environ.get("SPLASH_ROTATION")
+    if env is not None:
+        return parse_rotation(env)
+    try:
+        with open(ROTATION_FILE) as f:
+            return parse_rotation(f.read())
+    except OSError:
+        pass
+    try:
+        with open(KIOSK_ENV) as f:
+            for line in f:
+                if line.strip().startswith("WLR_OUTPUT_TRANSFORM="):
+                    return parse_rotation(line)
+    except OSError:
+        pass
+    return 0
+
+
+class Output:
+    """A shadow of the framebuffer, filled from the logical canvas box by box
+    and turned on the way. `rows(box)` yields (offset, bytes) runs to write."""
+
+    def __init__(self, xres, yres, stride, fmt, rotation):
+        self.xres, self.yres, self.stride = xres, yres, stride
+        self.B = fmt.bytes
+        if stride % self.B or stride < xres * self.B:
+            raise ValueError("odd framebuffer stride")
+        self.rotation = rotation
+        self.W, self.H = logical_size(xres, yres, rotation)
+        self.shadow = bytearray(stride * yres)
+        self.raw = memoryview(self.shadow)
+        code = "H" if self.B == 2 else "I"
+        self.P = self.raw.cast(code)
+        self.code = code
+        self.pitch = stride // self.B
+
+    def copy(self, canvas, box):
+        """Turn one logical box of the canvas into the shadow; returns the
+        framebuffer rectangle (px0, py0, px1, py1) it covered."""
+        x0, y0, x1, y1 = box
+        W, P, pitch = self.W, self.P, self.pitch
+        L = memoryview(canvas).cast(self.code)
+        rot = self.rotation
+        if rot == 0:
+            n = x1 - x0
+            for y in range(y0, y1):
+                d = y * pitch + x0
+                P[d:d + n] = L[y * W + x0:y * W + x1]
+            return x0, y0, x1, y1
+        if rot == 180:
+            n = x1 - x0
+            for y in range(y0, y1):
+                py = self.yres - 1 - y
+                d = py * pitch + (self.xres - x1)
+                s = y * W + x1 - 1
+                P[d:d + n] = L[s - n + 1:s + 1][::-1]
+            return self.xres - x1, self.yres - y1, self.xres - x0, self.yres - y0
+        n = y1 - y0
+        if rot == 270:
+            # fb row py = x, fb columns xres-y1 .. xres-1-y0 = y from y1-1 down.
+            px0 = self.xres - y1
+            for x in range(x0, x1):
+                d = x * pitch + px0
+                P[d:d + n] = L[y0 * W + x:y1 * W + x:W][::-1]
+            return px0, x0, self.xres - y0, x1
+        # rot == 90: fb row py = yres-1-x, fb columns y0 .. y1-1.
+        for x in range(x0, x1):
+            d = (self.yres - 1 - x) * pitch + y0
+            P[d:d + n] = L[y0 * W + x:y1 * W + x:W]
+        return y0, self.yres - x1, y1, self.yres - x0
+
+    def runs(self, rect):
+        """(byte offset, memoryview) runs of the shadow for an fb rectangle."""
+        px0, py0, px1, py1 = rect
+        B, stride = self.B, self.stride
+        if px0 == 0 and px1 == self.xres:
+            yield py0 * stride, self.raw[py0 * stride:py1 * stride]
+            return
+        for py in range(py0, py1):
+            o = py * stride + px0 * B
+            yield o, self.raw[o:o + (px1 - px0) * B]
+
+
+# -- the scene ----------------------------------------------------------------
+
+def intersect(a, b):
+    x0, y0 = max(a[0], b[0]), max(a[1], b[1])
+    x1, y1 = min(a[2], b[2]), min(a[3], b[3])
+    return (x0, y0, x1, y1) if x0 < x1 and y0 < y1 else None
+
+
+def union(a, b):
+    return (min(a[0], b[0]), min(a[1], b[1]), max(a[2], b[2]), max(a[3], b[3]))
+
+
+class Scene:
+    """Mark, wordmark and progress bar on a W x H canvas of packed pixels.
+
+    Every item draws from exactly what its key holds: the key is the whole
+    input of extent() and draw(). A redraw repaints the old and new extent of
+    each item whose key changed and redraws every item crossing those boxes,
+    clipped, so a frame built up box by box equals the same keys drawn whole.
+    """
+
+    ITEMS = ("mark", "word", "bar")
+
+    def __init__(self, W, H, fmt, art):
+        self.W, self.H, self.fmt, self.B = W, H, fmt, fmt.bytes
+        self.canvas = bytearray(W * H * self.B)
+        self.bg = fmt.pack(BG)
+        u = min(W, H)
+        self.mark = art["mark"]
+        self.word = art["word"]
+        mw, mh = self.mark[0], self.mark[1]
+        tw, th = self.word[0], self.word[1]
+        self.bar_w = max(16, min(W - 8, round(u * BAR_W_FRAC)))
+        self.bar_h = max(3, round(u * BAR_H_FRAC))
+        self.amp = max(1, round(u * BOB_FRAC))
+        g1, g2 = round(u * GAP_MARK_WORD), round(u * GAP_WORD_BAR)
+        total = mh + g1 + th + g2 + self.bar_h
+        top = max(self.amp, (H - total) // 2)
+        self.mark_xy = ((W - mw) // 2, top)
+        self.word_xy = ((W - tw) // 2, top + mh + g1)
+        self.bar_xy = ((W - self.bar_w) // 2, top + mh + g1 + th + g2)
+        self._sprite_cache = {}
+        self._color_cache = {}
+        self.keys = None
+
+    # keys --------------------------------------------------------------
+    def keys_at(self, t, progress):
+        """The keys of every item at t seconds with the bar at `progress`."""
+        level = min(FADE_LEVELS, int(t / FADE_S * FADE_LEVELS)) if FADE_S > 0 else FADE_LEVELS
+        dy = round(self.amp * math.sin(2 * math.pi * t / BOB_PERIOD))
+        fill = int(max(0.0, min(1.0, progress)) * self.bar_w)
+        return {"mark": (dy, level), "word": (level,), "bar": (fill, level)}
+
+    # extents -------------------------------------------------------------
+    def extent(self, name, key):
+        if name == "mark":
+            x, y = self.mark_xy
+            return (x, y + key[0], x + self.mark[0], y + key[0] + self.mark[1])
+        if name == "word":
+            x, y = self.word_xy
+            return (x, y, x + self.word[0], y + self.word[1])
+        x, y = self.bar_xy
+        return (x, y, x + self.bar_w, y + self.bar_h)
+
+    # drawing -------------------------------------------------------------
+    def _packed_sprite(self, name, level):
+        k = (name, level)
+        got = self._sprite_cache.get(k)
+        if got is None:
+            w, h, idx, pal = self.mark if name == "mark" else self.word
+            a = level / FADE_LEVELS
+            vals = [self.fmt.pack(blend(c, BG, a)) for c in pal]
+            out = bytearray(w * h * self.B)
+            for j in range(self.B):
+                table = bytes(v[j] for v in vals)
+                out[j::self.B] = idx.translate(table)
+            got = bytes(out)
+            self._sprite_cache[k] = got
+        return got
+
+    def _color(self, rgb, level):
+        k = (rgb, level)
+        got = self._color_cache.get(k)
+        if got is None:
+            got = self.fmt.pack(blend(rgb, BG, level / FADE_LEVELS))
+            self._color_cache[k] = got
+        return got
+
+    def fill_bg(self, box):
+        x0, y0, x1, y1 = box
+        B, W, c = self.B, self.W, self.canvas
+        row = self.bg * (x1 - x0)
+        for y in range(y0, y1):
+            o = (y * W + x0) * B
+            c[o:o + len(row)] = row
+
+    def draw(self, name, key, clip):
+        ext = self.extent(name, key)
+        box = intersect(ext, clip)
+        if box is None:
+            return
+        x0, y0, x1, y1 = box
+        B, W, c = self.B, self.W, self.canvas
+        ex, ey = ext[0], ext[1]
+        if name == "bar":
+            fill, level = key
+            row = (self._color(BAR_FILL, level) * fill
+                   + self._color(BAR_TRACK, level) * (self.bar_w - fill))
+            seg = row[(x0 - ex) * B:(x1 - ex) * B]
+            for y in range(y0, y1):
+                o = (y * W + x0) * B
+                c[o:o + len(seg)] = seg
+            return
+        level = key[-1]
+        sw = (self.mark if name == "mark" else self.word)[0]
+        sp = self._packed_sprite(name, level)
+        n = (x1 - x0) * B
+        for y in range(y0, y1):
+            s = ((y - ey) * sw + (x0 - ex)) * B
+            o = (y * W + x0) * B
+            c[o:o + n] = sp[s:s + n]
+
+    def draw_whole(self, keys):
+        """Draw every item from scratch; returns the full-canvas box."""
+        full = (0, 0, self.W, self.H)
+        self.fill_bg(full)
+        for name in self.ITEMS:
+            self.draw(name, keys[name], full)
+        self.keys = dict(keys)
+        return [full]
+
+    def update(self, keys):
+        """Redraw what changed since the last keys; returns the dirty boxes."""
+        if self.keys is None:
+            return self.draw_whole(keys)
+        boxes = []
+        for name in self.ITEMS:
+            old, new = self.keys[name], keys[name]
+            if old != new:
+                b = union(self.extent(name, old), self.extent(name, new))
+                b = intersect(b, (0, 0, self.W, self.H))
+                if b:
+                    boxes.append(b)
+        for box in boxes:
+            self.fill_bg(box)
+            for name in self.ITEMS:
+                self.draw(name, keys[name], box)
+        self.keys = dict(keys)
+        return boxes
+
+
+# -- progress -----------------------------------------------------------------
+
+def guess(elapsed, expected):
+    """Boot progress guessed from time alone: steady to 90% at the expected
+    time, then creeping toward the cap so the bar still moves."""
+    if expected <= 0:
+        expected = DEFAULT_BOOT_S
+    x = max(0.0, elapsed / expected)
+    if x <= 1.0:
+        p = 0.9 * x
+    else:
+        p = 0.9 + (CAP - 0.9) * (1.0 - math.exp(-2.0 * (x - 1.0)))
+    return min(CAP, p)
+
+
+class Progress:
+    """The bar's value: never backwards, capped until the app answers, then
+    filled over FILL_S."""
+
+    def __init__(self, expected):
+        self.expected = expected
+        self.value = 0.0
+        self._fill_from = None
+
+    def at(self, uptime, now, health_seen):
+        if health_seen:
+            if self._fill_from is None:
+                self._fill_from = (now, self.value)
+            t0, v0 = self._fill_from
+            target = v0 + (1.0 - v0) * min(1.0, (now - t0) / FILL_S)
+        else:
+            target = guess(uptime, self.expected)
+        self.value = max(self.value, min(1.0, target))
+        return self.value
+
+
+def load_expected(path):
+    try:
+        with open(path) as f:
+            v = float(json.load(f).get("boot_s", 0))
+        if 5.0 <= v <= GIVE_UP:
+            return v
+    except (OSError, ValueError, TypeError, AttributeError):
+        pass
+    return DEFAULT_BOOT_S
+
+
+def save_expected(path, seconds):
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp = path + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump({"boot_s": round(seconds, 1)}, f)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    except OSError:
+        pass
+
+
+def uptime():
+    try:
+        return time.clock_gettime(time.CLOCK_BOOTTIME)
+    except (AttributeError, OSError):
+        return time.monotonic()
+
+
+# -- the app's /health --------------------------------------------------------
+
+HEALTH_RE = re.compile(r"(https?)://([A-Za-z0-9._-]+|\[[0-9A-Fa-f:.]+\])(?::(\d+))?/health")
+
+
+def kiosk_files(unit):
+    files = [unit]
+    d = unit + ".d"
+    try:
+        files += [os.path.join(d, n) for n in sorted(os.listdir(d)) if n.endswith(".conf")]
+    except OSError:
+        pass
+    return files
+
+
+def kiosk_text(unit):
+    parts = []
+    for path in kiosk_files(unit):
+        try:
+            with open(path, encoding="utf-8", errors="replace") as f:
+                parts.append(f.read())
+        except OSError:
+            pass
+    return "\n".join(parts)
+
+
+def kiosk_switches_vt(text):
+    """True when an ExecStartPre= line of the kiosk runs chvt."""
+    for line in text.splitlines():
+        s = line.strip()
+        if s.startswith("ExecStartPre=") and re.search(r"(^|[\s/])chvt\s+\d", s):
+            return True
+    return False
+
+
+def health_target(text):
+    """(host, port, path) of the app's /health from the kiosk's boot wait;
+    the default local app when none is found or it is https."""
+    url = os.environ.get("SPLASH_HEALTH_URL")
+    m = HEALTH_RE.search(url) if url else HEALTH_RE.search(text or "")
+    if not m:
+        m = HEALTH_RE.search(DEFAULT_HEALTH)
+    scheme, host, port = m.group(1), m.group(2).strip("[]"), m.group(3)
+    if scheme != "http":
+        return None
+    if host == "localhost":
+        host = "127.0.0.1"
+    return host, int(port or 80), "/health"
+
+
+def health_ok(target, timeout=1.0):
+    host, port, path = target
+    try:
+        with socket.create_connection((host, port), timeout=timeout) as s:
+            s.settimeout(timeout)
+            s.sendall(("GET %s HTTP/1.0\r\nHost: %s\r\nConnection: close\r\n\r\n"
+                       % (path, host)).encode())
+            head = s.recv(64)
+    except OSError:
+        return False
+    parts = head.split(None, 2)
+    return len(parts) >= 2 and parts[0].startswith(b"HTTP/") and parts[1] == b"200"
+
+
+class HealthWatch(threading.Thread):
+    def __init__(self, target, clock):
+        super().__init__(daemon=True)
+        self.target, self.clock = target, clock
+        self.seen_at = None
+        self.stop = threading.Event()
+
+    def run(self):
+        while not self.stop.is_set():
+            if health_ok(self.target):
+                self.seen_at = self.clock()
+                return
+            self.stop.wait(0.5)
+
+
+# -- console ------------------------------------------------------------------
+
+class Console:
+    """tty1 in graphics mode and VT_PROCESS for the life of the screen."""
+
+    def __init__(self, path):
+        self.fd = os.open(path, os.O_RDWR | os.O_NOCTTY)
+        self.ours = struct.pack(VT_MODE_FMT, VT_PROCESS, 0, signal.SIGUSR1,
+                                signal.SIGUSR1, 0)
+        # Somebody else already draws on tty1 (a compositor through seatd, a
+        # Plymouth theme): a hand-started boot screen must not take it over.
+        mode = struct.unpack(VT_MODE_FMT, fcntl.ioctl(
+            self.fd, VT_GETMODE, b"\0" * struct.calcsize(VT_MODE_FMT)))
+        kd = struct.unpack("i", fcntl.ioctl(self.fd, KDGETMODE, b"\0" * 4))[0]
+        if mode[0] != VT_AUTO or kd != KD_TEXT:
+            os.close(self.fd)
+            self.fd = None
+            raise RuntimeError("tty1 is already in use by another program")
+        try:
+            fcntl.ioctl(self.fd, KDSETMODE, KD_GRAPHICS)
+            fcntl.ioctl(self.fd, VT_SETMODE, self.ours)
+        except OSError:
+            self.restore()
+            raise
+
+    def answer(self):
+        """The kernel asked (SIGUSR1). True when it was a switch away, which
+        is now allowed; False when it was a return to this VT."""
+        try:
+            fcntl.ioctl(self.fd, VT_RELDISP, 1)
+            return True
+        except OSError:
+            try:
+                fcntl.ioctl(self.fd, VT_RELDISP, VT_ACKACQ)
+            except OSError:
+                pass
+            return False
+
+    def restore(self):
+        """Text mode and VT_AUTO back, unless another program (seatd, for the
+        kiosk) has taken the VT since: then its modes are left alone."""
+        if self.fd is None:
+            return
+        try:
+            mode = struct.unpack(VT_MODE_FMT, fcntl.ioctl(
+                self.fd, VT_GETMODE, b"\0" * struct.calcsize(VT_MODE_FMT)))
+            theirs = mode[0] == VT_PROCESS and (mode[2], mode[3]) != (
+                signal.SIGUSR1, signal.SIGUSR1)
+            if not theirs:
+                if mode[0] == VT_PROCESS:
+                    fcntl.ioctl(self.fd, VT_SETMODE, struct.pack(
+                        VT_MODE_FMT, VT_AUTO, 0, 0, 0, 0))
+                fcntl.ioctl(self.fd, KDSETMODE, KD_TEXT)
+        except OSError:
+            pass
+        try:
+            os.close(self.fd)
+        except OSError:
+            pass
+        self.fd = None
+
+
+def active_vt(path):
+    try:
+        with open(path) as f:
+            return f.read().strip()
+    except OSError:
+        return ""
+
+
+# -- framebuffer --------------------------------------------------------------
+
+def fb_layout(fd, sys_dir):
+    """(xres, yres, stride, PixelFormat, byte offset of the visible area)."""
+    try:
+        v = struct.unpack("40I", fcntl.ioctl(fd, FBIOGET_VSCREENINFO, b"\0" * 160))
+        xres, yres, xoff, yoff, bpp = v[0], v[1], v[4], v[5], v[6]
+        fmt = PixelFormat(bpp, (v[8], v[9]), (v[11], v[12]), (v[14], v[15]))
+        stride = None
+        try:
+            with open(os.path.join(sys_dir, "stride")) as f:
+                stride = int(f.read().strip())
+        except (OSError, ValueError):
+            stride = v[2] * fmt.bytes
+        return xres, yres, stride, fmt, yoff * stride + xoff * fmt.bytes
+    except OSError:
+        pass
+    # Not a real framebuffer (a test file): geometry from the sysfs stand-in.
+    with open(os.path.join(sys_dir, "virtual_size")) as f:
+        xres, yres = (int(n) for n in f.read().strip().split(","))
+    with open(os.path.join(sys_dir, "bits_per_pixel")) as f:
+        bpp = int(f.read().strip())
+    fmt = {16: PixelFormat.rgb565, 32: PixelFormat.xrgb8888}.get(bpp)
+    if fmt is None:
+        raise ValueError("unsupported framebuffer depth: %d" % bpp)
+    fmt = fmt()
+    try:
+        with open(os.path.join(sys_dir, "stride")) as f:
+            stride = int(f.read().strip())
+    except (OSError, ValueError):
+        stride = xres * fmt.bytes
+    return xres, yres, stride, fmt, 0
+
+
+def wait_for(path, seconds):
+    end = time.monotonic() + seconds
+    while True:
+        if os.path.exists(path):
+            return True
+        if time.monotonic() >= end:
+            return False
+        time.sleep(0.1)
+
+
+def fb_driver(sys_dir):
+    try:
+        with open(os.path.join(sys_dir, "name")) as f:
+            return f.read().strip()
+    except OSError:
+        return ""
+
+
+def open_framebuffer(fb_path, sys_dir, seconds, kms_wait):
+    """(fd, layout) for the framebuffer the display driver will keep.
+
+    The firmware's simple framebuffer comes up first and is replaced when the
+    DRM driver binds, about two seconds later on a Pi 4: the device node goes
+    away and comes back with another format. Opening the first one loses the
+    race (the node is gone by the time it is opened, or every write fails).
+    So wait for the driver's own framebuffer, up to kms_wait seconds after a
+    simple one was seen, and retry anything that fails in between. None when
+    no framebuffer could be opened in time."""
+    end = time.monotonic() + seconds
+    simple_until = None
+    while True:
+        now = time.monotonic()
+        if os.path.exists(fb_path):
+            driver = fb_driver(sys_dir)
+            if driver.startswith("simple"):
+                if simple_until is None:
+                    simple_until = now + kms_wait
+                waiting = now < simple_until
+            else:
+                waiting = False
+            if not waiting:
+                fd = None
+                try:
+                    fd = os.open(fb_path, os.O_RDWR)
+                    return fd, fb_layout(fd, sys_dir)
+                except (OSError, ValueError) as e:
+                    if fd is not None:
+                        try:
+                            os.close(fd)
+                        except OSError:
+                            pass
+                    if isinstance(e, ValueError):
+                        raise
+        if now >= end:
+            return None
+        time.sleep(0.1)
+
+
+# -- main ---------------------------------------------------------------------
+
+class Flags:
+    release = False
+    stop = False
+
+
+def _on_usr1(signum, frame):
+    Flags.release = True
+
+
+def _on_term(signum, frame):
+    Flags.stop = True
+
+
+def run():
+    env = os.environ.get
+    started = time.monotonic()
+    give_up = float(env("SPLASH_GIVE_UP", GIVE_UP))
+    vt_on = env("SPLASH_VT", "on") != "off"
+    unit = env("SPLASH_KIOSK_UNIT", DEFAULT_KIOSK_UNIT)
+    ktext = kiosk_text(unit)
+    if vt_on:
+        if not kiosk_switches_vt(ktext):
+            log("the kiosk does not switch to its own VT; leaving the plain boot")
+            return
+        if not os.path.exists(env("SPLASH_CHVT", DEFAULT_CHVT)):
+            log("chvt is not installed; leaving the plain boot")
+            return
+    fb_path = env("SPLASH_FB", DEFAULT_FB)
+    fb_sys = env("SPLASH_FB_SYS", DEFAULT_FB_SYS)
+    fb_wait = float(env("SPLASH_FB_WAIT", 15))
+    kms_wait = float(env("SPLASH_KMS_WAIT", 8))
+    opened = open_framebuffer(fb_path, fb_sys, fb_wait, kms_wait)
+    if opened is None:
+        log("no framebuffer; leaving the plain boot")
+        return
+    if vt_on and active_vt(env("SPLASH_VT_ACTIVE", DEFAULT_VT_ACTIVE)) != "tty1":
+        log("tty1 is not on screen; leaving it alone")
+        return
+
+    art = load_art(env("SPLASH_ASSET", DEFAULT_ASSET))
+    state_path = env("SPLASH_STATE", STATE_FILE)
+    expected = load_expected(state_path)
+    rotation = read_rotation()
+    clock0 = env("SPLASH_UPTIME")
+    if clock0 is not None:
+        base = float(clock0) - time.monotonic()
+
+        def clock():
+            return base + time.monotonic()
+    else:
+        clock = uptime
+
+    fd, layout = opened
+    console = None
+    learned = None
+    how = "gave up"
+    watch = None
+    try:
+        xres, yres, stride, fmt, fb_off = layout
+        out = Output(xres, yres, stride, fmt, rotation)
+        scene = Scene(out.W, out.H, fmt, pick_set(art, min(out.W, out.H)))
+        progress = Progress(expected)
+
+        signal.signal(signal.SIGUSR1, _on_usr1)
+        for s in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+            signal.signal(s, _on_term)
+        if vt_on:
+            console = Console(env("SPLASH_TTY", DEFAULT_TTY))
+
+        target = health_target(ktext)
+        if target:
+            watch = HealthWatch(target, clock)
+            watch.start()
+
+        t0 = time.monotonic()
+        frame = 0
+        while True:
+            if Flags.release:
+                Flags.release = False
+                if console is None or console.answer():
+                    how = "handed over"
+                    learned = watch.seen_at if watch and watch.seen_at else clock()
+                    break
+            if Flags.stop:
+                how = "stopped"
+                break
+            now = time.monotonic()
+            if now - started >= give_up:
+                break
+            seen = bool(watch and watch.seen_at)
+            value = progress.at(clock(), now, seen)
+            try:
+                for box in scene.update(scene.keys_at(now - t0, value)):
+                    for off, data in out.runs(out.copy(scene.canvas, box)):
+                        os.pwrite(fd, data, fb_off + off)
+            except OSError:
+                # The framebuffer was replaced under us (a late display
+                # driver): open the new one and paint the whole scene again.
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+                fd = None
+                reopened = open_framebuffer(fb_path, fb_sys, 5, 0)
+                if reopened is None:
+                    how = "lost the framebuffer"
+                    break
+                fd, layout = reopened
+                xres, yres, stride, fmt, fb_off = layout
+                out = Output(xres, yres, stride, fmt, rotation)
+                scene = Scene(out.W, out.H, fmt, pick_set(art, min(out.W, out.H)))
+            frame += 1
+            delay = t0 + frame / FPS - time.monotonic()
+            if delay > 0:
+                time.sleep(delay)
+            elif delay < -1.0:
+                frame = int((time.monotonic() - t0) * FPS)
+    finally:
+        if watch:
+            watch.stop.set()
+        if console:
+            console.restore()
+        if fd is not None:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+    seen = watch.seen_at if watch else None
+    if learned is not None:
+        save_expected(state_path, learned)
+    log("%s at %.1f s after power-on; app answered %s; expected %.0f s"
+        % (how, clock(), "at %.1f s" % seen if seen else "never", expected))
+
+
+def main():
+    try:
+        run()
+    except Exception as e:  # never fail or hold the boot
+        try:
+            log("skipped (%s: %s)" % (type(e).__name__, e))
+        except Exception:
+            pass
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
