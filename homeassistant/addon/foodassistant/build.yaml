@@ -1,0 +1,8 @@
+# The Dockerfile builds FROM the published Pantry Raider release named by this
+# add-on's version (the BUILD_VERSION the Supervisor passes), not from the
+# entries below. They stay because the Supervisor still expects build_from and
+# passes it as BUILD_FROM, which the Dockerfile no longer reads. The release
+# image is a multi-arch manifest, so one tag serves every architecture.
+build_from:
+  amd64: ghcr.io/syracuse3dprintingorg/pantryraider:latest
+  aarch64: ghcr.io/syracuse3dprintingorg/pantryraider:latest

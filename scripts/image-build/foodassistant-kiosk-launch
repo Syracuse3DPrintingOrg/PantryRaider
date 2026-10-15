@@ -1,0 +1,865 @@
+#!/usr/bin/python3
+"""Start the kitchen screen's browser, sign it in and let the Stream Deck
+steer it.
+
+    foodassistant-kiosk-launch <browser> <flags...> <kiosk url>
+
+The kiosk unit runs this as cage's client, as the kiosk user, in place of
+the browser itself. It:
+
+- signs the screen in when the kiosk page is on this device: the app is asked
+  whether it takes launch tickets (GET /ui/kiosk/launch?probe=1 answers 204),
+  and when it does, the browser first opens a small local page that hands the
+  one-time ticket from /run/foodassistant-kiosk/ticket to the app. The ticket
+  never appears in the browser's command line;
+- talks to the browser over a debugging pipe (--remote-debugging-pipe, fds 3
+  and 4) instead of the open debugging port, and serves
+  /run/foodassistant-kiosk/nav.sock so the Stream Deck can open a page on the
+  screen's own address;
+- still opens the debugging port 9222 while something needs it: an older
+  Stream Deck controller, a deck user that cannot open the socket, a socket
+  that could not be made, or the devtools switch
+  (foodassistant-kiosk-devtools on);
+- keeps the browser's profile in RAM when the kiosk page is on this device:
+  --user-data-dir=/run/foodassistant-kiosk/profile with a capped disk cache.
+  Chromium otherwise writes its profile (a metrics file it keeps mapped, the
+  cache, cookies) to the SD card all day. The run directory is the unit's
+  RuntimeDirectory=, so each start begins with a fresh profile and the launch
+  ticket signs the screen in again; a screen showing another device's page
+  keeps its profile on the card, since nothing could sign it back in;
+- passes SIGTERM, SIGINT and SIGHUP to the browser and exits with its status.
+
+When anything goes wrong before the browser starts, or the browser never
+answers on its pipe, the browser is started the old way (its own arguments
+plus the debugging port), so the screen always comes up and the deck keeps
+navigating.
+
+Standard library only (Python 3.9 and later, no app venv).
+"""
+from __future__ import annotations
+
+import fcntl
+import grp
+import html
+import http.client
+import itertools
+import json
+import os
+import pwd
+import re
+import signal
+import socket
+import ssl
+import subprocess
+import sys
+import threading
+import time
+import urllib.parse
+
+LEGACY_PORT_FLAG = "--remote-debugging-port=9222"
+PROFILE_FLAG = "--user-data-dir="
+# The disk cache sizes itself from the free space where the profile lives; in
+# /run (a tmpfs that is a fraction of the RAM) that has to be capped.
+CACHE_FLAG = "--disk-cache-size=33554432"
+PIPE_FLAG = "--remote-debugging-pipe"
+NAV_GROUP = "foodassistant-kiosknav"
+MAX_REQUEST = 4096
+READ_SECONDS = 2.0
+CDP_STEP_SECONDS = 3.0
+LAUNCH_PAGE_SECONDS = 60
+LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+TICKET_RE = re.compile(r"v1\.[0-9]+\.[0-9a-f]{32}\.[0-9a-f]{64}")
+NO_ANSWER_MSG = ("The browser did not answer on its debugging pipe; restarting "
+                 "it with the debugging port so the Stream Deck keeps navigating.")
+
+
+def log(msg):
+    print(f"kiosk launch: {msg}", file=sys.stderr, flush=True)
+
+
+def run_dir():
+    return os.environ.get("KIOSK_RUN_DIR", "/run/foodassistant-kiosk")
+
+
+def deck_pkg_dir():
+    return os.environ.get("DECK_PKG_DIR", "/opt/foodassistant/foodassistant_streamdeck")
+
+
+def devtools_flag():
+    return os.environ.get("FA_DEVTOOLS_FLAG", "/run/foodassistant-kiosk-devtools")
+
+
+def systemctl_cmd():
+    return os.environ.get("SYSTEMCTL", "systemctl")
+
+
+def _env_float(name, default):
+    try:
+        return float(os.environ.get(name, default))
+    except ValueError:
+        return float(default)
+
+
+# --- nav path rule (shared with the Stream Deck; keep byte-identical) ---
+NAV_PATH_MAX = 2048
+
+
+def valid_nav_path(path):
+    """True for a path on the app: a non-empty str of at most NAV_PATH_MAX
+    characters that starts with exactly one '/' and holds no backslash and
+    no control character (below 0x20, or 0x7f)."""
+    if not isinstance(path, str) or not path or len(path) > NAV_PATH_MAX:
+        return False
+    if not path.startswith("/") or path.startswith("//"):
+        return False
+    if "\\" in path:
+        return False
+    return not any(ord(c) < 0x20 or ord(c) == 0x7f for c in path)
+# --- end nav path rule ---
+
+
+# --- pure helpers -----------------------------------------------------------
+
+def kiosk_url_index(args):
+    """Index of the kiosk URL in the browser's arguments: the last one that
+    starts with http:// or https://, or -1."""
+    for i in range(len(args) - 1, -1, -1):
+        if args[i].startswith(("http://", "https://")):
+            return i
+    return -1
+
+
+def origin_of(url):
+    """scheme://host[:port] of an http(s) URL, without any login part, or
+    ''."""
+    try:
+        parts = urllib.parse.urlsplit(url or "")
+        if parts.scheme.lower() not in ("http", "https") or not parts.hostname:
+            return ""
+        parts.port  # noqa: B018 - raises ValueError for a bad port
+    except ValueError:
+        return ""
+    return f"{parts.scheme.lower()}://{parts.netloc.rsplit('@', 1)[-1]}"
+
+
+def profile_flags(args, directory, hostname=None):
+    """Flags that keep the browser profile in RAM under directory: a
+    --user-data-dir there plus a capped disk cache. [] when the arguments
+    already name a profile, the kiosk page is not on this device, or
+    directory is not a directory this user can write."""
+    if any(a.startswith(PROFILE_FLAG) for a in args):
+        return []
+    idx = kiosk_url_index(args)
+    url = args[idx] if idx >= 0 else ""
+    if not url or not is_local_kiosk_host(url_host(url), hostname):
+        return []
+    if not (os.path.isdir(directory) and os.access(directory, os.W_OK | os.X_OK)):
+        return []
+    flags = [PROFILE_FLAG + os.path.join(directory, "profile")]
+    if not any(a.startswith("--disk-cache-size=") for a in args):
+        flags.append(CACHE_FLAG)
+    return flags
+
+
+def join_origin(origin, path):
+    """The page to open: the kiosk URL's origin plus a valid nav path."""
+    return origin.rstrip("/") + path
+
+
+def bare_hostname(hostname=None):
+    """This device's host name, lowercased, when it is a single label."""
+    try:
+        name = hostname if hostname is not None else socket.gethostname()
+    except OSError:
+        return ""
+    name = str(name or "").strip().lower().rstrip(".")
+    if not name or "." in name:
+        return ""
+    return name
+
+
+def is_local_kiosk_host(host, hostname=None):
+    """True when a kiosk URL's host is this device: 127.0.0.1, localhost,
+    ::1 or the bare host name (Debian maps it to 127.0.1.1). A '.local' name
+    is not: mDNS answers it with the LAN address. The same rule the bridge,
+    host-harden and the Stream Deck use."""
+    h = str(host or "").strip().lower()
+    if h.startswith("[") and h.endswith("]"):
+        h = h[1:-1]
+    h = h.rstrip(".")
+    if not h:
+        return False
+    if h in LOOPBACK_HOSTS:
+        return True
+    bare = bare_hostname(hostname)
+    return bool(bare) and h == bare
+
+
+def url_host(url):
+    try:
+        return (urllib.parse.urlsplit(url or "").hostname or "").lower()
+    except ValueError:
+        return ""
+
+
+def valid_ticket(text):
+    """A ticket in the I-5 shape: 'v1', decimal digits, 32 and 64 lowercase
+    hex, dot separated."""
+    return isinstance(text, str) and TICKET_RE.fullmatch(text) is not None
+
+
+def next_param(kiosk_url):
+    """The kiosk URL's path and query, percent-encoded for the next=
+    parameter."""
+    parts = urllib.parse.urlsplit(kiosk_url)
+    target = parts.path or "/"
+    if parts.query:
+        target += "?" + parts.query
+    return urllib.parse.quote(target, safe="")
+
+
+def launch_target(origin, ticket, kiosk_url):
+    return (f"{origin}/ui/kiosk/launch?ticket={ticket}"
+            f"&next={next_param(kiosk_url)}")
+
+
+def launch_page(target):
+    """The local page that hands the ticket to the app. The target is
+    HTML-escaped in the refresh tag and JSON-encoded in the script, and sent
+    with no referrer."""
+    attr = html.escape(target, quote=True)
+    js = (json.dumps(target).replace("<", "\\u003c").replace(">", "\\u003e")
+          .replace("&", "\\u0026"))
+    return (
+        "<!doctype html>\n"
+        "<html><head><meta charset=\"utf-8\">\n"
+        "<meta name=\"referrer\" content=\"no-referrer\">\n"
+        f"<meta http-equiv=\"refresh\" content=\"0;url={attr}\">\n"
+        "<title>Pantry Raider</title>\n"
+        "<style>html,body{margin:0;height:100%;background:#212529}</style>\n"
+        "</head><body>\n"
+        f"<script>location.replace({js});</script>\n"
+        "</body></html>\n"
+    )
+
+
+def legacy_port_reason(*, deck_loaded, deck_has_nav, deck_user, kiosk_user,
+                       deck_groups, socket_gid, socket_ok, devtools):
+    """Why the debugging port 9222 stays open, or '' when nothing needs it.
+
+    deck_groups is the deck user's group ids (None when the user is
+    unknown); socket_gid is the navigation socket's group."""
+    if devtools:
+        return "the browser debugging switch is on"
+    if not socket_ok:
+        return "the navigation socket could not be created"
+    if deck_loaded and not deck_has_nav:
+        return "an older Stream Deck controller is installed"
+    if deck_loaded and deck_user and deck_user not in (kiosk_user, "root"):
+        if deck_groups is None or socket_gid not in deck_groups:
+            return (f"the Stream Deck runs as {deck_user}, which cannot open "
+                    "the navigation socket")
+    return ""
+
+
+def with_flags(args, flags):
+    """args with each flag not already there inserted before the kiosk URL,
+    so the URL stays last."""
+    out = list(args)
+    idx = -1
+    for i in range(len(out) - 1, -1, -1):
+        # The kiosk URL, or the local launch page that stands in for it.
+        if out[i].startswith(("http://", "https://", "file://")):
+            idx = i
+            break
+    for flag in flags:
+        if flag in out:
+            continue
+        if idx >= 0:
+            out.insert(idx, flag)
+            idx += 1
+        else:
+            out.append(flag)
+    return out
+
+
+def handle_request(raw, navigate, ready):
+    """The reply to one nav socket request. navigate(path) returns True
+    when the page opened; ready() is True once the browser runs."""
+    if len(raw) > MAX_REQUEST:
+        return {"ok": False, "error": "bad_request"}
+    try:
+        msg = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        return {"ok": False, "error": "bad_request"}
+    if not isinstance(msg, dict):
+        return {"ok": False, "error": "bad_request"}
+    op = msg.get("op")
+    if op == "ping":
+        return {"ok": True, "version": 1}
+    if op != "navigate":
+        return {"ok": False, "error": "bad_request"}
+    path = msg.get("path")
+    if not valid_nav_path(path):
+        return {"ok": False, "error": "bad_path"}
+    if not ready():
+        return {"ok": False, "error": "not_ready"}
+    try:
+        ok = navigate(path)
+    except Exception:  # noqa: BLE001 - any failure is a failed navigation
+        ok = False
+    return {"ok": True} if ok else {"ok": False, "error": "navigate_failed"}
+
+
+# --- the ticket step --------------------------------------------------------
+
+def probe(origin, tries=3, delay=2.0, timeout=3.0):
+    """True when the app at origin answers GET /ui/kiosk/launch?probe=1 with
+    204. Redirects are not followed. A refusal or a timeout is retried."""
+    parts = urllib.parse.urlsplit(origin)
+    host = parts.hostname
+    for attempt in range(tries):
+        if attempt:
+            time.sleep(delay)
+        try:
+            if parts.scheme == "https":
+                ctx = ssl.create_default_context()
+                ctx.check_hostname = False
+                ctx.verify_mode = ssl.CERT_NONE
+                conn = http.client.HTTPSConnection(host, parts.port, timeout=timeout,
+                                                   context=ctx)
+            else:
+                conn = http.client.HTTPConnection(host, parts.port, timeout=timeout)
+            try:
+                conn.request("GET", "/ui/kiosk/launch?probe=1")
+                status = conn.getresponse().status
+            finally:
+                conn.close()
+        except (OSError, http.client.HTTPException):
+            continue
+        if status == 204:
+            return True
+        if status < 500:
+            return False
+    return False
+
+
+def _remove(path):
+    try:
+        os.unlink(path)
+    except FileNotFoundError:
+        pass
+    except OSError as e:
+        log(f"could not remove {path}: {e.strerror}")
+
+
+def take_ticket(directory):
+    """Read the ticket and delete it at once. '' when missing or malformed."""
+    path = os.path.join(directory, "ticket")
+    try:
+        with open(path, encoding="ascii") as f:
+            text = f.read(256).strip()
+    except (OSError, UnicodeDecodeError):
+        text = ""
+    _remove(path)
+    return text if valid_ticket(text) else ""
+
+
+def ticket_step(args, hostname=None, probe_fn=None):
+    """args with the kiosk URL swapped for the local launch page when the
+    screen can be signed in, else args unchanged. Returns (args,
+    launch_page_path or '')."""
+    directory = run_dir()
+    idx = kiosk_url_index(args)
+    url = args[idx] if idx >= 0 else ""
+    origin = origin_of(url)
+    if not origin or not is_local_kiosk_host(url_host(url), hostname):
+        _remove(os.path.join(directory, "ticket"))
+        if url:
+            log("the kiosk page is not on this device; it opens without a sign-in ticket")
+        return args, ""
+    if not os.path.exists(os.path.join(directory, "ticket")):
+        log("no sign-in ticket was left for the screen; opening the kiosk page as it is")
+        return args, ""
+    probe_fn = probe_fn or (lambda o: probe(
+        o, delay=_env_float("FA_PROBE_RETRY_SECONDS", 2)))
+    if not probe_fn(origin):
+        _remove(os.path.join(directory, "ticket"))
+        log("the app does not take launch tickets; opening the kiosk page as it is")
+        return args, ""
+    ticket = take_ticket(directory)
+    if not ticket:
+        log("no usable sign-in ticket; opening the kiosk page as it is")
+        return args, ""
+    page = os.path.join(directory, "launch.html")
+    _remove(page)
+    fd = os.open(page, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(launch_page(launch_target(origin, ticket, url)))
+    out = list(args)
+    out[idx] = "file://" + page
+    log("signing the screen in with a one-time ticket")
+    return out, page
+
+
+# --- CDP over a pipe --------------------------------------------------------
+
+class CDPError(Exception):
+    pass
+
+
+class CDPPipe:
+    """The browser's debugging pipe: NUL-ended JSON messages, commands on
+    our write end (the browser's fd 3), replies on our read end (its fd 4).
+    A reader thread drains the replies and hands them to waiters by id."""
+
+    def __init__(self):
+        cmd_r, cmd_w = os.pipe()
+        rep_r, rep_w = os.pipe()
+        fds = []
+        for fd in (cmd_r, cmd_w, rep_r, rep_w):
+            fds.append(fcntl.fcntl(fd, fcntl.F_DUPFD_CLOEXEC, 10))
+            os.close(fd)
+        self.child_read, self.cmd_w, self.rep_r, self.child_write = fds
+        self._ids = itertools.count(1)
+        self._write_lock = threading.Lock()
+        self._waiters = {}
+        self._waiters_lock = threading.Lock()
+        self.closed = False
+
+    def child_fds_closed(self):
+        for fd in (self.child_read, self.child_write):
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+
+    def start_reader(self):
+        t = threading.Thread(target=self._read_loop, name="cdp-reader", daemon=True)
+        t.start()
+
+    def _read_loop(self):
+        buf = b""
+        while True:
+            try:
+                chunk = os.read(self.rep_r, 65536)
+            except OSError:
+                chunk = b""
+            if not chunk:
+                break
+            buf += chunk
+            while b"\0" in buf:
+                raw, buf = buf.split(b"\0", 1)
+                try:
+                    msg = json.loads(raw.decode("utf-8"))
+                except (UnicodeDecodeError, ValueError):
+                    continue
+                if not isinstance(msg, dict) or "id" not in msg:
+                    continue
+                with self._waiters_lock:
+                    waiter = self._waiters.get(msg["id"])
+                if waiter is not None:
+                    waiter["reply"] = msg
+                    waiter["event"].set()
+        self.closed = True
+        with self._waiters_lock:
+            for waiter in self._waiters.values():
+                waiter["event"].set()
+
+    def send(self, method, params=None, session_id=None, timeout=CDP_STEP_SECONDS):
+        if self.closed:
+            raise CDPError("pipe closed")
+        mid = next(self._ids)
+        msg = {"id": mid, "method": method, "params": params or {}}
+        if session_id:
+            msg["sessionId"] = session_id
+        waiter = {"event": threading.Event(), "reply": None}
+        with self._waiters_lock:
+            self._waiters[mid] = waiter
+        try:
+            data = json.dumps(msg).encode("utf-8") + b"\0"
+            with self._write_lock:
+                view = memoryview(data)
+                while view:
+                    n = os.write(self.cmd_w, view)
+                    view = view[n:]
+            if not waiter["event"].wait(timeout) or waiter["reply"] is None:
+                raise CDPError(f"no answer to {method}")
+        except OSError as e:
+            raise CDPError(f"pipe error on {method}") from e
+        finally:
+            with self._waiters_lock:
+                self._waiters.pop(mid, None)
+        reply = waiter["reply"]
+        if "error" in reply:
+            raise CDPError(f"{method} failed")
+        result = reply.get("result")
+        return result if isinstance(result, dict) else {}
+
+
+def cdp_navigate(pipe, url):
+    """Open url in the first page target: getTargets, attachToTarget with
+    flatten, Page.navigate with the sessionId, detachFromTarget."""
+    targets = pipe.send("Target.getTargets").get("targetInfos") or []
+    page = next((t for t in targets
+                 if isinstance(t, dict) and t.get("type") == "page"), None)
+    if not page or not page.get("targetId"):
+        raise CDPError("no page target")
+    session = pipe.send("Target.attachToTarget",
+                        {"targetId": page["targetId"], "flatten": True}).get("sessionId")
+    if not session:
+        raise CDPError("no session")
+    try:
+        result = pipe.send("Page.navigate", {"url": url}, session_id=session)
+        if result.get("errorText"):
+            raise CDPError("navigation error")
+    finally:
+        try:
+            pipe.send("Target.detachFromTarget", {"sessionId": session})
+        except CDPError:
+            pass
+    return True
+
+
+# --- the navigation socket --------------------------------------------------
+
+class NavServer:
+    def __init__(self, path, origin, kiosk_user):
+        self.path = path
+        self.origin = origin
+        self.kiosk_user = kiosk_user
+        self.pipe = None
+        self.lock = threading.Lock()
+        self.sock = None
+
+    def create(self):
+        """Make the socket at self.path. It is bound under a temporary name
+        beside it, set 0660 in the nav group and listening, and only then
+        renamed into place, so a client that finds the path can always
+        connect. Returns its group id. Raises OSError, leaving nothing
+        behind."""
+        try:
+            os.unlink(self.path)
+        except FileNotFoundError:
+            pass
+        tmp = f"{self.path}.{os.getpid()}"
+        try:
+            os.unlink(tmp)
+        except FileNotFoundError:
+            pass
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        old = os.umask(0o117)
+        try:
+            sock.bind(tmp)
+        except OSError:
+            sock.close()
+            raise
+        finally:
+            os.umask(old)
+        try:
+            os.chmod(tmp, 0o660)
+            try:
+                gid = grp.getgrnam(NAV_GROUP).gr_gid
+                pw = pwd.getpwnam(self.kiosk_user)
+                if gid in os.getgrouplist(self.kiosk_user, pw.pw_gid):
+                    os.chown(tmp, -1, gid)
+            except (KeyError, OSError):
+                pass
+            sock.listen(8)
+            group = os.stat(tmp).st_gid
+            os.replace(tmp, self.path)
+        except OSError:
+            sock.close()
+            _remove(tmp)
+            raise
+        self.sock = sock
+        return group
+
+    def ready(self):
+        return self.pipe is not None and not self.pipe.closed
+
+    def navigate(self, path):
+        if not self.origin:
+            return False
+        with self.lock:
+            try:
+                return cdp_navigate(self.pipe, join_origin(self.origin, path))
+            except CDPError as e:
+                log(f"navigation failed: {e}")
+                return False
+
+    def serve(self):
+        t = threading.Thread(target=self._accept_loop, name="nav-sock", daemon=True)
+        t.start()
+
+    def _accept_loop(self):
+        while True:
+            try:
+                conn, _ = self.sock.accept()
+            except OSError:
+                return
+            threading.Thread(target=self._handle, args=(conn,), daemon=True).start()
+
+    def _handle(self, conn):
+        try:
+            deadline = time.monotonic() + READ_SECONDS
+            data = b""
+            while b"\n" not in data and len(data) <= MAX_REQUEST:
+                left = deadline - time.monotonic()
+                if left <= 0:
+                    break
+                conn.settimeout(left)
+                try:
+                    chunk = conn.recv(MAX_REQUEST + 1 - len(data))
+                except socket.timeout:
+                    break
+                if not chunk:
+                    break
+                data += chunk
+            # At most MAX_REQUEST bytes in all, the newline included. A
+            # longer request stays whole so handle_request refuses it.
+            nl = data.find(b"\n")
+            raw = data[:nl] if 0 <= nl < MAX_REQUEST else data
+            reply = handle_request(raw, self.navigate, self.ready)
+            conn.settimeout(READ_SECONDS)
+            conn.sendall(json.dumps(reply).encode("utf-8") + b"\n")
+        except OSError:
+            pass
+        finally:
+            try:
+                conn.close()
+            except OSError:
+                pass
+
+    def close(self):
+        if self.sock is not None:
+            try:
+                self.sock.close()
+            except OSError:
+                pass
+        _remove(self.path)
+
+
+# --- the legacy port decision on this host ----------------------------------
+
+def _systemctl_value(prop, unit):
+    try:
+        r = subprocess.run([systemctl_cmd(), "show", "-p", prop, "--value", unit],
+                           capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return r.stdout.strip() if r.returncode == 0 else None
+
+
+def host_legacy_reason(kiosk_user, socket_gid, socket_ok):
+    unit = "foodassistant-streamdeck.service"
+    load = _systemctl_value("LoadState", unit)
+    if load is None:
+        # systemd gave no answer: go by the deck package on disk, so an old
+        # deck still gets its port.
+        deck_loaded = os.path.isdir(deck_pkg_dir())
+    else:
+        deck_loaded = load == "loaded"
+    deck_user = (_systemctl_value("User", unit) or "") if deck_loaded else ""
+    deck_groups = None
+    if deck_user:
+        try:
+            pw = pwd.getpwnam(deck_user)
+            deck_groups = os.getgrouplist(deck_user, pw.pw_gid)
+        except (KeyError, OSError):
+            deck_groups = None
+    return legacy_port_reason(
+        deck_loaded=deck_loaded,
+        deck_has_nav=os.path.exists(os.path.join(deck_pkg_dir(), "kiosk_nav.py")),
+        deck_user=deck_user, kiosk_user=kiosk_user, deck_groups=deck_groups,
+        socket_gid=socket_gid, socket_ok=socket_ok,
+        devtools=os.path.exists(devtools_flag()))
+
+
+# --- running the browser ----------------------------------------------------
+
+def exec_legacy(original, page=""):
+    """Replace this process with the browser, started the old way. The
+    launch page (if any) goes first: the browser opens the plain kiosk URL."""
+    if page:
+        _remove(page)
+    # Python ignores SIGPIPE and SIGXFSZ, and an ignored signal survives exec.
+    for sig in (signal.SIGPIPE, signal.SIGXFSZ):
+        try:
+            signal.signal(sig, signal.SIG_DFL)
+        except (OSError, ValueError):
+            pass
+    try:
+        flags = profile_flags(original, run_dir())
+    except Exception:  # noqa: BLE001 - the screen must always come up
+        flags = []
+    args = with_flags(original, flags + [LEGACY_PORT_FLAG])
+    os.execvp(args[0], args)
+
+
+def exit_code(status):
+    code = os.waitstatus_to_exitcode(status)
+    return 128 - code if code < 0 else code
+
+
+class Launcher:
+    def __init__(self, original):
+        self.original = list(original)
+        self.pid = None
+        self.nav = None
+        self.pipe = None
+        self.status = None
+        self.page = ""
+
+    def start(self):
+        """Everything up to the browser's start. Raises on any failure."""
+        args = list(self.original)
+        idx = kiosk_url_index(args)
+        kiosk_url = args[idx] if idx >= 0 else ""
+        try:
+            kiosk_user = pwd.getpwuid(os.getuid()).pw_name
+        except KeyError:
+            kiosk_user = str(os.getuid())
+
+        args, page = ticket_step(args)
+        self.page = page
+
+        self.nav = NavServer(os.path.join(run_dir(), "nav.sock"),
+                             origin_of(kiosk_url), kiosk_user)
+        socket_ok, socket_gid = True, -1
+        try:
+            socket_gid = self.nav.create()
+        except OSError as e:
+            socket_ok = False
+            log(f"could not create the navigation socket: {e.strerror or e}")
+        else:
+            # Answers not_ready until the browser runs.
+            self.nav.serve()
+        reason = host_legacy_reason(kiosk_user, socket_gid, socket_ok)
+        flags = profile_flags(self.original, run_dir()) + [PIPE_FLAG]
+        if reason:
+            flags.append(LEGACY_PORT_FLAG)
+            log(f"keeping the debugging port 9222 open: {reason}")
+        args = with_flags(args, flags)
+
+        self.pipe = CDPPipe()
+        self.pipe.start_reader()
+        self.pid = os.posix_spawnp(
+            args[0], args, os.environ,
+            file_actions=[(os.POSIX_SPAWN_DUP2, self.pipe.child_read, 3),
+                          (os.POSIX_SPAWN_DUP2, self.pipe.child_write, 4)],
+            setsigdef=(signal.SIGPIPE, signal.SIGXFSZ))
+        # The browser runs from here on: nothing below may start a second one.
+        try:
+            for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+                signal.signal(sig, self._forward)
+            self.pipe.child_fds_closed()
+            self.nav.pipe = self.pipe
+            if page:
+                timer = threading.Timer(LAUNCH_PAGE_SECONDS, _remove, args=(page,))
+                timer.daemon = True
+                timer.start()
+        except Exception as e:  # noqa: BLE001 - keep the running browser
+            log(f"after the browser started: {type(e).__name__}: {e}")
+
+    def _forward(self, signum, frame):
+        if self.pid and self.status is None:
+            try:
+                os.kill(self.pid, signum)
+            except OSError:
+                pass
+
+    def _poll(self):
+        if self.status is None:
+            pid, status = os.waitpid(self.pid, os.WNOHANG)
+            if pid:
+                self.status = status
+        return self.status
+
+    def pipe_check(self):
+        """True once the browser answers Target.getTargets over the pipe;
+        False when it never does within FA_PIPE_CHECK_SECONDS; None when
+        the browser exited during the check."""
+        limit = _env_float("FA_PIPE_CHECK_SECONDS", 120)
+        deadline = time.monotonic() + limit
+        while True:
+            if self._poll() is not None:
+                return None
+            started = time.monotonic()
+            try:
+                self.pipe.send("Target.getTargets",
+                               timeout=max(0.1, min(2.0, deadline - started)))
+                return True
+            except CDPError:
+                pass
+            if self._poll() is not None:
+                return None
+            if time.monotonic() >= deadline:
+                return False
+            rest = 2.0 - (time.monotonic() - started)
+            if rest > 0:
+                time.sleep(min(rest, max(0.0, deadline - time.monotonic())))
+
+    def stop_browser(self):
+        if self._poll() is not None:
+            return
+        try:
+            os.kill(self.pid, signal.SIGTERM)
+        except OSError:
+            pass
+        end = time.monotonic() + 5
+        while time.monotonic() < end:
+            if self._poll() is not None:
+                return
+            time.sleep(0.1)
+        try:
+            os.kill(self.pid, signal.SIGKILL)
+        except OSError:
+            pass
+        os.waitpid(self.pid, 0)
+
+    def wait(self):
+        while self.status is None:
+            try:
+                pid, status = os.waitpid(self.pid, 0)
+            except ChildProcessError:
+                return 0
+            if pid:
+                self.status = status
+        return exit_code(self.status)
+
+
+def main(argv=None):
+    argv = sys.argv[1:] if argv is None else argv
+    if not argv:
+        log("usage: foodassistant-kiosk-launch <browser> <flags...> <kiosk url>")
+        return 2
+    launcher = Launcher(argv)
+    try:
+        launcher.start()
+    except Exception as e:  # noqa: BLE001 - the screen must always come up
+        if launcher.pid is not None:
+            # The browser did start; keep it rather than start a second one.
+            log(f"after the browser started: {type(e).__name__}: {e}")
+        else:
+            log(f"starting the browser the old way ({type(e).__name__}: {e})")
+            if launcher.nav is not None:
+                launcher.nav.close()
+            exec_legacy(argv, launcher.page)
+            return 1  # not reached
+    if launcher.pipe is None or launcher.nav is None:
+        return launcher.wait()
+    check = launcher.pipe_check()
+    if check is False:
+        log(NO_ANSWER_MSG)
+        launcher.nav.close()
+        launcher.stop_browser()
+        exec_legacy(argv, launcher.page)
+        return 1  # not reached
+    code = launcher.wait()
+    launcher.nav.close()
+    return code
+
+
+if __name__ == "__main__":
+    sys.exit(main())

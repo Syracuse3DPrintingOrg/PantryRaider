@@ -1,0 +1,21 @@
+tree c3da762cba8f7acc4ad3432faf34ffd3984c3ed1
+author BillNyeDegrasseTyson <300288513+BillNyeDegrasseTyson@users.noreply.github.com> 1790550213 +0000
+committer BillNyeDegrasseTyson <300288513+BillNyeDegrasseTyson@users.noreply.github.com> 1790550213 +0000
+gpgsig -----BEGIN SSH SIGNATURE-----
+ U1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAgc9bNoCKHNHHtj0mVei1pl87R2s
+ NM5P+VfG+h48Xzat0AAAADZ2l0AAAAAAAAAAZzaGE1MTIAAABTAAAAC3NzaC1lZDI1NTE5
+ AAAAQBYp6QuCBXVj1IsQDKBMC6i6Q9CGY96rQXnYz0ocUflOWGKelPSOQ2iIWGXFfJiM1x
+ GAUaNB0Ka0WneAxUHomgU=
+ -----END SSH SIGNATURE-----
+
+Pantry Raider: self-hosted food inventory and spoilage tracker
+
+Pantry Raider is a self-hosted food inventory and spoilage tracker built
+on Grocy, with optional Mealie for recipes and meal planning and local
+or cloud AI for photo-based scanning. It runs on a Raspberry Pi
+appliance or any Docker host, with an optional kiosk display and Stream
+Deck control, and an optional Forager cloud companion for remote access
+and hosted AI.
+
+This tree contains the FastAPI service, the Forager cloud companion,
+Raspberry Pi provisioning, Home Assistant integration, and the docs.

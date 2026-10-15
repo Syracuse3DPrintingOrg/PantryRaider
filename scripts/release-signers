@@ -1,0 +1,4 @@
+# Pantry Raider release keys, one per line, in ssh-keygen allowed-signers form.
+# Every copy that devices, installers and CI trust lists the same lines; add a
+# key by adding its line everywhere.
+pantryraider-release namespaces="git,pantryraider-release" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHPWzaAihzRx7Y9JlXotaZfO0drDTOT/lXxvoePF82rd
