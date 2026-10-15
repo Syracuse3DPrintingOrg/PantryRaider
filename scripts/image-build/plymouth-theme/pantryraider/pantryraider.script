@@ -1,0 +1,38 @@
+# Pantry Raider boot splash (FoodAssistant-y8vj).
+#
+# Centers the brand mark on the app's dark background (#212529, matching the
+# kiosk Chromium default background so the handoff to the app shows no colour
+# jump) and breathes it with a gentle opacity pulse. Deliberately simple: no
+# progress bar or text, since the point is to hide the boot console and show
+# only the logo. Plymouth's script language is a small C-like dialect.
+
+# Dark background matching the app + the kiosk browser's --default-background-color.
+Window.SetBackgroundTopColor(0.129, 0.145, 0.161);     # 0x212529
+Window.SetBackgroundBottomColor(0.129, 0.145, 0.161);
+
+logo.image = Image("logo.png");
+logo.sprite = Sprite(logo.image);
+
+# Center it.
+logo.x = Window.GetX() + (Window.GetWidth()  - logo.image.GetWidth())  / 2;
+logo.y = Window.GetY() + (Window.GetHeight() - logo.image.GetHeight()) / 2;
+logo.sprite.SetX(logo.x);
+logo.sprite.SetY(logo.y);
+logo.sprite.SetZ(10);
+
+# Gentle breathing pulse (opacity 0.55 .. 1.0), compositor-cheap on a Pi.
+progress = 0;
+fun refresh_callback() {
+    progress++;
+    # ~2.4s period at Plymouth's ~50 fps refresh.
+    opacity = 0.775 + 0.225 * Math.Sin(progress / 19);
+    logo.sprite.SetOpacity(opacity);
+}
+Plymouth.SetRefreshFunction(refresh_callback);
+
+# A password prompt should never appear on a kiosk, but if plymouth is asked for
+# one (e.g. an fsck prompt), keep the splash quiet rather than flashing text.
+fun display_normal_callback() {
+    logo.sprite.SetOpacity(1);
+}
+Plymouth.SetDisplayNormalFunction(display_normal_callback);

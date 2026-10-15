@@ -1,0 +1,30 @@
+# Auto detect text files and perform LF normalization
+* text=auto
+
+# Force LF for files that must be executed on Linux regardless of checkout OS.
+# Windows git clients convert to CRLF by default; CRLF in bash/service files
+# causes "invalid option" and "bad interpreter" errors on the Pi.
+*.sh text eol=lf
+*.service text eol=lf
+*.env text eol=lf
+*.toml text eol=lf
+*.conf text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.py text eol=lf
+*.rules text eol=lf
+*.plymouth text eol=lf
+*.script text eol=lf
+
+# Scripts with no extension that run on Linux. Each one starts with a shebang,
+# and a CRLF ending turns "bash" into "bash\r", which is a "bad interpreter".
+# tests/test_gitattributes_lf.py fails when a script with a shebang is not
+# covered by an LF rule here.
+scripts/image-build/foodassistant-* text eol=lf
+scripts/git-hooks/* text eol=lf
+cloud/vps/forager-tunnel-agent text eol=lf
+cloud/vps/forager-wg0-firewall text eol=lf
+tests/data/foodassistant-update-* text eol=lf
+.beads/hooks/* text eol=lf
+# Read by ssh-keygen on the device when it checks an update's signature.
+scripts/release-signers text eol=lf

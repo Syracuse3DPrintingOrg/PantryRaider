@@ -1,0 +1,144 @@
+{% extends "base.html" %}
+{% block title %}Current Recipe: Pantry Raider{% endblock %}
+
+{% block content %}
+
+
+
+<div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mt-3 mb-3">
+  <h1 class="h4 mb-0"><i class="bi bi-fire me-2"></i>On the Line</h1>
+  <div class="d-flex gap-2">
+    <a class="btn btn-outline-secondary" href="ui/cook" title="Back to suggestions">
+      <i class="bi bi-fire me-1"></i>What Can I Cook?
+    </a>
+    <button class="btn btn-outline-secondary" data-on-click="loadCurrentRecipe()" title="Refresh">
+      <i class="bi bi-arrow-clockwise me-1"></i>Refresh
+    </button>
+  </div>
+</div>
+
+<!-- Empty state: no recipe active -->
+<div id="cr-empty" class="d-none">
+  <div class="card">
+    <div class="card-body text-center py-5">
+      <i class="bi bi-journal-check display-5 text-secondary d-block mb-3"></i>
+      <h5 class="mb-2">No recipe is cooking yet</h5>
+      <p class="text-secondary mb-3">
+        Pick something to make from the <a href="ui/cook">What Can I Cook?</a> page or your
+        <a href="ui/recipes">Recipes</a>, then set it as the current recipe. Once a recipe is
+        active it shows up here with scalable servings, the ingredient list, the steps, and
+        kitchen timers pulled from those steps.
+      </p>
+    </div>
+  </div>
+</div>
+
+<!-- Loading -->
+<div id="cr-loading" class="text-secondary py-4">
+  <span class="spinner-border spinner-border-sm me-2"></span>Loading the active recipe…
+</div>
+
+<!-- Course selector: every recipe in progress (appetizer, main, dessert...),
+     shown only when more than one is cooking (FoodAssistant-dbgx/i8hz). -->
+<div id="cr-courses" class="d-flex flex-wrap gap-2 mb-3 d-none"></div>
+
+<!-- Active recipe -->
+<div id="cr-active" class="d-none">
+  <div class="d-flex align-items-start justify-content-between flex-wrap gap-2 mb-2">
+    <div>
+      <h5 class="mb-1" id="cr-title"></h5>
+      <div class="small text-secondary" id="cr-source"></div>
+      <a id="cr-open-mealie" class="small d-none" target="_blank" rel="noopener">
+        <i class="bi bi-box-arrow-up-right me-1"></i>Open in Mealie
+      </a>
+    </div>
+    <div class="d-flex align-items-center gap-2 flex-wrap">
+      <label class="small text-secondary mb-0" for="cr-servings">Servings</label>
+      <div class="input-group input-group-sm" style="width: 8.5rem;">
+        <button class="btn btn-outline-secondary" type="button" data-on-click="bumpServings(-1)" title="Fewer servings">
+          <i class="bi bi-dash"></i>
+        </button>
+        <input type="number" min="1" step="1" class="form-control text-center" id="cr-servings">
+        <button class="btn btn-outline-secondary" type="button" data-on-click="bumpServings(1)" title="More servings">
+          <i class="bi bi-plus"></i>
+        </button>
+      </div>
+      <!-- A loaded recipe stays until the user clears or cooks it (yurm).
+           Cooked only opens the confirmation below; stock is used up from
+           there (FoodAssistant-hyr67). -->
+      <button class="btn btn-success btn-sm" data-on-click="askCooked()" title="Mark cooked, consume ingredients, offer leftovers">
+        <i class="bi bi-check2-circle me-1"></i>Cooked
+      </button>
+      {% if printing_enabled %}
+      <button class="btn btn-outline-secondary btn-sm" data-on-click="printRecipe(this)" title="Print this recipe">
+        <i class="bi bi-printer me-1"></i>Print
+      </button>
+      {% endif %}
+      <button class="btn btn-outline-secondary btn-sm" data-on-click="clearCurrentRecipe(this)" title="Clear the current recipe">
+        <i class="bi bi-x-circle me-1"></i>Clear
+      </button>
+    </div>
+  </div>
+
+  <!-- Confirmation for Cooked: big buttons for a kitchen touchscreen. -->
+  <div id="cr-cooked-confirm" class="card border-success mb-3 d-none" role="alertdialog"
+       aria-labelledby="cr-cooked-confirm-text">
+    <div class="card-body">
+      <p class="fs-5 mb-3" id="cr-cooked-confirm-text">
+        <i class="bi bi-check2-circle text-success me-2"></i>Mark this recipe cooked? This uses up the matching items in your pantry.
+      </p>
+      <div class="d-flex flex-wrap gap-2">
+        <button class="btn btn-success btn-lg flex-fill" id="cr-cooked-yes" data-on-click="confirmCooked(this)">
+          <i class="bi bi-check2-circle me-1"></i>Use them up
+        </button>
+        <button class="btn btn-outline-secondary btn-lg flex-fill" id="cr-cooked-no" data-on-click="cancelCooked()">
+          Cancel
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div class="row g-3">
+    <div class="col-12 col-lg-5">
+      <h6 class="text-info"><i class="bi bi-basket me-1"></i>Ingredients</h6>
+      <ul class="list-group list-group-flush" id="cr-ingredients"></ul>
+    </div>
+    <div class="col-12 col-lg-7">
+      <h6 class="text-info"><i class="bi bi-list-ol me-1"></i>Steps</h6>
+      <ol class="ps-3" id="cr-steps"></ol>
+      <div class="small text-secondary mt-2 d-none" id="cr-notes"></div>
+    </div>
+  </div>
+
+  <!-- Equipment the recipe likely needs (FoodAssistant-ooq3). -->
+  <div id="cr-equipment-wrap" class="mt-3 d-none">
+    <h6 class="text-info"><i class="bi bi-tools me-1"></i>Equipment you'll likely need</h6>
+    <div id="cr-equipment" class="d-flex flex-wrap gap-1"></div>
+    <div id="cr-equipment-missing" class="small text-warning mt-1 d-none"></div>
+  </div>
+
+  <hr>
+
+  <h6 class="text-warning"><i class="bi bi-stopwatch me-1"></i>Timers</h6>
+  <div class="mb-2" id="cr-timer-suggestions">
+    <span class="small text-secondary">No timer suggestions for this recipe.</span>
+  </div>
+  <div id="cr-running-timers"></div>
+</div>
+
+<!-- Print confirmation toast -->
+<div class="position-fixed bottom-0 end-0 p-3" style="z-index:9999">
+  <div id="crToast" class="toast align-items-center text-bg-success border-0" role="alert">
+    <div class="d-flex">
+      <div class="toast-body" id="crToastMsg"></div>
+      <button type="button" class="btn-close btn-close-white me-2 m-auto" aria-label="Close" data-bs-dismiss="toast"></button>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script type="application/json" id="current-recipe-data">{{ ({'mealie_url': mealie_url}) | tojson }}</script>
+<script src="static/js/pages/current-recipe.js?v={{ app_version }}"></script>
+{% endblock %}

@@ -1,0 +1,100 @@
+{# Access banner: the open-install notice, the grace-period banner and the
+   Docker-gateway hint. Context comes from templating.theme_context
+   (access_banner); with a password set, both parts are off and nothing renders.
+   The public demo is public on purpose and has its own banner, so nothing shows
+   there either.
+
+   Two layouts. base.html includes this inside {% with access_banner_fixed = true %}:
+   the banner is fixed to the top, the body gets the access-banner-on class that
+   moves the fixed navbar down, and a spacer moves the page content down by the
+   same height. Standalone pages (the Start Page, Settings) include it plainly
+   and it sits in normal flow at the top of the body. The setup page sets
+   access_banner_hide_open while the first-run wizard shows, which drops the
+   "No password" notice (the wizard asks for the password itself) but keeps
+   the grace-period banner.
+
+   The script is inline because the standalone pages do not load base-page.js.
+   Every localStorage call is wrapped, so a browser that blocks storage keeps
+   seeing the notice. #}
+{%- set _ab = access_banner if access_banner is defined else none %}
+{%- set _fixed = access_banner_fixed is defined and access_banner_fixed %}
+{%- set _open = _ab and _ab.open_notice and not (access_banner_hide_open is defined and access_banner_hide_open) %}
+{%- if _ab and not demo_mode and (_open or _ab.grace_until) %}
+<div id="pr-access-banner" class="pr-access-banner {{ 'pr-access-banner-fixed' if _fixed else 'pr-access-banner-flow' }}">
+  {%- if _ab.grace_until %}
+  {%- set _date = _ab.grace_date_display %}
+  {%- set _addr = _ab.grace_address %}
+  <div id="pr-grace-banner" class="alert alert-warning d-flex align-items-start mb-0 rounded-0 py-1 px-3 pr-access-row"
+       role="alert" data-pr-dismiss-key="prGraceBannerUntil" data-pr-dismiss-days="1">
+    <i class="bi bi-exclamation-triangle-fill me-2 mt-1"></i>
+    <div class="flex-grow-1 pr-access-line"><span class="pr-access-text">
+      This kitchen has no password, so {% if _date %}from {{ _date }} it will{% else %}soon it will{% endif %}
+      {%- if _ab.grace_kind == 'name' %}
+        {%- if _addr %} stop answering at <strong>{{ _addr }}</strong>. To keep using this name, add it under Other names for this kitchen in Settings, Security, or set a password.
+        {%- else %} stop answering names that are not on your home network. To keep using one, add it under Other names for this kitchen in Settings, Security, or set a password.
+        {%- endif %}
+      {%- else %}
+        {%- if _addr %} stop answering at <strong>{{ _addr }}</strong>.
+        {%- else %} stop answering requests that come through a proxy or tunnel.
+        {%- endif %} To keep using it from outside your home network, turn on two-factor sign-in in Settings, Security first, then set a password there. Signing in from outside needs both.
+      {%- endif %}</span>
+      <a href="setup#pane-security" class="alert-link ms-1 pr-access-link">Open Settings, Security</a>
+    </div>
+    <button type="button" class="btn-close ms-2" aria-label="Dismiss"></button>
+  </div>
+  {%- endif %}
+  {%- if _open %}
+  <div id="pr-open-notice" class="alert alert-secondary d-flex align-items-start mb-0 rounded-0 py-1 px-3 pr-access-row"
+       role="status" data-pr-dismiss-key="prOpenNoticeUntil" data-pr-dismiss-days="30">
+    <i class="bi bi-unlock me-2 mt-1"></i>
+    <div class="flex-grow-1">
+      <div class="pr-access-line"><span class="pr-access-text">No password: anyone on your home network can use and change this kitchen.</span>
+        <a href="setup#pane-security" class="alert-link ms-1 pr-access-link">Set a password</a></div>
+      {%- if _ab.gateway_peer and _ab.gateway_hint %}
+      <div class="pr-gateway-hint mt-1">{{ _ab.gateway_hint }}</div>
+      {%- endif %}
+    </div>
+    <button type="button" class="btn-close ms-2" aria-label="Dismiss"></button>
+  </div>
+  {%- endif %}
+</div>
+{%- if _fixed %}
+<div class="pr-access-spacer" aria-hidden="true"></div>
+{%- endif %}
+<style>
+  .pr-access-banner { font-size: 0.85rem; }
+  .pr-access-banner .pr-access-row { border-width: 0 0 1px 0; }
+  .pr-access-banner .pr-gateway-hint { opacity: 0.85; }
+  /* Fixed layout (pages built on base.html): pinned above the fixed navbar and
+     inset by the kiosk panel safe area like the navbar itself. */
+  .pr-access-banner-fixed {
+    position: fixed; z-index: 1045;
+    top: var(--kiosk-inset-top, 0px);
+    left: var(--kiosk-inset-left, 0px);
+    right: var(--kiosk-inset-right, 0px);
+  }
+  body.access-banner-on .navbar.fixed-top {
+    top: calc(var(--kiosk-inset-top, 0px) + var(--pr-access-banner-h, 0px)) !important;
+  }
+  /* The spacer moves the page content down by the banner's height on top of
+     whatever padding already reserves the navbar (60px, or 50px on a kiosk). */
+  .pr-access-spacer { display: none; }
+  body.access-banner-on .pr-access-spacer { display: block; height: var(--pr-access-banner-h, 0px); }
+  /* Everything else pinned just under the navbar moves down with it: the side
+     docks of the on-screen nav bar, the sticky sub-page pills and the locked
+     screen notice. */
+  body.access-banner-on .float-nav-dock-left,
+  body.access-banner-on .float-nav-dock-right {
+    top: calc(56px + var(--pr-access-banner-h, 0px));
+  }
+  body.access-banner-on .subpill-bar { top: var(--pr-access-banner-h, 0px); }
+  body.access-banner-on .pr-pin-readonly {
+    top: calc(56px + var(--pr-access-banner-h, 0px)) !important;
+  }
+  /* Beside a NeoKey key rail the banner stops short of the rail and sits under
+     it, so the rail's top tile stays lined up with its key and the Dismiss
+     button stays clear of it. */
+  .pr-access-banner-fixed.pr-access-banner-railed { z-index: 1035; }
+</style>
+<script src="static/js/access-banner.js?v={{ app_version }}"></script>
+{%- endif %}
