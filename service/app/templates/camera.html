@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}Camera: Pantry Raider{% endblock %}
+
+{% block content %}
+<div class="mt-3 mb-3 d-flex align-items-center justify-content-between flex-wrap gap-2">
+  <h4 class="mb-0"><i class="bi bi-camera-video me-2"></i>Camera</h4>
+  {% if cameras and cameras|length > 1 %}
+  <div class="btn-group btn-group-sm" role="group" id="cameraSwitcher">
+    {% for cam in cameras %}
+    <button type="button"
+            class="btn btn-outline-info{% if loop.index0 == initial_index %} active{% endif %}"
+            data-cam-index="{{ loop.index0 }}"
+            data-on-click="selectCamera({{ loop.index0 }})">
+      {{ cam.name or ("Camera " ~ loop.index) }}
+    </button>
+    {% endfor %}
+  </div>
+  {% endif %}
+</div>
+
+{% if cameras %}
+<div id="cameraStage"
+     class="d-flex align-items-center justify-content-center rounded overflow-hidden"
+     style="background:#000; width:100%; min-height:70vh;">
+  <video id="cameraVideo" class="d-none" controls autoplay muted playsinline
+         style="max-width:100%; max-height:82vh; object-fit:contain; background:#000;"></video>
+  <img id="cameraImg" class="d-none" alt="Camera feed"
+       style="max-width:100%; max-height:82vh; object-fit:contain; background:#000;">
+  <div id="cameraError" class="d-none text-center text-secondary p-4">
+    <i class="bi bi-camera-video-off fs-1 d-block mb-2"></i>
+    <div id="cameraErrorMsg">Camera unavailable. Check that the feed is reachable.</div>
+  </div>
+</div>
+{% else %}
+<div class="card">
+  <div class="card-body text-center text-secondary py-5">
+    <i class="bi bi-camera-video-off fs-1 d-block mb-3"></i>
+    <p class="mb-3">No cameras are configured yet.</p>
+    <a href="{{ ingress_path }}/setup#pane-connections" class="btn btn-outline-info btn-sm">
+      <i class="bi bi-gear me-1"></i>Add a camera in Settings
+    </a>
+  </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{% if cameras %}
+<script type="application/json" id="camera-data">{{ ({'cameras': cameras, 'initial_index': initial_index | default(0)}) | tojson }}</script>
+<script src="static/js/pages/camera.js?v={{ app_version }}"></script>
+{% endif %}
+{% endblock %}
