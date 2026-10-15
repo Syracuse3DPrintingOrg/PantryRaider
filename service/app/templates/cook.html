@@ -1,0 +1,639 @@
+{% extends "base.html" %}
+{% block title %}What Can I Cook: Pantry Raider{% endblock %}
+
+{% block content %}
+
+
+
+<div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mt-3 mb-1">
+  <h1 class="h4 mb-0"><i class="bi bi-fire me-2"></i>What Can I Cook?</h1>
+  <div class="d-flex flex-wrap gap-2">
+    <a class="btn btn-outline-secondary" href="ui/current-recipe" title="Open the active recipe">
+      <i class="bi bi-journal-check me-1"></i>Current Recipe
+    </a>
+    {% if ai_can_write_recipes %}
+    <button class="btn btn-outline-secondary" id="btn-ask-ai" data-on-click="loadAiSuggestions()">
+      <i class="bi bi-stars me-1"></i>Ask AI
+    </button>
+    <button class="btn btn-outline-secondary" id="btn-surprise" data-on-click="surpriseMe()"
+            title="Invent a random recipe from your preferences and inventory">
+      <i class="bi bi-dice-5 me-1"></i>Surprise me
+    </button>
+    <button class="btn btn-outline-secondary" id="btn-copycat" data-on-click="copycatDish()"
+            title="Recreate a famous restaurant dish at home">
+      <i class="bi bi-shop me-1"></i>Copycat
+    </button>
+    {% endif %}
+    <button class="btn btn-outline-secondary" data-on-click="loadSuggestions()" title="Refresh">
+      <i class="bi bi-arrow-clockwise me-1"></i>Refresh
+    </button>
+  </div>
+</div>
+<p class="text-secondary small mb-2" id="cook-meta">Matching recipes against your inventory…</p>
+{% if ai_configured and not ai_can_write_recipes %}
+<p class="text-secondary small mb-2"><i class="bi bi-info-circle me-1"></i>{{ ai_writing_note }}</p>
+{% endif %}
+
+<!-- Cook wizard launch (FoodAssistant-y3yi): a big, touch-friendly entry into
+     the step-by-step "choose your own adventure" finder. It reuses this page's
+     suggest, quick-view, and AI-generate flows, so it is a guided front door,
+     not a second recipe engine. -->
+<button class="btn btn-primary btn-lg w-100 mb-3" data-on-click="launchCookWizard()">
+  <i class="bi bi-magic me-2"></i>Launch cook wizard
+</button>
+
+{% if ai_can_write_recipes %}
+<!-- Optional custom prompt for the AI recipe path (FoodAssistant-2mh9). Hidden
+     behind a click-to-expand control; empty means use the default prompt. -->
+<div class="mb-3">
+  <a class="small text-decoration-none" data-bs-toggle="collapse" href="#aiCustomPromptBox"
+     role="button" aria-expanded="false" aria-controls="aiCustomPromptBox">
+    <i class="bi bi-chat-left-text me-1"></i>Custom AI prompt <span class="text-secondary">(optional)</span>
+  </a>
+  <div class="collapse" id="aiCustomPromptBox">
+    <textarea class="form-control form-control-sm mt-2" id="ai-custom-prompt" rows="2"
+              placeholder="Extra instructions for AI suggestions and generated recipes, e.g. 'lean high-protein, no dairy, sheet-pan only'"></textarea>
+    <div class="form-text">Applies to the AI path (Ask AI and Generate full recipe), not the stock-based suggestions.</div>
+  </div>
+</div>
+{% endif %}
+
+<!-- Preference tuning panel -->
+<!-- Icon compatibility note (FoodAssistant-438t): every icon in this panel is a
+     plain emoji character rendered by the client's emoji font, so stick to
+     glyphs from Emoji 12.0 (2019) or older. Newer glyphs (the Unicode 13/14
+     food emoji) and flag sequences render as empty boxes or bare letters on
+     Windows and on devices with an older Noto Color Emoji. A pure test
+     (tests/test_cook_emoji.py) enforces this. -->
+<div class="cook-prefs-bar mb-3" id="cook-prefs-bar">
+  <button class="cook-prefs-toggle" data-on-click="togglePrefs()">
+    🎛️ Tune My Suggestions <span id="prefs-active-badge" class="badge text-bg-primary ms-1 d-none">●</span>
+    <i class="bi bi-chevron-down ms-1" id="prefs-chevron"></i>
+  </button>
+  <div class="cook-prefs-panel" id="cook-prefs-panel">
+
+    <!-- Complexity -->
+    <div class="pref-row">
+      <input type="checkbox" class="pref-toggle" id="on-complexity" title="Include this factor" checked>
+      <span class="end-label">Trash Panda 🦝</span>
+      <input type="range" class="pref-slider" id="pref-complexity" min="1" max="5" value="3">
+      <span class="end-label right">Michelin Star ⭐</span>
+    </div>
+    <div class="pref-mid-label"><span id="lbl-complexity">Getting Fancy</span> <span class="ai-only">✨ AI only</span></div>
+
+    <!-- Spice -->
+    <div class="pref-row">
+      <input type="checkbox" class="pref-toggle" id="on-spice" title="Include this factor" checked>
+      <span class="end-label">Midwest Mayo 🥪</span>
+      <input type="range" class="pref-slider" id="pref-spice" min="1" max="5" value="3">
+      <span class="end-label right">Asian Fury 🌶️</span>
+    </div>
+    <div class="pref-mid-label"><span id="lbl-spice">Flavor Town</span> <span class="ai-only">✨ AI only</span></div>
+
+    <!-- Time -->
+    <div class="pref-row">
+      <input type="checkbox" class="pref-toggle" id="on-time" title="Include this factor" checked>
+      <span class="end-label">Microwave Minutes ⚡</span>
+      <input type="range" class="pref-slider" id="pref-time" min="1" max="5" value="3">
+      <span class="end-label right">All Day Affair ☕</span>
+    </div>
+    <div class="pref-mid-label" id="lbl-time">~1 hour</div>
+
+    <!-- Portions -->
+    <div class="pref-row">
+      <input type="checkbox" class="pref-toggle" id="on-portions" title="Include this factor" checked>
+      <span class="end-label">Solo Snack 🙋</span>
+      <input type="range" class="pref-slider" id="pref-portions" min="1" max="5" value="3">
+      <span class="end-label right">Feed the Horde 🏟️</span>
+    </div>
+    <div class="pref-mid-label"><span id="lbl-portions">4–6 servings</span> <span class="ai-only">✨ AI only</span></div>
+
+    <!-- Dietary toggles -->
+    <div class="pref-section-label">Dietary</div>
+    <div class="diet-pills" id="diet-pills">
+      <span class="diet-pill" data-diet="Vegan" data-on-click="toggleDiet(this)">🌱 Vegan</span>
+      <span class="diet-pill" data-diet="Vegetarian" data-on-click="toggleDiet(this)">🥦 Vegetarian</span>
+      <span class="diet-pill" data-diet="Dairy Free" data-on-click="toggleDiet(this)">🥛 Dairy Free</span>
+      <span class="diet-pill" data-diet="Gluten Free" data-on-click="toggleDiet(this)">🌾 Gluten Free</span>
+      <span class="diet-pill" data-diet="Keto" data-on-click="toggleDiet(this)">🥑 Keto</span>
+      <span class="diet-pill" data-diet="Low Carb" data-on-click="toggleDiet(this)">🍞 Low Carb</span>
+      <span class="diet-pill" data-diet="Nut Free" data-on-click="toggleDiet(this)">🥜 Nut Free</span>
+      <span class="diet-pill" data-diet="Pescatarian" data-on-click="toggleDiet(this)">🐟 Pescatarian</span>
+      <span class="diet-pill" data-diet="Low Sodium" data-on-click="toggleDiet(this)">🧂 Low Sodium</span>
+      <span class="diet-pill" data-diet="Low Sugar" data-on-click="toggleDiet(this)">🍬 Low Sugar</span>
+      <span class="diet-pill" data-diet="High Protein" data-on-click="toggleDiet(this)">💪 High Protein</span>
+      <span class="diet-pill" data-diet="Paleo" data-on-click="toggleDiet(this)">🍖 Paleo</span>
+      <span class="diet-pill" data-diet="Whole30" data-on-click="toggleDiet(this)">🥗 Whole30</span>
+      <span class="diet-pill" data-diet="Halal" data-on-click="toggleDiet(this)">☪️ Halal</span>
+      <span class="diet-pill" data-diet="Kosher" data-on-click="toggleDiet(this)">✡️ Kosher</span>
+      <span class="diet-pill" data-diet="Kid Friendly" data-on-click="toggleDiet(this)">🧒 Kid Friendly</span>
+    </div>
+
+    <!-- Cuisine (optional) -->
+    <div class="pref-section-label">Cuisine <span class="text-secondary fw-normal">(optional)</span></div>
+    <div class="cuisine-pills" id="cuisine-pills">
+      <span class="cuisine-group-label">Regions</span>
+      <span class="cuisine-pill" data-cuisine="Asian" data-on-click="toggleCuisine(this)">🥢 Asian</span>
+      <span class="cuisine-pill" data-cuisine="Mediterranean" data-on-click="toggleCuisine(this)">🥙 Mediterranean</span>
+      <span class="cuisine-pill" data-cuisine="European" data-on-click="toggleCuisine(this)">🏰 European</span>
+      <span class="cuisine-pill" data-cuisine="Latin American" data-on-click="toggleCuisine(this)">🌮 Latin American</span>
+      <span class="cuisine-pill" data-cuisine="Middle Eastern" data-on-click="toggleCuisine(this)">🧆 Middle Eastern</span>
+      <span class="cuisine-pill" data-cuisine="American" data-on-click="toggleCuisine(this)">🍔 American</span>
+      <span class="cuisine-pill" data-cuisine="African" data-on-click="toggleCuisine(this)">🌍 African</span>
+      <span class="cuisine-pill" data-cuisine="Caribbean" data-on-click="toggleCuisine(this)">🏝️ Caribbean</span>
+      <span class="cuisine-pill" data-cuisine="Nordic" data-on-click="toggleCuisine(this)">🧊 Nordic</span>
+      <span class="cuisine-group-label">Cuisines</span>
+      <span class="cuisine-pill" data-cuisine="Italian" data-on-click="toggleCuisine(this)">🍝 Italian</span>
+      <span class="cuisine-pill" data-cuisine="French" data-on-click="toggleCuisine(this)">🥐 French</span>
+      <span class="cuisine-pill" data-cuisine="Greek" data-on-click="toggleCuisine(this)">🏛️ Greek</span>
+      <span class="cuisine-pill" data-cuisine="Spanish" data-on-click="toggleCuisine(this)">🥘 Spanish</span>
+      <span class="cuisine-pill" data-cuisine="Chinese" data-on-click="toggleCuisine(this)">🥟 Chinese</span>
+      <span class="cuisine-pill" data-cuisine="Japanese" data-on-click="toggleCuisine(this)">🍣 Japanese</span>
+      <span class="cuisine-pill" data-cuisine="Thai" data-on-click="toggleCuisine(this)">🌶️ Thai</span>
+      <span class="cuisine-pill" data-cuisine="Vietnamese" data-on-click="toggleCuisine(this)">🍜 Vietnamese</span>
+      <span class="cuisine-pill" data-cuisine="Indian" data-on-click="toggleCuisine(this)">🍛 Indian</span>
+      <span class="cuisine-pill" data-cuisine="Mexican" data-on-click="toggleCuisine(this)">🌯 Mexican</span>
+      <span class="cuisine-pill" data-cuisine="Korean" data-on-click="toggleCuisine(this)">🥩 Korean</span>
+      <span class="cuisine-pill" data-cuisine="Filipino" data-on-click="toggleCuisine(this)">🍧 Filipino</span>
+      <span class="cuisine-pill" data-cuisine="African American (Soul Food)" data-on-click="toggleCuisine(this)">🍗 Soul Food</span>
+      <span class="cuisine-pill" data-cuisine="Cajun and Creole" data-on-click="toggleCuisine(this)">🦞 Cajun &amp; Creole</span>
+      <span class="cuisine-pill" data-cuisine="British" data-on-click="toggleCuisine(this)">🥧 British</span>
+    </div>
+
+    <!-- Occasion / dish-type / extra tags (FoodAssistant-stqb, -n9aq, -qaes,
+         -2513, -irxk, -u3rh). These steer the AI suggestion and generation
+         prompts only (there is no clean external-search filter for them). -->
+    <div class="pref-section-label">Occasion <span class="ai-only">✨ AI only</span></div>
+    <div class="cuisine-pills" id="tag-pills">
+      <span class="tag-pill" data-tag="Meal Prep" data-on-click="toggleTag(this)">🥡 Meal Prep</span>
+      <span class="tag-pill" data-tag="Lunch Box" data-on-click="toggleTag(this)">🍱 Lunch Box</span>
+      <span class="tag-pill" data-tag="Camping" data-on-click="toggleTag(this)">⛺ Camping</span>
+      <span class="tag-pill" data-tag="Picnic" data-on-click="toggleTag(this)">🧺 Picnic</span>
+      <span class="tag-pill" data-tag="Party" data-on-click="toggleTag(this)">🎉 Party / Crowd</span>
+      <span class="tag-pill" data-tag="Game Day" data-on-click="toggleTag(this)">🏈 Game Day</span>
+      <span class="tag-pill" data-tag="Holiday" data-on-click="toggleTag(this)">🎄 Holiday</span>
+      <span class="tag-pill" data-tag="Date Night" data-on-click="toggleTag(this)">🕯️ Date Night</span>
+    </div>
+
+    <div class="pref-section-label">Dish type <span class="ai-only">✨ AI only</span></div>
+    <div class="cuisine-pills" id="course-pills">
+      <span class="tag-pill" data-tag="Breakfast" data-on-click="toggleTag(this)">🍳 Breakfast</span>
+      <span class="tag-pill" data-tag="Appetizer" data-on-click="toggleTag(this)">🥟 Appetizer</span>
+      <span class="tag-pill" data-tag="Soup" data-on-click="toggleTag(this)">🍲 Soup</span>
+      <span class="tag-pill" data-tag="Salad" data-on-click="toggleTag(this)">🥗 Salad</span>
+      <span class="tag-pill" data-tag="Main Course" data-on-click="toggleTag(this)">🍽️ Main</span>
+      <span class="tag-pill" data-tag="Side Dish" data-on-click="toggleTag(this)">🥔 Side</span>
+      <span class="tag-pill" data-tag="Snack" data-on-click="toggleTag(this)">🍿 Snack</span>
+      <span class="tag-pill" data-tag="Dessert" data-on-click="toggleTag(this)">🍰 Dessert</span>
+      <span class="tag-pill" data-tag="Baked Goods" data-on-click="toggleTag(this)">🥖 Baked Goods</span>
+      <span class="tag-pill" data-tag="Candy" data-on-click="toggleTag(this)">🍬 Candy</span>
+      <span class="tag-pill" data-tag="Drink" data-on-click="toggleTag(this)">🍹 Drink</span>
+    </div>
+
+    <div class="pref-section-label">Extras <span class="ai-only">✨ AI only</span></div>
+    <div class="cuisine-pills" id="extra-pills">
+      <span class="tag-pill" data-tag="Cooks With Wine" data-on-click="toggleTag(this)">🍷 Cooks With Wine</span>
+      <span class="tag-pill" data-tag="Leftover Friendly" data-on-click="toggleTag(this)">♻️ Leftover Friendly</span>
+      <span class="tag-pill" data-tag="One Pot" data-on-click="toggleTag(this)">🍲 One Pot</span>
+      <span class="tag-pill" data-tag="No Cook" data-on-click="toggleTag(this)">🧊 No Cook</span>
+      <span class="tag-pill" data-tag="Budget" data-on-click="toggleTag(this)">💸 Budget</span>
+    </div>
+
+    <!-- Appliance steering (FoodAssistant-q098 part 1). Declare what you can cook
+         with; the AI tailors recipes to that equipment. AI-only, same mechanism
+         as the tags above. -->
+    <div class="pref-section-label">Appliances <span class="ai-only">✨ AI only</span></div>
+    <div class="cuisine-pills" id="appliance-pills">
+      <span class="tag-pill" data-tag="Air Fryer" data-on-click="toggleTag(this)">🍟 Air Fryer</span>
+      <span class="tag-pill" data-tag="Instant Pot" data-on-click="toggleTag(this)">⏲️ Instant Pot</span>
+      <span class="tag-pill" data-tag="Slow Cooker" data-on-click="toggleTag(this)">🍲 Slow Cooker</span>
+      <span class="tag-pill" data-tag="Grill" data-on-click="toggleTag(this)">🔥 Grill / BBQ</span>
+      <span class="tag-pill" data-tag="Sous Vide" data-on-click="toggleTag(this)">🌡️ Sous Vide</span>
+      <span class="tag-pill" data-tag="Cast Iron" data-on-click="toggleTag(this)">🍳 Cast Iron</span>
+      <span class="tag-pill" data-tag="Wok" data-on-click="toggleTag(this)">🥢 Wok</span>
+      <span class="tag-pill" data-tag="Stand Mixer" data-on-click="toggleTag(this)">🧁 Stand Mixer</span>
+      <span class="tag-pill" data-tag="Blender" data-on-click="toggleTag(this)">🥤 Blender</span>
+      <span class="tag-pill" data-tag="Toaster Oven" data-on-click="toggleTag(this)">🍞 Toaster Oven</span>
+      <span class="tag-pill" data-tag="Microwave Only" data-on-click="toggleTag(this)">📡 Microwave Only</span>
+      <span class="tag-pill" data-tag="No Oven" data-on-click="toggleTag(this)">🚫 No Oven</span>
+    </div>
+
+    <!-- Ingredient include/exclude filter (FoodAssistant-w3s5). Free-text,
+         comma-separated; AI-only steering like the tags above. -->
+    <div class="pref-section-label">Ingredients <span class="ai-only">✨ AI only</span></div>
+    <div class="ingredient-filter">
+      <input type="text" class="form-control form-control-sm" id="pref-include"
+             placeholder="Must include, e.g. chicken, basil" data-on-input="savePrefs(); updatePrefLabels();">
+      <input type="text" class="form-control form-control-sm" id="pref-exclude"
+             placeholder="Avoid, e.g. cilantro, mushrooms" data-on-input="savePrefs(); updatePrefLabels();">
+    </div>
+
+    <div class="pref-reset-row">
+      <a href="#" data-on-click="resetPrefs(); return false;">Reset to defaults</a>
+    </div>
+  </div>
+</div>
+
+<div class="row g-3" id="tiers">
+  <div class="col-12 text-secondary">
+    <span class="spinner-border spinner-border-sm me-2"></span>Checking your recipes and TheMealDB against current stock…
+  </div>
+</div>
+
+<!-- External (web) recipe tiers: always visible regardless of local count -->
+<div class="d-none mt-3" id="ext-section">
+  <div class="d-flex align-items-baseline gap-2 mb-2">
+    <h5 class="text-secondary mb-0"><i class="bi bi-globe2 me-1"></i>From the Web</h5>
+    <span class="small text-secondary">External recipes matched against your inventory</span>
+  </div>
+  <div id="ext-tiers"></div>
+</div>
+
+<!-- AI suggestions section (hidden until asked) -->
+<div class="d-none mt-3" id="ai-section">
+  <div class="d-flex align-items-baseline gap-2 mb-2">
+    <h5 class="text-primary mb-0"><i class="bi bi-stars me-1"></i>AI Suggestions</h5>
+    <span class="small text-secondary">Based on your current inventory</span>
+    <button type="button" class="btn-close ms-auto" aria-label="Close"
+            data-on-click="PR.hideById('ai-section')"></button>
+  </div>
+  <div id="ai-cards" class="row g-2 row-cols-1 row-cols-md-2 row-cols-lg-3 row-cols-xxl-4"></div>
+</div>
+
+<!-- AI recipe preview modal -->
+<div class="modal fade" id="aiPreviewModal" tabindex="-1" aria-labelledby="aipv-name">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="aipv-name">Recipe</h5>
+        <button type="button" class="btn-close" aria-label="Close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="text-center text-secondary py-4" id="aipv-loading">
+          <span class="spinner-border spinner-border-sm me-2"></span>Generating recipe…
+        </div>
+        <div id="aipv-body" class="d-none">
+          <div class="small text-secondary mb-2" id="aipv-meta"></div>
+          <p class="small" id="aipv-description"></p>
+          <h6><i class="bi bi-basket me-1"></i>Ingredients</h6>
+          <ul class="small" id="aipv-ingredients"></ul>
+          <h6><i class="bi bi-list-ol me-1"></i>Instructions</h6>
+          <ol class="small" id="aipv-instructions"></ol>
+        </div>
+        <div class="alert alert-danger d-none" id="aipv-error"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+        <button class="btn btn-outline-primary" id="aipv-cook" disabled data-on-click="cookAiRecipe(this)">
+          <i class="bi bi-fire me-1"></i>Cook this
+        </button>
+        <button class="btn btn-info" id="aipv-save" disabled data-on-click="saveAiRecipe(this)">
+          <i class="bi bi-download me-1"></i>Save to {{ library_name }}
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Add-to-mealplan modal -->
+<div class="modal fade" id="planModal" tabindex="-1" aria-labelledby="planModal-title">
+  <div class="modal-dialog modal-sm">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h6 class="modal-title" id="planModal-title">Plan: <span id="plan-recipe-name"></span></h6>
+        <button type="button" class="btn-close" aria-label="Close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body vstack gap-2">
+        <input type="date" class="form-control" id="plan-date">
+        <select class="form-select" id="plan-type">
+          <option value="breakfast">Breakfast</option>
+          <option value="lunch">Lunch</option>
+          <option value="dinner" selected>Dinner</option>
+          <option value="side">Side</option>
+        </select>
+        <div class="text-danger small d-none" id="plan-error"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button class="btn btn-primary" data-on-click="savePlan()">Add to Plan</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Recipe quick view: opens in-app so a click reads the recipe here instead of
+     jumping out to Mealie or the web. Works for both a saved Mealie recipe and a
+     web recipe, and carries Cook, Add to cart, and a separate Open in Mealie /
+     View source button. -->
+<div class="modal fade" id="cookPreviewModal" tabindex="-1" aria-labelledby="cpv-name">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="cpv-name">Recipe</h5>
+        <button type="button" class="btn-close" aria-label="Close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="text-center text-secondary py-4 d-none" id="cpv-loading">
+          <span class="spinner-border spinner-border-sm me-2"></span>Loading recipe…
+        </div>
+        <div id="cpv-body" class="d-none">
+          <img id="cpv-image" class="rounded mb-3 w-100 d-none" style="max-height:260px;object-fit:cover" alt="Recipe photo">
+          <div class="small text-secondary mb-2" id="cpv-meta"></div>
+          <p class="small" id="cpv-description"></p>
+          <h6><i class="bi bi-basket me-1"></i>Ingredients</h6>
+          <ul class="small" id="cpv-ingredients"></ul>
+          <h6><i class="bi bi-list-ol me-1"></i>Instructions</h6>
+          <ol class="small" id="cpv-instructions"></ol>
+        </div>
+        <div class="alert alert-danger d-none" id="cpv-error"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+        <a class="btn btn-outline-secondary d-none" id="cpv-open" target="_blank" rel="noopener">
+          <i class="bi bi-box-arrow-up-right me-1"></i>Open in Mealie
+        </a>
+        {% if printing_enabled %}
+        <button class="btn btn-outline-secondary" id="cpv-print" data-on-click="printFromPreview(this)">
+          <i class="bi bi-printer me-1"></i>Print
+        </button>
+        {% endif %}
+        <button class="btn btn-outline-warning d-none" id="cpv-cart" data-on-click="cartFromPreview(this)">
+          <i class="bi bi-cart-plus me-1"></i>Add to cart
+        </button>
+        <button class="btn btn-primary" id="cpv-cook" data-on-click="cookFromPreview(this)">
+          <i class="bi bi-fire me-1"></i>Cook
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Cook wizard: a full-screen (on small panels) step-by-step recipe finder.
+     The body is redrawn per step by static/js/cook-wizard.js; the header carries
+     a Back button that walks the step history and a close that returns to Cook. -->
+<div class="modal fade" id="cookWizardModal" tabindex="-1" aria-hidden="true" aria-labelledby="cw-title">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable modal-fullscreen-md-down">
+    <div class="modal-content">
+      <div class="modal-header">
+        <button type="button" class="btn btn-sm btn-outline-secondary me-2 invisible" id="cw-back" title="Back">
+          <i class="bi bi-arrow-left"></i>
+        </button>
+        <h5 class="modal-title flex-grow-1" id="cw-title">Cook wizard</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body" id="cw-body"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Print confirmation toast -->
+<div class="position-fixed bottom-0 end-0 p-3" style="z-index:9999">
+  <div id="cookToast" class="toast align-items-center text-bg-success border-0" role="alert">
+    <div class="d-flex">
+      <div class="toast-body" id="cookToastMsg"></div>
+      <button type="button" class="btn-close btn-close-white me-2 m-auto" aria-label="Close" data-bs-dismiss="toast"></button>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<style>
+/* A long recipe description or title must stay inside its card
+   (FoodAssistant-gy5a): same fix as the Recipes page. min-width-0 lets a flex
+   child shrink (Bootstrap ships no such utility), recipe-desc wraps unbroken
+   text and clamps to two lines (max-height is the no-line-clamp fallback). */
+.min-width-0 { min-width: 0; }
+.recipe-desc {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  overflow: hidden;
+  max-height: 3em;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+/* The recipe read views show the whole description: wrap, never clamp. */
+#cpv-description, #aipv-description { overflow-wrap: anywhere; word-break: break-word; }
+.cook-prefs-bar {
+  border: 1px solid var(--bs-border-color);
+  border-radius: 0.5rem;
+  background: var(--bs-tertiary-bg);
+  overflow: hidden;
+}
+.cook-prefs-toggle {
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 0.6rem 1rem;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--bs-body-color);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+.cook-prefs-toggle:hover {
+  background: var(--bs-secondary-bg);
+}
+.cook-prefs-panel {
+  display: none;
+  padding: 1rem;
+  border-top: 1px solid var(--bs-border-color);
+}
+.cook-prefs-panel.open {
+  display: block;
+}
+.pref-row {
+  display: grid;
+  grid-template-columns: 1.1rem 7rem 1fr 7rem;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.25rem;
+}
+.pref-row .pref-toggle {
+  accent-color: var(--bs-primary);
+  cursor: pointer;
+  margin: 0;
+}
+.pref-row.disabled .end-label {
+  opacity: 0.4;
+}
+input[type=range].pref-slider:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.pref-row .end-label {
+  font-size: 0.75rem;
+  color: var(--bs-secondary-color);
+  white-space: nowrap;
+}
+.pref-row .end-label.right { text-align: right; }
+.pref-mid-label {
+  text-align: center;
+  font-size: 0.72rem;
+  color: var(--bs-secondary-color);
+  margin-bottom: 0.75rem;
+  margin-top: 0.1rem;
+}
+input[type=range].pref-slider {
+  width: 100%;
+  accent-color: var(--bs-primary);
+}
+.diet-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.75rem;
+}
+.diet-pill {
+  padding: 0.2rem 0.65rem;
+  border-radius: 999px;
+  border: 1px solid var(--bs-border-color);
+  background: var(--bs-secondary-bg);
+  font-size: 0.78rem;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.diet-pill.active {
+  background: var(--bs-primary);
+  border-color: var(--bs-primary);
+  color: #fff;
+}
+.ai-only {
+  display: inline-block;
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 0.05rem 0.4rem;
+  border-radius: 999px;
+  color: var(--bs-info);
+  border: 1px solid var(--bs-info);
+  vertical-align: middle;
+  opacity: 0.85;
+}
+.pref-section-label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--bs-secondary-color);
+  margin: 0.85rem 0 0.4rem;
+}
+.cuisine-pills {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+}
+.cuisine-group-label {
+  font-size: 0.68rem;
+  color: var(--bs-tertiary-color, var(--bs-secondary-color));
+  margin-right: 0.1rem;
+  flex-basis: 100%;
+}
+.cuisine-group-label:not(:first-child) { margin-top: 0.35rem; }
+.cuisine-pill {
+  padding: 0.2rem 0.65rem;
+  border-radius: 999px;
+  border: 1px solid var(--bs-border-color);
+  background: var(--bs-secondary-bg);
+  font-size: 0.78rem;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.cuisine-pill.active {
+  background: var(--bs-info);
+  border-color: var(--bs-info);
+  color: #fff;
+}
+.tag-pill {
+  padding: 0.2rem 0.65rem;
+  border-radius: 999px;
+  border: 1px solid var(--bs-border-color);
+  background: var(--bs-secondary-bg);
+  font-size: 0.78rem;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.tag-pill.active {
+  background: var(--bs-success);
+  border-color: var(--bs-success);
+  color: #fff;
+}
+.ingredient-filter {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.4rem;
+}
+@media (max-width: 520px) {
+  .ingredient-filter { grid-template-columns: 1fr; }
+}
+.pref-reset-row {
+  text-align: right;
+  margin-top: 0.75rem;
+}
+.pref-reset-row a {
+  font-size: 0.78rem;
+  color: var(--bs-secondary-color);
+}
+/* Cook wizard (FoodAssistant-y3yi): large touch targets for a 1024x600 panel. */
+.cw-panel {
+  border: 1px solid var(--bs-border-color);
+  border-radius: 0.6rem;
+  background: var(--bs-tertiary-bg);
+  padding: 1rem;
+}
+.cw-panel-title { margin-bottom: 0.4rem; }
+.cw-step-title { margin-bottom: 0.25rem; }
+.cw-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr));
+  gap: 0.6rem;
+  margin-top: 0.5rem;
+}
+.cw-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3rem;
+  min-height: 5.5rem;
+  padding: 0.5rem;
+  font-size: 1rem;
+}
+.cw-tile .cw-emoji { font-size: 1.8rem; line-height: 1; }
+.cw-tile-label { font-weight: 500; }
+.cw-skip { border-style: dashed; }
+.cw-results-list { display: flex; flex-direction: column; gap: 0.5rem; }
+.cw-result-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.6rem 0.85rem;
+  min-height: 3.6rem;
+}
+.cw-result-img {
+  width: 3rem; height: 3rem;
+  object-fit: cover; border-radius: 0.4rem; flex-shrink: 0;
+}
+.cw-result-text { display: flex; flex-direction: column; flex-grow: 1; min-width: 0; }
+.cw-result-name { font-weight: 600; }
+.cw-result-desc {
+  font-size: 0.8rem;
+  color: var(--bs-secondary-color);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.cw-result-chev { flex-shrink: 0; color: var(--bs-secondary-color); }
+</style>
+<script type="application/json" id="cook-data">{{ ({'mealie_url': mealie_url, 'library_name': library_name, 'ai_configured': true if ai_can_write_recipes else false}) | tojson }}</script>
+<script src="static/js/pages/cook.js?v={{ app_version }}"></script>
+<script src="static/js/cook-wizard.js?v={{ app_version }}"></script>
+{% endblock %}

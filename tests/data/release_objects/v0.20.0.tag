@@ -1,0 +1,12 @@
+object 180048de8ff1b73a4a42b19b580c78b99b9fd140
+type commit
+tag v0.20.0
+tagger BillNyeDegrasseTyson <billnye@syracuse3dprinting.com> 1790550226 +0000
+
+Pantry Raider v0.20.0 (public beta)
+-----BEGIN SSH SIGNATURE-----
+U1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAgc9bNoCKHNHHtj0mVei1pl87R2s
+NM5P+VfG+h48Xzat0AAAADZ2l0AAAAAAAAAAZzaGE1MTIAAABTAAAAC3NzaC1lZDI1NTE5
+AAAAQO2UbOhfHNkWe4jDInwVsebNfk1MVpRKUgxaz7KzoIPyEXycJc910pEY73wflyvFd/
++Ch8eyFLFVLUwk0gT+WwU=
+-----END SSH SIGNATURE-----

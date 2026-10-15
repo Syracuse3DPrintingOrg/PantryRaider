@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}Status: Forager{% endblock %}
+{% block main_class %}narrow{% endblock %}
+{% block content %}
+
+<section class="status-hero">
+  <h1 style="margin-bottom:0.5rem;">Forager status</h1>
+</section>
+
+<div class="card" style="text-align:center;">
+  {% if healthy %}
+  <p class="status-line"><span class="status-dot" aria-hidden="true"></span>All systems operational</p>
+  <p class="muted small" style="margin-top:0.5rem;">Photo scanning and remote
+  access are up and running.</p>
+  {% else %}
+  <p class="status-line"><span class="status-dot status-dot-down" aria-hidden="true"></span>Forager is having trouble</p>
+  <p class="muted small" style="margin-top:0.5rem;">Photo scanning, sign-in
+  and your account page may not work for a little while. Your kitchen keeps
+  working on its own in the meantime.</p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <ul class="plain">
+    <li><span>Service</span><span class="muted">{% if healthy %}Online{% else %}Degraded{% endif %}</span></li>
+    <li><span>Version</span><span class="muted">{{ version }}</span></li>
+  </ul>
+</div>
+
+<p class="muted small" style="text-align:center;">
+  Trouble reaching your kitchen? <a href="mailto:support@pantryraider.app">Contact support</a>.
+</p>
+
+{% endblock %}

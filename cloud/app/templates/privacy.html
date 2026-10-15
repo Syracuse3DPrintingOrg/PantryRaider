@@ -1,0 +1,169 @@
+{% extends "base.html" %}
+{% block title %}Privacy policy: Forager{% endblock %}
+{% block main_class %}legal{% endblock %}
+{% block content %}
+<h1>Privacy policy</h1>
+<p class="muted">Effective October 14, 2026</p>
+
+<p>This policy explains what Forager, the optional hosted companion for
+Pantry Raider, knows about you, why, who else is involved, and what you can
+ask us to do about it. The Pantry Raider app you run at home is covered by
+the <a href="https://docs.pantryraider.app/privacy/">full privacy policy</a>,
+which also lists the few things a self-hosted install sends out. For a
+self-hosted install without a Forager account, we hold no data about you at
+all.</p>
+
+<h2>Who we are</h2>
+<p>Forager is run by Dan Marafino, an individual doing business as Syracuse
+3D Printing, in Syracuse, New York, USA. "We" and "us" on this page mean him.
+Write to <a href="mailto:support@pantryraider.app">support@pantryraider.app</a>
+with any question or request about your data.</p>
+
+<h2>What we keep, and why</h2>
+<ul>
+  <li><strong>Your account:</strong> your email address, a password hash
+  (never the password itself), and, if you turn them on, two-factor and
+  passkey details (a passkey stores only its public half). Every sign-in,
+  pairing, and kitchen token is stored only as a hash. We never ask for your
+  name, address, or phone number.</li>
+  <li><strong>Your kitchens:</strong> the name you give each linked kitchen,
+  its app version and setup type, when it last checked in, and its
+  remote-access address if you turned that on. No home network addresses are
+  stored.</li>
+  <li><strong>Your plan and usage:</strong> your plan, trial dates, and a
+  monthly count of AI tokens used, so your allowance can be metered. For paid
+  plans, Stripe's customer and subscription ids and the subscription status.
+  Card numbers and billing details stay with Stripe and never reach
+  Forager.</li>
+  <li><strong>Free trial record:</strong> an anonymous id for the copy of the
+  app that started a trial, so each install gets one trial. It holds no email
+  address and stays after an account is deleted.</li>
+  <li><strong>Cloud backups (Premium):</strong> the backup files your kitchen
+  sends, newest three only. They are encrypted on the way to Forager but not
+  on Forager's disk, so leave secrets out of a backup if that matters to
+  you.</li>
+  <li><strong>Recipes you share:</strong> what you chose to share (title,
+  description, ingredients, steps, credit line, and photo), plus ratings and
+  reports, which are tied to accounts so one person cannot vote or report
+  many times.</li>
+</ul>
+
+<h2>Photos, AI, and recipe pages</h2>
+<p><strong>Managed AI.</strong> Photos and text you send through Forager's AI
+pass through our server in memory to Google's Gemini API and are never
+written to disk, the database, or logs. Only the token count is kept.</p>
+<p><strong>Recipe photos.</strong> When you share a recipe that has a photo,
+your kitchen uploads the photo to Forager, which keeps its own copy so the
+recipe still shows its picture when your kitchen is offline. Before it is
+saved, the photo is re-encoded and stripped of camera details such as GPS
+position. Share pages and the community recipe pages on pantryraider.app load
+that photo from forager.pantryraider.app. If a recipe's photo is a link to
+another website instead, it loads from that website.</p>
+<p><strong>Recipe uploads.</strong> A recipe you upload on this website
+(typed, as a PDF, or as a photo of a recipe card) is read by the AI to make a
+draft you review. The uploaded file itself is not kept.</p>
+<p><strong>Share links and community recipes.</strong> A share link is a
+public page anyone with the link can open, showing only the recipe you
+shared. You can turn any link off from your account page. A community recipe
+is published for every Forager member to browse, with your credit line and
+never your email. When someone who is not signed in reports a share page, we
+keep a short one-way hash of their network address, never the address
+itself, and delete report records after 90 days.</p>
+<p><strong>Remote access.</strong> If you turn it on, your kitchen gets an
+address under forager.pantryraider.app. The secure connection from your
+browser ends at Forager's server, which passes the traffic to your kitchen
+over an encrypted WireGuard link. We do not log or inspect that traffic, but
+it does pass through our server, so it is not encrypted end to end. Use your
+own tunnel or VPN if that does not suit you.</p>
+<p><strong>Email.</strong> Forager only sends verification, password reset,
+and recipe share emails that you start. No newsletters, no marketing.</p>
+<p><strong>No tracking.</strong> No analytics, advertising, or tracking
+pixels, and Forager's server keeps no request logs of the pages you visit.
+We do not sell personal data or share it for advertising.</p>
+
+<h2>Where your data is kept</h2>
+<p>Forager runs on a virtual private server we rent in the United States. Its
+database, cloud backups, and recipe photos are stored there. If you use
+Forager from outside the United States, your data is transferred to and
+handled in the United States.</p>
+
+<h2>Service providers we use</h2>
+<p>Each provider gets only what its job needs.</p>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Provider</th><th>What it does</th><th>What it receives</th></tr></thead>
+  <tbody>
+    <tr><td>Stripe</td><td>Takes subscription payments, sends receipts, and
+    runs the billing page</td><td>Your email, the payment details you enter
+    on Stripe's pages, and your Forager account number so the payment is
+    matched to you</td></tr>
+    <tr><td>Google (Gemini API)</td><td>Managed AI: photo and receipt
+    scanning, recipe formatting, and the other AI features</td><td>The photo,
+    receipt, or text of each request, without your email or name</td></tr>
+    <tr><td>Google (Sign-In)</td><td>Optional "Continue with Google"
+    sign-in</td><td>Your Google sign-in; Forager gets back only your email
+    address and whether Google has confirmed it</td></tr>
+    <tr><td>Resend</td><td>Delivers verification, password reset, and recipe
+    share emails</td><td>The recipient address and the message</td></tr>
+    <tr><td>Cloudflare</td><td>The bot check on the signup page (Turnstile),
+    and DNS for the pantryraider.app domain</td><td>Your visit to the signup
+    page, as on any site that uses Turnstile</td></tr>
+    <tr><td>Our hosting provider</td><td>The US server Forager runs
+    on</td><td>Everything Forager stores, held on its hardware on our
+    behalf</td></tr>
+  </tbody>
+</table>
+</div>
+<p>We would disclose data to anyone else only if the law required it, and we
+would tell you unless the law forbids that.</p>
+
+<h2>How long we keep it</h2>
+<ul>
+  <li>AI photos and prompts: never stored.</li>
+  <li>Your account, kitchens, usage totals, and share links: while your
+  account exists.</li>
+  <li>Cloud backups: the newest three; older ones are deleted when a new one
+  arrives.</li>
+  <li>Recipe photos: while the recipe or share that uses them exists.</li>
+  <li>Expired sign-in links, codes, and sessions: deleted daily.</li>
+  <li>Recipe report records: 90 days.</li>
+  <li>Billing records: Stripe keeps payment and invoice records as long as the
+  tax and accounting rules it follows require.</li>
+</ul>
+
+<h2>Your rights</h2>
+<p>Wherever you live, you can ask us to:</p>
+<ul>
+  <li><strong>See</strong> the data we hold about you. Your account page
+  shows most of it.</li>
+  <li><strong>Correct</strong> it. To change your email address, write to
+  support.</li>
+  <li><strong>Delete</strong> it. Delete your account yourself from the
+  bottom of your <a href="/account">account page</a>, or ask support.
+  Deleting cancels any subscription right away and removes your sign-in
+  details, kitchens, backups, usage history, and share links. Community
+  recipes you published stay up, credited to "a former member".</li>
+  <li><strong>Export</strong> it. Cloud backups download from the app, and on
+  request we will send a copy of your account data in a common
+  machine-readable format.</li>
+  <li><strong>Object</strong> to or limit how we use it, or withdraw consent
+  you gave.</li>
+</ul>
+<p>Email <a href="mailto:support@pantryraider.app">support@pantryraider.app</a>
+from the address on your account, so we know the request is yours. We answer
+within 30 days and do not charge for it, and using these rights never changes
+how we treat you. If you are in the EU, the UK, or a US state with its own
+privacy law, you can also complain to your data protection authority, though
+we would like the chance to fix things first.</p>
+
+<h2>Children</h2>
+<p>Forager is not meant for children under 13, and we do not knowingly hold
+data about them. If you think a child has made an account, write to support
+and we will delete it.</p>
+
+<h2>Changes</h2>
+<p>If we change this policy in a way that matters, we update the date at the
+top and email account holders before the change takes effect. Paid plans and
+the rules for shared recipes are in the <a href="/terms">Terms of
+Service</a>.</p>
+{% endblock %}
