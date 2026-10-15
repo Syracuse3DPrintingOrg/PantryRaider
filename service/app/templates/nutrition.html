@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}Nutrition: Pantry Raider{% endblock %}
+{% block content %}
+
+<div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mt-3 mb-3">
+  <h4 class="mb-0"><i class="bi bi-heart-pulse me-2"></i>Nutrition <span class="text-secondary fs-6" id="nt-date"></span></h4>
+  <button class="btn btn-outline-secondary btn-sm" data-on-click="loadToday()" title="Refresh"><i class="bi bi-arrow-clockwise me-1"></i>Refresh</button>
+</div>
+
+<!-- Today's running totals -->
+<div class="row g-2 mb-3 pr-keep-cols" id="nt-totals">
+  <div class="col-6 col-md-3"><div class="card text-center"><div class="card-body py-2"><div class="fs-3 fw-semibold" id="tt-cal">0</div><div class="small text-secondary">calories</div></div></div></div>
+  <div class="col-6 col-md-3"><div class="card text-center"><div class="card-body py-2"><div class="fs-3 fw-semibold" id="tt-pro">0</div><div class="small text-secondary">protein (g)</div></div></div></div>
+  <div class="col-6 col-md-3"><div class="card text-center"><div class="card-body py-2"><div class="fs-3 fw-semibold" id="tt-carb">0</div><div class="small text-secondary">carbs (g)</div></div></div></div>
+  <div class="col-6 col-md-3"><div class="card text-center"><div class="card-body py-2"><div class="fs-3 fw-semibold" id="tt-fat">0</div><div class="small text-secondary">fat (g)</div></div></div></div>
+</div>
+
+<!-- Add a food -->
+<div class="card mb-3">
+  <div class="card-body">
+    <h6 class="card-title"><i class="bi bi-plus-circle me-1"></i>Log a food</h6>
+    <div class="row g-2 align-items-end">
+      <div class="col-12 col-md-5">
+        <label class="form-label small mb-1" for="nt-name">Food</label>
+        <input type="text" class="form-control form-control-sm" id="nt-name" placeholder="e.g. 2 eggs and toast">
+      </div>
+      <div class="col-4 col-md-2">
+        <label class="form-label small mb-1" for="nt-serv">Servings</label>
+        <input type="number" class="form-control form-control-sm" id="nt-serv" value="1" min="0" step="0.5">
+      </div>
+      {% if ai_can_write_recipes %}
+      <div class="col-8 col-md-3">
+        <button class="btn btn-outline-info btn-sm w-100" data-on-click="estimateMacros(this)" title="Ask the AI to estimate calories and macros">
+          <i class="bi bi-stars me-1"></i>Estimate with AI
+        </button>
+      </div>
+      {% endif %}
+      {% if ai_configured and not ai_can_write_recipes %}
+      <div class="col-12"><p class="text-secondary small mb-0"><i class="bi bi-info-circle me-1"></i>{{ ai_writing_note }}</p></div>
+      {% endif %}
+    </div>
+    <div class="row g-2 mt-1">
+      <div class="col"><label class="form-label small mb-1" for="nt-cal">Calories</label><input type="number" class="form-control form-control-sm" id="nt-cal" min="0" step="1"></div>
+      <div class="col"><label class="form-label small mb-1" for="nt-pro">Protein g</label><input type="number" class="form-control form-control-sm" id="nt-pro" min="0" step="0.1"></div>
+      <div class="col"><label class="form-label small mb-1" for="nt-carb">Carbs g</label><input type="number" class="form-control form-control-sm" id="nt-carb" min="0" step="0.1"></div>
+      <div class="col"><label class="form-label small mb-1" for="nt-fat">Fat g</label><input type="number" class="form-control form-control-sm" id="nt-fat" min="0" step="0.1"></div>
+    </div>
+    <button class="btn btn-success btn-sm mt-2" data-on-click="logFood(this)"><i class="bi bi-check-lg me-1"></i>Add to today</button>
+    <span class="small ms-2" id="nt-msg"></span>
+  </div>
+</div>
+
+<h6 class="text-secondary">Today's log</h6>
+<div id="nt-entries" class="d-flex flex-column gap-2"></div>
+<div id="nt-empty" class="text-secondary small d-none">Nothing logged yet today.</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="static/js/pages/nutrition.js?v={{ app_version }}"></script>
+{% endblock %}

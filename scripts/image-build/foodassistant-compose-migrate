@@ -1,0 +1,599 @@
+#!/usr/bin/env python3
+"""Bring a device's stack compose file up to the current defaults.
+
+firstboot.sh copies docker-compose.appliance.yml into INSTALL_DIR once, and
+foodassistant-update only pulls a new image after that, so a Pi imaged months
+ago still runs the compose file it was imaged with. This helper makes the few
+targeted edits a newer release needs, in place, and leaves everything else in
+the file exactly as it was (ports, extra services, environment, comments).
+
+Edits it makes, each only when the old form is still there:
+  - the app's uvicorn command gains "--workers", "1" (the app runs as one
+    process, always) and "--no-proxy-headers";
+  - a bare Grocy or Mealie publish such as "9383:80" becomes
+    "${GROCY_BIND:-0.0.0.0}:9383:80" (same behaviour, now overridable);
+  - a bare Beszel hub publish "8090:8090" becomes
+    "${BESZEL_BIND:-127.0.0.1}:8090:8090". When the hub already has an account
+    (or its data cannot be read), BESZEL_BIND=0.0.0.0 goes into the stack .env
+    first so the dashboard stays reachable from the network exactly as before.
+    A hub with no account yet is the one that anybody on the network could
+    claim, so that one moves to this device only;
+  - the app, Grocy and Mealie services gain the log limit a fresh install
+    has (json-file, three files of 10 MB) when they have no logging: key at
+    all. Docker keeps a container's log without limit otherwise, which on an
+    SD card means constant writes and, eventually, a full card. A service
+    that already has any logging: setting keeps it.
+
+Why edits rather than a fresh copy of the shipped file: the shipped file also
+moved Grocy to a release that upgrades its database one way, closed Ollama to
+the network, and changed how the Beszel agent pairs. Copying it over even an
+untouched old file would make those changes behind the owner's back.
+
+Safety: nothing changes unless at least one edit applies. The new text goes
+to a temp file beside the original and must pass `docker compose config -q`;
+then the original is copied to docker-compose.yml.bak-<timestamp> and the
+temp file is renamed over it. If docker compose is missing or rejects the
+result, the original file stays as it is and the reason is printed.
+
+Usage: foodassistant-compose-migrate [--env-file PATH] [--docker CMD]
+           [--recreate-file PATH] [--dry-run] COMPOSE_FILE
+
+Prints one plain line per change on stdout. --recreate-file receives the
+names of services that should be recreated for a change to take effect:
+"beszel" when its hub moved to this device only, and the Grocy or Mealie
+service (by its name in the file) when it gained the log limit. The app itself is not listed, because every update
+recreates it anyway and Docker applies the new setting then.
+Exit status is 0 unless the arguments are wrong.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import shlex
+import shutil
+import sqlite3
+import subprocess
+import sys
+import tempfile
+import time
+from dataclasses import dataclass, field
+from pathlib import Path
+
+# Bundled services whose host publish gained a bind-address variable, keyed
+# by an image substring, with the container port and the variable's default.
+BIND_RULES = (
+    ("linuxserver/grocy", "80", "GROCY_BIND", "0.0.0.0"),
+    ("mealie-recipes/mealie", "9000", "MEALIE_BIND", "0.0.0.0"),
+    ("henrygd/beszel:", "8090", "BESZEL_BIND", "127.0.0.1"),
+)
+BESZEL_IMAGE = "henrygd/beszel:"
+# The services that gain a log limit, keyed by an image substring, with the
+# name used in messages and whether --recreate-file lists the service (the
+# update recreates the app anyway). The app is also found by its uvicorn command.
+LOG_RULES = (
+    ("/pantryraider", "the app", False),
+    ("/foodassistant", "the app", False),
+    ("linuxserver/grocy", "Grocy", True),
+    ("mealie-recipes/mealie", "Mealie", True),
+)
+# The same values as x-logging in docker-compose.appliance.yml.
+LOG_BLOCK = (
+    (0, "logging:"),
+    (1, "driver: json-file"),
+    (1, "options:"),
+    (2, 'max-size: "10m"'),
+    (2, 'max-file: "3"'),
+)
+BESZEL_DATA_TARGET = "/beszel_data"
+# PocketBase makes this placeholder superuser itself while no real one exists.
+PB_INSTALLER_EMAIL = "__pbinstaller@example.com"
+
+_KEY_RE = re.compile(r"^(?P<indent>[ ]*)(?P<key>[A-Za-z0-9._-]+):(?P<rest>.*)$")
+_PORT_RE = re.compile(
+    r"""^(?P<lead>\s*-\s*)(?P<q>["']?)(?P<host>\d+):(?P<ctr>\d+)(?P<proto>/(?:tcp|udp))?(?P=q)(?P<tail>\s*(?:\#.*)?)$"""
+)
+_FLOW_CMD_RE = re.compile(r"^(?P<lead>\s*command:\s*)\[(?P<body>.*)\](?P<tail>\s*(?:#.*)?)$")
+_VOLUME_RE = re.compile(
+    r"""^\s*-\s*["']?(?P<src>[^"'\s:]+):(?P<dst>/[^"'\s:]*)(?::[a-z,]+)?["']?\s*(?:\#.*)?$"""
+)
+_ENV_BIND_RE = re.compile(r"^\s*(?:export\s+)?BESZEL_BIND\s*=")
+
+
+@dataclass
+class Block:
+    """One service under the top-level services: key, as line indexes."""
+    name: str
+    start: int  # the "name:" line
+    end: int  # one past the last line
+    image: str = ""
+
+
+@dataclass
+class Plan:
+    lines: list[str]
+    messages: list[str] = field(default_factory=list)
+    env_append: str = ""
+    recreate: list[str] = field(default_factory=list)
+    changed: bool = False
+
+
+def _indent(line: str) -> int:
+    return len(line) - len(line.lstrip(" "))
+
+
+def _is_meaningful(line: str) -> bool:
+    s = line.strip()
+    return bool(s) and not s.startswith("#")
+
+
+def service_blocks(lines: list[str]) -> list[Block]:
+    """Find each service under the top-level services: key."""
+    blocks: list[Block] = []
+    in_services = False
+    svc_indent = None
+    current: Block | None = None
+    for i, line in enumerate(lines):
+        if not _is_meaningful(line):
+            continue
+        ind = _indent(line)
+        if ind == 0:
+            if current:
+                current.end = i
+                blocks.append(current)
+                current = None
+            m = _KEY_RE.match(line)
+            in_services = bool(m and m.group("key") == "services")
+            svc_indent = None
+            continue
+        if not in_services:
+            continue
+        if svc_indent is None:
+            svc_indent = ind
+        if ind == svc_indent:
+            m = _KEY_RE.match(line)
+            if not m:
+                continue
+            if current:
+                current.end = i
+                blocks.append(current)
+            current = Block(m.group("key"), i, len(lines))
+    if current:
+        blocks.append(current)
+    for block in blocks:
+        for _i, line, key in _subsections(lines, block):
+            if key == "image" and line.strip().startswith("image:"):
+                block.image = line.split(":", 1)[1].split("#", 1)[0].strip().strip("\"'")
+                break
+    return blocks
+
+
+def _subsections(lines: list[str], block: Block):
+    """Yield (index, line, key) for each line inside a service, where key is
+    the service-level key (ports, command, volumes, ...) the line sits under."""
+    key_indent = None
+    key = ""
+    for i in range(block.start + 1, block.end):
+        line = lines[i]
+        if not _is_meaningful(line):
+            continue
+        ind = _indent(line)
+        if key_indent is None:
+            key_indent = ind
+        stripped = line.strip()
+        if ind == key_indent and not stripped.startswith("-"):
+            m = _KEY_RE.match(line)
+            key = m.group("key") if m else ""
+        yield i, line, key
+
+
+def _fix_command(lines: list[str], block: Block, plan: Plan) -> None:
+    for i, line, key in _subsections(lines, block):
+        if key != "command" or not line.strip().startswith("command:"):
+            continue
+        m = _FLOW_CMD_RE.match(line)
+        if not m:
+            if "uvicorn" in line:
+                plan.messages.append(
+                    f"Left the {block.name} command as it is (not in the usual list form); "
+                    'it should include "--workers", "1".')
+            return
+        try:
+            items = json.loads("[" + m.group("body") + "]")
+        except ValueError:
+            return
+        if not all(isinstance(x, str) for x in items):
+            return
+        if "uvicorn" not in items or "app.main:app" not in items:
+            return
+        added = []
+        if "--workers" not in items and not any(x.startswith("--workers=") for x in items):
+            pos = len(items)
+            if "--port" in items and items.index("--port") + 1 < len(items):
+                pos = items.index("--port") + 2
+            items[pos:pos] = ["--workers", "1"]
+            added.append("--workers 1")
+        if "--no-proxy-headers" not in items and "--proxy-headers" not in items:
+            items.append("--no-proxy-headers")
+            added.append("--no-proxy-headers")
+        if not added:
+            return
+        body = ", ".join(json.dumps(x) for x in items)
+        lines[i] = f"{m.group('lead')}[{body}]{m.group('tail')}"
+        plan.changed = True
+        what = " and ".join(added)
+        plan.messages.append(
+            f"The app now starts with {what}, the same as a fresh install "
+            "(it runs as a single process).")
+        return
+
+
+def _env_sets_beszel_bind(env_file: Path | None) -> bool:
+    if not env_file or not env_file.is_file():
+        return False
+    try:
+        text = env_file.read_text(errors="replace")
+    except OSError:
+        return False
+    return any(_ENV_BIND_RE.match(line) for line in text.splitlines())
+
+
+def beszel_db_state(data_dir: Path) -> str:
+    """'none' (the hub never ran here), 'empty' (no account yet), 'accounts'
+    (an admin or user exists) or 'unreadable' (data present, can't tell)."""
+    db = data_dir / "data.db"
+    if not db.exists():
+        db = data_dir / "pb_data" / "data.db"
+    if not db.exists():
+        return "none"
+    try:
+        con = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=2)
+    except sqlite3.Error:
+        return "unreadable"
+    try:
+        tables = {r[0] for r in con.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'")}
+        known = [t for t in ("_superusers", "_admins", "users") if t in tables]
+        if not known:
+            return "unreadable"
+        for table in known:
+            if table == "_superusers":
+                n = con.execute("SELECT count(*) FROM _superusers WHERE email != ?",
+                                (PB_INSTALLER_EMAIL,)).fetchone()[0]
+            else:
+                n = con.execute(f"SELECT count(*) FROM {table}").fetchone()[0]
+            if n:
+                return "accounts"
+        return "empty"
+    except sqlite3.Error:
+        return "unreadable"
+    finally:
+        con.close()
+
+
+def _run(cmd: list[str], cwd: Path, timeout: int = 60):
+    try:
+        return subprocess.run(cmd, cwd=str(cwd), capture_output=True, text=True,
+                              timeout=timeout)
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def _named_volume_dir(compose: Path, volume: str, docker: list[str]) -> Path | None | str:
+    """Where a named volume lives on the host. Returns the path, None when
+    the volume does not exist yet, or 'unknown'."""
+    r = _run(docker + ["compose", "-f", compose.name, "config", "--format", "json"], compose.parent)
+    if not r or r.returncode != 0:
+        return "unknown"
+    try:
+        name = json.loads(r.stdout)["volumes"][volume]["name"]
+    except (ValueError, KeyError, TypeError):
+        return "unknown"
+    r = _run(docker + ["volume", "inspect", "--format", "{{.Mountpoint}}", name], compose.parent)
+    if r is None:
+        return "unknown"
+    if r.returncode != 0:
+        return None
+    return Path(r.stdout.strip()) if r.stdout.strip() else "unknown"
+
+
+def beszel_state(lines: list[str], block: Block, compose: Path, docker: list[str]) -> str:
+    source = ""
+    for _i, line, key in _subsections(lines, block):
+        if key == "volumes":
+            m = _VOLUME_RE.match(line)
+            if m and m.group("dst").rstrip("/") == BESZEL_DATA_TARGET:
+                source = m.group("src")
+    if not source:
+        return "unknown"
+    if source.startswith((".", "/", "~")):
+        path = Path(os.path.expanduser(source))
+        if not path.is_absolute():
+            path = compose.parent / path
+        return beszel_db_state(path)
+    where = _named_volume_dir(compose, source, docker)
+    if where == "unknown":
+        return "unknown"
+    if where is None:
+        return "none"
+    return beszel_db_state(where)
+
+
+def _fix_ports(lines: list[str], block: Block, plan: Plan, *, beszel=None) -> None:
+    rule = next((r for r in BIND_RULES if r[0] in block.image), None)
+    if not rule:
+        return
+    _img, ctr_port, var, default = rule
+    targets = []
+    for i, line, key in _subsections(lines, block):
+        if key != "ports":
+            continue
+        m = _PORT_RE.match(line)
+        if m and m.group("ctr") == ctr_port:
+            targets.append((i, m))
+    if not targets:
+        return
+    if var == "BESZEL_BIND":
+        if not beszel_decide(plan, beszel or "unknown"):
+            return
+    for i, m in targets:
+        lines[i] = (f'{m.group("lead")}"${{{var}:-{default}}}:{m.group("host")}:'
+                    f'{m.group("ctr")}{m.group("proto") or ""}"{m.group("tail")}')
+    plan.changed = True
+    if var in ("GROCY_BIND", "MEALIE_BIND"):
+        app = "Grocy" if var == "GROCY_BIND" else "Mealie"
+        plan.messages.append(f"{app} stays open to your network as before; set {var}=127.0.0.1 "
+                             "in .env to keep its page to this device.")
+
+
+def beszel_decide(plan: Plan, state: str) -> bool:
+    """Record what happens to the Beszel hub's publish. False: leave it."""
+    if state == "env":
+        plan.messages.append("Beszel now follows the BESZEL_BIND setting already in your .env.")
+    elif state == "none":
+        plan.messages.append(
+            "Beszel monitoring, if you turn it on, answers only on this device until "
+            "its admin account exists. Then set BESZEL_BIND=0.0.0.0 in .env to open it "
+            "to your network.")
+    elif state == "empty":
+        plan.messages.append(
+            "The Beszel hub has no admin account yet, so it now answers only on this "
+            "device: anyone who opened it first would have become its admin. Create the "
+            "account at http://localhost:8090 on this device, then set BESZEL_BIND=0.0.0.0 "
+            "in .env to open it to your network.")
+        plan.recreate.append("beszel")
+    elif state in ("accounts", "unreadable"):
+        plan.env_append = (
+            "# Beszel already had an admin account before this setting existed, so its\n"
+            "# dashboard stays open to the network. Set 127.0.0.1 to keep it to this device.\n"
+            "BESZEL_BIND=0.0.0.0\n")
+        plan.messages.append(
+            "Beszel already has an admin account, so it stays open to your network "
+            "(BESZEL_BIND=0.0.0.0 is now in .env; set it to 127.0.0.1 to keep it to this device).")
+    else:
+        plan.messages.append(
+            "Left the Beszel port as it is: could not find where its data lives to "
+            "check for an admin account.")
+        return False
+    return True
+
+
+def _log_rule(lines: list[str], block: Block):
+    image = block.image.lower()
+    for needle, label, recreate in LOG_RULES:
+        if needle in image:
+            return label, recreate
+    for _i, line, key in _subsections(lines, block):
+        if key == "command" and "app.main:app" in line and "uvicorn" in line:
+            return "the app", False
+    return None
+
+
+def _log_insertion(lines: list[str], block: Block):
+    """(index, new lines) that give a service the shipped log limit, or None
+    when it already has a logging: key or its layout is not the usual one."""
+    last = None
+    key_indent = None
+    for i, line, key in _subsections(lines, block):
+        if key == "logging":
+            return None
+        if key_indent is None:
+            key_indent = _indent(line)
+        last = i
+    if last is None or key_indent is None:
+        return None
+    step = key_indent - _indent(lines[block.start])
+    if step <= 0:
+        return None
+    new = [" " * (key_indent + step * depth) + text for depth, text in LOG_BLOCK]
+    return last + 1, new
+
+
+def _add_log_limits(lines: list[str], plan: Plan) -> None:
+    inserts = []
+    labels: list[str] = []
+    for block in service_blocks(lines):
+        rule = _log_rule(lines, block)
+        if not rule:
+            continue
+        ins = _log_insertion(lines, block)
+        if not ins:
+            continue
+        label, recreate = rule
+        inserts.append(ins)
+        if label not in labels:
+            labels.append(label)
+        if recreate and block.name not in plan.recreate:
+            plan.recreate.append(block.name)
+    if not inserts:
+        return
+    # Bottom up, so the earlier indexes stay valid.
+    for at, new in sorted(inserts, reverse=True):
+        lines[at:at] = new
+    plan.changed = True
+    if len(labels) > 1:
+        who = ", ".join(labels[:-1]) + " and " + labels[-1]
+        whose = "The logs of " + who + " are"
+    else:
+        whose = "The log of " + labels[0] + " is"
+    plan.messages.append(
+        f"{whose} now capped at three files of 10 MB each, the same as a fresh "
+        "install, so the card no longer fills up with old log lines.")
+
+
+def plan_migration(text: str, compose: Path, env_file: Path | None,
+                   docker: list[str]) -> Plan:
+    lines = text.split("\n")
+    plan = Plan(lines=lines)
+    for block in service_blocks(lines):
+        _fix_command(lines, block, plan)
+        beszel = None
+        if BESZEL_IMAGE in block.image:
+            if _env_sets_beszel_bind(env_file):
+                beszel = "env"
+            elif any(key == "ports" and _PORT_RE.match(line)
+                     for _i, line, key in _subsections(lines, block)):
+                beszel = beszel_state(lines, block, compose, docker)
+        _fix_ports(lines, block, plan, beszel=beszel)
+    # Last, because it adds lines and the edits above work on line indexes.
+    _add_log_limits(lines, plan)
+    return plan
+
+
+def _atomic_text(path: Path, text: str, like: Path | None = None) -> None:
+    fd, tmp = tempfile.mkstemp(prefix=f".{path.name}.", dir=str(path.parent))
+    try:
+        with os.fdopen(fd, "w") as fh:
+            fh.write(text)
+            fh.flush()
+            os.fsync(fh.fileno())
+        src = like if like and like.exists() else (path if path.exists() else None)
+        if src:
+            shutil.copymode(src, tmp)
+            st = src.stat()
+            try:
+                os.chown(tmp, st.st_uid, st.st_gid)
+            except OSError:
+                pass
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def _validate(candidate: Path, docker: list[str]) -> str:
+    """'' when docker compose accepts the file, otherwise the reason."""
+    r = _run(docker + ["compose", "version"], candidate.parent, timeout=30)
+    if not r or r.returncode != 0:
+        return "docker compose is not available to check it"
+    r = _run(docker + ["compose", "-f", candidate.name, "config", "-q"], candidate.parent)
+    if r is None:
+        return "docker compose could not be run to check it"
+    if r.returncode != 0:
+        detail = (r.stderr or r.stdout).strip().splitlines()
+        return "docker compose rejected it" + (f": {detail[-1]}" if detail else "")
+    return ""
+
+
+def migrate(compose: Path, env_file: Path | None, docker: list[str],
+            dry_run: bool = False) -> Plan:
+    out = Plan(lines=[])
+    if compose.is_symlink() or not compose.is_file():
+        out.messages.append(f"WARN: {compose} is not a plain file; left it as it is.")
+        return out
+    text = compose.read_text()
+    plan = plan_migration(text, compose, env_file, docker)
+    if not plan.changed:
+        # Only messages that explain a skipped edit are worth showing.
+        return plan
+    new_text = "\n".join(plan.lines)
+    if dry_run:
+        plan.messages.insert(0, f"Would update {compose.name}:")
+        return plan
+    fd, cand_name = tempfile.mkstemp(prefix=f".{compose.name}.migrate-", suffix=".yml",
+                                     dir=str(compose.parent))
+    cand = Path(cand_name)
+    try:
+        with os.fdopen(fd, "w") as fh:
+            fh.write(new_text)
+            fh.flush()
+            os.fsync(fh.fileno())
+        shutil.copymode(compose, cand)
+        try:
+            st = compose.stat()
+            os.chown(cand, st.st_uid, st.st_gid)
+        except OSError:
+            pass
+        problem = _validate(cand, docker)
+        if problem:
+            out.messages.append(
+                f"WARN: kept {compose.name} as it was; the updated version was not used "
+                f"because {problem}.")
+            return out
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        backup = compose.with_name(f"{compose.name}.bak-{stamp}")
+        n = 1
+        while backup.exists():
+            n += 1
+            backup = compose.with_name(f"{compose.name}.bak-{stamp}-{n}")
+        try:
+            shutil.copy2(compose, backup)
+        except OSError as exc:
+            out.messages.append(f"WARN: kept {compose.name} as it was; could not save a backup ({exc}).")
+            return out
+        if plan.env_append and env_file:
+            try:
+                old = env_file.read_text() if env_file.exists() else ""
+                if old and not old.endswith("\n"):
+                    old += "\n"
+                _atomic_text(env_file, old + plan.env_append)
+            except OSError as exc:
+                out.messages.append(
+                    f"WARN: kept {compose.name} as it was; could not update {env_file.name} ({exc}).")
+                return out
+        os.replace(cand, compose)
+        try:
+            dfd = os.open(str(compose.parent), os.O_RDONLY)
+            os.fsync(dfd)
+            os.close(dfd)
+        except OSError:
+            pass
+        plan.messages.insert(0, f"Updated {compose.name} to the current defaults "
+                                f"(the previous copy is saved as {backup.name}).")
+        return plan
+    finally:
+        if cand.exists():
+            try:
+                cand.unlink()
+            except OSError:
+                pass
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
+    ap.add_argument("compose")
+    ap.add_argument("--env-file")
+    ap.add_argument("--docker", default=os.environ.get("DOCKER", "docker"))
+    ap.add_argument("--recreate-file")
+    ap.add_argument("--dry-run", action="store_true")
+    args = ap.parse_args(argv)
+    compose = Path(args.compose).absolute()
+    env_file = Path(args.env_file).absolute() if args.env_file else compose.parent / ".env"
+    plan = migrate(compose, env_file, shlex.split(args.docker), dry_run=args.dry_run)
+    for msg in plan.messages:
+        print(msg)
+    if args.recreate_file:
+        try:
+            Path(args.recreate_file).write_text("".join(f"{s}\n" for s in plan.recreate)
+                                                if plan.changed and not args.dry_run else "")
+        except OSError:
+            pass
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

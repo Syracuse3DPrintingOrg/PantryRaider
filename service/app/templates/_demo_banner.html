@@ -1,0 +1,52 @@
+{# Read-only DEMO MODE banner (FoodAssistant-pxp0). Slim, brand-pink accented,
+   dismissible per page, and pinned to the very top so it never covers the kiosk
+   clock (which floats over the page centre). Shown only when demo_mode is on, so
+   a normal install renders nothing here.
+
+   The banner wraps onto two or three lines on a phone, so its height is not a
+   constant: demo-banner.js measures it into --pr-demo-banner-h (on load, on
+   resize and when the text reflows) and the rules below move the fixed navbar,
+   the sub-page pills and the page content down by exactly that much. #}
+{% if demo_mode %}
+<div id="demoBanner" class="alert alert-dismissible d-flex align-items-center mb-0 rounded-0 py-1 px-3 pr-demo-banner"
+     role="status">
+  <i class="bi bi-eye-fill me-2" aria-hidden="true"></i>
+  <span>You are exploring a live Pantry Raider demo. Feel free to click around, changes are disabled.</span>
+  <button type="button" class="btn-close btn-close-white ms-auto"
+          data-bs-dismiss="alert" aria-label="Dismiss"></button>
+</div>
+<div class="pr-demo-spacer" aria-hidden="true"></div>
+<style>
+  .pr-demo-banner {
+    position: fixed; z-index: 1050;
+    top: var(--kiosk-inset-top, 0px);
+    left: var(--kiosk-inset-left, 0px);
+    right: var(--kiosk-inset-right, 0px);
+    font-size: 0.85rem; background: #d80062; color: #fff; border: 0;
+  }
+  /* Scoped to demo mode via the body class demo-banner.js sets, so it is inert
+     otherwise. The !important matches kiosk.css, which pins the navbar top to
+     the panel inset with !important. */
+  body.demo-banner-on .navbar.fixed-top {
+    top: calc(var(--kiosk-inset-top, 0px) + var(--pr-demo-banner-h, 0px)) !important;
+  }
+  /* The spacer adds the banner's height on top of the padding that already
+     reserves the navbar (60px, or 50px on a kiosk). */
+  .pr-demo-spacer { display: none; }
+  body.demo-banner-on .pr-demo-spacer { display: block; height: var(--pr-demo-banner-h, 0px); }
+  body.demo-banner-on .float-nav-dock-left,
+  body.demo-banner-on .float-nav-dock-right {
+    top: calc(56px + var(--pr-demo-banner-h, 0px));
+  }
+  body.demo-banner-on .subpill-bar { top: var(--pr-demo-banner-h, 0px); }
+  .pr-demo-banner.pr-demo-pulse { animation: pr-demo-pulse 0.9s ease-out 2; }
+  @keyframes pr-demo-pulse {
+    0% { box-shadow: 0 0 0 0 rgba(255, 77, 151, 0.9); }
+    100% { box-shadow: 0 0 0 14px rgba(255, 77, 151, 0); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .pr-demo-banner.pr-demo-pulse { animation: none; outline: 2px solid #fff; }
+  }
+</style>
+<script src="static/js/demo-banner.js?v={{ app_version }}"></script>
+{% endif %}
