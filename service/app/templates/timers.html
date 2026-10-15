@@ -1,0 +1,134 @@
+{% extends "base.html" %}
+{% block title %}Timers &amp; Temps: Pantry Raider{% endblock %}
+
+{% block content %}
+{# Timers / Thermometers / Both is now chosen from the header sub-pill row
+   (Time & Temp), which drives the view through ?view= (initial_view). The old
+   in-page toggle was removed as a duplicate (FoodAssistant-2e0f, Dan). #}
+<div id="timersSection" data-initial-view="{{ initial_view or '' }}">
+<div class="mt-3 mb-3 d-flex align-items-center justify-content-between gap-2">
+  <h4 class="mb-0"><i class="bi bi-stopwatch me-2"></i>Timers</h4>
+  <div class="d-flex align-items-center gap-2">
+    {# Hidden until at least one timer exists; the confirm names the count so
+       a stray tap mid-cook cannot silently wipe the kitchen. Lives here in the
+       header so it sits with the running timers it clears, not with the
+       start controls below. #}
+    <button type="button" id="timersClearAll" class="btn btn-outline-danger btn-sm timer-clear-all d-none">
+      <i class="bi bi-x-lg me-1"></i>Clear all
+    </button>
+    {# Only shown when the screensaver script is on this page: mid-cook you can
+       set the timers going, then send the display straight to the saver where
+       they float. Works even with the idle timeout set to off. #}
+    <button type="button" id="startScreensaver" class="btn btn-outline-secondary btn-sm d-none">
+      <i class="bi bi-moon-stars me-1"></i>Screensaver
+    </button>
+  </div>
+</div>
+
+{# Compact idle hint: one quiet line when nothing is running, so the
+   start-a-timer controls below own the screen. It swaps out for the timer
+   cards the moment a countdown starts. #}
+<div id="timersEmpty" class="text-secondary small d-flex align-items-center gap-2 py-2">
+  <i class="bi bi-stopwatch"></i>
+  <span>No timers running. Start one below; it shows here, on the Stream Deck, and on every screen.</span>
+</div>
+
+<div id="timersGrid" class="row g-3 d-none"></div>
+</div><!-- /timersSection -->
+
+{# Bluetooth thermometer probes. Hidden until the host-side reader has
+   reported something: an install without thermometers never sees this. #}
+<div id="probesSection" class="d-none mt-4 pt-3 border-top">
+  <h4 class="mb-3"><i class="bi bi-thermometer-half me-2"></i>Temperatures</h4>
+  <div id="probesGrid" class="row g-3"></div>
+  <div id="probesDiscovered" class="d-none mt-3">
+    <div class="text-secondary mb-2">Thermometers in range, ready to add:</div>
+    <div id="probesDiscoveredList" class="d-flex flex-wrap gap-2"></div>
+  </div>
+</div>
+
+{# Hygrometers (FoodAssistant-q97i): fridge, freezer, pantry, and room
+   temperature + humidity sensors, a separate class from the cooking probes.
+   Hidden until at least one is added; they are added and managed from
+   Settings, Thermometers. #}
+<div id="hygroSection" class="d-none mt-4 pt-3 border-top">
+  <h4 class="mb-3"><i class="bi bi-moisture me-2"></i>Fridge &amp; room sensors</h4>
+  <div id="hygroGrid" class="row g-3"></div>
+</div>
+
+{# The start-a-timer controls sit below the live content on purpose: on a
+   kitchen glance the running timers and temperatures matter most, so they own
+   the top of the page and these controls are one flick away. Shown and hidden
+   together with the timers section, so the thermometers-only view hides both. #}
+<div id="timersStartSection" class="mt-3">
+<div class="card timer-start-card mb-3">
+  <div class="card-body">
+    <div class="timer-start-head mb-3"><i class="bi bi-plus-circle me-2"></i>Start a timer</div>
+
+    {# Quick minute presets: one tap starts an unnamed countdown (the server
+       numbers it). A tidy grid so the choices read at a glance: two rows on a
+       phone, a single row on the kiosk panel. #}
+    <div class="timer-group">
+      <div class="timer-group-label">Quick minutes</div>
+      <div class="timer-preset-grid">
+        <button type="button" class="timer-preset timer-minute" data-minutes="1">1 min</button>
+        <button type="button" class="timer-preset timer-minute" data-minutes="5">5 min</button>
+        <button type="button" class="timer-preset timer-minute" data-minutes="10">10 min</button>
+        <button type="button" class="timer-preset timer-minute" data-minutes="15">15 min</button>
+        <button type="button" class="timer-preset timer-minute" data-minutes="30">30 min</button>
+        <button type="button" class="timer-preset timer-minute" data-minutes="60">60 min</button>
+      </div>
+    </div>
+
+    {# Custom timer: name it (optional) and set the minutes yourself. Grouped
+       so the fields and the Start button read as one control. #}
+    <div class="timer-group">
+      <div class="timer-group-label">Custom timer</div>
+      <form id="timerCustomForm" class="timer-custom-row">
+        <input type="text" id="timerCustomLabel" class="form-control timer-custom-name"
+               maxlength="40" placeholder="Name (optional)" autocomplete="off">
+        <input type="number" id="timerCustomMinutes" class="form-control timer-custom-min"
+               min="1" max="1440" step="1" placeholder="Minutes" required>
+        <button type="submit" class="btn btn-primary timer-custom-start">
+          <i class="bi bi-play-fill me-1"></i>Start
+        </button>
+      </form>
+    </div>
+
+    {# Named staple-food timers: one tap starts a labeled countdown for the
+       common kitchen jobs. Durations are sensible starting points. Laid out as
+       their own tile grid so they read as quick presets, not stray buttons. #}
+    <div class="timer-group mb-0">
+      <div class="timer-group-label">Common foods</div>
+      <div class="timer-food-grid">
+        <button type="button" class="timer-preset timer-food-tile" data-name="Soft egg" data-minutes="6">
+          <span class="timer-food-name">Soft egg</span><span class="timer-food-time">6 min</span>
+        </button>
+        <button type="button" class="timer-preset timer-food-tile" data-name="Hard egg" data-minutes="10">
+          <span class="timer-food-name">Hard egg</span><span class="timer-food-time">10 min</span>
+        </button>
+        <button type="button" class="timer-preset timer-food-tile" data-name="Pasta" data-minutes="10">
+          <span class="timer-food-name">Pasta</span><span class="timer-food-time">10 min</span>
+        </button>
+        <button type="button" class="timer-preset timer-food-tile" data-name="Rice" data-minutes="18">
+          <span class="timer-food-name">Rice</span><span class="timer-food-time">18 min</span>
+        </button>
+        <button type="button" class="timer-preset timer-food-tile" data-name="Steamed veg" data-minutes="7">
+          <span class="timer-food-name">Steamed veg</span><span class="timer-food-time">7 min</span>
+        </button>
+        <button type="button" class="timer-preset timer-food-tile" data-name="Baked potato" data-minutes="45">
+          <span class="timer-food-name">Baked potato</span><span class="timer-food-time">45 min</span>
+        </button>
+        <button type="button" class="timer-preset timer-food-tile" data-name="Tea steep" data-minutes="4">
+          <span class="timer-food-name">Tea steep</span><span class="timer-food-time">4 min</span>
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+</div><!-- /timersStartSection -->
+
+<link rel="stylesheet" href="static/css/timers.css?v={{ app_version }}">
+
+<script src="static/js/timers-page.js?v={{ app_version }}"></script>
+{% endblock %}

@@ -1,0 +1,8 @@
+{# Kiosk intro animation (FoodAssistant-a8xy). Included in the <head> of every
+   page a kiosk can land on (base.html plus the standalone start, setup, pin,
+   and login pages). intro.js is loaded plain (not deferred) so it runs before
+   first paint: when the intro is due (kiosk mode, first load this boot), it
+   blacks out the page so the app never flashes for a frame before the overlay
+   appears, then plays the animation and removes the blackout. On a non-kiosk
+   browser, or after the intro has already played this boot, it does nothing. #}
+<script src="static/js/intro.js?v={{ app_version }}"></script>

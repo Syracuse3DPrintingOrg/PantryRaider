@@ -1,0 +1,35 @@
+{
+  "tag": "v0.20.0",
+  "objects": [
+    {
+      "file": "v0.20.0.tag",
+      "type": "tag",
+      "id": "0d98f840e79a2bd266382be5e8880b3c99ae1853"
+    },
+    {
+      "file": "v0.20.0.commit",
+      "type": "commit",
+      "id": "180048de8ff1b73a4a42b19b580c78b99b9fd140"
+    },
+    {
+      "file": "v0.20.0.root.tree",
+      "type": "tree",
+      "id": "c3da762cba8f7acc4ad3432faf34ffd3984c3ed1"
+    },
+    {
+      "file": "v0.20.0.service.tree",
+      "type": "tree",
+      "id": "d0b900cc4887d685706e13366eb610bb517a2989"
+    },
+    {
+      "file": "v0.20.0.app.tree",
+      "type": "tree",
+      "id": "fe625c23a0136907e8579ba676d2c11587bfbd66"
+    },
+    {
+      "file": "v0.20.0.config.blob",
+      "type": "blob",
+      "id": "e5af8895f11e267461698381d72fdfb5c387f2ce"
+    }
+  ]
+}

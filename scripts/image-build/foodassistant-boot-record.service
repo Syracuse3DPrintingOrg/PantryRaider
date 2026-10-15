@@ -1,0 +1,21 @@
+# Pantry Raider boot record (FoodAssistant-85f64).
+# Adds one line per boot to /var/lib/foodassistant/boot-history.jsonl saying
+# whether the previous run ended cleanly, when the app was last alive, and the
+# power state, so a power cut or a freeze leaves evidence while the journal
+# stays in RAM. Ordered before Docker and the satellite web service so the
+# app's heartbeat file is still the previous run's when it is read. A short
+# oneshot that always exits 0.
+
+[Unit]
+Description=Pantry Raider boot record
+After=local-fs.target systemd-journald.service
+Before=docker.service foodassistant-remote.service
+ConditionPathExists=/usr/local/bin/foodassistant-boot-record
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/foodassistant-boot-record --at-boot
+TimeoutStartSec=90
+
+[Install]
+WantedBy=multi-user.target

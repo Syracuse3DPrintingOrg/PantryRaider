@@ -1,0 +1,7 @@
+# Test tools for the main suite (tests/). Install alongside the app's own
+# dependencies (service/requirements.txt), then run it in parallel with
+#   python -m pytest tests/ -q -n auto
+pytest>=8
+pytest-xdist>=3.5
+anyio
+pyyaml
