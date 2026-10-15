@@ -1,0 +1,306 @@
+#!/usr/bin/python3
+"""Keep a short record of how each run of this device ended.
+
+    foodassistant-boot-record [--at-boot]
+
+The journal on a Pantry Raider appliance lives in RAM (it saves the SD card a
+steady stream of writes), so after a power cut or a freeze nothing on the
+device says what happened: the next boot only shows the kernel recovering the
+root filesystem. This helper keeps that one fact. It appends one JSON line
+per boot to /var/lib/foodassistant/boot-history.jsonl:
+
+- boot_id, recorded (wall time, UTC), clock_synced, uptime_s;
+- previous_shutdown: "unclean" when this boot's kernel log shows ext4 journal
+  recovery or orphan cleanup on the root filesystem (the previous run did not
+  shut down cleanly), "clean" when it shows the root mount without either,
+  and "unknown" when the root mount is no longer in the log;
+- fs_messages: the kernel lines that decided it;
+- previous_last_alive: when the app last wrote its heartbeat
+  (data/app-instance.json, refreshed every 30 seconds while it runs), which
+  dates the end of the previous run. Taken only when that file predates this
+  boot;
+- throttled: `vcgencmd get_throttled` at the time of the record.
+
+foodassistant-boot-record.service runs it with --at-boot early in every boot,
+before Docker and the app start, so the heartbeat file is still the previous
+run's. Without --at-boot (the updater runs it once on a device that has no
+record for the running boot yet) a heartbeat from this boot is left out.
+
+One line per boot, and nothing when the running boot is already recorded, so
+it writes the card once per boot. The file keeps the last 200 lines and is
+replaced atomically (temp file, fsync, rename). The host bridge adds the first
+sighting of an under-voltage or throttling flag to the running boot's line and
+serves the file to the app (GET /system/boot-history); both writers hold an
+flock on a lock file in /run, since there are two of them.
+
+Standard library only. Always exits 0: a boot never waits on it failing.
+"""
+from __future__ import annotations
+
+import fcntl
+import json
+import os
+import re
+import subprocess
+import sys
+import tempfile
+import time
+
+MAX_LINES = 200
+MAX_MESSAGES = 6
+SCHEMA = 1
+
+# ext4 lines that only appear when the filesystem was not unmounted cleanly:
+# its journal had to be replayed, or files deleted while still open had to be
+# cleaned up.
+UNCLEAN_RE = re.compile(
+    r"recovery required|recovery complete|starting recovery|recovering journal"
+    r"|orphan cleanup|orphan inodes? deleted|truncating inode",
+    re.IGNORECASE)
+MOUNT_RE = re.compile(r"mounted filesystem", re.IGNORECASE)
+
+
+def history_path():
+    return os.environ.get("BOOT_HISTORY", "/var/lib/foodassistant/boot-history.jsonl")
+
+
+def lock_path():
+    return os.environ.get("BOOT_HISTORY_LOCK", "/run/foodassistant-boot-history.lock")
+
+
+def heartbeat_path():
+    explicit = os.environ.get("HEARTBEAT_FILE")
+    if explicit:
+        return explicit
+    install = os.environ.get("INSTALL_DIR", "/opt/foodassistant")
+    return os.path.join(install, "data", "app-instance.json")
+
+
+def _read(path, limit=4096):
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            return f.read(limit)
+    except OSError:
+        return ""
+
+
+def iso(epoch):
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(epoch))
+
+
+# --- pure helpers -----------------------------------------------------------
+
+def classify_kernel_log(text, root_dev=""):
+    """(previous_shutdown, messages) from this boot's kernel log.
+
+    Only ext4 lines about the root filesystem count (any ext4 line when the
+    root device is not known). "unclean" when one of them shows recovery or
+    orphan cleanup, "clean" when the mount is there without either, else
+    "unknown" (the start of the log has rotated out)."""
+    tag = f"EXT4-fs ({root_dev})" if root_dev else "EXT4-fs ("
+    lines = [ln.strip() for ln in (text or "").splitlines() if tag in ln]
+    unclean = [ln for ln in lines if UNCLEAN_RE.search(ln)]
+    if unclean:
+        return "unclean", [ln[:200] for ln in unclean[:MAX_MESSAGES]]
+    if any(MOUNT_RE.search(ln) for ln in lines):
+        return "clean", []
+    return "unknown", []
+
+
+def last_alive(mtime, boot_epoch, at_boot):
+    """The previous run's last heartbeat (epoch) or None. At boot the file
+    cannot be from this run yet (the app starts later); otherwise a heartbeat
+    written since this boot says nothing about the previous run."""
+    if mtime is None:
+        return None
+    if at_boot or mtime < boot_epoch:
+        return mtime
+    return None
+
+
+def parse_history(text):
+    """The history's entries (dicts), skipping anything unreadable."""
+    out = []
+    for line in (text or "").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            d = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(d, dict):
+            out.append(d)
+    return out
+
+
+def add_entry(entries, entry, cap=MAX_LINES):
+    """entries with entry appended (keeping the last cap), or None when the
+    same boot is already recorded (the first record of a boot stands)."""
+    bid = entry.get("boot_id")
+    if bid and any(e.get("boot_id") == bid for e in entries):
+        return None
+    return (list(entries) + [entry])[-cap:]
+
+
+def render(entries):
+    return "".join(json.dumps(e, sort_keys=True, separators=(",", ":")) + "\n"
+                   for e in entries)
+
+
+# --- device probes ----------------------------------------------------------
+
+def boot_id():
+    return _read(os.environ.get("BOOT_ID_FILE", "/proc/sys/kernel/random/boot_id")).strip()
+
+
+def uptime():
+    try:
+        return float(_read(os.environ.get("UPTIME_FILE", "/proc/uptime")).split()[0])
+    except (IndexError, ValueError):
+        return None
+
+
+def root_device():
+    """The root filesystem's block device name (mmcblk0p2, sda2), from the
+    device number of /, which works even where /proc/mounts says /dev/root."""
+    explicit = os.environ.get("ROOT_DEV")
+    if explicit is not None:
+        return explicit
+    try:
+        st = os.stat("/")
+        link = f"/sys/dev/block/{os.major(st.st_dev)}:{os.minor(st.st_dev)}"
+        return os.path.basename(os.path.realpath(link)) if os.path.exists(link) else ""
+    except OSError:
+        return ""
+
+
+def _run(cmd, timeout):
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return r.stdout if r.returncode == 0 else ""
+
+
+def kernel_log():
+    """This boot's kernel messages: the journal first, the kernel's own ring
+    buffer when the journal has nothing."""
+    path = os.environ.get("BOOT_RECORD_KLOG")
+    if path:
+        return _read(path, 4 * 1024 * 1024)
+    text = _run(["journalctl", "-k", "-b", "-q", "-o", "cat", "--no-pager"], 30)
+    if "EXT4-fs" not in text:
+        text = _run(["dmesg"], 15) or text
+    return text
+
+
+def throttled():
+    out = _run([os.environ.get("VCGENCMD", "vcgencmd"), "get_throttled"], 5)
+    m = re.search(r"throttled=(0x[0-9a-fA-F]+|\d+)", out)
+    if not m:
+        return None
+    try:
+        return hex(int(m.group(1), 0))
+    except ValueError:
+        return None
+
+
+def heartbeat_mtime():
+    try:
+        return os.stat(heartbeat_path()).st_mtime
+    except OSError:
+        return None
+
+
+def clock_synced():
+    return os.path.exists(os.environ.get(
+        "TIMESYNC_FLAG", "/run/systemd/timesync/synchronized"))
+
+
+def build_entry(at_boot, now=None):
+    now = time.time() if now is None else now
+    up = uptime()
+    state, messages = classify_kernel_log(kernel_log(), root_device())
+    alive = last_alive(heartbeat_mtime(), now - (up or 0.0), at_boot)
+    return {
+        "v": SCHEMA,
+        "boot_id": boot_id(),
+        "recorded": iso(now),
+        "clock_synced": clock_synced(),
+        "uptime_s": round(up, 1) if up is not None else None,
+        "previous_shutdown": state,
+        "fs_messages": messages,
+        "previous_last_alive": iso(alive) if alive is not None else None,
+        "throttled": throttled(),
+    }
+
+
+# --- writing ----------------------------------------------------------------
+
+def write_atomic(path, text):
+    directory = os.path.dirname(path) or "."
+    os.makedirs(directory, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=directory, prefix="." + os.path.basename(path) + ".")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        os.chmod(tmp, 0o644)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+    try:
+        dfd = os.open(directory, os.O_RDONLY)
+        try:
+            os.fsync(dfd)
+        finally:
+            os.close(dfd)
+    except OSError:
+        pass
+
+
+def record(entry):
+    """Add entry to the history under the lock. True when it was written."""
+    lock = None
+    try:
+        lock = open(lock_path(), "a")
+        fcntl.flock(lock, fcntl.LOCK_EX)
+    except OSError:
+        lock = None  # no /run to lock in: one writer at boot, carry on
+    try:
+        path = history_path()
+        entries = add_entry(parse_history(_read(path, 1024 * 1024)), entry)
+        if entries is None:
+            return False
+        write_atomic(path, render(entries))
+        return True
+    finally:
+        if lock is not None:
+            lock.close()
+
+
+def main(argv=None):
+    argv = sys.argv[1:] if argv is None else argv
+    at_boot = "--at-boot" in argv
+    try:
+        entry = build_entry(at_boot)
+        if not entry["boot_id"]:
+            print("boot record: no boot id; nothing recorded", file=sys.stderr)
+            return 0
+        if record(entry):
+            print("boot record: " + json.dumps(entry, sort_keys=True))
+        else:
+            print("boot record: this boot is already recorded")
+    except Exception as e:  # noqa: BLE001 - never fail a boot
+        print(f"boot record: {type(e).__name__}: {e}", file=sys.stderr)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

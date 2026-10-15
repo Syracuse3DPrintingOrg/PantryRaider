@@ -1,0 +1,117 @@
+#!/usr/bin/env python3
+"""Read orientation from an Adafruit LSM6DSOX (product 4438) and apply KMS
+display rotation via foodassistant-set-rotation.
+
+Wiring (Raspberry Pi I2C-1):
+  SDA -> GPIO2 (pin 3)
+  SCL -> GPIO3 (pin 5)
+  VCC -> 3.3 V (pin 1)
+  GND -> GND (pin 6)
+  SDO -> GND (I2C address 0x6A, default) or 3.3 V (address 0x6B)
+
+Usage:
+  sudo python3 foodassistant-accel-rotation [--addr 0x6A] [--reboot]
+
+Run once at boot from the kiosk systemd unit (before cage launches) to
+auto-rotate the display based on how the Pi is physically mounted.
+
+Calibration notes:
+  The sensor is mounted on the same board as the display (or in a fixed
+  orientation relative to it). The axis-to-rotation mapping below assumes
+  the sensor's Z axis points away from the display surface, X axis points
+  right, and Y axis points up when the display is in its normal upright
+  position.  Adjust _detect_rotation() if your mounting differs.
+"""
+from __future__ import annotations
+
+import argparse
+import subprocess
+import sys
+
+
+def _read_accel(bus_num: int, addr: int) -> tuple[float, float, float]:
+    """Read one accelerometer sample from the LSM6DSOX. Returns (x, y, z) in g."""
+    try:
+        import smbus2  # type: ignore[import]
+    except ImportError:
+        sys.exit("smbus2 not installed: pip install smbus2 or apt install python3-smbus")
+
+    CTRL1_XL = 0x10
+    OUTX_L_XL = 0x28
+
+    with smbus2.SMBus(bus_num) as bus:
+        # Set accelerometer to 104 Hz ODR, +/-2 g
+        bus.write_byte_data(addr, CTRL1_XL, 0x40)
+        import time; time.sleep(0.05)
+
+        raw = bus.read_i2c_block_data(addr, OUTX_L_XL, 6)
+
+    def _s16(lo, hi):
+        v = (hi << 8) | lo
+        return v - 65536 if v >= 32768 else v
+
+    sx = _s16(raw[0], raw[1])
+    sy = _s16(raw[2], raw[3])
+    sz = _s16(raw[4], raw[5])
+    sensitivity = 0.061 / 1000  # mg/LSB for +/-2g -> convert to g
+    return sx * sensitivity, sy * sensitivity, sz * sensitivity
+
+
+def _detect_rotation(x: float, y: float, z: float) -> int:
+    """Map accelerometer vector to display rotation in degrees (0, 90, 180, 270).
+
+    Convention (adjust if sensor mounting differs):
+      - Display upright (normal): Y ~ +1 g          -> 0
+      - Display upside down:      Y ~ -1 g           -> 180
+      - Display rotated CW 90:    X ~ -1 g           -> 90
+      - Display rotated CCW 90 (CW 270): X ~ +1 g   -> 270
+    """
+    ax, ay, az = abs(x), abs(y), abs(z)
+    if az > ax and az > ay:
+        # Flat (face up or down): no meaningful rotation, keep current
+        return 0
+    if ay >= ax:
+        # Dominant Y axis
+        return 0 if y > 0 else 180
+    else:
+        # Dominant X axis
+        return 270 if x > 0 else 90
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Auto-rotate display from LSM6DSOX")
+    parser.add_argument("--addr", default="0x6A",
+                        help="I2C address of LSM6DSOX (default 0x6A)")
+    parser.add_argument("--bus", type=int, default=1,
+                        help="I2C bus number (default 1)")
+    parser.add_argument("--reboot", action="store_true",
+                        help="Reboot after applying rotation")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="Print detected rotation without applying it")
+    args = parser.parse_args()
+
+    addr = int(args.addr, 16) if args.addr.startswith("0x") else int(args.addr)
+
+    try:
+        x, y, z = _read_accel(args.bus, addr)
+    except OSError as e:
+        print(f"Could not read LSM6DSOX at bus={args.bus} addr={args.addr}: {e}",
+              file=sys.stderr)
+        sys.exit(1)
+
+    rotation = _detect_rotation(x, y, z)
+    print(f"Accelerometer: x={x:.2f}g y={y:.2f}g z={z:.2f}g -> rotation={rotation}")
+
+    if args.dry_run:
+        return
+
+    cmd = ["/usr/local/bin/foodassistant-set-rotation", str(rotation)]
+    if args.reboot:
+        cmd.append("--reboot")
+
+    result = subprocess.run(cmd)
+    sys.exit(result.returncode)
+
+
+if __name__ == "__main__":
+    main()

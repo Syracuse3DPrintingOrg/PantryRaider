@@ -1,0 +1,131 @@
+name: Verify the release signature
+
+# The one release signature check, called by every workflow that publishes
+# something the fleet or a user downloads: publish-image.yml (the container
+# image), release-image.yml (the SD image and install.sh on a release) and
+# build-cub-firmware.yml (the Cub firmware on a release). Their publishing jobs
+# list this job under needs:, so nothing is pushed or attached for a ref the
+# release key did not sign.
+#
+# The release keys are pinned in this file and nowhere else in CI. A tag must
+# be an annotated tag object signed by one of them, named for the ref, pointing
+# at the checked-out commit, with a matching APP_VERSION. Any other ref needs a
+# signed commit.
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: "The ref to verify, e.g. refs/tags/v0.21.0 or refs/heads/main"
+        required: true
+        type: string
+      sha:
+        description: "The commit the caller builds from; blank checks out the ref itself"
+        required: false
+        type: string
+        default: ""
+      enforce:
+        description: "False for a run that publishes nothing: the job passes without checking"
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Release signature
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        if: inputs.enforce
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          ref: ${{ inputs.sha || inputs.ref }}
+
+      - name: Verify the release signature
+        if: inputs.enforce
+        env:
+          REF: ${{ inputs.ref }}
+        run: |
+          set -euo pipefail
+          signers=scripts/release-signers
+
+          # The release keys are pinned here too, one per line, in the same
+          # order as the key lines of scripts/release-signers. Otherwise a
+          # pushed commit could add its own key to that file and vouch for
+          # itself; this way, trusting another key also means editing this
+          # workflow.
+          pinned="$(cat <<'PINNED'
+          pantryraider-release namespaces="git,pantryraider-release" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHPWzaAihzRx7Y9JlXotaZfO0drDTOT/lXxvoePF82rd
+          PINNED
+          )"
+          if [ "$({ grep -vE '^[[:space:]]*(#|$)' "$signers" || true; })" != "$pinned" ]; then
+            echo "::error::$signers does not match the release key pinned in this workflow."
+            exit 1
+          fi
+
+          # Check a raw tag object: split it at its last SSH signature block
+          # (as git does), verify the payload with ssh-keygen, and require the
+          # tag's own name to be $2. Needs only ssh-keygen, no git.
+          verify_tag_object() {
+            local obj="$1" want="$2" signers="$3" dir n name
+            dir="$(mktemp -d)"
+            n="$({ grep -n -x -e '-----BEGIN SSH SIGNATURE-----' "$obj" || true; } | tail -n 1 | cut -d: -f1)"
+            if [ -z "$n" ]; then
+              echo "::error::Tag $want carries no SSH signature."
+              return 1
+            fi
+            head -n "$((n - 1))" "$obj" > "$dir/payload"
+            tail -n "+$n" "$obj" > "$dir/sig"
+            if ! ssh-keygen -Y verify -f "$signers" -I pantryraider-release -n git \
+                -s "$dir/sig" < "$dir/payload"; then
+              echo "::error::Tag $want is not signed by a key in $signers."
+              return 1
+            fi
+            name="$(awk 'NF == 0 { exit } /^tag / { print substr($0, 5) }' "$dir/payload")"
+            if [ "$name" != "$want" ]; then
+              echo "::error::The signed tag is named '$name', not '$want'."
+              return 1
+            fi
+          }
+
+          case "$REF" in
+            refs/tags/*)
+              tag="${REF#refs/tags/}"
+              # actions/checkout can hand over a lightweight ref, so fetch the
+              # tag object itself and insist that it is one.
+              git fetch --no-tags --depth=1 origin "+$REF:$REF"
+              if [ "$(git cat-file -t "$REF")" != tag ]; then
+                echo "::error::$tag is not an annotated tag."
+                exit 1
+              fi
+              obj="$(mktemp)"
+              git cat-file tag "$REF" > "$obj"
+              verify_tag_object "$obj" "$tag" "$signers"
+              if [ "$(git rev-parse "$REF^{commit}")" != "$(git rev-parse HEAD)" ]; then
+                echo "::error::The checked-out commit is not the one $tag points at."
+                exit 1
+              fi
+              version="$(grep -oE 'APP_VERSION = "[0-9.]+"' service/app/config.py | grep -oE '[0-9.]+')"
+              if [ "v$version" != "$tag" ]; then
+                echo "::error::$tag does not match APP_VERSION $version."
+                exit 1
+              fi
+              echo "Tag $tag verified against $signers."
+              ;;
+            *)
+              if ! git -c gpg.ssh.allowedSignersFile="$signers" verify-commit HEAD; then
+                echo "::error::HEAD is not signed by a key in $signers."
+                exit 1
+              fi
+              echo "Commit $(git rev-parse --short HEAD) verified against $signers."
+              ;;
+          esac
+
+      - name: Nothing to verify
+        if: ${{ !inputs.enforce }}
+        run: echo "This run publishes no release assets, so there is no signature to check."

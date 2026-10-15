@@ -1,0 +1,277 @@
+{
+  "generated_by": "scripts/compat/capture-ha-component-requests.py",
+  "versions": [
+    {
+      "calls": [
+        {
+          "client_method": "async_get_state",
+          "headers": [],
+          "json": null,
+          "keyed": false,
+          "method": "GET",
+          "path": "/ha/state",
+          "version": "c9517f9"
+        },
+        {
+          "client_method": "async_post_settings",
+          "headers": [],
+          "json": {
+            "display_idle_timeout": 10
+          },
+          "keyed": false,
+          "method": "POST",
+          "path": "/ha/settings",
+          "version": "c9517f9"
+        },
+        {
+          "client_method": "async_get_state",
+          "headers": [
+            "X-API-Key"
+          ],
+          "json": null,
+          "keyed": true,
+          "method": "GET",
+          "path": "/ha/state",
+          "version": "c9517f9"
+        },
+        {
+          "client_method": "async_post_settings",
+          "headers": [
+            "X-API-Key"
+          ],
+          "json": {
+            "display_idle_timeout": 10
+          },
+          "keyed": true,
+          "method": "POST",
+          "path": "/ha/settings",
+          "version": "c9517f9"
+        }
+      ],
+      "version": "c9517f9"
+    },
+    {
+      "calls": [
+        {
+          "client_method": "async_get_state",
+          "headers": [],
+          "json": null,
+          "keyed": false,
+          "method": "GET",
+          "path": "/ha/state",
+          "version": "v0.20.0"
+        },
+        {
+          "client_method": "async_post_settings",
+          "headers": [],
+          "json": {
+            "display_idle_timeout": 10
+          },
+          "keyed": false,
+          "method": "POST",
+          "path": "/ha/settings",
+          "version": "v0.20.0"
+        },
+        {
+          "client_method": "async_display_action",
+          "headers": [],
+          "json": {
+            "action": "wake"
+          },
+          "keyed": false,
+          "method": "POST",
+          "path": "/ha/display",
+          "version": "v0.20.0"
+        },
+        {
+          "client_method": "async_notify",
+          "headers": [],
+          "json": {
+            "level": "info",
+            "message": "Dinner is ready",
+            "timeout": 0,
+            "title": "Kitchen"
+          },
+          "keyed": false,
+          "method": "POST",
+          "path": "/events/notify",
+          "version": "v0.20.0"
+        },
+        {
+          "client_method": "async_camera_popup",
+          "headers": [],
+          "json": {
+            "camera": "Front Door",
+            "seconds": 20
+          },
+          "keyed": false,
+          "method": "POST",
+          "path": "/events/camera-popup",
+          "version": "v0.20.0"
+        },
+        {
+          "client_method": "async_camera_detect",
+          "headers": [],
+          "json": {
+            "camera": "Front Door",
+            "detection_type": "person",
+            "seconds": 0
+          },
+          "keyed": false,
+          "method": "POST",
+          "path": "/events/camera-detect",
+          "version": "v0.20.0"
+        },
+        {
+          "client_method": "async_connect",
+          "headers": [],
+          "json": {
+            "base_url": "http://192.168.1.40:8123",
+            "token": "<ha-token>"
+          },
+          "keyed": false,
+          "method": "POST",
+          "path": "/ha/connect",
+          "version": "v0.20.0"
+        },
+        {
+          "client_method": "async_request_pairing",
+          "headers": [],
+          "json": {
+            "hostname": "Home Assistant"
+          },
+          "keyed": false,
+          "method": "POST",
+          "path": "/api/pairing/request",
+          "version": "v0.20.0"
+        },
+        {
+          "client_method": "async_pairing_status",
+          "headers": [],
+          "json": null,
+          "keyed": false,
+          "method": "GET",
+          "path": "/api/pairing/status/req-1",
+          "version": "v0.20.0"
+        },
+        {
+          "client_method": "async_get_state",
+          "headers": [
+            "X-API-Key"
+          ],
+          "json": null,
+          "keyed": true,
+          "method": "GET",
+          "path": "/ha/state",
+          "version": "v0.20.0"
+        },
+        {
+          "client_method": "async_post_settings",
+          "headers": [
+            "X-API-Key"
+          ],
+          "json": {
+            "display_idle_timeout": 10
+          },
+          "keyed": true,
+          "method": "POST",
+          "path": "/ha/settings",
+          "version": "v0.20.0"
+        },
+        {
+          "client_method": "async_display_action",
+          "headers": [
+            "X-API-Key"
+          ],
+          "json": {
+            "action": "wake"
+          },
+          "keyed": true,
+          "method": "POST",
+          "path": "/ha/display",
+          "version": "v0.20.0"
+        },
+        {
+          "client_method": "async_notify",
+          "headers": [
+            "X-API-Key"
+          ],
+          "json": {
+            "level": "info",
+            "message": "Dinner is ready",
+            "timeout": 0,
+            "title": "Kitchen"
+          },
+          "keyed": true,
+          "method": "POST",
+          "path": "/events/notify",
+          "version": "v0.20.0"
+        },
+        {
+          "client_method": "async_camera_popup",
+          "headers": [
+            "X-API-Key"
+          ],
+          "json": {
+            "camera": "Front Door",
+            "seconds": 20
+          },
+          "keyed": true,
+          "method": "POST",
+          "path": "/events/camera-popup",
+          "version": "v0.20.0"
+        },
+        {
+          "client_method": "async_camera_detect",
+          "headers": [
+            "X-API-Key"
+          ],
+          "json": {
+            "camera": "Front Door",
+            "detection_type": "person",
+            "seconds": 0
+          },
+          "keyed": true,
+          "method": "POST",
+          "path": "/events/camera-detect",
+          "version": "v0.20.0"
+        },
+        {
+          "client_method": "async_connect",
+          "headers": [
+            "X-API-Key"
+          ],
+          "json": {
+            "base_url": "http://192.168.1.40:8123",
+            "token": "<ha-token>"
+          },
+          "keyed": true,
+          "method": "POST",
+          "path": "/ha/connect",
+          "version": "v0.20.0"
+        },
+        {
+          "client_method": "async_request_pairing",
+          "headers": [],
+          "json": {
+            "hostname": "Home Assistant"
+          },
+          "keyed": true,
+          "method": "POST",
+          "path": "/api/pairing/request",
+          "version": "v0.20.0"
+        },
+        {
+          "client_method": "async_pairing_status",
+          "headers": [],
+          "json": null,
+          "keyed": true,
+          "method": "GET",
+          "path": "/api/pairing/status/req-1",
+          "version": "v0.20.0"
+        }
+      ],
+      "version": "v0.20.0"
+    }
+  ]
+}
