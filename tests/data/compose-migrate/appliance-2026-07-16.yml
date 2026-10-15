@@ -1,0 +1,130 @@
+# FoodAssistant appliance compose
+# ================================
+# Adapted from docker-compose.prod.yml for the SD-card image. It is dropped
+# into INSTALL_DIR by the first-boot provisioner (firstboot.sh), which also
+# writes a .env beside it from image/config.env. Optional backends are gated
+# behind compose profiles, toggled by ENABLE_MEALIE / ENABLE_OLLAMA.
+#
+# Differences from docker-compose.prod.yml:
+#   - Grocy runs by default (no profile): the appliance is useless without it.
+#   - Mealie/Ollama still profile-gated (with-mealie / with-ollama).
+services:
+  service:
+    image: ghcr.io/syracuse3dprintingorg/pantryraider:${FOODASSISTANT_TAG:-latest}
+    # Local-source fallback: if the GHCR pull fails (image not yet public, no
+    # auth, or no internet), run "docker compose build service" to build from the
+    # on-device clone at REPO_DIR (default /home/foodassistant/FoodAssistant).
+    # firstboot.sh tries the pull first and falls back to this build context
+    # automatically. The build: block is ignored when the image pulls cleanly.
+    build:
+      context: ${REPO_DIR:-/home/foodassistant/FoodAssistant}
+      dockerfile: service/Dockerfile
+    container_name: foodassistant-service
+    # Host networking lets the kiosk browser and local daemons (stream deck)
+    # reach the API as 127.0.0.1 inside the container, enabling the auth
+    # bypass for on-device clients without needing a password or API key.
+    # Side effect: Grocy must be reached via localhost:9383, not by container
+    # name. Set GROCY_BASE_URL=http://localhost:9383 (or use /setup).
+    network_mode: "host"
+    # --no-proxy-headers: with host networking the app trusts a loopback client
+    # for the password-free kiosk, so uvicorn must not rewrite the client from a
+    # spoofable X-Forwarded-For (which would be an auth bypass). The app never
+    # reads that header. See service/Dockerfile.
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "9284", "--no-proxy-headers"]
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      - TZ=${TZ:-America/New_York}
+      - FOODASSISTANT_FORCE_MODEL=Raspberry Pi
+    volumes:
+      - ./data:/app/data
+      # Touch calibration runs evtest against the panel's input device, so the
+      # container needs to read /dev/input/event*. The container runs as root,
+      # so the bind mount plus the input-class device cgroup rule below grants
+      # read access (FoodAssistant-mox4). A Pi with any display always has
+      # /dev/input (HDMI alone creates CEC input devices), so the mount source
+      # exists.
+      - /dev/input:/dev/input
+    device_cgroup_rules:
+      - 'c 13:* rmw'   # char major 13 = /dev/input/* (event, mouse, js)
+    restart: unless-stopped
+    depends_on:
+      grocy:
+        condition: service_started
+        required: false
+
+  grocy:
+    image: lscr.io/linuxserver/grocy:4.6.0   # pinned; matches docker-compose.prod.yml
+    container_name: foodassistant-grocy
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=${TZ:-America/New_York}
+    volumes:
+      - ./grocy:/config
+    ports:
+      - "9383:80"
+    restart: unless-stopped
+
+  mealie:
+    image: ghcr.io/mealie-recipes/mealie:v3.19.2   # pinned; matches docker-compose.prod.yml
+    container_name: foodassistant-mealie
+    profiles: ["with-mealie"]
+    environment:
+      - TZ=${TZ:-America/New_York}
+      - ALLOW_SIGNUP=false
+      - BASE_URL=http://localhost:9285
+    volumes:
+      - ./mealie:/app/data
+    ports:
+      - "9285:9000"
+    restart: unless-stopped
+
+  ollama:
+    image: ollama/ollama:0.30.8   # pinned; matches docker-compose.prod.yml
+    container_name: foodassistant-ollama
+    profiles: ["with-ollama"]
+    volumes:
+      - ./ollama:/root/.ollama
+    ports:
+      - "11434:11434"
+    restart: unless-stopped
+
+  # Optional Beszel monitoring hub (FoodAssistant-4kz2), matches
+  # docker-compose.prod.yml. Off by default; turn it on with:
+  #   docker compose --profile with-beszel up -d
+  # First run: open http://THIS-PI:8090, create the admin account, then add a
+  # system pointing at the beszel-agent container (host "beszel-agent", port
+  # 45876) to get its pairing token, and paste the hub URL into
+  # Settings > Resources in the app.
+  beszel:
+    image: henrygd/beszel:0.12.1   # pinned; check github.com/henrygd/beszel/releases before bumping
+    container_name: foodassistant-beszel
+    profiles: ["with-beszel"]
+    environment:
+      - TZ=${TZ:-America/New_York}
+    volumes:
+      - ./beszel:/beszel_data
+    ports:
+      - "8090:8090"
+    restart: unless-stopped
+
+  # Reports this Pi's own metrics to the hub above. Host networking and PID
+  # namespace, plus a read-only bind of the host root filesystem, are needed
+  # for it to see the real hardware; opt in only if you want this appliance
+  # monitored. BESZEL_AGENT_KEY is the pairing key the hub shows when you add
+  # this system; set it in .env rather than editing this file.
+  beszel-agent:
+    image: henrygd/beszel-agent:0.12.1   # pinned; check github.com/henrygd/beszel/releases before bumping
+    container_name: foodassistant-beszel-agent
+    profiles: ["with-beszel"]
+    network_mode: host
+    pid: host
+    environment:
+      - TZ=${TZ:-America/New_York}
+      - KEY=${BESZEL_AGENT_KEY:-}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /:/host:ro
+    restart: unless-stopped

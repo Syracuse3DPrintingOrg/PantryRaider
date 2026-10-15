@@ -1,0 +1,2366 @@
+{
+ "admin_json/gzip": {
+  "status": 200,
+  "headers": [
+   [
+    "content-length",
+    "*"
+   ],
+   [
+    "content-type",
+    "application/json"
+   ],
+   [
+    "x-frame-options",
+    "SAMEORIGIN"
+   ],
+   [
+    "x-content-type-options",
+    "nosniff"
+   ],
+   [
+    "referrer-policy",
+    "same-origin"
+   ],
+   [
+    "content-security-policy",
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+   ],
+   [
+    "vary",
+    "Cookie"
+   ]
+  ]
+ },
+ "admin_json/identity": {
+  "status": 200,
+  "headers": [
+   [
+    "content-length",
+    "*"
+   ],
+   [
+    "content-type",
+    "application/json"
+   ],
+   [
+    "x-frame-options",
+    "SAMEORIGIN"
+   ],
+   [
+    "x-content-type-options",
+    "nosniff"
+   ],
+   [
+    "referrer-policy",
+    "same-origin"
+   ],
+   [
+    "content-security-policy",
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+   ],
+   [
+    "vary",
+    "Cookie"
+   ]
+  ]
+ },
+ "admin_page/gzip": {
+  "status": 200,
+  "headers": [
+   [
+    "content-length",
+    "*"
+   ],
+   [
+    "content-type",
+    "text/html; charset=utf-8"
+   ],
+   [
+    "x-frame-options",
+    "SAMEORIGIN"
+   ],
+   [
+    "x-content-type-options",
+    "nosniff"
+   ],
+   [
+    "referrer-policy",
+    "same-origin"
+   ],
+   [
+    "content-security-policy",
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+   ],
+   [
+    "vary",
+    "Cookie, Accept-Encoding"
+   ],
+   [
+    "content-encoding",
+    "gzip"
+   ]
+  ]
+ },
+ "admin_page/identity": {
+  "status": 200,
+  "headers": [
+   [
+    "content-length",
+    "*"
+   ],
+   [
+    "content-type",
+    "text/html; charset=utf-8"
+   ],
+   [
+    "x-frame-options",
+    "SAMEORIGIN"
+   ],
+   [
+    "x-content-type-options",
+    "nosniff"
+   ],
+   [
+    "referrer-policy",
+    "same-origin"
+   ],
+   [
+    "content-security-policy",
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+   ],
+   [
+    "vary",
+    "Cookie, Accept-Encoding"
+   ]
+  ]
+ },
+ "admin_tls_json/gzip": {
+  "status": 200,
+  "headers": [
+   [
+    "content-length",
+    "*"
+   ],
+   [
+    "content-type",
+    "application/json"
+   ],
+   [
+    "x-frame-options",
+    "SAMEORIGIN"
+   ],
+   [
+    "x-content-type-options",
+    "nosniff"
+   ],
+   [
+    "referrer-policy",
+    "same-origin"
+   ],
+   [
+    "content-security-policy",
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+   ],
+   [
+    "vary",
+    "Cookie"
+   ]
+  ]
+ },
+ "admin_tls_json/identity": {
+  "status": 200,
+  "headers": [
+   [
+    "content-length",
+    "*"
+   ],
+   [
+    "content-type",
+    "application/json"
+   ],
+   [
+    "x-frame-options",
+    "SAMEORIGIN"
+   ],
+   [
+    "x-content-type-options",
+    "nosniff"
+   ],
+   [
+    "referrer-policy",
+    "same-origin"
+   ],
+   [
+    "content-security-policy",
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+   ],
+   [
+    "vary",
+    "Cookie"
+   ]
+  ]
+ },
+ "anon_head_health/gzip": {
+  "status": 405,
+  "headers": [
+   [
+    "allow",
+    "GET"
+   ],
+   [
+    "content-length",
+    "*"
+   ],
+   [
+    "content-type",
+    "application/json"
+   ],
+   [
+    "x-frame-options",
+    "SAMEORIGIN"
+   ],
+   [
+    "x-content-type-options",
+    "nosniff"
+   ],
+   [
+    "referrer-policy",
+    "same-origin"
+   ],
+   [
+    "content-security-policy",
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+   ],
+   [
+    "vary",
+    "Cookie"
+   ]
+  ]
+ },
+ "anon_head_health/identity": {
+  "status": 405,
+  "headers": [
+   [
+    "allow",
+    "GET"
+   ],
+   [
+    "content-length",
+    "*"
+   ],
+   [
+    "content-type",
+    "application/json"
+   ],
+   [
+    "x-frame-options",
+    "SAMEORIGIN"
+   ],
+   [
+    "x-content-type-options",
+    "nosniff"
+   ],
+   [
+    "referrer-policy",
+    "same-origin"
+   ],
+   [
+    "content-security-policy",
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+   ],
+   [
+    "vary",
+    "Cookie"
+   ]
+  ]
+ },
+ "anon_health/gzip": {
+  "status": 200,
+  "headers": [
+   [
+    "content-length",
+    "*"
+   ],
+   [
+    "content-type",
+    "application/json"
+   ],
+   [
+    "x-frame-options",
+    "SAMEORIGIN"
+   ],
+   [
+    "x-content-type-options",
+    "nosniff"
+   ],
+   [
+    "referrer-policy",
+    "same-origin"
+   ],
+   [
+    "content-security-policy",
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+   ],
+   [
+    "vary",
+    "Cookie"
+   ]
+  ]
+ },
+ "anon_health/identity": {
+  "status": 200,
+  "headers": [
+   [
+    "content-length",
+    "*"
+   ],
+   [
+    "content-type",
+    "application/json"
+   ],
+   [
+    "x-frame-options",
+    "SAMEORIGIN"
+   ],
+   [
+    "x-content-type-options",
+    "nosniff"
+   ],
+   [
+    "referrer-policy",
+    "same-origin"
+   ],
+   [
+    "content-security-policy",
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+   ],
+   [
+    "vary",
+    "Cookie"
+   ]
+  ]
+ },
+ "anon_json_refused/gzip": {
+  "status": 401,
+  "headers": [
+   [
+    "content-length",
+    "*"
+   ],
+   [
+    "content-type",
+    "application/json"
+   ],
+   [
+    "x-frame-options",
+    "SAMEORIGIN"
+   ],
+   [
+    "x-content-type-options",
+    "nosniff"
+   ],
+   [
+    "referrer-policy",
+    "same-origin"
+   ],
+   [
+    "content-security-policy",
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+   ],
+   [
+    "vary",
+    "Cookie"
+   ]
+  ]
+ },
+ "anon_json_refused/identity": {
+  "status": 401,
+  "headers": [
+   [
+    "content-length",
+    "*"
+   ],
+   [
+    "content-type",
+    "application/json"
+   ],
+   [
+    "x-frame-options",
+    "SAMEORIGIN"
+   ],
+   [
+    "x-content-type-options",
+    "nosniff"
+   ],
+   [
+    "referrer-policy",
+    "same-origin"
+   ],
+   [
+    "content-security-policy",
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+   ],
+   [
+    "vary",
+    "Cookie"
+   ]
+  ]
+ },
+ "anon_login_page/gzip": {
+  "status": 200,
+  "headers": [
+   [
+    "content-length",
+    "*"
+   ],
+   [
+    "content-type",
+    "text/html; charset=utf-8"
+   ],
+   [
+    "x-frame-options",
+    "SAMEORIGIN"
+   ],
+   [
+    "x-content-type-options",
+    "nosniff"
+   ],
+   [
+    "referrer-policy",
+    "same-origin"
+   ],
+   [
+    "content-security-policy",
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+   ],
+   [
+    "vary",
+    "Cookie, Accept-Encoding"
+   ],
+   [
+    "content-encoding",
+    "gzip"
+   ]
+  ]
+ },
+ "anon_login_page/identity": {
+  "status": 200,
+  "headers": [
+   [
+    "content-length",
+    "*"
+   ],
+   [
+    "content-type",
+    "text/html; charset=utf-8"
+   ],
+   [
+    "x-frame-options",
+    "SAMEORIGIN"
+   ],
+   [
+    "x-content-type-options",
+    "nosniff"
+   ],
+   [
+    "referrer-policy",
+    "same-origin"
+   ],
+   [
+    "content-security-policy",
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+   ],
+   [
+    "vary",
+    "Cookie, Accept-Encoding"
+   ]
+  ]
+ },
+ "anon_not_found/gzip": {
+  "status": 401,
+  "headers": [
+   [
+    "content-length",
+    "*"
+   ],
+   [
+    "content-type",
+    "application/json"
+   ],
+   [
+    "x-frame-options",
+    "SAMEORIGIN"
+   ],
+   [
+    "x-content-type-options",
+    "nosniff"
+   ],
+   [
+    "referrer-policy",
+    "same-origin"
+   ],
+   [
+    "content-security-policy",
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+   ],
+   [
+    "vary",
+    "Cookie"
+   ]
+  ]
+ },
+ "anon_not_found/identity": {
+  "status": 401,
+  "headers": [
+   [
+    "content-length",
+    "*"
+   ],
+   [
+    "content-type",
+    "application/json"
+   ],
+   [
+    "x-frame-options",
+    "SAMEORIGIN"
+   ],
+   [
+    "x-content-type-options",
+    "nosniff"
+   ],
+   [
+    "referrer-policy",
+    "same-origin"
+   ],
+   [
+    "content-security-policy",
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+   ],
+   [
+    "vary",
+    "Cookie"
+   ]
+  ]
+ },
+ "anon_page_redirects_to_login/gzip": {
+  "status": 303,
+  "headers": [
+   [
+    "content-length",
+    "*"
+   ],
+   [
+    "location",
+    "/ui/login"
+   ],
+   [
+    "x-frame-options",
+    "SAMEORIGIN"
+   ],
+   [
+    "x-content-type-options",
+    "nosniff"
+   ],
+   [
+    "referrer-policy",
+    "same-origin"
+   ],
+   [
+    "content-security-policy",
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+   ],
+   [
+    "vary",
+    "Cookie"
+   ]
+  ]
+ },
+ "anon_page_redirects_to_login/identity": {
+  "status": 303,
+  "headers": [
+   [
+    "content-length",
+    "*"
+   ],
+   [
+    "location",
+    "/ui/login"
+   ],
+   [
+    "x-frame-options",
+    "SAMEORIGIN"
+   ],
+   [
+    "x-content-type-options",
+    "nosniff"
+   ],
+   [
+    "referrer-policy",
+    "same-origin"
+   ],
+   [
+    "content-security-policy",
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+   ],
+   [
+    "vary",
+    "Cookie"
+   ]
+  ]
+ },
+ "anon_root/gzip": {
+  "status": 303,
+  "headers": [
+   [
+    "content-length",
+    "*"
+   ],
+   [
+    "location",
+    "/ui/"
+   ],
+   [
+    "x-frame-options",
+    "SAMEORIGIN"
+   ],
+   [
+    "x-content-type-options",
+    "nosniff"
+   ],
+   [
+    "referrer-policy",
+    "same-origin"
+   ],
+   [
+    "content-security-policy",
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+   ],
+   [
+    "vary",
+    "Cookie"
+   ]
+  ]
+ },
+ "anon_root/identity": {
+  "status": 303,
+  "headers": [
+   [
+    "content-length",
+    "*"
+   ],
+   [
+    "location",
+    "/ui/"
+   ],
+   [
+    "x-frame-options",
+    "SAMEORIGIN"
+   ],
+   [
+    "x-content-type-options",
+    "nosniff"
+   ],
+   [
+    "referrer-policy",
+    "same-origin"
+   ],
+   [
+    "content-security-policy",
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+   ],
+   [
+    "vary",
+    "Cookie"
+   ]
+  ]
+ },
+ "anon_write_refused/gzip": {
+  "status": 401,
+  "headers": [
+   [
+    "content-length",
+    "*"
+   ],
+   [
+    "content-type",
+    "application/json"
+   ],
+   [
+    "x-frame-options",
+    "SAMEORIGIN"
+   ],
+   [
+    "x-content-type-options",
+    "nosniff"
+   ],
+   [
+    "referrer-policy",
+    "same-origin"
+   ],
+   [
+    "content-security-policy",
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+   ],
+   [
+    "vary",
+    "Cookie"
+   ]
+  ]
+ },
+ "anon_write_refused/identity": {
+  "status": 401,
+  "headers": [
+   [
+    "content-length",
+    "*"
+   ],
+   [
+    "content-type",
+    "application/json"
+   ],
+   [
+    "x-frame-options",
+    "SAMEORIGIN"
+   ],
+   [
+    "x-content-type-options",
+    "nosniff"
+   ],
+   [
+    "referrer-policy",
+    "same-origin"
+   ],
+   [
+    "content-security-policy",
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+   ],
+   [
+    "vary",
+    "Cookie"
+   ]
+  ]
+ },
+ "bad_key_json/gzip": {
+  "status": 401,
+  "headers": [
+   [
+    "content-length",
+    "*"
+   ],
+   [
+    "content-type",
+    "application/json"
+   ],
+   [
+    "x-frame-options",
+    "SAMEORIGIN"
+   ],
+   [
+    "x-content-type-options",
+    "nosniff"
+   ],
+   [
+    "referrer-policy",
+    "same-origin"
+   ],
+   [
+    "content-security-policy",
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+   ],
+   [
+    "vary",
+    "Cookie"
+   ]
+  ]
+ },
+ "bad_key_json/identity": {
+  "status": 401,
+  "headers": [
+   [
+    "content-length",
+    "*"
+   ],
+   [
+    "content-type",
+    "application/json"
+   ],
+   [
+    "x-frame-options",
+    "SAMEORIGIN"
+   ],
+   [
+    "x-content-type-options",
+    "nosniff"
+   ],
+   [
+    "referrer-policy",
+    "same-origin"
+   ],
+   [
+    "content-security-policy",
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+   ],
+   [
+    "vary",
+    "Cookie"
+   ]
+  ]
+ },
+ "camera_path_never_gzipped/gzip": {
+  "status": 404,
+  "headers": [
+   [
+    "content-length",
+    "*"
+   ],
+   [
+    "content-type",
+    "application/json"
+   ],
+   [
+    "x-frame-options",
+    "SAMEORIGIN"
+   ],
+   [
+    "x-content-type-options",
+    "nosniff"
+   ],
+   [
+    "referrer-policy",
+    "same-origin"
+   ],
+   [
+    "content-security-policy",
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+   ],
+   [
+    "vary",
+    "Cookie"
+   ]
+  ]
+ },
+ "camera_path_never_gzipped/identity": {
+  "status": 404,
+  "headers": [
+   [
+    "content-length",
+    "*"
+   ],
+   [
+    "content-type",
+    "application/json"
+   ],
+   [
+    "x-frame-options",
+    "SAMEORIGIN"
+   ],
+   [
+    "x-content-type-options",
+    "nosniff"
+   ],
+   [
+    "referrer-policy",
+    "same-origin"
+   ],
+   [
+    "content-security-policy",
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+   ],
+   [
+    "vary",
+    "Cookie"
+   ]
+  ]
+ },
+ "cross_site_write/gzip": {
+  "status": 403,
+  "headers": [
+   [
+    "content-length",
+    "*"
+   ],
+   [
+    "content-type",
+    "application/json"
+   ]
+  ]
+ },
+ "cross_site_write/identity": {
+  "status": 403,
+  "headers": [
+   [
+    "content-length",
+    "*"
+   ],
+   [
+    "content-type",
+    "application/json"
+   ]
+  ]
+ },
+ "demo_write_html/gzip": {
+  "status": 303,
+  "headers": [
+   [
+    "content-length",
+    "*"
+   ],
+   [
+    "location",
+    "/ui/timers?msg=This+is+a+live+demo%2C+changes+are+turned+off+here.&msg_type=warning"
+   ],
+   [
+    "x-frame-options",
+    "SAMEORIGIN"
+   ],
+   [
+    "x-content-type-options",
+    "nosniff"
+   ],
+   [
+    "referrer-policy",
+    "same-origin"
+   ],
+   [
+    "content-security-policy",
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+   ]
+  ]
+ },
+ "demo_write_html/identity": {
+  "status": 303,
+  "headers": [
+   [
+    "content-length",
+    "*"
+   ],
+   [
+    "location",
+    "/ui/timers?msg=This+is+a+live+demo%2C+changes+are+turned+off+here.&msg_type=warning"
+   ],
+   [
+    "x-frame-options",
+    "SAMEORIGIN"
+   ],
+   [
+    "x-content-type-options",
+    "nosniff"
+   ],
+   [
+    "referrer-policy",
+    "same-origin"
+   ],
+   [
+    "content-security-policy",
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+   ]
+  ]
+ },
+ "demo_write_json/gzip": {
+  "status": 403,
+  "headers": [
+   [
+    "content-length",
+    "*"
+   ],
+   [
+    "content-type",
+    "application/json"
+   ],
+   [
+    "x-frame-options",
+    "SAMEORIGIN"
+   ],
+   [
+    "x-content-type-options",
+    "nosniff"
+   ],
+   [
+    "referrer-policy",
+    "same-origin"
+   ],
+   [
+    "content-security-policy",
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+   ]
+  ]
+ },
+ "demo_write_json/identity": {
+  "status": 403,
+  "headers": [
+   [
+    "content-length",
+    "*"
+   ],
+   [
+    "content-type",
+    "application/json"
+   ],
+   [
+    "x-frame-options",
+    "SAMEORIGIN"
+   ],
+   [
+    "x-content-type-options",
+    "nosniff"
+   ],
+   [
+    "referrer-policy",
+    "same-origin"
+   ],
+   [
+    "content-security-policy",
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+   ]
+  ]
+ },
+ "key_json/gzip": {
+  "status": 200,
+  "headers": [
+   [
+    "content-length",
+    "*"
+   ],
+   [
+    "content-type",
+    "application/json"
+   ],
+   [
+    "x-frame-options",
+    "SAMEORIGIN"
+   ],
+   [
+    "x-content-type-options",
+    "nosniff"
+   ],
+   [
+    "referrer-policy",
+    "same-origin"
+   ],
+   [
+    "content-security-policy",
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+   ]
+  ]
+ },
+ "key_json/identity": {
+  "status": 200,
+  "headers": [
+   [
+    "content-length",
+    "*"
+   ],
+   [
+    "content-type",
+    "application/json"
+   ],
+   [
+    "x-frame-options",
+    "SAMEORIGIN"
+   ],
+   [
+    "x-content-type-options",
+    "nosniff"
+   ],
+   [
+    "referrer-policy",
+    "same-origin"
+   ],
+   [
+    "content-security-policy",
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+   ]
+  ]
+ },
+ "kiosk_json/gzip": {
+  "status": 200,
+  "headers": [
+   [
+    "content-length",
+    "*"
+   ],
+   [
+    "content-type",
+    "application/json"
+   ],
+   [
+    "x-frame-options",
+    "SAMEORIGIN"
+   ],
+   [
+    "x-content-type-options",
+    "nosniff"
+   ],
+   [
+    "referrer-policy",
+    "same-origin"
+   ],
+   [
+    "content-security-policy",
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+   ],
+   [
+    "vary",
+    "Cookie"
+   ],
+   [
+    "set-cookie",
+    "session=*; path=/; Max-Age=2592000; httponly; samesite=lax"
+   ]
+  ]
+ },
+ "kiosk_json/identity": {
+  "status": 200,
+  "headers": [
+   [
+    "content-length",
+    "*"
+   ],
+   [
+    "content-type",
+    "application/json"
+   ],
+   [
+    "x-frame-options",
+    "SAMEORIGIN"
+   ],
+   [
+    "x-content-type-options",
+    "nosniff"
+   ],
+   [
+    "referrer-policy",
+    "same-origin"
+   ],
+   [
+    "content-security-policy",
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+   ],
+   [
+    "vary",
+    "Cookie"
+   ],
+   [
+    "set-cookie",
+    "session=*; path=/; Max-Age=2592000; httponly; samesite=lax"
+   ]
+  ]
+ },
+ "kiosk_tls_json/gzip": {
+  "status": 200,
+  "headers": [
+   [
+    "content-length",
+    "*"
+   ],
+   [
+    "content-type",
+    "application/json"
+   ],
+   [
+    "x-frame-options",
+    "SAMEORIGIN"
+   ],
+   [
+    "x-content-type-options",
+    "nosniff"
+   ],
+   [
+    "referrer-policy",
+    "same-origin"
+   ],
+   [
+    "content-security-policy",
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+   ],
+   [
+    "vary",
+    "Cookie"
+   ],
+   [
+    "set-cookie",
+    "session=*; path=/; Max-Age=2592000; httponly; samesite=lax; Secure"
+   ]
+  ]
+ },
+ "kiosk_tls_json/identity": {
+  "status": 200,
+  "headers": [
+   [
+    "content-length",
+    "*"
+   ],
+   [
+    "content-type",
+    "application/json"
+   ],
+   [
+    "x-frame-options",
+    "SAMEORIGIN"
+   ],
+   [
+    "x-content-type-options",
+    "nosniff"
+   ],
+   [
+    "referrer-policy",
+    "same-origin"
+   ],
+   [
+    "content-security-policy",
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+   ],
+   [
+    "vary",
+    "Cookie"
+   ],
+   [
+    "set-cookie",
+    "session=*; path=/; Max-Age=2592000; httponly; samesite=lax; Secure"
+   ]
+  ]
+ },
+ "pin_locked_page/gzip": {
+  "status": 303,
+  "headers": [
+   [
+    "content-length",
+    "*"
+   ],
+   [
+    "location",
+    "/ui/pin"
+   ],
+   [
+    "x-frame-options",
+    "SAMEORIGIN"
+   ],
+   [
+    "x-content-type-options",
+    "nosniff"
+   ],
+   [
+    "referrer-policy",
+    "same-origin"
+   ],
+   [
+    "content-security-policy",
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+   ],
+   [
+    "vary",
+    "Cookie"
+   ]
+  ]
+ },
+ "pin_locked_page/identity": {
+  "status": 303,
+  "headers": [
+   [
+    "content-length",
+    "*"
+   ],
+   [
+    "location",
+    "/ui/pin"
+   ],
+   [
+    "x-frame-options",
+    "SAMEORIGIN"
+   ],
+   [
+    "x-content-type-options",
+    "nosniff"
+   ],
+   [
+    "referrer-policy",
+    "same-origin"
+   ],
+   [
+    "content-security-policy",
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+   ],
+   [
+    "vary",
+    "Cookie"
+   ]
+  ]
+ },
+ "pin_read_only_page/gzip": {
+  "status": 200,
+  "headers": [
+   [
+    "content-length",
+    "*"
+   ],
+   [
+    "content-type",
+    "text/html; charset=utf-8"
+   ],
+   [
+    "x-frame-options",
+    "SAMEORIGIN"
+   ],
+   [
+    "x-content-type-options",
+    "nosniff"
+   ],
+   [
+    "referrer-policy",
+    "same-origin"
+   ],
+   [
+    "content-security-policy",
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+   ],
+   [
+    "vary",
+    "Cookie, Accept-Encoding"
+   ],
+   [
+    "content-encoding",
+    "gzip"
+   ]
+  ]
+ },
+ "pin_read_only_page/identity": {
+  "status": 200,
+  "headers": [
+   [
+    "content-length",
+    "*"
+   ],
+   [
+    "content-type",
+    "text/html; charset=utf-8"
+   ],
+   [
+    "x-frame-options",
+    "SAMEORIGIN"
+   ],
+   [
+    "x-content-type-options",
+    "nosniff"
+   ],
+   [
+    "referrer-policy",
+    "same-origin"
+   ],
+   [
+    "content-security-policy",
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+   ],
+   [
+    "vary",
+    "Cookie, Accept-Encoding"
+   ]
+  ]
+ },
+ "pin_read_only_write/gzip": {
+  "status": 403,
+  "headers": [
+   [
+    "content-length",
+    "*"
+   ],
+   [
+    "content-type",
+    "application/json"
+   ],
+   [
+    "x-frame-options",
+    "SAMEORIGIN"
+   ],
+   [
+    "x-content-type-options",
+    "nosniff"
+   ],
+   [
+    "referrer-policy",
+    "same-origin"
+   ],
+   [
+    "content-security-policy",
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+   ],
+   [
+    "vary",
+    "Cookie"
+   ]
+  ]
+ },
+ "pin_read_only_write/identity": {
+  "status": 403,
+  "headers": [
+   [
+    "content-length",
+    "*"
+   ],
+   [
+    "content-type",
+    "application/json"
+   ],
+   [
+    "x-frame-options",
+    "SAMEORIGIN"
+   ],
+   [
+    "x-content-type-options",
+    "nosniff"
+   ],
+   [
+    "referrer-policy",
+    "same-origin"
+   ],
+   [
+    "content-security-policy",
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+   ],
+   [
+    "vary",
+    "Cookie"
+   ]
+  ]
+ },
+ "pin_screen_open/gzip": {
+  "status": 200,
+  "headers": [
+   [
+    "content-length",
+    "*"
+   ],
+   [
+    "content-type",
+    "text/html; charset=utf-8"
+   ],
+   [
+    "x-frame-options",
+    "SAMEORIGIN"
+   ],
+   [
+    "x-content-type-options",
+    "nosniff"
+   ],
+   [
+    "referrer-policy",
+    "same-origin"
+   ],
+   [
+    "content-security-policy",
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+   ],
+   [
+    "vary",
+    "Cookie, Accept-Encoding"
+   ],
+   [
+    "content-encoding",
+    "gzip"
+   ]
+  ]
+ },
+ "pin_screen_open/identity": {
+  "status": 200,
+  "headers": [
+   [
+    "content-length",
+    "*"
+   ],
+   [
+    "content-type",
+    "text/html; charset=utf-8"
+   ],
+   [
+    "x-frame-options",
+    "SAMEORIGIN"
+   ],
+   [
+    "x-content-type-options",
+    "nosniff"
+   ],
+   [
+    "referrer-policy",
+    "same-origin"
+   ],
+   [
+    "content-security-policy",
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+   ],
+   [
+    "vary",
+    "Cookie, Accept-Encoding"
+   ]
+  ]
+ },
+ "same_site_write/gzip": {
+  "status": 403,
+  "headers": [
+   [
+    "content-length",
+    "*"
+   ],
+   [
+    "content-type",
+    "application/json"
+   ]
+  ]
+ },
+ "same_site_write/identity": {
+  "status": 403,
+  "headers": [
+   [
+    "content-length",
+    "*"
+   ],
+   [
+    "content-type",
+    "application/json"
+   ]
+  ]
+ },
+ "satellite_forwarded/gzip": {
+  "status": 200,
+  "headers": [
+   [
+    "content-length",
+    "*"
+   ],
+   [
+    "content-type",
+    "application/json"
+   ],
+   [
+    "x-frame-options",
+    "SAMEORIGIN"
+   ],
+   [
+    "x-content-type-options",
+    "nosniff"
+   ],
+   [
+    "referrer-policy",
+    "same-origin"
+   ],
+   [
+    "content-security-policy",
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+   ],
+   [
+    "vary",
+    "Cookie"
+   ]
+  ]
+ },
+ "satellite_forwarded/identity": {
+  "status": 200,
+  "headers": [
+   [
+    "content-length",
+    "*"
+   ],
+   [
+    "content-type",
+    "application/json"
+   ],
+   [
+    "x-frame-options",
+    "SAMEORIGIN"
+   ],
+   [
+    "x-content-type-options",
+    "nosniff"
+   ],
+   [
+    "referrer-policy",
+    "same-origin"
+   ],
+   [
+    "content-security-policy",
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+   ],
+   [
+    "vary",
+    "Cookie"
+   ]
+  ]
+ },
+ "satellite_forwarded_bad_path/gzip": {
+  "status": 400,
+  "headers": [
+   [
+    "content-length",
+    "*"
+   ],
+   [
+    "content-type",
+    "application/json"
+   ],
+   [
+    "x-frame-options",
+    "SAMEORIGIN"
+   ],
+   [
+    "x-content-type-options",
+    "nosniff"
+   ],
+   [
+    "referrer-policy",
+    "same-origin"
+   ],
+   [
+    "content-security-policy",
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+   ],
+   [
+    "vary",
+    "Cookie"
+   ]
+  ]
+ },
+ "satellite_forwarded_bad_path/identity": {
+  "status": 400,
+  "headers": [
+   [
+    "content-length",
+    "*"
+   ],
+   [
+    "content-type",
+    "application/json"
+   ],
+   [
+    "x-frame-options",
+    "SAMEORIGIN"
+   ],
+   [
+    "x-content-type-options",
+    "nosniff"
+   ],
+   [
+    "referrer-policy",
+    "same-origin"
+   ],
+   [
+    "content-security-policy",
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+   ],
+   [
+    "vary",
+    "Cookie"
+   ]
+  ]
+ },
+ "satellite_forwarded_remote/gzip": {
+  "status": 200,
+  "headers": [
+   [
+    "content-length",
+    "*"
+   ],
+   [
+    "content-type",
+    "application/json"
+   ],
+   [
+    "x-frame-options",
+    "SAMEORIGIN"
+   ],
+   [
+    "x-content-type-options",
+    "nosniff"
+   ],
+   [
+    "referrer-policy",
+    "same-origin"
+   ],
+   [
+    "content-security-policy",
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+   ],
+   [
+    "vary",
+    "Cookie"
+   ]
+  ]
+ },
+ "satellite_forwarded_remote/identity": {
+  "status": 200,
+  "headers": [
+   [
+    "content-length",
+    "*"
+   ],
+   [
+    "content-type",
+    "application/json"
+   ],
+   [
+    "x-frame-options",
+    "SAMEORIGIN"
+   ],
+   [
+    "x-content-type-options",
+    "nosniff"
+   ],
+   [
+    "referrer-policy",
+    "same-origin"
+   ],
+   [
+    "content-security-policy",
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+   ],
+   [
+    "vary",
+    "Cookie"
+   ]
+  ]
+ },
+ "satellite_forwarded_write/gzip": {
+  "status": 200,
+  "headers": [
+   [
+    "content-length",
+    "*"
+   ],
+   [
+    "content-type",
+    "application/json"
+   ],
+   [
+    "x-frame-options",
+    "SAMEORIGIN"
+   ],
+   [
+    "x-content-type-options",
+    "nosniff"
+   ],
+   [
+    "referrer-policy",
+    "same-origin"
+   ],
+   [
+    "content-security-policy",
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+   ],
+   [
+    "vary",
+    "Cookie"
+   ]
+  ]
+ },
+ "satellite_forwarded_write/identity": {
+  "status": 200,
+  "headers": [
+   [
+    "content-length",
+    "*"
+   ],
+   [
+    "content-type",
+    "application/json"
+   ],
+   [
+    "x-frame-options",
+    "SAMEORIGIN"
+   ],
+   [
+    "x-content-type-options",
+    "nosniff"
+   ],
+   [
+    "referrer-policy",
+    "same-origin"
+   ],
+   [
+    "content-security-policy",
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+   ],
+   [
+    "vary",
+    "Cookie"
+   ]
+  ]
+ },
+ "satellite_local/gzip": {
+  "status": 200,
+  "headers": [
+   [
+    "content-length",
+    "*"
+   ],
+   [
+    "content-type",
+    "application/json"
+   ],
+   [
+    "x-frame-options",
+    "SAMEORIGIN"
+   ],
+   [
+    "x-content-type-options",
+    "nosniff"
+   ],
+   [
+    "referrer-policy",
+    "same-origin"
+   ],
+   [
+    "content-security-policy",
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+   ],
+   [
+    "vary",
+    "Cookie"
+   ]
+  ]
+ },
+ "satellite_local/identity": {
+  "status": 200,
+  "headers": [
+   [
+    "content-length",
+    "*"
+   ],
+   [
+    "content-type",
+    "application/json"
+   ],
+   [
+    "x-frame-options",
+    "SAMEORIGIN"
+   ],
+   [
+    "x-content-type-options",
+    "nosniff"
+   ],
+   [
+    "referrer-policy",
+    "same-origin"
+   ],
+   [
+    "content-security-policy",
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+   ],
+   [
+    "vary",
+    "Cookie"
+   ]
+  ]
+ },
+ "static_css/gzip": {
+  "status": 200,
+  "headers": [
+   [
+    "content-type",
+    "text/css; charset=utf-8"
+   ],
+   [
+    "accept-ranges",
+    "bytes"
+   ],
+   [
+    "content-length",
+    "*"
+   ],
+   [
+    "last-modified",
+    "*"
+   ],
+   [
+    "etag",
+    "*"
+   ],
+   [
+    "cache-control",
+    "public, max-age=31536000, immutable"
+   ],
+   [
+    "x-frame-options",
+    "SAMEORIGIN"
+   ],
+   [
+    "x-content-type-options",
+    "nosniff"
+   ],
+   [
+    "referrer-policy",
+    "same-origin"
+   ],
+   [
+    "content-security-policy",
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+   ],
+   [
+    "vary",
+    "Accept-Encoding"
+   ],
+   [
+    "content-encoding",
+    "gzip"
+   ]
+  ]
+ },
+ "static_css/identity": {
+  "status": 200,
+  "headers": [
+   [
+    "content-type",
+    "text/css; charset=utf-8"
+   ],
+   [
+    "accept-ranges",
+    "bytes"
+   ],
+   [
+    "content-length",
+    "*"
+   ],
+   [
+    "last-modified",
+    "*"
+   ],
+   [
+    "etag",
+    "*"
+   ],
+   [
+    "cache-control",
+    "public, max-age=31536000, immutable"
+   ],
+   [
+    "x-frame-options",
+    "SAMEORIGIN"
+   ],
+   [
+    "x-content-type-options",
+    "nosniff"
+   ],
+   [
+    "referrer-policy",
+    "same-origin"
+   ],
+   [
+    "content-security-policy",
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+   ],
+   [
+    "vary",
+    "Accept-Encoding"
+   ]
+  ]
+ },
+ "static_head/gzip": {
+  "status": 200,
+  "headers": [
+   [
+    "content-type",
+    "text/css; charset=utf-8"
+   ],
+   [
+    "accept-ranges",
+    "bytes"
+   ],
+   [
+    "content-length",
+    "*"
+   ],
+   [
+    "last-modified",
+    "*"
+   ],
+   [
+    "etag",
+    "*"
+   ],
+   [
+    "cache-control",
+    "public, max-age=31536000, immutable"
+   ],
+   [
+    "x-frame-options",
+    "SAMEORIGIN"
+   ],
+   [
+    "x-content-type-options",
+    "nosniff"
+   ],
+   [
+    "referrer-policy",
+    "same-origin"
+   ],
+   [
+    "content-security-policy",
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+   ]
+  ]
+ },
+ "static_head/identity": {
+  "status": 200,
+  "headers": [
+   [
+    "content-type",
+    "text/css; charset=utf-8"
+   ],
+   [
+    "accept-ranges",
+    "bytes"
+   ],
+   [
+    "content-length",
+    "*"
+   ],
+   [
+    "last-modified",
+    "*"
+   ],
+   [
+    "etag",
+    "*"
+   ],
+   [
+    "cache-control",
+    "public, max-age=31536000, immutable"
+   ],
+   [
+    "x-frame-options",
+    "SAMEORIGIN"
+   ],
+   [
+    "x-content-type-options",
+    "nosniff"
+   ],
+   [
+    "referrer-policy",
+    "same-origin"
+   ],
+   [
+    "content-security-policy",
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+   ]
+  ]
+ },
+ "static_missing/gzip": {
+  "status": 404,
+  "headers": [
+   [
+    "content-length",
+    "*"
+   ],
+   [
+    "content-type",
+    "application/json"
+   ],
+   [
+    "x-frame-options",
+    "SAMEORIGIN"
+   ],
+   [
+    "x-content-type-options",
+    "nosniff"
+   ],
+   [
+    "referrer-policy",
+    "same-origin"
+   ],
+   [
+    "content-security-policy",
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+   ]
+  ]
+ },
+ "static_missing/identity": {
+  "status": 404,
+  "headers": [
+   [
+    "content-length",
+    "*"
+   ],
+   [
+    "content-type",
+    "application/json"
+   ],
+   [
+    "x-frame-options",
+    "SAMEORIGIN"
+   ],
+   [
+    "x-content-type-options",
+    "nosniff"
+   ],
+   [
+    "referrer-policy",
+    "same-origin"
+   ],
+   [
+    "content-security-policy",
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+   ]
+  ]
+ },
+ "unconfigured_kiosk_page/gzip": {
+  "status": 303,
+  "headers": [
+   [
+    "content-length",
+    "*"
+   ],
+   [
+    "location",
+    "/setup?kiosk=1"
+   ],
+   [
+    "x-frame-options",
+    "SAMEORIGIN"
+   ],
+   [
+    "x-content-type-options",
+    "nosniff"
+   ],
+   [
+    "referrer-policy",
+    "same-origin"
+   ],
+   [
+    "content-security-policy",
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+   ],
+   [
+    "vary",
+    "Cookie"
+   ]
+  ]
+ },
+ "unconfigured_kiosk_page/identity": {
+  "status": 303,
+  "headers": [
+   [
+    "content-length",
+    "*"
+   ],
+   [
+    "location",
+    "/setup?kiosk=1"
+   ],
+   [
+    "x-frame-options",
+    "SAMEORIGIN"
+   ],
+   [
+    "x-content-type-options",
+    "nosniff"
+   ],
+   [
+    "referrer-policy",
+    "same-origin"
+   ],
+   [
+    "content-security-policy",
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+   ],
+   [
+    "vary",
+    "Cookie"
+   ]
+  ]
+ },
+ "unconfigured_page/gzip": {
+  "status": 303,
+  "headers": [
+   [
+    "content-length",
+    "*"
+   ],
+   [
+    "location",
+    "/setup"
+   ],
+   [
+    "x-frame-options",
+    "SAMEORIGIN"
+   ],
+   [
+    "x-content-type-options",
+    "nosniff"
+   ],
+   [
+    "referrer-policy",
+    "same-origin"
+   ],
+   [
+    "content-security-policy",
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+   ],
+   [
+    "vary",
+    "Cookie"
+   ]
+  ]
+ },
+ "unconfigured_page/identity": {
+  "status": 303,
+  "headers": [
+   [
+    "content-length",
+    "*"
+   ],
+   [
+    "location",
+    "/setup"
+   ],
+   [
+    "x-frame-options",
+    "SAMEORIGIN"
+   ],
+   [
+    "x-content-type-options",
+    "nosniff"
+   ],
+   [
+    "referrer-policy",
+    "same-origin"
+   ],
+   [
+    "content-security-policy",
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+   ],
+   [
+    "vary",
+    "Cookie"
+   ]
+  ]
+ },
+ "unconfigured_setup_bypass/gzip": {
+  "status": 200,
+  "headers": [
+   [
+    "content-length",
+    "*"
+   ],
+   [
+    "content-type",
+    "application/json"
+   ],
+   [
+    "x-frame-options",
+    "SAMEORIGIN"
+   ],
+   [
+    "x-content-type-options",
+    "nosniff"
+   ],
+   [
+    "referrer-policy",
+    "same-origin"
+   ],
+   [
+    "content-security-policy",
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+   ],
+   [
+    "vary",
+    "Cookie"
+   ]
+  ]
+ },
+ "unconfigured_setup_bypass/identity": {
+  "status": 200,
+  "headers": [
+   [
+    "content-length",
+    "*"
+   ],
+   [
+    "content-type",
+    "application/json"
+   ],
+   [
+    "x-frame-options",
+    "SAMEORIGIN"
+   ],
+   [
+    "x-content-type-options",
+    "nosniff"
+   ],
+   [
+    "referrer-policy",
+    "same-origin"
+   ],
+   [
+    "content-security-policy",
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+   ],
+   [
+    "vary",
+    "Cookie"
+   ]
+  ]
+ },
+ "viewer_settings_write/gzip": {
+  "status": 403,
+  "headers": [
+   [
+    "content-length",
+    "*"
+   ],
+   [
+    "content-type",
+    "application/json"
+   ],
+   [
+    "x-frame-options",
+    "SAMEORIGIN"
+   ],
+   [
+    "x-content-type-options",
+    "nosniff"
+   ],
+   [
+    "referrer-policy",
+    "same-origin"
+   ],
+   [
+    "content-security-policy",
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+   ],
+   [
+    "vary",
+    "Cookie"
+   ]
+  ]
+ },
+ "viewer_settings_write/identity": {
+  "status": 403,
+  "headers": [
+   [
+    "content-length",
+    "*"
+   ],
+   [
+    "content-type",
+    "application/json"
+   ],
+   [
+    "x-frame-options",
+    "SAMEORIGIN"
+   ],
+   [
+    "x-content-type-options",
+    "nosniff"
+   ],
+   [
+    "referrer-policy",
+    "same-origin"
+   ],
+   [
+    "content-security-policy",
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+   ],
+   [
+    "vary",
+    "Cookie"
+   ]
+  ]
+ }
+}

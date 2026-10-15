@@ -1,0 +1,8 @@
+[Plymouth Theme]
+Name=Pantry Raider
+Description=Pantry Raider boot splash: the pink raccoon mark on a dark background
+ModuleName=script
+
+[script]
+ImageDir=/usr/share/plymouth/themes/pantryraider
+ScriptFile=/usr/share/plymouth/themes/pantryraider/pantryraider.script
