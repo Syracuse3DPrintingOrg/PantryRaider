@@ -1,0 +1,421 @@
+{% extends "base.html" %}
+{% block title %}Recipes: Pantry Raider{% endblock %}
+{% block content %}
+
+<style>
+/* A long recipe description must stay inside its card (FoodAssistant-gy5a).
+   min-width-0 lets a flex child actually shrink (Bootstrap ships no such
+   utility, so without it the row grew past the card instead of truncating),
+   and recipe-desc wraps even an unbroken run of text and clamps a card's
+   description to two lines. The max-height is the fallback for engines
+   without line-clamp support. */
+.min-width-0 { min-width: 0; }
+.recipe-desc {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  overflow: hidden;
+  max-height: 3em;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+/* The recipe read view shows the whole description: wrap, never clamp. */
+#pv-description { overflow-wrap: anywhere; word-break: break-word; }
+</style>
+
+{% if not recipes_enabled %}
+<div class="alert alert-info mt-3">
+  <i class="bi bi-journal-richtext me-2"></i>
+  Recipes are stored in <a href="https://mealie.io" target="_blank">Mealie</a>.
+  Add your Mealie URL and API token in <a href="setup">Settings</a> to enable this page.
+</div>
+{% else %}
+
+<div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mt-3 mb-3">
+  <h4 class="mb-0"><i class="bi bi-journal-richtext me-2"></i>Recipes</h4>
+  <div class="d-flex gap-2">
+    {% if recipes_backend == 'mealie' %}
+    <a class="btn btn-sm btn-outline-secondary" href="{{ mealie_url }}" target="_blank">
+      <i class="bi bi-box-arrow-up-right me-1"></i>Open Mealie
+    </a>
+    <button class="btn btn-sm btn-outline-secondary" id="migrate-mealie-btn" data-on-click="migrateFromMealie(this)"
+            title="Copy every Mealie recipe into Pantry Raider. Mealie is never changed.">
+      <i class="bi bi-box-arrow-in-down me-1"></i>Copy into Pantry Raider
+    </button>
+    {% endif %}
+    <div class="btn-group">
+      <button class="btn btn-sm btn-primary" data-bs-toggle="modal" data-bs-target="#importUrlModal">
+        <i class="bi bi-link-45deg me-1"></i>From URL
+      </button>
+      {% if ai_can_write_recipes %}
+      <button class="btn btn-sm btn-primary" data-on-click="PR.clickById('photo-input')">
+        <i class="bi bi-camera me-1"></i>From Photo
+      </button>
+      <button class="btn btn-sm btn-primary" data-on-click="PR.clickById('pdf-input')">
+        <i class="bi bi-filetype-pdf me-1"></i>From PDF
+      </button>
+      {% endif %}
+      <button class="btn btn-sm btn-primary" data-on-click="PR.clickById('file-input')">
+        <i class="bi bi-filetype-json me-1"></i>From File
+      </button>
+      <button class="btn btn-sm btn-outline-primary" data-on-click="openEditor()">
+        <i class="bi bi-pencil me-1"></i>Manual
+      </button>
+    </div>
+  </div>
+</div>
+
+<input type="file" id="photo-input" accept="image/*" capture="environment" class="d-none"
+       data-on-change="extractPhoto(this)">
+<input type="file" id="pdf-input" accept="application/pdf,.pdf" class="d-none"
+       data-on-change="importPdf(this)">
+<input type="file" id="file-input" accept=".json,.txt" class="d-none"
+       data-on-change="importFile(this)">
+
+<!-- Photo extraction progress -->
+<div class="alert alert-info d-none" id="photo-progress">
+  <span class="spinner-border spinner-border-sm me-2"></span>Reading recipe from photo…
+</div>
+
+<!-- PDF extraction progress -->
+<div class="alert alert-info d-none" id="pdf-progress">
+  <span class="spinner-border spinner-border-sm me-2"></span>Reading recipe from PDF…
+</div>
+
+<!-- File import progress -->
+<div class="alert alert-info d-none" id="file-progress">
+  <span class="spinner-border spinner-border-sm me-2"></span>Importing recipe from file…
+</div>
+
+{% if forager_linked %}
+<!-- Recipes people shared with this kitchen (FoodAssistant-l697). Hidden until
+     the inbox actually has something, so it never adds noise. -->
+<div class="mb-3 d-none" id="shared-inbox-wrap">
+  <button class="btn btn-sm btn-outline-info" id="shared-inbox-toggle" data-on-click="toggleSharedInbox()"
+          aria-expanded="false" aria-controls="shared-inbox-list">
+    <i class="bi bi-inbox me-1"></i>Shared with you
+    <span class="badge text-bg-info ms-1" id="shared-inbox-count">0</span>
+  </button>
+  <div class="vstack gap-2 mt-2 d-none" id="shared-inbox-list"></div>
+</div>
+{% endif %}
+
+<!-- Browse -->
+<div class="row g-3" id="browse-section">
+  <div class="col-lg-8 col-xl-6">
+    <div class="input-group mb-2">
+      <input type="search" class="form-control" id="recipe-filter"
+             placeholder="Search recipes…" autocomplete="off">
+      {% if ai_can_write_recipes %}
+      <button class="btn btn-outline-secondary d-none" id="btn-generate-ai"
+              data-on-click="generateFromSearch()" title="Ask AI to write this recipe">
+        <i class="bi bi-stars me-1"></i>Generate with AI
+      </button>
+      {% endif %}
+    </div>
+    {% if ai_configured and not ai_can_write_recipes %}
+    <p class="text-secondary small mb-2"><i class="bi bi-info-circle me-1"></i>{{ ai_writing_note }}</p>
+    {% endif %}
+    <div class="d-flex gap-3 mb-3">
+      <div class="form-check form-check-inline mb-0">
+        <input class="form-check-input" type="checkbox" id="chk-mine" checked data-on-change="reloadRecipes()">
+        <label class="form-check-label small" for="chk-mine">My recipes</label>
+      </div>
+      <div class="form-check form-check-inline mb-0">
+        <input class="form-check-input" type="checkbox" id="chk-external" data-on-change="reloadRecipes()">
+        <label class="form-check-label small" for="chk-external">Other recipes
+          <span class="text-secondary">({% if forager_recipes_active %}web + community{% else %}web{% endif %})</span></label>
+      </div>
+    </div>
+    <div id="recipe-list" class="vstack gap-2">
+      <div class="text-secondary"><span class="spinner-border spinner-border-sm me-2"></span>Loading recipes…</div>
+    </div>
+  </div>
+</div>
+
+<!-- External recipe preview modal -->
+<div class="modal fade" id="previewModal" tabindex="-1" aria-labelledby="pv-name">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="pv-name">Recipe</h5>
+        <button type="button" class="btn-close" aria-label="Close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="text-center text-secondary py-4 d-none" id="pv-loading">
+          <span class="spinner-border spinner-border-sm me-2"></span>Loading recipe…
+        </div>
+        <div id="pv-body" class="d-none">
+          <img id="pv-image" class="rounded mb-3 w-100 d-none" style="max-height:260px;object-fit:cover" alt="Recipe photo">
+          <div class="small text-secondary mb-2" id="pv-meta"></div>
+          <p class="small" id="pv-description"></p>
+          <h6><i class="bi bi-basket me-1"></i>Ingredients</h6>
+          <ul class="small" id="pv-ingredients"></ul>
+          <h6><i class="bi bi-list-ol me-1"></i>Instructions</h6>
+          <ol class="small" id="pv-instructions"></ol>
+          <a class="small d-none" id="pv-source-link" target="_blank">
+            <i class="bi bi-box-arrow-up-right me-1"></i>Original source</a>
+        </div>
+        <div class="alert alert-danger d-none" id="pv-error"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+        <a class="btn btn-outline-secondary d-none" id="pv-open-mealie" target="_blank">
+          <i class="bi bi-box-arrow-up-right me-1"></i>Open in Mealie
+        </a>
+        <button class="btn btn-outline-primary d-none" id="pv-edit" data-on-click="editFromPreview()"
+                title="Edit this recipe in Pantry Raider">
+          <i class="bi bi-pencil me-1"></i>Edit
+        </button>
+        <button class="btn btn-outline-primary d-none" id="pv-parse" data-on-click="parseIngredients(this)"
+                title="Read the ingredient amounts, units, and foods so they show tidily">
+          <i class="bi bi-magic me-1"></i>Parse ingredients
+        </button>
+        <button class="btn btn-info" id="pv-save" data-on-click="saveFromPreview(this)">
+          <i class="bi bi-download me-1"></i>Save to {{ library_name }}
+        </button>
+        {% if printing_enabled %}
+        <button class="btn btn-outline-secondary" id="pv-print" data-on-click="printRecipePreview(this)">
+          <i class="bi bi-printer me-1"></i>Print
+        </button>
+        {% endif %}
+        <button class="btn btn-primary" id="pv-cook" data-on-click="cookFromPreview(this)">
+          <i class="bi bi-fire me-1"></i>Cook
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Import-from-URL modal -->
+<div class="modal fade" id="importUrlModal" tabindex="-1" aria-labelledby="importUrlModal-title">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="importUrlModal-title">Import recipe from a webpage</h5>
+        <button type="button" class="btn-close" aria-label="Close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="url" class="form-control" id="import-url" placeholder="https://example.com/best-lasagna">
+        <div class="form-text">Paste a recipe link and we'll pull in the ingredients and steps.</div>
+        <div class="mt-2 small d-none" id="import-url-status"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button class="btn btn-primary" id="import-url-btn" data-on-click="importUrl()">
+          <i class="bi bi-download me-1"></i>Import
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Review/edit + manual-add modal -->
+<div class="modal fade" id="editorModal" tabindex="-1" aria-labelledby="editor-title">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="editor-title">New Recipe</h5>
+        <button type="button" class="btn-close" aria-label="Close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body vstack gap-3">
+        <div class="alert alert-warning py-2 small d-none" id="editor-note"></div>
+        <div>
+          <label class="form-label" for="ed-name">Name</label>
+          <input type="text" class="form-control" id="ed-name">
+        </div>
+        <div>
+          <label class="form-label" for="ed-description">Description</label>
+          <input type="text" class="form-control" id="ed-description">
+        </div>
+        <div class="row g-2">
+          <div class="col-sm-3">
+            <label class="form-label" for="ed-servings">Servings</label>
+            <input type="text" class="form-control" id="ed-servings" placeholder="Optional">
+          </div>
+          <div class="col-sm-3">
+            <label class="form-label" for="ed-prep">Prep Time</label>
+            <input type="text" class="form-control" id="ed-prep" placeholder="Optional">
+          </div>
+          <div class="col-sm-3">
+            <label class="form-label" for="ed-cook">Cook Time</label>
+            <input type="text" class="form-control" id="ed-cook" placeholder="Optional">
+          </div>
+          <div class="col-sm-3">
+            <label class="form-label" for="ed-time">Total Time</label>
+            <input type="text" class="form-control" id="ed-time" placeholder="Optional">
+          </div>
+        </div>
+        {% if recipes_backend == 'native' %}
+        <div id="ed-image-wrap">
+          <label class="form-label" for="ed-image">Photo</label>
+          <div class="d-flex align-items-center gap-3">
+            <img id="ed-image-current" class="rounded d-none flex-shrink-0" style="width:64px;height:64px;object-fit:cover" alt="Current recipe photo">
+            <div class="flex-grow-1">
+              <input type="file" class="form-control" id="ed-image" accept="image/*">
+              <div class="form-check mt-1 d-none" id="ed-image-remove-wrap">
+                <input class="form-check-input" type="checkbox" id="ed-image-remove">
+                <label class="form-check-label small" for="ed-image-remove">Remove the current photo</label>
+              </div>
+            </div>
+          </div>
+          <div class="form-text">Choosing a new photo replaces the current one. Leaving this alone keeps it.</div>
+        </div>
+        {% endif %}
+        <div>
+          <label class="form-label" for="ed-ingredients">Ingredients <span class="text-secondary small">(one per line; end a line with a colon to start a group, like "Sauce:")</span></label>
+          <textarea class="form-control font-monospace" id="ed-ingredients" rows="7"></textarea>
+        </div>
+        <div>
+          <label class="form-label" for="ed-instructions">Instructions <span class="text-secondary small">(one step per line)</span></label>
+          <textarea class="form-control" id="ed-instructions" rows="7"></textarea>
+        </div>
+        <div class="text-danger small d-none" id="editor-error"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        {% if ai_can_write_recipes %}
+        <button class="btn btn-outline-primary" id="editor-optimize" data-on-click="optimizeDraft(this)"
+                title="Tidy the wording, steps, and timer cues without changing the recipe">
+          <i class="bi bi-stars me-1"></i>Optimize
+        </button>
+        {% endif %}
+        <button class="btn btn-success" id="editor-save" data-on-click="saveRecipe()">
+          <i class="bi bi-check-lg me-1"></i>Save to {{ library_name }}
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Share hub modal: link shares, send-to-a-person, the community post, and the
+     no-account fallbacks (file download, email) all live here (FoodAssistant-l697). -->
+<div class="modal fade" id="shareModal" tabindex="-1" aria-labelledby="shareModal-title">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="shareModal-title">Share <span id="share-name">this recipe</span></h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body vstack gap-4">
+        {% if forager_linked %}
+        <div>
+          <label class="form-label" for="share-attribution">Who to credit</label>
+          <input type="text" class="form-control" id="share-attribution"
+                 value="{{ share_attribution_default }}"
+                 placeholder="Your name, or where this recipe came from">
+          <div class="form-text">The credit travels with the recipe wherever you share it, so people know where it came from.</div>
+        </div>
+
+        <section aria-labelledby="share-link-heading">
+          <h6 id="share-link-heading" class="mb-1"><i class="bi bi-link-45deg me-1"></i>Share a link</h6>
+          <p class="small text-secondary mb-2">Anyone with the link can read the recipe in their browser and add it to their own Pantry Raider. No account needed on their side.</p>
+          <button class="btn btn-sm btn-primary" id="share-link-btn" data-on-click="createShareLink(this)">
+            <i class="bi bi-link-45deg me-1"></i>Create share link
+          </button>
+          <div class="d-none mt-2" id="share-link-result">
+            <div class="input-group input-group-sm">
+              <input type="text" class="form-control" id="share-link-url" readonly aria-label="Share link">
+              <a class="btn btn-outline-secondary" id="share-link-open-btn" href="#"
+                 target="_blank" rel="noopener">
+                <i class="bi bi-box-arrow-up-right me-1"></i>Open
+              </a>
+              <button class="btn btn-outline-secondary" id="share-copy-btn" data-on-click="copyLinkInput(this, 'share-link-url')">
+                <i class="bi bi-clipboard me-1"></i>Copy
+              </button>
+            </div>
+            <div class="d-flex flex-wrap gap-1 mt-2" id="share-social"></div>
+          </div>
+          <div class="small mt-2 d-none" id="share-link-status"></div>
+        </section>
+
+        <section aria-labelledby="share-send-heading">
+          <h6 id="share-send-heading" class="mb-1"><i class="bi bi-send me-1"></i>Send to a person</h6>
+          <div class="row g-2">
+            <div class="col-sm-5">
+              <label class="visually-hidden" for="share-email">Their email address</label>
+              <input type="email" class="form-control form-control-sm" id="share-email"
+                     placeholder="their@email.com" autocomplete="off">
+            </div>
+            <div class="col-sm-5">
+              <label class="visually-hidden" for="share-note">A short note (optional)</label>
+              <input type="text" class="form-control form-control-sm" id="share-note"
+                     placeholder="A short note (optional)" maxlength="200">
+            </div>
+            <div class="col-sm-2 d-grid">
+              <button class="btn btn-sm btn-primary" id="share-send-btn" data-on-click="sendShareToPerson(this)">Send</button>
+            </div>
+          </div>
+          <div class="form-text">If they use Forager, the recipe lands in their Shared with you. Either way they get an email with the recipe.</div>
+          <div class="small mt-1 d-none" id="share-send-status"></div>
+        </section>
+
+        <section aria-labelledby="share-community-heading">
+          <h6 id="share-community-heading" class="mb-1"><i class="bi bi-people me-1"></i>Post to the Forager community</h6>
+          <p class="small text-secondary mb-2">Publish the recipe so every Pantry Raider kitchen can find and cook it.</p>
+          <button class="btn btn-sm btn-primary" id="share-btn" data-on-click="submitShare()">
+            <i class="bi bi-people me-1"></i>Share with the community
+          </button>
+          <div class="small mt-2 d-none" id="share-status"></div>
+          <div class="d-none mt-2" id="share-community-result">
+            <div class="input-group input-group-sm">
+              <input type="text" class="form-control" id="share-community-url" readonly
+                     aria-label="Your recipe's community page link">
+              <a class="btn btn-outline-secondary" id="share-community-open-btn" href="#"
+                 target="_blank" rel="noopener">
+                <i class="bi bi-box-arrow-up-right me-1"></i>Open
+              </a>
+              <button class="btn btn-outline-secondary" id="share-community-copy-btn"
+                      data-on-click="copyLinkInput(this, 'share-community-url')">
+                <i class="bi bi-clipboard me-1"></i>Copy
+              </button>
+            </div>
+            <div class="d-flex flex-wrap gap-1 mt-2" id="share-community-social"></div>
+          </div>
+        </section>
+        {% endif %}
+
+        <section aria-labelledby="share-copy-heading">
+          <h6 id="share-copy-heading" class="mb-1"><i class="bi bi-file-earmark-arrow-down me-1"></i>Send a copy</h6>
+          <p class="small text-secondary mb-2">Download the recipe as plain text anyone can read, download a file that imports into any Pantry Raider (the From File button), or email the recipe text. None of these need a Forager account.</p>
+          <div class="d-flex flex-wrap gap-2">
+            <a class="btn btn-sm btn-outline-secondary" id="share-download-text-btn" href="#" download>
+              <i class="bi bi-file-earmark-text me-1"></i>Download as text
+            </a>
+            <a class="btn btn-sm btn-outline-secondary" id="share-download-btn" href="#" download>
+              <i class="bi bi-download me-1"></i>Download for import
+            </a>
+            <button class="btn btn-sm btn-outline-secondary" id="share-email-text-btn" data-on-click="emailRecipeText(this)">
+              <i class="bi bi-envelope me-1"></i>Email the recipe text
+            </button>
+          </div>
+        </section>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endif %}
+
+<!-- Print confirmation toast -->
+<div class="position-fixed bottom-0 end-0 p-3" style="z-index:9999">
+  <div id="recipesToast" class="toast align-items-center text-bg-success border-0" role="alert">
+    <div class="d-flex">
+      <div class="toast-body" id="recipesToastMsg"></div>
+      <button type="button" class="btn-close btn-close-white me-2 m-auto" aria-label="Close" data-bs-dismiss="toast"></button>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+{% if recipes_enabled %}
+<script type="application/json" id="recipes-data">{{ ({'mealie_url': mealie_url, 'native_backend': recipes_backend == 'native', 'library_name': library_name, 'forager_linked': true if forager_linked else false, 'ai_configured': true if ai_can_write_recipes else false, 'share_attribution_default': share_attribution_default | default('')}) | tojson }}</script>
+<script src="static/js/pages/recipes.js?v={{ app_version }}"></script>
+{% endif %}
+{% endblock %}

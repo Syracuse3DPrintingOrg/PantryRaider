@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <title>Touch calibration</title>
+  <style>
+    html, body {
+      margin: 0; padding: 0; height: 100%; width: 100%;
+      background: #000; color: #fff; overflow: hidden;
+      touch-action: none; user-select: none;
+      font-family: sans-serif;
+    }
+    #crosshair {
+      position: absolute; width: 64px; height: 64px;
+      transform: translate(-50%, -50%); pointer-events: none;
+      display: none;
+    }
+    #msg {
+      position: fixed; bottom: 12%; left: 50%; transform: translateX(-50%);
+      text-align: center; font-size: 1.3rem; line-height: 1.7; width: 80%;
+    }
+    #hint {
+      position: fixed; top: 1rem; left: 50%; transform: translateX(-50%);
+      text-align: center; font-size: 0.85rem; color: #adb5bd; width: 80%;
+    }
+  </style>
+</head>
+<body>
+  <div id="crosshair">
+    <svg viewBox="0 0 64 64" width="64" height="64">
+      <line x1="32" y1="2"  x2="32" y2="62" stroke="#4dabf7" stroke-width="3"/>
+      <line x1="2"  y1="32" x2="62" y2="32" stroke="#4dabf7" stroke-width="3"/>
+      <circle cx="32" cy="32" r="11" fill="none" stroke="#4dabf7" stroke-width="3"/>
+    </svg>
+  </div>
+  <div id="msg">Connecting to the touch device...</div>
+  <div id="hint">Tap each crosshair in turn. To stop, press Cancel on the device you started this from.</div>
+
+{# This page has no <base href>; it is served at setup/calibrate/touch/page,
+   so the script sits three levels up (which also holds under an ingress
+   prefix). #}
+<script src="../../../static/js/pages/calibrate.js?v={{ app_version }}"></script>
+</body>
+</html>

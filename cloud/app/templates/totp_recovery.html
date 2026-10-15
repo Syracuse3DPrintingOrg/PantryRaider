@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Your recovery codes: Forager{% endblock %}
+{% block main_class %}narrow{% endblock %}
+{% block content %}
+<h1>Save your recovery codes</h1>
+<div class="card">
+  {% if regenerated %}
+  <div class="alert alert-notice">Here is your new set of recovery codes. Your
+  old codes no longer work.</div>
+  {% else %}
+  <div class="alert alert-notice">Two-factor authentication is on.</div>
+  {% endif %}
+  <p><strong>Save these codes somewhere safe.</strong> If you ever lose your
+  authenticator app, a recovery code is how you get back in. Each code works
+  once, and this is the only time we show them.</p>
+  <ul class="codes">
+    {% for code in codes %}<li><code>{{ code }}</code></li>{% endfor %}
+  </ul>
+  <a class="btn btn-block" href="/account">I have saved my codes</a>
+</div>
+<style>
+  ul.codes { list-style: none; margin: 1rem 0 1.25rem; padding: 0;
+             display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.5rem; }
+  ul.codes li { background: var(--bg); border: 1px solid var(--border);
+                border-radius: 0.4rem; padding: 0.5rem 0.6rem; text-align: center; }
+  ul.codes code { font-size: 1.02rem; letter-spacing: 0.06em; }
+  @media (max-width: 420px) { ul.codes { grid-template-columns: 1fr; } }
+</style>
+{% endblock %}
