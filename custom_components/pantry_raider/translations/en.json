@@ -1,0 +1,142 @@
+{
+  "config": {
+    "flow_title": "{name}",
+    "step": {
+      "user": {
+        "title": "Connect to Pantry Raider",
+        "description": "Point this at your Pantry Raider install. Leave the API key blank to pair: you approve a code on the kitchen screen instead of copying a key by hand.",
+        "data": {
+          "host": "Host",
+          "port": "Port",
+          "api_key": "API key (optional; leave blank to pair)"
+        }
+      },
+      "zeroconf_confirm": {
+        "title": "Add this Pantry Raider install?",
+        "description": "Home Assistant found {name} on your network. Add it now and approve the pairing code on the kitchen screen."
+      },
+      "pair": {
+        "title": "Approve on your kitchen",
+        "description": "Pantry Raider is showing pairing code {code}. Approve the request on the kitchen screen (or in Pantry Raider under Settings, Bandit Remotes), then press Submit here."
+      },
+      "reauth_confirm": {
+        "title": "Reconnect Pantry Raider",
+        "description": "Approve the code on the kitchen screen or in Pantry Raider under Settings, Bandit Remotes, or paste a key made in Pantry Raider under Settings, Security.",
+        "data": {
+          "api_key": "API key (optional)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Could not reach Pantry Raider at that address. Check the host and port, and that you used the LAN address.",
+      "invalid_auth": "Pantry Raider rejected the API key. Copy it from Settings, Security.",
+      "pairing_pending": "Not approved yet. Approve it on the kitchen, then try again.",
+      "pairing_unavailable": "Pairing is unavailable on this install (it may be turned off in Pantry Raider under Settings, Security). Paste an API key instead.",
+      "pairing_key_missing": "The kitchen approved Home Assistant, but its key did not arrive. Press Submit to try again."
+    },
+    "abort": {
+      "already_configured": "This Pantry Raider install is already set up.",
+      "pairing_denied": "The pairing request was denied on the kitchen.",
+      "pairing_expired": "The pairing request expired. Start again and approve it within a few minutes.",
+      "reauth_successful": "Pantry Raider is connected again."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Pantry Raider options",
+        "description": "How often Home Assistant checks Pantry Raider for updates, and whether Pantry Raider is given a link back to Home Assistant for cameras, Stream Deck keys and thermometers. Turning the link off removes only the tokens this integration created.",
+        "data": {
+          "scan_interval": "Update interval (seconds)",
+          "connect_back": "Let Pantry Raider connect back to Home Assistant"
+        }
+      }
+    }
+  },
+  "services": {
+    "camera_popup": {
+      "name": "Camera pop-up",
+      "description": "Pop a camera feed up on a Pantry Raider screen, for example when someone rings the doorbell.",
+      "fields": {
+        "device_id": {
+          "name": "Device",
+          "description": "Which Pantry Raider screen shows the pop-up. Leave empty to use your main install when only one is set up."
+        },
+        "camera": {
+          "name": "Camera",
+          "description": "The camera's name as set on Pantry Raider's Cameras page. Leave empty for the first configured camera."
+        },
+        "seconds": {
+          "name": "Seconds",
+          "description": "How long the pop-up stays on screen. Leave at 0 to use the length set in Pantry Raider."
+        }
+      }
+    },
+    "camera_detect": {
+      "name": "Camera detection",
+      "description": "Report a camera detection and let Pantry Raider decide whether to pop the camera up, using each camera's own \"pop up on\" checkboxes. One automation can send every detection type it sees.",
+      "fields": {
+        "device_id": {
+          "name": "Device",
+          "description": "Which Pantry Raider screen shows the pop-up. Leave empty to use your main install when only one is set up."
+        },
+        "camera": {
+          "name": "Camera",
+          "description": "The camera's name as set on Pantry Raider's Cameras page. Leave empty for the first configured camera."
+        },
+        "detection_type": {
+          "name": "Detection type",
+          "description": "What the camera saw. Visitor means a doorbell button press."
+        },
+        "seconds": {
+          "name": "Seconds",
+          "description": "How long the pop-up stays on screen. Leave at 0 to use the length set in Pantry Raider."
+        }
+      }
+    },
+    "probe_alert": {
+      "name": "Probe alert",
+      "description": "Pantry Raider calls this when a thermometer probe reaches its target. It fires the pantry_raider_probe_alert event with the alert's details, so automations can react."
+    }
+  },
+  "issues": {
+    "pair_needed": {
+      "title": "Pair Home Assistant with Pantry Raider",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "Pair Home Assistant with Pantry Raider",
+            "description": "This Pantry Raider install accepts Home Assistant without a key today, but that stops once a password is set. Pair now so it keeps working."
+          }
+        }
+      }
+    },
+    "pairing_off": {
+      "title": "Pairing is turned off in Pantry Raider",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "Pairing is turned off in Pantry Raider",
+            "description": "Turn on device pairing in Pantry Raider under Settings, Security (Allow devices on your home network to request access), then press Submit."
+          }
+        }
+      }
+    },
+    "app_update_needed": {
+      "title": "Update Pantry Raider",
+      "description": "Update Pantry Raider so Home Assistant can give it a limited account instead of the owner account."
+    },
+    "open_install_grace": {
+      "title": "Pantry Raider needs a password",
+      "description": "Pantry Raider at {host} has no password, so from {date} it stops answering requests that come through a proxy or tunnel. To keep that access, turn on two-factor sign-in in Pantry Raider under Settings, Security, then set a password there. Signing in from outside your home network needs both."
+    },
+    "open_install_name": {
+      "title": "Pantry Raider does not know one of its names",
+      "description": "Pantry Raider at {host} was opened by a name it does not know, so from {date} it stops answering that name. If you use that name, add it under Other names for this kitchen in Pantry Raider under Settings, Security."
+    },
+    "manual_token": {
+      "title": "Pantry Raider uses a token you pasted",
+      "description": "Pantry Raider is using a Home Assistant token that was pasted into its settings, so this integration leaves it as it is. To let the integration give Pantry Raider a limited account of its own, clear that token in Pantry Raider under Settings, Home Assistant, then reload this integration."
+    }
+  }
+}

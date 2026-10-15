@@ -1,0 +1,12 @@
+[Unit]
+Description=Forager: keep kitchen tunnel peers off the host
+After=network-online.target docker.service wg-quick@wg0.service ufw.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/bin/forager-wg0-firewall
+
+[Install]
+WantedBy=multi-user.target

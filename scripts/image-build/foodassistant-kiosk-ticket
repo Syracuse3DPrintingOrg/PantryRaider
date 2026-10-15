@@ -1,0 +1,114 @@
+#!/usr/bin/python3
+"""Leave a one-time sign-in ticket for the kitchen screen.
+
+    foodassistant-kiosk-ticket
+
+Runs as root from the kiosk unit (ExecStartPre=+) before the browser starts.
+The ticket lets the screen sign in to the app on this device without a
+password: 'v1.<t>.<n>.' followed by the hex HMAC-SHA256 of 'pr-kiosk-v1', t
+and n (newline separated) under this device's bridge token, where t is the
+time in unix seconds and n is 32 random hex digits. The app accepts it once,
+within a few minutes.
+
+It is written to /run/foodassistant-kiosk/ticket (0600), owned by the owner
+of that directory (systemd's RuntimeDirectory= makes it for the kiosk user),
+so only the kiosk launcher can read it. Never prints the ticket. Always
+exits 0, so the screen comes up whatever happens here.
+"""
+from __future__ import annotations
+
+import hashlib
+import hmac
+import os
+import secrets
+import sys
+import time
+
+KIOSK_LABEL = b"pr-kiosk-v1"
+
+
+def log(msg):
+    print(msg, file=sys.stderr, flush=True)
+
+
+def install_dir():
+    return os.environ.get("INSTALL_DIR", "/opt/foodassistant")
+
+
+def run_dir():
+    return os.environ.get("KIOSK_RUN_DIR", "/run/foodassistant-kiosk")
+
+
+def mint(token, t, n):
+    """The I-5 kiosk ticket for time ``t`` (a str of decimal digits, or an
+    int) and nonce ``n`` (32 lowercase hex). Pure."""
+    t = str(t)
+    mac = hmac.new(token.encode("utf-8"),
+                   KIOSK_LABEL + b"\n" + t.encode("ascii") + b"\n" + n.encode("ascii"),
+                   hashlib.sha256).hexdigest()
+    return f"v1.{t}.{n}.{mac}"
+
+
+def read_token():
+    try:
+        with open(os.path.join(install_dir(), "data", "bridge-token"),
+                  encoding="utf-8") as f:
+            return f.read().strip()
+    except (OSError, UnicodeDecodeError):
+        return ""
+
+
+def write_ticket(directory, ticket):
+    st = os.stat(directory)
+    path = os.path.join(directory, "ticket")
+    tmp = os.path.join(directory, f".ticket.{os.getpid()}.tmp")
+    try:
+        os.unlink(tmp)
+    except OSError:
+        pass
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    try:
+        with os.fdopen(fd, "w", encoding="ascii") as f:
+            # The directory belongs to the kiosk user, who could swap the
+            # name for a link between the open and a chown by path, so the
+            # ownership is changed on the open file itself.
+            if os.geteuid() == 0:
+                os.fchown(f.fileno(), st.st_uid, st.st_gid)
+            f.write(ticket)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def run():
+    directory = run_dir()
+    if not os.path.isdir(directory):
+        log(f"kiosk ticket: {directory} is missing; the screen starts without one")
+        return
+    token = read_token()
+    if not token:
+        log("kiosk ticket: no bridge token; the screen starts without one")
+        try:
+            os.unlink(os.path.join(directory, "ticket"))
+        except OSError:
+            pass
+        return
+    ticket = mint(token, int(time.time()), secrets.token_hex(16))
+    write_ticket(directory, ticket)
+    log("kiosk ticket: written")
+
+
+def main():
+    try:
+        run()
+    except Exception as e:  # noqa: BLE001 - never block the screen
+        log(f"kiosk ticket: not written ({type(e).__name__})")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
