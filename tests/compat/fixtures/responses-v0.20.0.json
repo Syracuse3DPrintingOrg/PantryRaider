@@ -1,0 +1,245 @@
+{
+ "ref": "v0.20.0",
+ "captured_with": "scripts/compat/capture-client-fixtures.py --ref v0.20.0 --r1-ref e95cf9b --out tests/compat/fixtures --integration-ref c9517f9",
+ "note": "What v0.20.0 answers to the requests newer clients make, measured against its real app. The approved pairing status had a freshly minted key; its value is replaced by a fixed fake one.",
+ "refs": {
+  "ref": "v0.20.0",
+  "version": "0.20.0",
+  "r1_ref": "e95cf9b",
+  "r1_version": "0.20.2",
+  "integration_ref": "c9517f9"
+ },
+ "satellite_pull": {
+  "status": 200,
+  "json": {
+   "ok": true,
+   "config": {
+    "vision_provider": "gemini",
+    "gemini_api_key": "fake-gemini-key-aaaaaaa",
+    "gemini_model": "gemini-2.5-flash",
+    "ollama_base_url": "http://ollama:11434",
+    "ollama_model": "llava:7b",
+    "openai_api_key": "",
+    "openai_model": "gpt-4o-mini",
+    "anthropic_api_key": "",
+    "anthropic_model": "claude-opus-4-8",
+    "barcode_enrichment": "llm",
+    "barcode_llm_fallback": false,
+    "barcode_autocheck_shopping": true,
+    "enrich_provider": "",
+    "enrich_model": "",
+    "llm_expiry_enabled": null,
+    "grocy_base_url": "http://127.0.0.1:9",
+    "grocy_api_key": "fake-grocy-key-aaaaaaaa",
+    "grocy_public_url": "",
+    "mealie_base_url": "",
+    "mealie_api_key": "",
+    "mealie_public_url": "",
+    "recipe_source": "themealdb",
+    "themealdb_api_key": "1",
+    "spoonacular_api_key": "",
+    "recipes_backend": "",
+    "shopping_backend": "",
+    "staple_items": "",
+    "cook_ai_context": "",
+    "kitchen_appliances": [
+     "stove",
+     "oven",
+     "microwave",
+     "refrigerator",
+     "freezer",
+     "toaster",
+     "blender"
+    ],
+    "perishable_days": 14,
+    "expiring_soon_days": 5,
+    "suggest_per_tier": 8,
+    "custom_storage_categories": [],
+    "ui_theme": "pantryraider",
+    "streamdeck_weather_location": "",
+    "streamdeck_weather_units": "f",
+    "streamdeck_key_overrides": [],
+    "streamdeck_cameras": [],
+    "streamdeck_ha_base_url": "http://192.168.1.40:8123",
+    "streamdeck_ha_token": "fake-ha-token-aaaaaaaa",
+    "streamdeck_ha_slots": [],
+    "ha_events_enabled": false,
+    "ha_camera_popup_seconds": 20,
+    "auto_update": true,
+    "update_channel": "main",
+    "timezone": "",
+    "clock_format": "auto",
+    "fleet_label_printer_queue": "",
+    "fleet_document_printer_queue": "",
+    "label_layout_json": "",
+    "label_show_logo": false,
+    "beszel_enabled": false,
+    "beszel_url": ""
+   },
+   "config_nonce": "0123456789abcdef0123456789abcdef",
+   "config_signature": "b9cda7dffa0f8bcc256fb5f79ee4354711771bd542e0f0a5e68523c525056d7f",
+   "server_hostname": "kitchen-pi",
+   "server_version": "0.20.0",
+   "expiry_defaults": [],
+   "streamdeck_profiles": [],
+   "gadget_config": {
+    "gadgets_enabled": false,
+    "gadget_devices": [],
+    "hygrometers_enabled": false,
+    "hygrometer_devices": [],
+    "buttons_enabled": false,
+    "button_devices": [],
+    "contacts_enabled": false,
+    "contact_devices": [],
+    "cub_ble_advertise": false,
+    "device_id": "compat-server-0001"
+   },
+   "gadget_alarms": [],
+   "command": null
+  },
+  "key": "fake-key-primary-aaaaaa",
+  "nonce": "0123456789abcdef0123456789abcdef",
+  "request_headers": {
+   "X-API-Key": "fake-key-primary-aaaaaa",
+   "X-Device-Id": "compat-sat-0001",
+   "X-Device-Hostname": "kitchen-pi",
+   "X-Device-Mode": "pi_remote",
+   "X-Device-Version": "0.20.0",
+   "X-Device-Ip": "192.168.1.71",
+   "X-Config-Nonce": "0123456789abcdef0123456789abcdef"
+  }
+ },
+ "ha_state": {
+  "status": 200,
+  "json": {
+   "app": "pantryraider",
+   "version": "0.20.0",
+   "mode": "server",
+   "device_id": "compat-server-0001",
+   "hostname": "kitchen-pi",
+   "display": {
+    "idle_timeout": 0,
+    "screensaver_minutes": 0,
+    "screensaver_mode": "bounce",
+    "wake_on_presence": "auto"
+   },
+   "presence": {
+    "available": false,
+    "detected": false
+   },
+   "printers": {
+    "label_queue": "",
+    "document_queue": "",
+    "queues": []
+   },
+   "expiring": {
+    "expired": 0,
+    "today": 0,
+    "within_3_days": 0,
+    "within_7_days": 0,
+    "expiring_ok": false
+   },
+   "counts": {
+    "pending": 0,
+    "action_items": 0
+   },
+   "timers": {
+    "running": 0,
+    "next": null,
+    "active": []
+   },
+   "thermometers": [],
+   "satellites": [
+    {
+     "device_id": "compat-sat-0001",
+     "hostname": "kitchen-pi",
+     "ip": "192.168.1.71",
+     "version": "0.20.0",
+     "last_seen": "2026-10-01T11:48:35+00:00"
+    }
+   ]
+  }
+ },
+ "credentials_exchange": {
+  "status": 404,
+  "json": {
+   "detail": "Not Found"
+  }
+ },
+ "kiosk_launch_probe": {
+  "status": 404,
+  "json": {
+   "detail": "Not Found"
+  }
+ },
+ "gadgets_config": {
+  "status": 200,
+  "json": {
+   "enabled": false,
+   "devices": [],
+   "hygrometers_enabled": false,
+   "hygrometers": [],
+   "buttons_enabled": false,
+   "buttons": [],
+   "contacts_enabled": false,
+   "contacts": [],
+   "cub_ble_advertise": false,
+   "device_id": "compat-server-0001",
+   "stemma": {
+    "enabled": true,
+    "devices": []
+   },
+   "scanner_uart": {
+    "enabled": false,
+    "port": "/dev/serial0",
+    "baud": 9600
+   },
+   "scan_active": false,
+   "scanner_mode": "inventory"
+  }
+ },
+ "pairing_status_approved": {
+  "status": 200,
+  "json": {
+   "ok": true,
+   "status": "approved",
+   "api_key": "fake-paired-key-aaaaaaa",
+   "key_name": "Home Assistant"
+  }
+ },
+ "streamdeck_config_toml": {
+  "input": {
+   "base_url": "http://127.0.0.1:9284",
+   "api_key": "fake-key-primary-aaaaaa",
+   "weather_location": "Syracuse",
+   "weather_units": "f",
+   "theme": "pantryraider",
+   "key_style": "rich",
+   "icon_color": "full",
+   "ha_base_url": "http://192.168.1.40:8123",
+   "ha_token": "fake-ha-token-aaaaaaaa",
+   "ha_slots": [],
+   "cameras": [],
+   "key_overrides": [
+    {
+     "slot": 0,
+     "type": "ha_action",
+     "entity_id": "lock.front_door",
+     "service": "lock.unlock",
+     "label": "Front door"
+    },
+    {
+     "slot": 1,
+     "type": "ha_action",
+     "entity_id": "light.kitchen",
+     "service": "light.toggle",
+     "label": "Kitchen light"
+    }
+   ],
+   "idle_timeout_minutes": 0,
+   "logo_when_display_off": true,
+   "clock_format": "auto"
+  },
+  "text": "base_url = \"http://127.0.0.1:9284\"\napi_key = \"fake-key-primary-aaaaaa\"\nweather_location = \"Syracuse\"\nweather_units = \"f\"\ntheme = \"pantryraider\"\nkey_style = \"rich\"\nicon_color = \"full\"\nha_base_url = \"http://192.168.1.40:8123\"\nha_token = \"fake-ha-token-aaaaaaaa\"\nha_slots = []\ncameras = []\nidle_timeout_minutes = 0\nlogo_when_display_off = true\nclock_format = \"auto\"\n\n[[key_overrides]]\nslot = 0\ntype = \"ha_action\"\nentity_id = \"lock.front_door\"\nservice = \"lock.unlock\"\nlabel = \"Front door\"\n\n[[key_overrides]]\nslot = 1\ntype = \"ha_action\"\nentity_id = \"light.kitchen\"\nservice = \"light.toggle\"\nlabel = \"Kitchen light\"\n"
+ }
+}

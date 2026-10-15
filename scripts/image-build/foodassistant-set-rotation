@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+# foodassistant-set-rotation -- set the kiosk display rotation
+#
+# Usage: sudo foodassistant-set-rotation <degrees> [--reboot]
+#   degrees: 0, 90, 180, or 270
+#
+# Rotation is applied by the Wayland compositor (cage/wlroots) through the
+# wlr-output-management protocol, driven by wlr-randr. cage on the Pi uses the
+# DRM backend, which ignores WLR_OUTPUT_TRANSFORM, so the env-var approach does
+# nothing; wlr-randr is the path that actually rotates the output.
+#
+# The chosen transform is saved to /etc/foodassistant/kiosk-rotation and applied
+# to the running display immediately (no reboot). It is re-applied on every
+# kiosk start by the service's ExecStartPost, so it survives restarts and
+# reboots. Pass --reboot to reboot the whole device instead of applying live.
+set -euo pipefail
+
+REBOOT=0
+ROT=""
+for arg in "$@"; do
+  case "$arg" in
+    --reboot) REBOOT=1 ;;
+    0|90|180|270) ROT="$arg" ;;
+    *) echo "Usage: $0 <0|90|180|270> [--reboot]" >&2; exit 1 ;;
+  esac
+done
+if [ -z "$ROT" ]; then
+  echo "Usage: $0 <0|90|180|270> [--reboot]" >&2
+  exit 1
+fi
+
+transform="normal"
+[ "$ROT" != "0" ] && transform="$ROT"
+
+mkdir -p /etc/foodassistant
+echo "$transform" > /etc/foodassistant/kiosk-rotation
+# Keep WLR_OUTPUT_TRANSFORM in kiosk-env in sync. It is ignored by the DRM
+# backend but honored by the nested wlroots backends used in dev, and the host
+# bridge reads it back to report the current rotation.
+echo "WLR_OUTPUT_TRANSFORM=$transform" > /etc/foodassistant/kiosk-env
+echo "Kiosk rotation set to ${ROT} degrees (transform=$transform)"
+
+# Remove any stale KMS rotation a previous version may have written to
+# cmdline.txt, so it does not stack with the compositor transform.
+for cmdline in /boot/firmware/cmdline.txt /boot/cmdline.txt; do
+  [ -f "$cmdline" ] || continue
+  if grep -q 'video=HDMI-A-[0-9]*:rotate=' "$cmdline"; then
+    line="$(tr -d '\n' < "$cmdline" | sed 's/ video=HDMI-A-[0-9]*:rotate=[0-9]*//')"
+    printf '%s\n' "$line" > "$cmdline"
+    echo "Cleared a stale KMS rotation from $cmdline; reboot once to fully drop it."
+  fi
+done
+
+if [ "$REBOOT" = "1" ]; then
+  echo "Rebooting now..."
+  reboot
+  exit 0
+fi
+
+# Apply to the live display. If the compositor is not reachable (kiosk down),
+# restart it so ExecStartPost applies the saved rotation on startup.
+if foodassistant-apply-rotation; then
+  echo "Rotation applied to the live display."
+elif systemctl list-unit-files foodassistant-kiosk.service >/dev/null 2>&1; then
+  echo "Compositor not reachable; restarting the kiosk to apply rotation..."
+  systemctl restart foodassistant-kiosk.service \
+    && echo "Kiosk restarted; rotation will apply on startup." \
+    || echo "Could not restart the kiosk service; rotation will apply on next start."
+else
+  echo "Kiosk service not installed; rotation will apply when it starts."
+fi

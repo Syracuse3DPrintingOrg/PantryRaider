@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% block title %}Shopping List: Pantry Raider{% endblock %}
+{% block content %}
+
+<div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mt-3 mb-3">
+  <h4 class="mb-0"><i class="bi bi-cart me-2"></i>Shopping List</h4>
+  <div class="d-flex gap-2 align-items-center">
+    <select class="form-select form-select-sm d-none" id="list-select" style="width:auto"
+            data-on-change="load(this.value)"></select>
+    {% if ai_configured %}
+    <button class="btn btn-sm btn-outline-primary" id="receipt-btn"
+            data-on-click="PR.clickById('receipt-file')">
+      <i class="bi bi-receipt me-1"></i>Add receipt
+    </button>
+    <input type="file" id="receipt-file" accept="image/*" capture="environment"
+           class="d-none" data-on-change="receiptSelected(this)">
+    {% endif %}
+    {% if shopping_backend == 'mealie' %}
+    <a class="btn btn-sm btn-outline-secondary" href="{{ mealie_url }}" target="_blank">
+      <i class="bi bi-box-arrow-up-right me-1"></i>Open Mealie
+    </a>
+    {% endif %}
+  </div>
+</div>
+
+{% if ai_configured %}
+<div id="receipt-card" class="card mb-3 d-none">
+  <div class="card-body">
+    <h6 class="mb-1"><i class="bi bi-receipt me-1"></i>Receipt prices</h6>
+    <div class="text-secondary small mb-2">
+      Snap a photo of a grocery receipt and the prices you paid are matched to
+      the items in your pantry. Review the pairings, then apply to record them
+      in your price history.
+    </div>
+    <div id="receipt-status" class="d-none"></div>
+    <div id="receipt-dismiss" class="d-none">
+      <button class="btn btn-sm btn-outline-secondary" data-on-click="dismissReceipt()">
+        Dismiss
+      </button>
+    </div>
+    <div id="receipt-review" class="d-none">
+      <div id="receipt-store" class="small text-secondary mb-2"></div>
+      <div id="receipt-rows" class="list-group mb-2"></div>
+      <div class="d-flex gap-2">
+        <button class="btn btn-sm btn-primary" id="receipt-apply-btn"
+                data-on-click="applyReceiptPrices()">
+          <i class="bi bi-check2 me-1"></i>Apply prices
+        </button>
+        <button class="btn btn-sm btn-outline-secondary" data-on-click="dismissReceipt()">
+          Dismiss
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+<div class="row">
+  <div class="col-lg-7 col-xl-6">
+    <form class="input-group mb-3" data-on-submit="addItem(event)">
+      <input type="text" class="form-control" id="new-item" placeholder="Add an item…"
+             list="new-item-suggestions" autocomplete="off" data-on-input="suggestItems(this.value)">
+      <datalist id="new-item-suggestions"></datalist>
+      <button class="btn btn-primary" type="submit" aria-label="Add this item to the list"><i class="bi bi-plus-lg"></i></button>
+    </form>
+
+    <div id="shopping-msg" class="alert alert-warning py-2 px-3 d-none" role="alert"></div>
+
+    <div id="items" class="list-group">
+      <div class="text-secondary"><span class="spinner-border spinner-border-sm me-2"></span>Loading…</div>
+    </div>
+
+    {% if shopping_backend == 'grocy' %}
+    <div class="mt-2">
+      <button class="btn btn-sm btn-outline-secondary" data-on-click="clearDone()">
+        <i class="bi bi-check2-all me-1"></i>Clear checked
+      </button>
+    </div>
+    {% endif %}
+  </div>
+
+  {% if shopping_backend == 'grocy' %}
+  <div class="col-lg-5 col-xl-4 mt-3 mt-lg-0">
+    <div id="suggestions-card" class="d-none">
+      <h6 class="text-secondary mb-2">
+        <i class="bi bi-arrow-repeat me-1"></i>Restock suggestions
+      </h6>
+      <div id="suggestions" class="list-group"></div>
+    </div>
+  </div>
+  {% endif %}
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script type="application/json" id="shopping-data">{{ ({'backend': shopping_backend, 'ai': true if ai_configured else false}) | tojson }}</script>
+<script src="static/js/pages/shopping.js?v={{ app_version }}"></script>
+{% endblock %}
