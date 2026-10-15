@@ -1,0 +1,458 @@
+#!/usr/bin/env python3
+"""Forager tunnel agent.
+
+Runs on the VPS as root (not in Docker), listening on 127.0.0.1:9300. The
+cloud app (behind Caddy on the same host, or a compose sidecar) asks it to
+program the two things a kitchen tunnel needs and that only root can touch:
+the WireGuard interface wg0 and Caddy's per-kitchen reverse-proxy routes.
+
+The app never runs `wg` or edits Caddy itself; it calls here with the shared
+token so the privileged surface stays small and auditable.
+
+Authentication: every route except GET /health requires the X-Tunnel-Token
+header to match the token in /etc/forager/tunnel-token (the same value the
+cloud app holds as CLOUD_TUNNEL_AGENT_TOKEN).
+
+Endpoints
+---------
+GET    /health   liveness probe (no token)
+POST   /peer     add or update a peer + its Caddy route
+                 {public_key, tunnel_ip, domain, app_port}
+DELETE /peer     remove a peer + its Caddy route  {public_key}
+
+Every field is checked before anything is touched: a WireGuard key shape, an
+address inside the tunnel network, a plain hostname, a port from 1 to 65535.
+A peer is keyed by its public key, its domain and its address together, so a
+reused name or address replaces the old entry (and its WireGuard peer)
+instead of rendering a second Caddy site for the same host.
+
+Caddy changes are checked before they land. The candidate include is written,
+`caddy validate` runs over the full Caddyfile that imports it, and only then
+are WireGuard and the state file changed and Caddy reloaded. Any failure puts
+the previous include back, so a bad entry can never leave Caddy unable to
+start (the include is imported by the main Caddyfile, so a broken one would
+take the apex down too on the next restart).
+
+State: the agent keeps its own view of the live peers in a small JSON file
+(PEERS_STATE) so it can regenerate the Caddy include and re-apply peers after
+a restart. WireGuard peers are also written into wg0's config via `wg-quick
+save` so they survive an interface bounce.
+
+The pure helpers (the peers store shape, the Caddy include renderer) carry no
+side effects, so cloud/tests exercises them without wg or Caddy present.
+"""
+import base64
+import binascii
+import hmac
+import http.server
+import ipaddress
+import json
+import os
+import re
+import subprocess
+import sys
+import threading
+from pathlib import Path
+
+# Bind host: 127.0.0.1 by default (agent and app on the same host netns).
+# When the cloud app runs in Docker and the agent on the host, set this to the
+# compose network's gateway IP (an internal-only address, e.g. 172.28.0.1) via
+# FORAGER_TUNNEL_AGENT_HOST so containers can reach it while the public
+# internet cannot. Never bind 0.0.0.0: that would expose a root helper.
+LISTEN_HOST = os.environ.get("FORAGER_TUNNEL_AGENT_HOST", "127.0.0.1")
+LISTEN_PORT = int(os.environ.get("FORAGER_TUNNEL_AGENT_PORT", "9300"))
+
+WG_INTERFACE = "wg0"
+# The Caddy include the app writes and Caddy imports. One site block per
+# kitchen; regenerated in full on every change so it always matches state.
+CADDY_KITCHENS_FILE = "/etc/caddy/forager-kitchens.caddy"
+# The main Caddyfile that imports the include above. `caddy validate` runs
+# over it before every change, so it needs the same environment Caddy itself
+# gets (CLOUD_DOMAIN in particular; see the unit file).
+CADDY_MAIN_CONFIG = os.environ.get("FORAGER_CADDYFILE", "/etc/caddy/Caddyfile")
+# The tunnel network peers are allocated from. The network address and the
+# server's own .1 are never a peer's.
+TUNNEL_CIDR = os.environ.get("FORAGER_TUNNEL_CIDR", "10.99.0.0/16")
+# The port the kitchen's Pantry Raider app listens on, reached over the
+# tunnel. Same 9284 the app uses everywhere.
+KITCHEN_APP_PORT = 9284
+# Where the agent remembers the live peers between restarts.
+PEERS_STATE = "/etc/forager/tunnel-peers.json"
+# The shared token file. Written out-of-band during VPS setup (see the VPS
+# README); the cloud app carries the same value in CLOUD_TUNNEL_AGENT_TOKEN.
+TOKEN_PATH = "/etc/forager/tunnel-token"
+
+_EXPECTED_TOKEN = ""
+
+# One change at a time: the server is threaded, and every change is a
+# read-modify-write of the state file and the Caddy include.
+_APPLY_LOCK = threading.Lock()
+
+_WG_KEY_RE = re.compile(r"^[A-Za-z0-9+/]{43}=$")
+_LABEL_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
+
+
+# --- Pure helpers (unit-tested; no wg, Caddy, or disk) --------------------
+
+def valid_public_key(key) -> bool:
+    """A WireGuard public key: 44 characters of base64 ending in "=",
+    decoding to 32 bytes."""
+    if not isinstance(key, str) or not _WG_KEY_RE.fullmatch(key):
+        return False
+    try:
+        return len(base64.b64decode(key, validate=True)) == 32
+    except (binascii.Error, ValueError):
+        return False
+
+
+def valid_tunnel_ip(ip, cidr: str = None) -> bool:
+    """An IPv4 host address inside the tunnel network, other than the network
+    address and the server's .1."""
+    try:
+        addr = ipaddress.IPv4Address(str(ip))
+        net = ipaddress.ip_network(cidr or TUNNEL_CIDR, strict=False)
+    except ValueError:
+        return False
+    if addr not in net:
+        return False
+    return addr not in (net.network_address, net.network_address + 1,
+                        net.broadcast_address)
+
+
+def valid_domain(domain) -> bool:
+    """A plain lowercase hostname: dot-separated labels of letters, digits and
+    inner dashes. Nothing that could break out of a Caddy site address."""
+    if not isinstance(domain, str) or not domain or len(domain) > 253:
+        return False
+    labels = domain.split(".")
+    return len(labels) >= 2 and all(_LABEL_RE.fullmatch(lb) for lb in labels)
+
+
+def valid_app_port(port) -> bool:
+    return (isinstance(port, int) and not isinstance(port, bool)
+            and 1 <= port <= 65535)
+
+
+def peer_entry_ok(p) -> bool:
+    """Whether a stored entry is safe to render into the Caddy include."""
+    return (isinstance(p, dict) and valid_domain(p.get("domain"))
+            and valid_tunnel_ip(p.get("tunnel_ip"))
+            and valid_app_port(p.get("app_port", KITCHEN_APP_PORT)))
+
+
+def _collides(p, public_key: str, tunnel_ip: str, domain: str) -> bool:
+    return (p.get("public_key") == public_key
+            or (domain and p.get("domain") == domain)
+            or (tunnel_ip and p.get("tunnel_ip") == tunnel_ip))
+
+
+def displaced_keys(peers, public_key: str, tunnel_ip: str, domain: str):
+    """Other peers' keys an add replaces because they hold the same domain or
+    address. Their WireGuard peers have to go too, or the old key would keep
+    a live (if unrouted) peer on wg0."""
+    return [p.get("public_key") for p in peers
+            if p.get("public_key") and p.get("public_key") != public_key
+            and _collides(p, public_key, tunnel_ip, domain)]
+
+def render_kitchen_block(domain: str, tunnel_ip: str,
+                         app_port: int = KITCHEN_APP_PORT) -> str:
+    """One Caddy site block routing a kitchen's public domain to its app over
+    the tunnel. TLS is left to the global on_demand config in the Caddyfile."""
+    return (f"{domain} {{\n"
+            f"\treverse_proxy {tunnel_ip}:{app_port}\n"
+            f"}}\n")
+
+
+def render_caddy_config(peers, default_app_port: int = KITCHEN_APP_PORT) -> str:
+    """The full forager-kitchens.caddy include from the peer list.
+
+    ``peers`` is an iterable of dicts with "domain" and "tunnel_ip", and an
+    optional "app_port" (the port the kitchen's app listens on behind the
+    tunnel). Sorted by domain so the file is stable (no spurious reloads from
+    dict ordering), and peers missing a domain are skipped rather than
+    rendered into a broken block. A peer without an "app_port" falls back to
+    ``default_app_port`` (9284), so peers stored before this field existed keep
+    working.
+    """
+    # An entry that fails validation (a hand edit, a state file from before
+    # the agent checked its input) is left out rather than rendered into a
+    # block that would stop Caddy loading.
+    usable = [p for p in peers if peer_entry_ok(p)]
+    usable.sort(key=lambda p: p["domain"])
+    header = ("# Managed by forager-tunnel-agent. Do not edit by hand; this\n"
+              "# file is regenerated whenever a kitchen tunnel changes.\n")
+    if not usable:
+        return header
+    blocks = [render_kitchen_block(p["domain"], p["tunnel_ip"],
+                                   p.get("app_port", default_app_port))
+              for p in usable]
+    return header + "\n".join(blocks)
+
+
+def upsert_peer(peers, public_key: str, tunnel_ip: str, domain: str,
+                app_port: int = KITCHEN_APP_PORT):
+    """Add or update a peer in the store (a list of dicts). Any entry with the
+    same public key, the same domain, or the same tunnel address is replaced,
+    so one domain never renders two Caddy sites and one address never routes
+    two names. Returns a new list, leaving the input untouched. ``app_port``
+    is the port the kitchen's app listens on behind the tunnel (Caddy
+    reverse-proxies to tunnel_ip:app_port)."""
+    out = [p for p in peers if not _collides(p, public_key, tunnel_ip, domain)]
+    out.append({"public_key": public_key, "tunnel_ip": tunnel_ip,
+                "domain": domain, "app_port": app_port})
+    return out
+
+
+def remove_peer_entry(peers, public_key: str):
+    """The store with any peer matching ``public_key`` dropped."""
+    return [p for p in peers if p.get("public_key") != public_key]
+
+
+def token_ok(provided: str, expected: str) -> bool:
+    """Constant-time token check. An empty expected token denies everything
+    (the agent refuses to run open); an empty provided token is a plain deny."""
+    if not expected or not provided:
+        return False
+    return hmac.compare_digest(provided.strip(), expected.strip())
+
+
+# --- Side-effecting layer (wg, Caddy, disk); stubbed in tests -------------
+
+def run_command(args) -> None:
+    """Run a command with no shell. Raises CalledProcessError on failure.
+
+    Isolated here (never shell=True, always an arg list) so the request
+    handlers stay declarative and tests replace this with a recorder."""
+    subprocess.run(args, check=True)
+
+
+def load_peers(path: str = None):
+    # Resolved at call time (not bound as a default) so a test or an env
+    # override of PEERS_STATE takes effect.
+    path = path or PEERS_STATE
+    try:
+        return json.loads(Path(path).read_text())
+    except (OSError, ValueError):
+        return []
+
+
+def save_peers(peers, path: str = None) -> None:
+    path = path or PEERS_STATE
+    tmp = f"{path}.tmp"
+    Path(tmp).write_text(json.dumps(peers, indent=2))
+    os.replace(tmp, path)
+
+
+def _write_text(path: str, text: str) -> None:
+    tmp = f"{path}.tmp"
+    Path(tmp).write_text(text)
+    os.replace(tmp, path)
+
+
+def write_caddy_config(peers, path: str = None) -> None:
+    _write_text(path or CADDY_KITCHENS_FILE, render_caddy_config(peers))
+
+
+def _read_include():
+    try:
+        return Path(CADDY_KITCHENS_FILE).read_text()
+    except OSError:
+        return None
+
+
+def _restore_include(previous) -> None:
+    """Put the include back the way it was before a failed change."""
+    try:
+        if previous is None:
+            Path(CADDY_KITCHENS_FILE).unlink(missing_ok=True)
+        else:
+            _write_text(CADDY_KITCHENS_FILE, previous)
+    except OSError as exc:
+        sys.stderr.write(f"tunnel-agent: could not restore the include: {exc}\n")
+
+
+def validate_caddy() -> None:
+    """Check the full Caddy config (the main Caddyfile plus the include it
+    imports) without touching the running server. Raises on a bad config."""
+    run_command(["caddy", "validate", "--config", CADDY_MAIN_CONFIG,
+                 "--adapter", "caddyfile"])
+
+
+def _commit(peers, wg_steps) -> None:
+    """Land a change safely: write the candidate include, validate the whole
+    Caddy config, then run the WireGuard steps, reload Caddy, and only then
+    save the state file. Any failure restores the previous include, so the
+    file Caddy imports always holds a config that loads."""
+    previous = _read_include()
+    write_caddy_config(peers)
+    try:
+        validate_caddy()
+        for step in wg_steps:
+            run_command(step)
+        run_command(["systemctl", "reload", "caddy"])
+    except Exception:
+        _restore_include(previous)
+        raise
+    save_peers(peers)
+
+
+def apply_add(public_key: str, tunnel_ip: str, domain: str,
+              app_port: int = KITCHEN_APP_PORT) -> None:
+    """Bring a peer fully online: wg peer, saved config, Caddy route, reload.
+    A peer already holding the same domain or address is replaced, its
+    WireGuard peer removed along with it."""
+    with _APPLY_LOCK:
+        current = load_peers()
+        peers = upsert_peer(current, public_key, tunnel_ip, domain, app_port)
+        steps = [["wg", "set", WG_INTERFACE, "peer", old, "remove"]
+                 for old in displaced_keys(current, public_key, tunnel_ip,
+                                           domain)]
+        steps.append(["wg", "set", WG_INTERFACE, "peer", public_key,
+                      "allowed-ips", f"{tunnel_ip}/32",
+                      "persistent-keepalive", "25"])
+        steps.append(["wg-quick", "save", WG_INTERFACE])
+        _commit(peers, steps)
+
+
+def apply_remove(public_key: str) -> None:
+    """Tear a peer down: drop it from wg0, the store, and Caddy, then reload.
+    A key that is not a real WireGuard key (stored before the agent checked
+    its input) was never accepted by wg, so only its stored entry and route
+    are dropped."""
+    with _APPLY_LOCK:
+        peers = remove_peer_entry(load_peers(), public_key)
+        steps = []
+        if valid_public_key(public_key):
+            steps = [["wg", "set", WG_INTERFACE, "peer", public_key, "remove"],
+                     ["wg-quick", "save", WG_INTERFACE]]
+        _commit(peers, steps)
+
+
+# --- HTTP layer -----------------------------------------------------------
+
+class Handler(http.server.BaseHTTPRequestHandler):
+    server_version = "forager-tunnel-agent"
+
+    def log_message(self, fmt, *args):
+        sys.stderr.write("tunnel-agent: " + (fmt % args) + "\n")
+
+    def _send(self, status: int, body: dict) -> None:
+        payload = json.dumps(body).encode()
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
+    def _authed(self) -> bool:
+        return token_ok(self.headers.get("X-Tunnel-Token", ""), _EXPECTED_TOKEN)
+
+    def _read_json(self) -> dict:
+        length = int(self.headers.get("Content-Length", 0) or 0)
+        if not length:
+            return {}
+        try:
+            return json.loads(self.rfile.read(length))
+        except ValueError:
+            return {}
+
+    def do_GET(self):
+        if self.path.split("?", 1)[0] == "/health":
+            self._send(200, {"status": "ok", "app": "forager-tunnel-agent"})
+            return
+        self._send(404, {"error": "not_found"})
+
+    def do_POST(self):
+        if self.path.split("?", 1)[0] != "/peer":
+            self._send(404, {"error": "not_found"})
+            return
+        if not self._authed():
+            self._send(403, {"error": "forbidden"})
+            return
+        body = self._read_json()
+        public_key = str(body.get("public_key", "")).strip()
+        tunnel_ip = str(body.get("tunnel_ip", "")).strip()
+        domain = str(body.get("domain", "")).strip()
+        domain = domain.lower().rstrip(".")
+        # Older cloud apps omit app_port; default to 9284 so existing peers and
+        # a stale cloud both keep working. Anything sent must be a real port.
+        app_port = body.get("app_port", KITCHEN_APP_PORT)
+        if not public_key or not tunnel_ip:
+            self._send(400, {"error": "public_key and tunnel_ip are required"})
+            return
+        if not valid_public_key(public_key):
+            self._send(400, {"error": "invalid_public_key"})
+            return
+        if not valid_tunnel_ip(tunnel_ip):
+            self._send(400, {"error": "invalid_tunnel_ip"})
+            return
+        if not valid_domain(domain):
+            self._send(400, {"error": "invalid_domain"})
+            return
+        if not valid_app_port(app_port):
+            self._send(400, {"error": "invalid_app_port"})
+            return
+        try:
+            apply_add(public_key, tunnel_ip, domain, app_port)
+        except Exception as exc:  # noqa: BLE001 - report, do not crash the loop
+            self.log_message("peer add failed: %s", exc)
+            self._send(500, {"error": "peer_add_failed"})
+            return
+        self._send(200, {"ok": True})
+
+    def do_DELETE(self):
+        if self.path.split("?", 1)[0] != "/peer":
+            self._send(404, {"error": "not_found"})
+            return
+        if not self._authed():
+            self._send(403, {"error": "forbidden"})
+            return
+        body = self._read_json()
+        public_key = str(body.get("public_key", "")).strip()
+        if not public_key:
+            self._send(400, {"error": "public_key is required"})
+            return
+        if len(public_key) > 128:
+            self._send(400, {"error": "invalid_public_key"})
+            return
+        try:
+            apply_remove(public_key)
+        except Exception as exc:  # noqa: BLE001
+            self.log_message("peer remove failed: %s", exc)
+            self._send(500, {"error": "peer_remove_failed"})
+            return
+        self._send(200, {"ok": True})
+
+
+class _ThreadingServer(http.server.ThreadingHTTPServer):
+    daemon_threads = True
+
+
+def _load_token(path: str = TOKEN_PATH) -> str:
+    try:
+        return Path(path).read_text().strip()
+    except OSError:
+        return ""
+
+
+def main() -> int:
+    global _EXPECTED_TOKEN
+    _EXPECTED_TOKEN = _load_token()
+    if not _EXPECTED_TOKEN:
+        sys.stderr.write(
+            f"tunnel-agent: no token at {TOKEN_PATH}; refusing to start "
+            "(create it and restart)\n")
+        return 1
+    server = _ThreadingServer((LISTEN_HOST, LISTEN_PORT), Handler)
+    sys.stderr.write(f"tunnel-agent: listening on {LISTEN_HOST}:{LISTEN_PORT}\n")
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.server_close()
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

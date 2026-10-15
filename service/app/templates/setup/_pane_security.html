@@ -1,0 +1,289 @@
+{% from "setup/_macros.html" import info, secret_input, panel, srow, pill, toggle with context %}
+<!-- Security (FoodAssistant-jcnh): the dense panel/row pattern.
+             Authentication saves with Save Security; keys, this device's own
+             programs and home network access save on change through
+             /api/credentials and /setup/security (static/js/setup/credentials.js),
+             outside Save Security. Field ids (auth_required, auth_password,
+             current_password, viewer_password) are unchanged so the save path
+             and its current-password check keep working. -->
+        <div class="tab-pane fade" id="pane-security">
+          <p class="pane-intro">Who can reach the app and how login is protected.</p>
+          <div id="kiosk-url-warning" class="alert alert-warning py-2 small d-none"></div>
+
+          {% call panel('Authentication',
+                        'How people sign in to this app.',
+                        pill_text=('On' if s.auth_required else 'Off'),
+                        pill_kind=('good' if s.auth_required else 'neutral'),
+                        pill_id='auth-state-pill') %}
+            {% call srow('Require a password',
+                         'Ask for a password to use the app.',
+                         'A password is required by default. Turn it off only for the Home Assistant add-on, where Home Assistant signs people in. Behind any other proxy or tunnel this kitchen needs its own password, and signing in from outside also needs two-factor.') %}
+              {{ toggle('auth_required', checked=s.auth_required, on_change='toggleAuthRequired()', label='Require a password to use the app') }}
+            {% endcall %}
+
+            <div id="outside-order"></div>
+            {% call srow('Password',
+                         'The main login password.',
+                         'Saved passwords are never sent back to the browser. Changing or removing a set password needs the current one, so an open settings page cannot lock you out.') %}
+              {# The device password is separate from Forager sign-in and works
+                 offline; keep it as the fallback (FoodAssistant-vg1f). #}
+              {% if s.forager_only_login_risk() %}
+              <div class="alert alert-warning py-2 small mb-2" style="max-width:420px">
+                <i class="bi bi-exclamation-triangle me-1"></i>This device is signed in with
+                Forager but has no device password. Set one below so a Forager outage cannot
+                lock you out. Your device password is separate from Forager and always works
+                offline.
+              </div>
+              {% elif s.cloud_linked() %}
+              <div class="form-text mb-2" style="max-width:420px">Separate from Forager sign-in:
+                your device password always works, even if the Forager server is offline. Keep it
+                set and remembered as your fallback.</div>
+              {% endif %}
+              <div id="keyless-devices-warning" class="alert alert-warning py-2 small mb-2 d-none" style="max-width:420px"></div>
+              <div class="set-row-actions">
+                {% if s.auth_password %}{{ pill('Set', 'good') }}
+                {% elif s.auth_required %}{{ pill('Required', 'pink') }}
+                {% else %}{{ pill('Not set', 'neutral') }}{% endif %}
+                <button class="btn btn-outline-secondary btn-sm" type="button"
+                        data-on-click="revealSecretChange('change-password-block', this)">
+                  <i class="bi bi-pencil me-1"></i>{{ 'Change' if s.auth_password else 'Set password' }}
+                </button>
+              </div>
+              <div id="change-password-block" class="d-none mt-2" style="max-width:360px">
+                {% if s.auth_password %}
+                <label class="form-label small mb-1" for="current_password">Current password</label>
+                <input type="password" class="form-control form-control-sm mb-2" id="current_password"
+                       autocomplete="current-password" placeholder="Enter your current password">
+                {% endif %}
+                <label class="form-label small mb-1" for="auth_password">New password</label>
+                {{ secret_input('auth_password', 'Protects the web UI login page') }}
+                <label class="form-label small mb-1 mt-2" for="auth_password_confirm">Confirm new password</label>
+                <input type="password" class="form-control form-control-sm" id="auth_password_confirm"
+                       autocomplete="new-password" placeholder="Re-enter the new password">
+                <div class="form-text" id="auth-pw-hint">Required while authentication is on. The app will not finish setup without it.</div>
+              </div>
+            {% endcall %}
+
+            {% call srow('Kitchen access',
+                         'An optional second, limited password.',
+                         'Share this one with the household: it opens the kitchen pages (inventory, timers, scanning, recipes) but keeps Settings, backups, and updates behind the main password. Leave it unset if everyone should use the main password.', name_id='viewer_password-name') %}
+              <div class="set-row-actions">
+                {% if has.viewer_password %}{{ pill('Set', 'good') }}{% else %}{{ pill('Optional', 'neutral') }}{% endif %}
+                <button class="btn btn-outline-secondary btn-sm" type="button"
+                        data-on-click="revealSecretChange('viewer-password-block', this)">
+                  <i class="bi bi-pencil me-1"></i>{{ 'Change' if has.viewer_password else 'Set a password' }}
+                </button>
+              </div>
+              <div id="viewer-password-block" class="d-none mt-2" style="max-width:360px">
+                {{ secret_input('viewer_password', 'A second password for kitchen-only access', label_id='viewer_password-name') }}
+              </div>
+            {% endcall %}
+
+            <div id="twofactor-next"></div>
+            {% call srow('Two-factor',
+                         'A code from an authenticator app.',
+                         'Adds a second step to the device password: a 6-digit code from an authenticator app (Google Authenticator, Authy, Bitwarden, 1Password, and others). Works offline, no email or text needed. Signing in from outside your home network always asks for it.') %}
+              {% if s.local_totp_enabled or s.totp_secret %}
+              <div class="set-row-actions mb-2">{{ pill('On', 'good') }}
+                <span class="text-secondary small">Two-factor is on for this device.</span>
+              </div>
+              <div class="mb-2" style="max-width: 320px;">
+                <label class="form-label small mb-1" for="totp-disable-code">Current code or password</label>
+                <input type="text" class="form-control form-control-sm font-monospace" id="totp-disable-code"
+                       placeholder="Code or your password" autocomplete="off">
+                <div class="form-text">Needed to turn 2FA off or make new recovery codes.</div>
+              </div>
+              <div class="d-flex flex-wrap gap-2">
+                <button class="btn btn-outline-secondary btn-sm" data-on-click="regenRecoveryCodes()">
+                  <i class="bi bi-arrow-repeat me-1"></i>New recovery codes
+                </button>
+                <button class="btn btn-outline-danger btn-sm" data-on-click="disableTOTP()">
+                  <i class="bi bi-shield-x me-1"></i>Turn off 2FA
+                </button>
+              </div>
+              <div id="totp-manage-result" class="mt-2"></div>
+              {% else %}
+              <div class="set-row-actions mb-1">{{ pill('Off', 'neutral') }}
+                <button class="btn btn-outline-info btn-sm" data-on-click="setupTOTP()">
+                  <i class="bi bi-shield-plus me-1"></i>Set up 2FA
+                </button>
+              </div>
+              {% endif %}
+              <div id="totp-setup" class="mt-3 d-none">
+                <div class="text-center mb-2">
+                  <img id="totp-qr" src="" alt="QR code" style="max-width:200px">
+                </div>
+                <p class="small text-secondary">Scan with your authenticator app, then enter the code to confirm.</p>
+                <div class="input-group mb-2" style="max-width:320px">
+                  <input type="text" class="form-control font-monospace" id="totp-code"
+                         placeholder="000000" maxlength="6" inputmode="numeric">
+                  <button class="btn btn-success" data-on-click="verifyTOTP()">
+                    <i class="bi bi-check2 me-1"></i>Enable
+                  </button>
+                </div>
+                <div class="form-text small" id="totp-secret-display"></div>
+                <div id="totp-result" class="mt-2"></div>
+              </div>
+            {% endcall %}
+            {% call srow('Signed-in browsers',
+                         'Sign out every other browser.',
+                         'Signs out every phone, tablet and computer signed in to this kitchen except this one. Changing a password or two-factor does the same.') %}
+              <div class="set-row-actions">
+                <button class="btn btn-outline-secondary btn-sm" type="button" id="signout-everywhere-btn">Sign out everywhere else</button>
+              </div>
+              <div id="signout-everywhere-result" class="mt-2"></div>
+            {% endcall %}
+          {% endcall %}
+
+          {# Keys (0.21): every key that can reach this kitchen, from
+             GET /api/credentials. Created keys are shown once. #}
+          {% call panel('Keys',
+                        'Keys that let Home Assistant, satellites, Bandit Cubs and your own scripts reach this kitchen.') %}
+            <div class="set-keys-wrap">
+              <table class="set-keys" id="credentials-table">
+                <thead>
+                  <tr><th>Name</th><th>What it can do</th><th>Last used</th><th>Last seen from</th><th>Status</th><th class="set-keys-actions">Actions</th></tr>
+                </thead>
+                <tbody id="credentials-rows">
+                  <tr><td colspan="6" class="text-secondary small">Loading keys...</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <div id="credentials-result" class="mt-2"></div>
+            <div class="mt-2" id="credential-create" style="max-width:420px">
+              <div class="fw-semibold small mb-1">Create a key</div>
+              <label class="form-label small mb-1" for="cred-name">Name</label>
+              <input type="text" class="form-control form-control-sm mb-2" id="cred-name" maxlength="60"
+                     placeholder="For example: Kitchen tablet" autocomplete="off">
+              <label class="form-label small mb-1" for="cred-scope">What it can do</label>
+              <select class="form-select form-select-sm mb-2" id="cred-scope">
+                <option value="ha">The Home Assistant integration</option>
+                <option value="ha_rest">Home Assistant sensors, buttons and ESPHome panels</option>
+                <option value="display">A Bandit Cub or other small display</option>
+                <option value="satellite">A second screen (satellite)</option>
+                {% if s.auth_password %}<option value="admin">Everything, including Settings</option>{% endif %}
+              </select>
+              {% if s.auth_password %}
+              <label class="form-label small mb-1" for="cred-password">Current password</label>
+              <input type="password" class="form-control form-control-sm mb-2" id="cred-password"
+                     autocomplete="current-password">
+              {% endif %}
+              <button class="btn btn-outline-secondary btn-sm" type="button" id="cred-create-btn">
+                <i class="bi bi-plus-lg me-1"></i>Create key
+              </button>
+              <div id="cred-created" class="mt-2"></div>
+            </div>
+            {% if not features.satellite %}
+            {% call srow('Device pairing',
+                         'Let new devices ask to join from your network.',
+                         'A new satellite, Bandit Cub or Home Assistant can request its own key: it shows a short code, this server shows the same code, and nothing is issued until you approve the match under Settings, Bandit Remotes. Requests are only accepted from your home network. Turn this off to require creating keys by hand.') %}
+              {{ toggle('local_device_pairing_enabled', checked=s.local_device_pairing_enabled, label='Allow devices on your home network to request access') }}
+            {% endcall %}
+            {% endif %}
+          {% endcall %}
+
+          {# This device's own programs: the screen, the Stream Deck and the
+             sensor reader sign in with their own keys; until they all do,
+             programs on this device are trusted without one. #}
+          <div id="local-programs-panel" class="d-none">
+          {% call panel("This device's own programs",
+                        'How the screen, the Stream Deck and the sensor reader on this device sign in.') %}
+            <div id="local-programs-list" class="small mb-2"></div>
+            <div id="local-trust-text" class="small mb-2"></div>
+            <div id="local-trust-confirm" class="alert alert-warning py-2 small d-none"></div>
+            <div class="d-flex flex-wrap gap-2">
+              <button class="btn btn-outline-danger btn-sm" type="button" id="local-trust-retire">
+                Require every program on this device to sign in
+              </button>
+              <button class="btn btn-outline-secondary btn-sm" type="button" id="local-trust-retrust">
+                Let programs on this device in without a key for 7 days
+              </button>
+            </div>
+            <div id="local-trust-result" class="mt-2"></div>
+          {% endcall %}
+          </div>
+
+          {# Home network access: only while this kitchen has no password. #}
+          <div id="home-access-panel" class="{{ '' if not s.auth_password else 'd-none' }}">
+          {% call panel('Home network access',
+                        'What devices at home can do while this kitchen has no password.') %}
+            <div class="alert alert-info py-2 small mb-2" id="open-notice">No password: anyone on your home network can use and change this kitchen. Set a password.</div>
+            <div id="same-host-proxy-warning" class="alert alert-warning py-2 small mb-2 d-none"></div>
+            <div id="gateway-hint" class="alert alert-warning py-2 small mb-2 d-none"></div>
+            <div id="grace-sightings" class="small mb-2"></div>
+            {% call srow('Require a key',
+                         'Devices of these kinds need their own key.',
+                         'Turned on, a device of that kind needs a key from Settings, Security (or an approved pairing) even on your home network.') %}
+              <div id="family-switches" class="small"></div>
+            {% endcall %}
+            {% call srow('Home networks',
+                         'Extra address ranges that count as home.',
+                         'If your home network uses addresses this kitchen does not recognize, list them here, separated by commas, for example 100.64.0.0/10.') %}
+              <input type="text" class="form-control form-control-sm" id="sec-lan-cidrs" value="{{ s.lan_cidrs }}" style="max-width:360px">
+              <div class="form-text" id="sec-lan-cidrs-note"></div>
+            {% endcall %}
+            {% call srow('Other names for this kitchen',
+                         'Names besides its own that reach it at home.',
+                         'Names you open this kitchen by at home that it does not recognize on its own, separated by commas, for example pantry.home.example.') %}
+              <input type="text" class="form-control form-control-sm" id="sec-home-host-names" value="{{ s.home_host_names }}" style="max-width:360px"
+                     placeholder="For example: pantry.home.example">
+            {% endcall %}
+            <div id="home-access-result" class="mt-2"></div>
+          {% endcall %}
+          </div>
+          <div id="same-host-proxy-warning-pw" class="alert alert-warning py-2 small d-none"></div>
+
+          {% call panel('Screens and satellites', 'How the kitchen screen and older satellites are treated.') %}
+            {% call srow('The kitchen screen can open Settings',
+                         'Whether the screen on this device counts as the owner.',
+                         'When this is off, the kitchen screen can use every kitchen page but not Settings. Open Settings from another device.') %}
+              <div class="set-row-actions">
+                {{ toggle('sec-kiosk-admin', checked=s.kiosk_screen_is_admin, label='The kitchen screen can open Settings') }}
+                <button class="btn btn-outline-secondary btn-sm" type="button" id="kiosk-signout-btn">Sign the kitchen screen out</button>
+              </div>
+            {% endcall %}
+            {% if not features.satellite %}
+            {% call srow('Share service keys with older satellites',
+                         'Auto, Always or Never.',
+                         'Older satellites need your AI, recipe and Home Assistant keys on the device itself. Newer ones ask this kitchen instead. Auto shares them while a satellite seen in the last 30 days still needs them. A newly set up kitchen shares nothing until such a satellite is seen.') %}
+              <select class="form-select form-select-sm" id="sec-sat-keys" style="max-width:200px">
+                <option value="auto"{% if s.satellite_legacy_credentials == 'auto' %} selected{% endif %}>Auto</option>
+                <option value="allow"{% if s.satellite_legacy_credentials == 'allow' %} selected{% endif %}>Always</option>
+                <option value="off"{% if s.satellite_legacy_credentials == 'off' %} selected{% endif %}>Never</option>
+              </select>
+              <div id="satellites-needing-update" class="form-text"></div>
+            {% endcall %}
+            {% endif %}
+            <details class="mt-2">
+              <summary class="small">Advanced</summary>
+              {% call srow('Keep new keys working if this kitchen goes back to an older version',
+                           'A copy of each new key where older versions look.',
+                           'Keeps a copy of each new key where older versions of Pantry Raider look for keys, so devices keep working if you go back to an older version. Turning this off removes the copies. Keys created while it is off only work on this version and newer.') %}
+                {{ toggle('sec-legacy-mirror', checked=s.legacy_mirror, label='Keep new keys working on older versions') }}
+              {% endcall %}
+              {% call srow('Retire old keys once nothing uses them',
+                           'Removes older full-access keys after 90 days without use.',
+                           'An older full-access key is removed 90 days after its last use, once every device that used it has its own key. Keys used by a satellite or a Bandit Cub are never removed without asking you.') %}
+                {{ toggle('sec-auto-retire', checked=s.legacy_key_auto_retire, label='Retire old keys once nothing uses them') }}
+              {% endcall %}
+            </details>
+            <div id="security-settings-result" class="mt-2"></div>
+          {% endcall %}
+
+          {% if features.satellite %}
+          {% call panel('Kiosk PIN', "A lightweight lock for this device's screen.", pill_text='Optional', pill_kind='neutral') %}
+            <p class="text-secondary small mt-2 mb-2">A satellite turns the UI password off by default (the main server owns access control). Set a short numeric PIN for a lock that is easy to enter on the touchscreen. Leave blank for no lock.</p>
+            {% call srow('PIN', 'Digits only.', name_id='kiosk_pin-name') %}
+              <div style="max-width:220px">{{ secret_input('kiosk_pin', 'e.g. 1234', label_id='kiosk_pin-name') }}</div>
+            {% endcall %}
+            {% call srow('Read-only while locked', 'Let visitors browse without the PIN.', 'When enabled, visitors can browse inventory without entering the PIN. Write actions (adding or editing items) are blocked until they log in.') %}
+              {{ toggle('kiosk_readonly_when_locked', checked=s.kiosk_readonly_when_locked, label='Allow read-only browsing while locked') }}
+            {% endcall %}
+          {% endcall %}
+          {% endif %}
+
+          <button type="button" class="btn btn-outline-info btn-sm" data-on-click="savePaneSecurity(this)">
+            <i class="bi bi-check-lg me-1"></i>Save Security
+          </button>
+          <div class="test-result mt-2" id="security-save-result"></div>
+        </div>

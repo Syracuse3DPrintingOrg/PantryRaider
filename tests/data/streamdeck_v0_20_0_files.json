@@ -1,0 +1,18 @@
+{
+  "_comment": "The Stream Deck package at v0.20.0 (streamdeck/foodassistant_streamdeck), listed once at build time with git ls-tree. A deck installed from this release has no kiosk_nav.py, so the kiosk launcher keeps the debugging port open for it.",
+  "version": "v0.20.0",
+  "files": [
+    "__init__.py",
+    "__main__.py",
+    "actions.py",
+    "config.py",
+    "controller.py",
+    "earlysplash.py",
+    "layout.py",
+    "render.py",
+    "theme.py"
+  ],
+  "dirs": [
+    "assets"
+  ]
+}
