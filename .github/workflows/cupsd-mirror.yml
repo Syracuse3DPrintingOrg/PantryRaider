@@ -1,0 +1,103 @@
+name: Mirror the print service image
+
+# The with-printing profile runs olbat/cupsd. Upstream now publishes only
+# per-architecture tags (for example 2026-10-12-amd64 and 2026-10-12-arm64),
+# so no single upstream reference serves both a Pi and an x86 server. This
+# workflow finds the newest date that has both tags and joins them into one
+# multi-arch manifest at ghcr.io/syracuse3dprintingorg/cupsd:<date> (and
+# :latest). Nothing is rebuilt: the manifest points at upstream's own image
+# layers, copied into GHCR by digest. A date already mirrored is left alone,
+# so the digest a compose file pins never changes under it.
+#
+# After the first run, set the new cupsd package's visibility to Public in the
+# org's package settings, or devices cannot pull it without signing in.
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 06:17 UTC on the 3rd of every month.
+    - cron: "17 6 3 * *"
+
+permissions:
+  contents: read
+
+env:
+  UPSTREAM: olbat/cupsd
+  # Pinned explicitly, like the app image in publish-image.yml.
+  MIRROR: ghcr.io/syracuse3dprintingorg/cupsd
+
+jobs:
+  mirror:
+    # Only the public repo publishes, so a fork or the dev repo never pushes.
+    if: github.repository == 'Syracuse3DPrintingOrg/PantryRaider'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069  # v4.4.1
+
+      - name: Log in to GHCR
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f  # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Find the newest dated amd64 and arm64 pair
+        id: pick
+        shell: python
+        run: |
+          import json, os, re, urllib.request
+          repo = os.environ["UPSTREAM"]
+          url = (f"https://hub.docker.com/v2/repositories/{repo}/tags"
+                 "?page_size=100&ordering=last_updated")
+          arches = {}
+          for _ in range(5):
+              with urllib.request.urlopen(url, timeout=30) as resp:
+                  page = json.load(resp)
+              for tag in page.get("results", []):
+                  m = re.fullmatch(r"(\d{4}-\d{2}-\d{2})-(amd64|arm64)", tag.get("name", ""))
+                  if m:
+                      arches.setdefault(m.group(1), set()).add(m.group(2))
+              url = page.get("next")
+              if not url:
+                  break
+          dates = sorted(d for d, a in arches.items() if a >= {"amd64", "arm64"})
+          if not dates:
+              raise SystemExit(f"No date on {repo} has both an amd64 and an arm64 tag.")
+          date = dates[-1]
+          print(f"Newest complete pair: {date}-amd64 and {date}-arm64")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+              out.write(f"date={date}\n")
+
+      - name: Join them into one multi-arch manifest
+        env:
+          DATE: ${{ steps.pick.outputs.date }}
+        run: |
+          set -euo pipefail
+          digest_of() {
+            echo "sha256:$(docker buildx imagetools inspect --raw "$1" | sha256sum | cut -d' ' -f1)"
+          }
+          if docker buildx imagetools inspect --raw "$MIRROR:$DATE" > /dev/null 2>&1; then
+            echo "$MIRROR:$DATE already exists; leaving it as it is."
+          else
+            amd64="$(digest_of "$UPSTREAM:$DATE-amd64")"
+            arm64="$(digest_of "$UPSTREAM:$DATE-arm64")"
+            echo "amd64: $UPSTREAM@$amd64"
+            echo "arm64: $UPSTREAM@$arm64"
+            docker buildx imagetools create \
+              -t "$MIRROR:$DATE" -t "$MIRROR:latest" \
+              "$UPSTREAM@$amd64" "$UPSTREAM@$arm64"
+          fi
+          docker buildx imagetools inspect "$MIRROR:$DATE"
+          final="$(digest_of "$MIRROR:$DATE")"
+          echo "Pin: $MIRROR@$final"
+          {
+            echo "### Print service mirror"
+            echo ""
+            echo "Tag: \`$MIRROR:$DATE\`"
+            echo ""
+            echo "Pin: \`$MIRROR@$final\`"
+          } >> "$GITHUB_STEP_SUMMARY"

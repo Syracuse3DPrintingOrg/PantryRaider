@@ -1,0 +1,30 @@
+# Host-side Bluetooth thermometer reader. bleak talks to bluez over D-Bus,
+# so it works on a Raspberry Pi (or any Linux host) without native builds.
+#
+# Every pin here is a range, not an exact version: these hosts only update by
+# git pull, so a floor with a next-major ceiling lets a patch release reach a
+# deployed Pi while a breaking major never does. daemon.py runs on bleak 0.21
+# through 3.x: from 1.0 on, a device that advertises no name reports None
+# instead of its address, and the reader already treats a missing name as
+# unnamed. 3.0.2 is the newest checked against it.
+bleak>=0.21,<4
+httpx>=0.24,<1
+# config.py reads TOML with the standard library's tomllib, which arrived in
+# Python 3.11. On 3.10 (Ubuntu 22.04) the tomli backport stands in for it.
+tomli>=2,<3; python_version < '3.11'
+# The Cub status broadcast (advertiser.py) drives bluez advertising over
+# D-Bus with dbus-fast, which bleak already pulls in on Linux; pinned here
+# explicitly so the dependency is stated, not inherited by accident.
+# advertiser.py exports its advertisement through dbus-fast's service API,
+# checked on 5.2.0. Python 3.10 hosts stop at the 5.0 releases, the last to
+# support it, which pip picks on its own.
+dbus-fast>=1.83,<6; platform_system == "Linux"
+# Plug-in STEMMA QT / Qwiic accessories (FoodAssistant-etsc) talk I2C through
+# /dev/i2c-1. smbus2 is a tiny pure-Python wheel, and the import is lazy, so
+# a host with no I2C bus (or no smbus2 installed) runs the reader unchanged.
+smbus2>=0.4,<1; platform_system == "Linux"
+# A UART barcode scanner (FoodAssistant-x61t) wired to the Pi's GPIO serial
+# port is read through pyserial. The import is lazy (inside SerialScanner.open),
+# so a host with no scanner (or no pyserial installed) runs the reader
+# unchanged and the tests need no serial hardware.
+pyserial>=3.5,<4; platform_system == "Linux"
