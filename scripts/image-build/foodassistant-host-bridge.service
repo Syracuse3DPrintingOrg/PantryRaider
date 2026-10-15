@@ -1,0 +1,14 @@
+[Unit]
+Description=FoodAssistant host bridge
+Documentation=https://github.com/Syracuse3DPrintingOrg/PantryRaider
+After=network.target NetworkManager.service
+Wants=NetworkManager.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/foodassistant-host-bridge
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

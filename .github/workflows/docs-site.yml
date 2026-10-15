@@ -1,0 +1,73 @@
+name: Docs site
+
+# Build the documentation website from docs/ with MkDocs Material and publish it
+# to GitHub Pages. The same docs/ feeds the GitHub wiki (wiki-sync.yml), so the
+# wiki and the website stay in step.
+#
+# One-time setup before the first publish: in the repository Settings, Pages,
+# set Source to "GitHub Actions". After that this workflow deploys on every push
+# to main that touches the docs (and on manual dispatch).
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - "README.md"
+      - "mkdocs.yml"
+      - ".github/workflows/docs-site.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One concurrent deploy; let an in-progress run finish rather than cancelling.
+concurrency:
+  group: docs-site
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: "3.11"
+
+      # Pinned: the docs site is published straight to docs.pantryraider.app on
+      # every push to main, so a theme release must never change the live site
+      # without anyone choosing it.
+      - name: Install MkDocs Material
+        run: pip install mkdocs-material==9.7.7
+
+      - name: Build site
+        # Not --strict: some docs link to repo source files (homeassistant/,
+        # streamdeck/) that are not part of the site; those are warnings, not
+        # failures, and still resolve in the repo and the wiki.
+        run: mkdocs build
+
+      - name: Serve the site at docs.pantryraider.app
+        # The custom domain the built site answers on. GitHub Pages reads this
+        # CNAME from the artifact; the DNS record for docs.pantryraider.app must
+        # point at the Pages host separately.
+        run: echo "docs.pantryraider.app" > site/CNAME
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9  # v5.0.0
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346  # v5.0.1
