@@ -16,7 +16,7 @@ from . import durable as _durable
 
 # Single source of truth for the app version (shown in the UI, used by the
 # update checker, and reported by FastAPI). Bump on each tagged release.
-APP_VERSION = "0.21.109"
+APP_VERSION = "0.21.110"
 
 # Single source of truth for the product's display name. The internal runtime
 # identifiers (systemd units, install paths, the foodassistant_streamdeck

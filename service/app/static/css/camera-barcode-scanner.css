@@ -1,0 +1,98 @@
+html.camera-scanning, html.camera-scanning body { overflow: hidden; overscroll-behavior: none; }
+html.camera-scanning body { position: fixed; top: var(--camera-scroll-top); left: 0; width: 100%; }
+#cameraScanModal { overflow: hidden; overscroll-behavior: none; touch-action: pinch-zoom; }
+#cameraScanModal .modal-dialog { width: 100%; height: 100%; margin: 0; max-width: none; }
+#cameraScanModal .modal-content { width: 100%; height: 100%; background: #000; color: #fff; overflow: hidden; }
+#scanner-container { position: absolute; inset: 0; display: flex; align-items: center; z-index: 0; overflow: hidden; }
+#camera-reader { width: 100%; }
+#cameraScanModal .camera-controls {
+  position: absolute;
+  inset: 0 0 auto;
+  z-index: 2;
+  padding: max(1rem, env(safe-area-inset-top)) max(1rem, env(safe-area-inset-right)) 2rem max(1rem, env(safe-area-inset-left));
+  background: linear-gradient(#000c, transparent);
+  pointer-events: none;
+}
+#cameraScanModal .camera-options { margin-right: 50px; gap: 4px; pointer-events: auto; }
+#cameraScanModal .camera-option { width: 44px; height: 44px; padding: 0; font-size: 24px; flex-shrink: 0; }
+#cameraScanModal .camera-options [aria-pressed="true"] .when-off,
+#cameraScanModal .camera-options [aria-pressed="false"] .when-on { display: none; }
+#cameraScanModal .when-unsupported { display: none; font-size: 0.75rem; line-height: 1.2; overflow-wrap: anywhere; }
+#cameraScanModal .camera-option.unsupported {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  width: auto;
+  max-width: 100%;
+  height: auto;
+  min-height: 44px;
+  padding: 0.25rem 0.5rem;
+  opacity: 1;
+  color: var(--bs-warning);
+  border-color: currentColor;
+  background: #000;
+}
+#cameraScanModal .camera-option.unsupported .when-off { display: none; }
+#cameraScanModal .camera-option.unsupported .when-unsupported { display: inline; }
+#cameraScanModal .camera-option.unsupported .when-on { display: inline-block; position: relative; flex-shrink: 0; line-height: 1; }
+#cameraScanModal .camera-option.unsupported .when-on::after {
+  content: "";
+  position: absolute;
+  inset: 50% 0 auto;
+  border-top: 2px solid currentColor;
+  transform: rotate(-45deg);
+  box-shadow: 0 0 0 1px #000;
+}
+#cameraScanPulse {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  border: 4px solid #5ac138;
+  color: #5ac138;
+  opacity: 0;
+  pointer-events: none;
+}
+#cameraScanPulse .bi { font-size: 64px; filter: drop-shadow(0 2px 4px #000); }
+#cameraScanPulse.scan-pulse { animation: scan-pulse 0.5s ease-out; }
+@keyframes scan-pulse { from { opacity: 1; } to { opacity: 0; } }
+#stopScanBtn {
+  position: absolute;
+  top: max(1rem, env(safe-area-inset-top));
+  right: max(1rem, env(safe-area-inset-right));
+  z-index: 4;
+  width: 48px;
+  height: 48px;
+  padding: 0;
+  font-size: 28px;
+  line-height: 1;
+}
+#cameraScanModal .camera-toast-position {
+  position: absolute;
+  bottom: max(1rem, env(safe-area-inset-bottom));
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(26rem, calc(100% - 2rem));
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  z-index: 3;
+}
+#cameraScanModal .toast {
+  width: 100%;
+  background: var(--bs-body-bg);
+  color: var(--bs-body-color);
+  border: 1px solid var(--bs-border-color);
+  border-radius: 0.75rem;
+  box-shadow: 0 4px 24px #0004;
+  overflow-wrap: anywhere;
+}
+#cameraScanModal .toast[data-level="info"],
+#cameraScanModal .toast[data-level="success"] { border-color: var(--bs-success); }
+#cameraScanModal .toast[data-level="warning"] { border-color: var(--bs-warning); }
+#cameraScanModal .toast[data-level="danger"] { border-color: var(--bs-danger); }
+@media (max-height: 450px) {
+  #cameraScanModal .toast > .d-flex { padding: 0.5rem !important; }
+}
+@media (prefers-reduced-motion: reduce) {
+  #cameraScanPulse.scan-pulse { animation: none; opacity: 1; }
+}

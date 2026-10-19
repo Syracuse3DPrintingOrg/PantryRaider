@@ -1,0 +1,68 @@
+{# Include once before the host page's deferred script. The decoder stays lazy-loaded. #}
+<link rel="stylesheet" href="static/css/camera-barcode-scanner.css?v={{ app_version }}">
+<div class="modal" id="cameraScanModal" tabindex="-1" aria-labelledby="cameraScanTitle"
+     aria-describedby="cameraScanHelp" aria-hidden="true"
+     data-decoder-src="static/vendor/html5-qrcode.min.js?v={{ app_version }}">
+  <div class="modal-dialog modal-fullscreen">
+    <div class="modal-content">
+      <div id="scanner-container">
+        <div id="camera-reader"></div>
+      </div>
+      <div id="cameraScanPulse" aria-hidden="true">
+        <i class="bi bi-check-circle-fill position-absolute top-50 start-50 translate-middle"></i>
+      </div>
+      <div id="cameraScanLoading" class="position-absolute top-50 start-50 translate-middle" role="status">
+        <span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>Starting camera…
+      </div>
+      <div class="camera-controls">
+        <div class="camera-options d-flex flex-wrap mb-3" role="group" aria-label="Scanner controls">
+          <button type="button" id="cameraSoundBtn" class="camera-option btn btn-outline-light rounded-pill"
+                  aria-label="Scan sound" aria-pressed="false" title="Scan sound: off">
+            <i class="bi bi-volume-up-fill when-on" aria-hidden="true"></i>
+            <i class="bi bi-volume-mute-fill when-off" aria-hidden="true"></i>
+            <span class="when-unsupported" id="cameraSoundBtnUnsupported">Not supported</span>
+          </button>
+          <button type="button" id="cameraVibrationBtn" class="camera-option btn btn-outline-light rounded-pill"
+                  aria-label="Scan vibration" aria-pressed="true" title="Scan vibration: on">
+            <i class="bi bi-phone-vibrate when-on" aria-hidden="true"></i>
+            <i class="bi bi-phone when-off" aria-hidden="true"></i>
+            <span class="when-unsupported" id="cameraVibrationBtnUnsupported">Not supported</span>
+          </button>
+          <button type="button" id="cameraTorchBtn" class="camera-option btn btn-outline-light rounded-pill d-none"
+                  aria-label="Flashlight" aria-pressed="false" title="Flashlight: off">
+            <i class="bi bi-lightbulb-fill when-on" aria-hidden="true"></i>
+            <i class="bi bi-lightbulb when-off" aria-hidden="true"></i>
+            <span class="when-unsupported" id="cameraTorchBtnUnsupported">Not supported</span>
+          </button>
+        </div>
+        <h2 id="cameraScanTitle" class="h5 mb-1">Camera Scanner</h2>
+        <p id="cameraScanHelp" class="small mb-0">Move a barcode out of view for a moment before scanning it again.</p>
+      </div>
+      <button type="button" class="btn btn-light rounded-circle" id="stopScanBtn" data-bs-dismiss="modal"
+              aria-label="Close camera" title="Close camera">
+        <span aria-hidden="true">&times;</span>
+      </button>
+      <div class="camera-toast-position" aria-live="polite" aria-atomic="true">
+        <div id="cameraScanToast" class="toast" role="status" aria-atomic="true">
+          <div class="d-flex align-items-start p-3 gap-3">
+            <div class="flex-grow-1">
+              <div id="cameraScanToastTitle" class="fw-semibold mb-1"></div>
+              <div id="cameraScanToastMessage" class="small"></div>
+            </div>
+            <button type="button" class="btn-close" data-bs-dismiss="toast" aria-label="Dismiss notification"></button>
+          </div>
+        </div>
+        <div id="cameraLookupToast" class="toast" role="status" aria-atomic="true">
+          <div class="d-flex align-items-start p-3 gap-3">
+            <div class="flex-grow-1">
+              <div id="cameraLookupToastTitle" class="fw-semibold mb-1"></div>
+              <div id="cameraLookupToastMessage" class="small"></div>
+            </div>
+            <button type="button" class="btn-close" data-bs-dismiss="toast" aria-label="Dismiss lookup notification"></button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<script src="static/js/lib/camera-barcode-scanner.js?v={{ app_version }}" defer></script>

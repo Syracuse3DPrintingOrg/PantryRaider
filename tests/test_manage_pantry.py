@@ -73,6 +73,16 @@ def test_old_route_serves_manage_pantry(client):
     assert "Add Food" not in html
 
 
+def test_page_loads_shared_camera_component_before_page_script(client):
+    html = _page(client)
+    assert html.count('id="cameraScanModal"') == 1
+    assert 'static/css/camera-barcode-scanner.css?v=' in html
+    assert 'static/js/lib/camera-barcode-scanner.js?v=' in html
+    assert html.index('static/js/lib/camera-barcode-scanner.js') < html.index('static/js/manage-pantry.js')
+    assert 'data-decoder-src="static/vendor/html5-qrcode.min.js?v=' in html
+    assert '<script src="static/vendor/html5-qrcode.min.js' not in html
+
+
 def test_page_has_all_four_mode_tabs(client):
     html = _page(client)
     for mode in ("inventory", "consume", "shopping", "audit"):

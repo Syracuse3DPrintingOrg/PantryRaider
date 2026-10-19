@@ -9,34 +9,7 @@
 // Server-rendered flags ride in on the #manage-pantry-config div: this file
 // must stay template-free.
 var _mpConfig = (document.getElementById('manage-pantry-config') || {}).dataset || {};
-// Cache-buster for the lazily fetched camera decoder below.
-var APP_VERSION = _mpConfig.version || '';
-
-// The camera decoder is 367 KB, and only two actions ever touch it: decoding
-// a photo of a barcode, and running the live camera scanner. It used to be
-// fetched and parsed on EVERY visit to this page, which on an appliance panel
-// is pure waste: the kiosk scans with a wired scanner, and live camera
-// scanning needs HTTPS so it could never run there anyway. Measured on a Pi 4,
-// this page took ~1.4s to load and over a second to first paint, far slower
-// than any other. Fetch the library the first time something actually needs
-// it instead.
-  var _qrLibPromise = null;
-  function ensureQrLib() {
-    if (window.Html5Qrcode) return Promise.resolve();
-    if (!_qrLibPromise) {
-      _qrLibPromise = new Promise(function (resolve, reject) {
-        var s = document.createElement('script');
-        s.src = 'static/vendor/html5-qrcode.min.js?v=' + APP_VERSION;
-        s.onload = resolve;
-        // Let a failed load be retried rather than poisoning every later try.
-        s.onerror = function () { _qrLibPromise = null; reject(new Error('scanner library unavailable')); };
-        document.head.appendChild(s);
-      });
-    }
-    return _qrLibPromise;
-  }
-
-let scanner = null;
+const cameraScanner = PR.cameraBarcodeScanner;
 let pendingFile = null;
 let queue = [];   // array of item objects
 
@@ -76,8 +49,8 @@ function scanStatusId() {
 
 // The camera card is authored inside the Stock up pane, but every mode scans
 // (a phone has no other scanner), so it follows the active pane: back to its
-// own slot for Stock up, top of the pane otherwise. A running camera is
-// stopped first, since moving its video element would freeze it.
+// own slot for Stock up, top of the pane otherwise. Stop a running camera
+// before changing what its scans do.
 let cameraHome = null;
 function placeCameraCard(mode) {
   const card = document.getElementById('camera-scan-card');
@@ -86,7 +59,7 @@ function placeCameraCard(mode) {
   const target = mode === 'inventory' ? cameraHome.parent
     : document.getElementById('mode-pane-' + mode);
   if (!target || card.parentNode === target) return;
-  if (scanner) stopScanner();
+  cameraScanner.stop();
   if (mode === 'inventory') {
     card.classList.remove('mb-3');
     target.insertBefore(card, cameraHome.next);
@@ -295,6 +268,7 @@ async function fetchEnrichingRows(signal) {
       }
       if (!it.enriching) {
         cur.name = it.name; cur.enriching = false; cur.failed = !!it.lookup_failed;
+        queueLookupToast(cur);
         changed = true;
       }
     }
@@ -418,6 +392,7 @@ function offerLinkAndConsume(statusId, result) {
   const status = document.getElementById(statusId);
   if (!status) return;
   const name = result.suggestion.name || result.barcode;
+  cameraScanner.showToast('Close the camera to review the suggested product. Nothing has been used up yet.', 'warning');
   status.innerHTML = '';
   const box = document.createElement('div');
   box.className = 'alert alert-warning py-2 px-2 mb-0 small';
@@ -543,13 +518,14 @@ function showInventoryResult(result) {
   // A fast-acked new scan is still resolving its name in the background, so the
   // status line says so honestly instead of flashing the "Unknown (...)"
   // placeholder; the live list row fills in the name when the lookup lands.
-  const enriching = !merged && !!result.enriching;
+  const enriching = !!(result.enriching || item.enriching);
   showStatus('barcode-status',
-    merged ? `<strong>${PR.esc(name)}</strong> (quantity bumped, already pending)`
-    : enriching ? '<span class="spinner-border spinner-border-sm me-1"></span>Saved, looking up…'
-                : `Saved: <strong>${PR.esc(name)}</strong>`,
-    'success');
-  if (!merged) trackLiveScan(item, enriching);
+    enriching ? `<span class="spinner-border spinner-border-sm me-1"></span>Saved <strong>${PR.esc(item.barcode || '')}</strong>, looking up…`
+      + (merged ? ' (quantity increased)' : '')
+    : merged ? `<strong>${PR.esc(name)}</strong> (quantity bumped, already pending)`
+             : `Saved: <strong>${PR.esc(name)}</strong>`,
+    'success', enriching ? 'Barcode saved' : undefined);
+  if (!merged || enriching) trackLiveScan(item, enriching);
   _barcodeSavedCount++;
   const badge = document.getElementById('barcode-saved-badge');
   const wrap = document.getElementById('barcode-saved-count');
@@ -703,7 +679,7 @@ async function decodeBarcodePhoto(input) {
   input.value = '';
   showStatus(scanStatusId(), '<span class="spinner-border spinner-border-sm me-1"></span>Decoding barcode...', 'info');
   try {
-    await ensureQrLib();
+    await cameraScanner.loadDecoder();
     // Same format hints as the live scanner: fewer formats to try means a
     // better hit rate on a soft or glary photo (FoodAssistant-fvuy).
     const decoder = new Html5Qrcode("reader", {
@@ -723,81 +699,22 @@ async function decodeBarcodePhoto(input) {
   }
 }
 
-async function startScanner() {
-  document.getElementById('startScanBtn').classList.add('d-none');
-  document.getElementById('stopScanBtn').classList.remove('d-none');
-  try {
-    await ensureQrLib();
-  } catch (e) {
-    showStatus(scanStatusId(), 'The camera scanner could not load. Use the barcode box or a scanner instead.', 'warning');
-    document.getElementById('startScanBtn').classList.remove('d-none');
-    document.getElementById('stopScanBtn').classList.add('d-none');
-    return;
-  }
-  // Product barcodes only (plus QR): telling the decoder what to look for
-  // makes each frame cheaper and misreads rarer.
-  scanner = new Html5Qrcode("reader", {
-    formatsToSupport: [
-      Html5QrcodeSupportedFormats.EAN_13, Html5QrcodeSupportedFormats.EAN_8,
-      Html5QrcodeSupportedFormats.UPC_A, Html5QrcodeSupportedFormats.UPC_E,
-      Html5QrcodeSupportedFormats.CODE_128, Html5QrcodeSupportedFormats.CODE_39,
-      Html5QrcodeSupportedFormats.QR_CODE,
-    ],
-    verbose: false,
-  });
-  scanner.start(
-    { facingMode: "environment" },
-    {
-      fps: 10,
-      qrbox: { width: 280, height: 120 },
-      // The phone's native barcode detector (Android Chrome) decodes far
-      // faster and more tolerantly than the JS fallback (FoodAssistant-fvuy).
-      experimentalFeatures: { useBarCodeDetectorIfSupported: true },
-      // The default camera stream is a soft VGA feed with no autofocus
-      // request: exactly why phones "struggle to focus" on a barcode a few
-      // inches away. Ask for a sharp feed and continuous focus up front.
-      videoConstraints: {
-        facingMode: "environment",
-        width: { ideal: 1920 },
-        height: { ideal: 1080 },
-        advanced: [{ focusMode: "continuous" }],
-      },
-    },
-    (decodedText) => {
-      stopScanner();
-      submitScan(decodedText);
-    },
-    () => {}
-  ).then(() => {
-    // Where the hardware allows it, force continuous focus and a touch of
-    // zoom: many phone cameras cannot focus closer than ~10cm, and 2x zoom
-    // effectively shortens that so a label-filling barcode gets sharp.
-    try {
-      const caps = scanner.getRunningTrackCapabilities() || {};
-      const tweak = {};
-      if (Array.isArray(caps.focusMode) && caps.focusMode.includes('continuous')) {
-        tweak.focusMode = 'continuous';
-      }
-      if (caps.zoom && caps.zoom.max >= 2) {
-        tweak.zoom = Math.min(2, caps.zoom.max);
-      }
-      if (Object.keys(tweak).length) {
-        scanner.applyVideoConstraints({ advanced: [tweak] }).catch(() => {});
-      }
-    } catch (e) { /* capability probing is best-effort */ }
-  }).catch(err => {
-    showStatus(scanStatusId(), 'Camera error: ' + err, 'danger');
-    stopScanner();
+function startScanner() {
+  return cameraScanner.start({
+    title: 'Camera Scanner · ' + MODE_LABELS[currentMode],
+    onScan: submitScan,
+    onError: (message, type) => showStatus(scanStatusId(), PR.esc(message)
+      + (type === 'warning' ? ' Use the barcode box or a scanner instead.' : ''), type),
   });
 }
 
-function stopScanner() {
-  if (scanner) {
-    scanner.stop().catch(() => {});
-    scanner = null;
-  }
-  document.getElementById('startScanBtn').classList.remove('d-none');
-  document.getElementById('stopScanBtn').classList.add('d-none');
+function queueLookupToast(scan) {
+  cameraScanner.queueResult(
+    `<div>Barcode <strong>${PR.esc(scan.barcode)}</strong></div>`
+      + (scan.failed ? 'Could not identify this product. The scan is still saved in Pending.'
+                     : `<strong>${PR.esc(scan.name)}</strong>`),
+    scan.failed ? 'warning' : 'success',
+    scan.failed ? 'Lookup failed · earlier scan' : 'Product found · earlier scan');
 }
 
 // Photo Upload
@@ -1090,10 +1007,11 @@ function storageOptions(selected) {
   ).join('');
 }
 
-function showStatus(id, html, type) {
+function showStatus(id, html, type, toastTitle) {
   const el = document.getElementById(id);
   if (!el) return;
   el.innerHTML = `<div class="alert alert-${type} py-1 px-2 mb-0 small">${html}</div>`;
+  if (type !== 'info' && Object.values(SCAN_STATUS_IDS).includes(id)) cameraScanner.showToast(html, type, toastTitle);
 }
 
 // A human message for a reply we could not read as JSON, keyed on the HTTP

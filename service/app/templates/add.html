@@ -195,15 +195,10 @@
         <div class="card">
           <div class="card-body">
             <h2 class="h6 card-title">Camera Scanner</h2>
-            <div id="scanner-container" style="width:100%; max-width:400px; margin:0 auto;">
-              <div id="reader" style="width:100%"></div>
-            </div>
+            <div id="reader" style="width:100%; max-width:400px; margin:0 auto;"></div>
             <div class="mt-2 d-flex gap-2 flex-wrap">
               <button class="btn btn-primary" id="startScanBtn" data-on-click="startScanner()">
                 <i class="bi bi-camera-video me-1"></i>Start Camera
-              </button>
-              <button class="btn btn-secondary d-none" id="stopScanBtn" data-on-click="stopScanner()">
-                <i class="bi bi-stop-circle me-1"></i>Stop
               </button>
               <button class="btn btn-outline-primary" data-on-click="PR.clickById('barcodePhotoInput')">
                 <i class="bi bi-camera me-1"></i>Snap Barcode Photo
@@ -212,6 +207,7 @@
                      class="d-none" data-on-change="decodeBarcodePhoto(this)">
             </div>
             <div class="form-text mt-1">
+              Scan continuously in full screen; close the camera when finished.
               Live scanning requires HTTPS. On HTTP use "Snap Barcode Photo" instead.
             </div>
           </div>
@@ -485,16 +481,11 @@
 {% endblock %}
 
 {% block scripts %}
-<!-- The page logic (mode tiles, scan routing, queue, camera hooks) lives in
-     static/js/manage-pantry.js, not inline: the browser caches it immutably
-     (?v= busted) and keeps its compiled bytecode across kiosk reloads, and the
-     HTML rendered and gzipped per request shrinks by ~28KB. This page was the
-     slowest kiosk load (FoodAssistant-3c7k); the 367KB camera decoder is
-     already lazy-loaded from inside that file for the same reason. The config
-     div carries the only two server-rendered values the script needs. -->
+{% include "_camera_barcode_scanner.html" %}
+<!-- Modes, scan routing, and imports belong to the page script. The camera
+     component above owns its UI and lazily loaded decoder. -->
 <div id="manage-pantry-config"
-     data-printing="{{ '1' if printing_enabled else '0' }}"
-     data-version="{{ app_version }}" hidden></div>
+     data-printing="{{ '1' if printing_enabled else '0' }}" hidden></div>
 {# defer is load-bearing: this script subscribes to window.PRKioskStatus at
    load time, and kiosk-status.js in the head is deferred (base.html), so a
    plain end-of-body script would run first, find no PRKioskStatus, and fall

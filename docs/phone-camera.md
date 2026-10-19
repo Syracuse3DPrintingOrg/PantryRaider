@@ -34,6 +34,14 @@ UPC-A, UPC-E) plus Code 128, Code 39, and QR codes. Phones cannot focus much
 closer than about four inches, so hold the package a little further back than
 feels natural and let it settle.
 
+A recognized barcode gives a green pulse and a 150 ms vibration where supported.
+The scanner has separate sound and vibration toggles: sound starts off and
+vibration starts on, and your choices are remembered in this browser. The flashlight
+control appears once the camera starts. If the browser or camera does not support a
+control, it shows a crossed-out icon and **Not supported**, rather than looking
+switched off or disappearing. Recognition feedback means the barcode was read;
+the save and product-lookup results appear separately in the scanner's toasts.
+
 **Snap Barcode Photo** takes a single picture with your normal camera app and
 reads the code from that. It is slower by a beat, but it always works, and it
 is the one to use if Start Camera is not offered (see below).
