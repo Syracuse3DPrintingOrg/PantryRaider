@@ -107,7 +107,7 @@ services:
   # MyPassword, change it!), then create an API token under
   # User Profile → API Tokens and paste it into /setup.
   mealie:
-    image: ghcr.io/mealie-recipes/mealie:v3.28.0   # pinned; see "Upgrading pinned images" in README
+    image: ghcr.io/mealie-recipes/mealie:v3.29.0   # pinned; see "Upgrading pinned images" in README
     container_name: foodassistant-mealie
     profiles: ["with-mealie"]
     environment:
@@ -254,7 +254,7 @@ services:
   # After starting, pull a vision model:
   #   docker exec foodassistant-ollama ollama pull gemma4:e4b
   ollama:
-    image: ollama/ollama:0.40.4   # pinned; see "Upgrading pinned images" in README
+    image: ollama/ollama:0.40.5   # pinned; see "Upgrading pinned images" in README
     container_name: foodassistant-ollama
     profiles: ["with-ollama"]
     volumes:

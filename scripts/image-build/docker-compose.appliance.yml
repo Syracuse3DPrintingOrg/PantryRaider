@@ -100,7 +100,7 @@ services:
     logging: *default-logging
 
   mealie:
-    image: ghcr.io/mealie-recipes/mealie:v3.28.0   # pinned; matches docker-compose.prod.yml
+    image: ghcr.io/mealie-recipes/mealie:v3.29.0   # pinned; matches docker-compose.prod.yml
     container_name: foodassistant-mealie
     profiles: ["with-mealie"]
     environment:
@@ -117,7 +117,7 @@ services:
     logging: *default-logging
 
   ollama:
-    image: ollama/ollama:0.40.4   # pinned; matches docker-compose.prod.yml
+    image: ollama/ollama:0.40.5   # pinned; matches docker-compose.prod.yml
     container_name: foodassistant-ollama
     profiles: ["with-ollama"]
     volumes:

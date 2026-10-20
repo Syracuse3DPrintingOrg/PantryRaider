@@ -130,7 +130,7 @@ services:
     logging: *default-logging
 
   mealie:
-    image: ghcr.io/mealie-recipes/mealie:v3.28.0   # pinned; see "Upgrading pinned images" in README
+    image: ghcr.io/mealie-recipes/mealie:v3.29.0   # pinned; see "Upgrading pinned images" in README
     container_name: foodassistant-mealie
     profiles: ["with-mealie"]
     environment:
@@ -147,7 +147,7 @@ services:
     logging: *default-logging
 
   ollama:
-    image: ollama/ollama:0.40.4   # pinned; see "Upgrading pinned images" in README
+    image: ollama/ollama:0.40.5   # pinned; see "Upgrading pinned images" in README
     container_name: foodassistant-ollama
     profiles: ["with-ollama"]
     volumes:
