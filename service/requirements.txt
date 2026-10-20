@@ -10,16 +10,16 @@
 # worker for seconds of CPU), and it carries the URL and form-limit security
 # fixes. Pi Remote satellites pip-install this file rather than the lock, so the
 # pin has to live here to reach them.
-fastapi==0.143.0
+fastapi==0.143.3
 starlette==1.8.0
 uvicorn[standard]==0.54.0
 
 # Database ORM for SQLite inventory (required)
-sqlalchemy==2.0.54
+sqlalchemy==2.1.5
 
 # Data validation and settings management (required)
 pydantic==2.14.1
-pydantic-settings==2.15.0
+pydantic-settings==2.16.0
 
 # Async HTTP client - used for Grocy, Mealie, and cloud provider APIs (required)
 httpx==0.28.1
@@ -37,8 +37,8 @@ python-multipart==0.0.32
 jinja2==3.1.6
 
 # AI vision providers (optional - install whichever providers you use)
-google-genai==2.30.1         # Gemini vision/enrichment provider
-anthropic==1.13.0            # Anthropic Claude vision/enrichment provider
+google-genai==2.31.0         # Gemini vision/enrichment provider
+anthropic==1.15.0            # Anthropic Claude vision/enrichment provider
 # OpenAI is accessed via httpx directly - no SDK needed
 
 # Image resizing before sending to AI providers (required for photo analysis),
@@ -51,13 +51,13 @@ Pillow==12.3.0
 # PDF text extraction for the "Import from PDF" recipe upload. Pure Python (no
 # poppler or other system deps); the recipe's text is handed to the same LLM
 # extractor the URL import fallback uses.
-pypdf==6.20.1
+pypdf==6.21.0
 
 # Renders a scanned / image-only PDF's pages to images so the vision AI can read
 # them (the "Import from PDF" fallback). Its wheels bundle the PDFium engine and
 # ship for both amd64 and arm64 (manylinux2014 x86_64 + aarch64, plus armv7l),
 # so there is still no poppler or other system binary to install in the image.
-pypdfium2==5.13.0
+pypdfium2==5.14.0
 
 # Structured-data recipe scraping for the "From URL" import (the same library
 # Mealie wraps, now run in-process for the native recipe store). Pure Python;
