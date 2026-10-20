@@ -66,4 +66,4 @@ pypdf==6.19.0
 # Re-encoding uploaded recipe photos (app/recipe_images.py) so camera
 # metadata, GPS position included, never reaches a public page. The same pin
 # the main app uses.
-Pillow==12.3.0
+Pillow==13.0.0
