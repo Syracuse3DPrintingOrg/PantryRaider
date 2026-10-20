@@ -46,7 +46,7 @@ anthropic==1.13.0            # Anthropic Claude vision/enrichment provider
 # open to a long list of malformed-image advisories, including heap
 # out-of-bounds writes reachable from Image.paste / Image.crop, ImageCms, and
 # the RankFilter this app's renderers use on uploaded photos.
-Pillow==12.3.0
+Pillow==13.0.0
 
 # PDF text extraction for the "Import from PDF" recipe upload. Pure Python (no
 # poppler or other system deps); the recipe's text is handed to the same LLM
