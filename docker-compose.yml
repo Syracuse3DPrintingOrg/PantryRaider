@@ -257,7 +257,7 @@ services:
   # After starting, pull a vision model:
   #   docker exec foodassistant-ollama ollama pull gemma4:e4b
   ollama:
-    image: ollama/ollama:0.40.5   # pinned; see "Upgrading pinned images" in README
+    image: ollama/ollama:0.40.10   # pinned; see "Upgrading pinned images" in README
     container_name: foodassistant-ollama
     profiles: ["with-ollama"]
     volumes:
@@ -295,7 +295,7 @@ services:
   # Once the admin account exists, set BESZEL_BIND=0.0.0.0 in .env and run the
   # up command again to open the dashboard from other computers on your network.
   beszel:
-    image: henrygd/beszel:0.21.0   # pinned; check github.com/henrygd/beszel/releases before bumping
+    image: henrygd/beszel:0.21.1   # pinned; check github.com/henrygd/beszel/releases before bumping
     container_name: foodassistant-beszel
     profiles: ["with-beszel"]
     environment:
@@ -317,7 +317,7 @@ services:
   # you add this system; set it in .env rather than editing this file. The
   # agent does not start until it is set.
   beszel-agent:
-    image: henrygd/beszel-agent:0.21.0   # pinned; check github.com/henrygd/beszel/releases before bumping
+    image: henrygd/beszel-agent:0.21.1   # pinned; check github.com/henrygd/beszel/releases before bumping
     container_name: foodassistant-beszel-agent
     profiles: ["with-beszel"]
     network_mode: host
