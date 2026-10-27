@@ -10,16 +10,16 @@
 # worker for seconds of CPU), and it carries the URL and form-limit security
 # fixes. Pi Remote satellites pip-install this file rather than the lock, so the
 # pin has to live here to reach them.
-fastapi==0.143.3
-starlette==1.8.0
+fastapi==0.162.0
+starlette==1.9.0
 uvicorn[standard]==0.54.0
 
 # Database ORM for SQLite inventory (required)
-sqlalchemy==2.1.5
+sqlalchemy==2.1.6
 
 # Data validation and settings management (required)
 pydantic==2.14.1
-pydantic-settings==2.16.0
+pydantic-settings==2.16.1
 
 # Async HTTP client - used for Grocy, Mealie, and cloud provider APIs (required)
 httpx==0.28.1
@@ -37,7 +37,7 @@ python-multipart==0.0.32
 jinja2==3.1.6
 
 # AI vision providers (optional - install whichever providers you use)
-google-genai==2.31.0         # Gemini vision/enrichment provider
+google-genai==2.33.0         # Gemini vision/enrichment provider
 anthropic==1.15.0            # Anthropic Claude vision/enrichment provider
 # OpenAI is accessed via httpx directly - no SDK needed
 
@@ -62,7 +62,7 @@ pypdfium2==5.14.0
 # Structured-data recipe scraping for the "From URL" import (the same library
 # Mealie wraps, now run in-process for the native recipe store). Pure Python;
 # pages the scraper cannot read fall back to the existing LLM extraction.
-recipe-scrapers==15.12.0
+recipe-scrapers==15.13.0
 
 # Flexible date parsing for expiry date extraction (required)
 python-dateutil==2.9.0
