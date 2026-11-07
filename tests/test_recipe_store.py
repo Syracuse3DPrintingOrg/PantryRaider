@@ -585,3 +585,22 @@ def test_attach_image_refuses_bytes_that_are_not_an_image(db):
     saved = recipe_store.create_from_parsed(db, PARSED)
     assert recipe_store.attach_image(db, saved["slug"], b"not an image",
                                      "image/png") is None
+
+
+def test_a_new_recipe_never_inherits_lines_left_under_a_reused_id(db):
+    """SQLite reuses the id of a removed recipe. Lines an older release or a
+    hand edit left under that id must not show up in the new recipe."""
+    from app.models.db_models import Recipe, RecipeIngredient, RecipeStep
+    old = recipe_store.create_from_parsed(db, {"name": "Old", "ingredients": ["a", "b", "c"],
+                                               "instructions": ["x"]})
+    rid = db.query(Recipe).filter_by(slug=old["slug"]).one().id
+    # Remove only the recipe row, as a careless delete would.
+    db.query(Recipe).filter(Recipe.id == rid).delete()
+    db.commit()
+    new = recipe_store.create_from_parsed(db, {"name": "New", "ingredients": ["saffron threads"],
+                                               "instructions": ["Combine."]})
+    nid = db.query(Recipe).filter_by(slug=new["slug"]).one().id
+    assert nid == rid  # the id was reused, which is the case this guards
+    lines = [i.text for i in db.query(RecipeIngredient).filter_by(recipe_id=nid)]
+    steps = [s.text for s in db.query(RecipeStep).filter_by(recipe_id=nid)]
+    assert lines == ["saffron threads"] and steps == ["Combine."]

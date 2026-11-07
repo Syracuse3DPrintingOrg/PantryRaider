@@ -434,6 +434,14 @@ def create_from_parsed(db: Session, parsed: dict, *, source: str = "manual",
     )
     db.add(recipe)
     db.flush()
+    # SQLite can hand a new recipe the id of one removed earlier. Lines left
+    # under that id by anything that removed recipes without their lines (an
+    # older release, a hand edit of the database) would otherwise show up in
+    # the new recipe, so clear them before writing its own.
+    (db.query(RecipeIngredient)
+     .filter(RecipeIngredient.recipe_id == recipe.id).delete())
+    (db.query(RecipeStep)
+     .filter(RecipeStep.recipe_id == recipe.id).delete())
     structured = structured if isinstance(structured, list) else []
     for pos, line in enumerate(lines):
         fields = _structured_fields(structured[pos] if pos < len(structured) else None)

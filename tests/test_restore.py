@@ -520,6 +520,9 @@ def test_restore_replaces_the_live_database_even_with_wal_frames():
     data_dir = Path(settings.data_dir)
     db = SessionLocal()
     try:
+        from app.models.db_models import RecipeIngredient, RecipeStep
+        db.query(RecipeIngredient).delete()
+        db.query(RecipeStep).delete()
         db.query(Recipe).delete()
         db.commit()
         for i in range(5):
