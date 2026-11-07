@@ -45,6 +45,8 @@ def test_verify_login_matches_linked_account(client, instance_token):
     body = r.json()
     assert body["ok"] is True
     assert body["account_email"] == "dan@example.com"
+    # No two-factor on the account, so the device is told none was checked.
+    assert body["mfa"] is False
 
 
 def test_verify_login_rejects_wrong_password(client, instance_token):
@@ -94,6 +96,7 @@ def test_verify_login_honours_account_2fa(client, instance_token):
                       json={**CREDS, "totp": totp_now(secret)})
     assert good.status_code == 200
     assert good.json()["ok"] is True
+    assert good.json()["mfa"] is True
 
     # A recovery code works too, and burns.
     rec = client.post("/v1/instance/verify-login",

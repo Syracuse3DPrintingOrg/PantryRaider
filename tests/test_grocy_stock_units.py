@@ -14,7 +14,7 @@ from app.services import grocy as grocy_mod
 from app.services.grocy import GrocyClient, _stock_unit_name
 
 
-def _install(monkeypatch, stock, units_status=200):
+def _install(monkeypatch, stock, units_status=200, units=None):
     def handler(request):
         p = request.url.path
         if p.endswith("/stock"):
@@ -28,7 +28,7 @@ def _install(monkeypatch, stock, units_status=200):
         if p.endswith("/objects/quantity_units"):
             if units_status != 200:
                 return httpx.Response(units_status, json={"error_message": "nope"})
-            return httpx.Response(200, json=[{"id": 10, "name": "Gram"}])
+            return httpx.Response(200, json=units or [{"id": 10, "name": "Gram"}])
         return httpx.Response(404, json={})
 
     monkeypatch.setattr(grocy_mod, "_client",
@@ -44,6 +44,19 @@ def test_full_stock_reports_the_stock_unit(monkeypatch):
     _install(monkeypatch, _STOCK)
     rows = asyncio.run(GrocyClient().get_full_stock())
     assert rows[0]["unit"] == "Gram"
+
+
+def test_full_stock_carries_the_plural_for_amounts_other_than_one(monkeypatch):
+    _install(monkeypatch, _STOCK,
+             units=[{"id": 10, "name": "Gram", "name_plural": "Grams"}])
+    rows = asyncio.run(GrocyClient().get_full_stock())
+    assert (rows[0]["unit"], rows[0]["unit_plural"]) == ("Gram", "Grams")
+
+
+def test_a_unit_without_a_plural_uses_its_name_for_both(monkeypatch):
+    _install(monkeypatch, _STOCK)
+    rows = asyncio.run(GrocyClient().get_full_stock())
+    assert rows[0]["unit_plural"] == "Gram"
 
 
 def test_a_failed_units_read_leaves_the_unit_blank(monkeypatch):

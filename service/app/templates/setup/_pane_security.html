@@ -82,7 +82,7 @@
             <div id="twofactor-next"></div>
             {% call srow('Two-factor',
                          'A code from an authenticator app.',
-                         'Adds a second step to the device password: a 6-digit code from an authenticator app (Google Authenticator, Authy, Bitwarden, 1Password, and others). Works offline, no email or text needed. Signing in from outside your home network always asks for it.') %}
+                         'Adds a second step to the device password: a 6-digit code from an authenticator app (Google Authenticator, Authy, Bitwarden, 1Password, and others). Works offline, no email or text needed. Signing in from outside your home network always asks for it; at home it can ask every time or not at all. After a code, a device can skip it for 30 days.') %}
               {% if s.local_totp_enabled or s.totp_secret %}
               <div class="set-row-actions mb-2">{{ pill('On', 'good') }}
                 <span class="text-secondary small">Two-factor is on for this device.</span>
@@ -92,6 +92,14 @@
                 <input type="text" class="form-control form-control-sm font-monospace" id="totp-disable-code"
                        placeholder="Code or your password" autocomplete="off">
                 <div class="form-text">Needed to turn 2FA off or make new recovery codes.</div>
+              </div>
+              <div class="mb-2" style="max-width: 320px;">
+                <label class="form-label small mb-1" for="totp-scope">Ask for the code</label>
+                <select class="form-select form-select-sm" id="totp-scope" data-on-change="saveTotpScope(this)">
+                  <option value="always" {% if s.local_totp_scope != 'outside' %}selected{% endif %}>At every sign-in</option>
+                  <option value="outside" {% if s.local_totp_scope == 'outside' %}selected{% endif %}>Only from outside my home network</option>
+                </select>
+                <div id="totp-scope-result" class="mt-1"></div>
               </div>
               <div class="d-flex flex-wrap gap-2">
                 <button class="btn btn-outline-secondary btn-sm" data-on-click="regenRecoveryCodes()">
@@ -125,9 +133,29 @@
                 <div id="totp-result" class="mt-2"></div>
               </div>
             {% endcall %}
+            {% call srow('Passkeys',
+                         'Sign in with your face, fingerprint or phone.',
+                         'A passkey signs you in with one tap, using Face ID, Touch ID, Windows Hello, your phone, or a security key. It needs no code afterwards, even from outside your home network, and it only works on the address it was added on. Passkeys need this kitchen to be open over HTTPS by its web address, such as through Forager remote access or your own domain.') %}
+              <div id="passkeys-list" class="mb-2 small text-secondary">Loading…</div>
+              <div id="passkeys-add" class="d-none" style="max-width: 320px;">
+                <label class="form-label small mb-1" for="passkey-name">Name for this passkey</label>
+                <input type="text" class="form-control form-control-sm mb-2" id="passkey-name"
+                       maxlength="40" placeholder="For example, Dan's phone" autocomplete="off">
+                <label class="form-label small mb-1" for="passkey-credential">Your password</label>
+                <input type="password" class="form-control form-control-sm mb-2" id="passkey-credential"
+                       autocomplete="current-password" placeholder="Password or a current code">
+                <button class="btn btn-outline-info btn-sm" type="button" data-on-click="addPasskey()">
+                  <i class="bi bi-fingerprint me-1"></i>Add a passkey
+                </button>
+              </div>
+              <div id="passkeys-not-here" class="small text-secondary d-none"></div>
+              <div id="passkeys-result" class="mt-2"></div>
+            {% endcall %}
             {% call srow('Signed-in browsers',
-                         'Sign out every other browser.',
-                         'Signs out every phone, tablet and computer signed in to this kitchen except this one. Changing a password or two-factor does the same.') %}
+                         'Where you are signed in.',
+                         'Every phone, tablet and computer signed in to this kitchen, and when each was last used. Sign out one you no longer use, or all of them except this one. Changing a password or two-factor signs out every other browser too.') %}
+              <div id="signins-list" class="small text-secondary mb-2">Loading…</div>
+              <div id="signins-trusted" class="small text-secondary mb-2 d-none"></div>
               <div class="set-row-actions">
                 <button class="btn btn-outline-secondary btn-sm" type="button" id="signout-everywhere-btn">Sign out everywhere else</button>
               </div>

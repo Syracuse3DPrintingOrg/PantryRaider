@@ -225,6 +225,70 @@ def test_toss_surfaces_grocy_outage_as_502(client):
     assert "not reachable" in r.json()["detail"]
 
 
+def test_a_rows_toss_takes_only_that_rows_stock(client):
+    """3 yogurts expired, 2 still good with a later date: the Expiring row
+    sends its place and date, and only the 3 go in the bin (all 5 did)."""
+    seen = {}
+
+    async def fake_group(self, product_id, amount, location_id, best_before_date,
+                         spoiled=False, expected_amount=None):
+        seen["args"] = (product_id, amount, location_id, best_before_date, spoiled)
+        return {"product_id": product_id, "consumed": 3.0, "requested": 3.0,
+                "complete": True}
+
+    async def no_plain_consume(self, *a, **kw):
+        raise AssertionError("a row must never toss the whole product")
+
+    with patch.object(GrocyClient, "consume_stock_group", fake_group), \
+         patch.object(GrocyClient, "consume_stock", no_plain_consume):
+        r = client.post("/expiring/toss/42", json={
+            "amount": 3.0, "location_id": 2, "best_before_date": "2026-10-25"})
+    assert r.status_code == 200
+    assert seen["args"] == (42, 3.0, 2, "2026-10-25", True)
+    body = r.json()
+    assert body["ok"] is True and body["amount"] == 3.0 and body["complete"] is True
+
+
+def test_a_rows_toss_says_when_grocy_reached_only_part_of_it(client):
+    async def fake_group(self, product_id, amount, location_id, best_before_date,
+                         spoiled=False, expected_amount=None):
+        return {"product_id": product_id, "consumed": 1.0, "requested": 3.0,
+                "complete": False}
+
+    with patch.object(GrocyClient, "consume_stock_group", fake_group):
+        r = client.post("/expiring/toss/42", json={
+            "amount": 3.0, "location_id": 2, "best_before_date": "2026-10-25"})
+    assert r.json()["complete"] is False
+    assert r.json()["amount"] == 1.0
+
+
+@pytest.mark.parametrize("kind,status", [("gone", 404), ("group", 409)])
+def test_a_rows_toss_that_grocy_cannot_do_alone_changes_nothing(client, kind, status):
+    async def fake_group(self, *a, **kw):
+        raise GrocyError("Grocy would use other stock first, so nothing was used.",
+                         kind=kind)
+
+    with patch.object(GrocyClient, "consume_stock_group", fake_group):
+        r = client.post("/expiring/toss/42", json={
+            "amount": 3.0, "location_id": 2, "best_before_date": "2026-10-25"})
+    assert r.status_code == status
+
+
+def test_a_toss_date_without_a_place_is_refused(client):
+    r = client.post("/expiring/toss/42", json={"amount": 1, "best_before_date": "2026-10-25"})
+    assert r.status_code == 422
+
+
+def test_a_toss_place_without_a_date_is_refused(client):
+    """A place alone must never fall through to the product-wide toss."""
+    async def no_plain_consume(self, *a, **kw):
+        raise AssertionError("a place alone must not toss the whole product")
+
+    with patch.object(GrocyClient, "consume_stock", no_plain_consume):
+        r = client.post("/expiring/toss/42", json={"amount": 1, "location_id": 2})
+    assert r.status_code == 422
+
+
 def test_toss_refreshes_the_count_cache(client):
     # The /expiring/count 30s cache must not keep showing the old number
     # right after the user acted on the list.
@@ -253,7 +317,7 @@ def _page(client, expiring_items, log_rows):
     async def fake_products(self):
         return [{"id": int(pid), "name": name} for pid, name in PRODUCTS.items()]
 
-    with patch.object(GrocyClient, "get_expiring", fake_expiring), \
+    with patch.object(GrocyClient, "get_expiring_by_date", fake_expiring), \
          patch.object(GrocyClient, "_get", fake_get), \
          patch.object(GrocyClient, "get_products", fake_products), \
          patch.object(type(settings), "is_configured", lambda self: True):
@@ -303,7 +367,7 @@ def test_expiring_page_hides_waste_during_an_outage(client):
     async def broken(self, days=7):
         raise GrocyError("Grocy is not reachable. Inventory will return when it is.")
 
-    with patch.object(GrocyClient, "get_expiring", broken), \
+    with patch.object(GrocyClient, "get_expiring_by_date", broken), \
          patch.object(type(settings), "is_configured", lambda self: True):
         r = client.get("/ui/expiring")
     assert r.status_code == 200

@@ -142,6 +142,22 @@ def test_sync_food_expired_raises_and_archives_stale(db):
     assert ai.count_active(db) == 0
 
 
+def test_sync_food_expired_counts_only_the_expired_stock(db):
+    # A row per best-by date and place: 3 yogurts expired in the fridge, 1
+    # more in the freezer, and none of the good ones (best by later) are on
+    # the list at all, so the one item says 4, never the product's 6.
+    items = [
+        {"product_id": 2, "product": {"name": "Yogurt"}, "days_remaining": -1,
+         "best_before_date": "2026-10-26", "amount": 1.0, "location_id": 3},
+        {"product_id": 2, "product": {"name": "Yogurt"}, "days_remaining": -2,
+         "best_before_date": "2026-10-25", "amount": 3.0, "location_id": 2},
+    ]
+    assert ai.sync_food_expired(db, items) == 1
+    [item] = ai.list_active(db)
+    assert item["title"] == "Yogurt has expired"
+    assert item["body"] == "Best-before 2026-10-25. Quantity 4."
+
+
 # -- inbox API --------------------------------------------------------------
 
 @pytest.fixture

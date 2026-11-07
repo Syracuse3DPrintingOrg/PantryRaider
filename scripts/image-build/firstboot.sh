@@ -716,7 +716,9 @@ os_timezone() {
 # Kiosk and Stream Deck run as this user; we never assume a fixed name.
 primary_user() {
   [ -n "${APPLIANCE_USER:-}" ] && { echo "$APPLIANCE_USER"; return; }
-  getent passwd 1000 | cut -d: -f1
+  # No uid 1000 account is an empty answer, which every caller handles. Under
+  # pipefail getent's "not found" status would otherwise end the whole run.
+  getent passwd 1000 | cut -d: -f1 || true
 }
 
 # Resolve an enable flag that may be true / false / auto. For "auto", the
@@ -3241,7 +3243,8 @@ configure_streamdeck() {
       "Pillow>=13.0.0,<14; python_version >= '3.11'" \
       "Pillow>=12.3.0,<13; python_version < '3.11'" \
       "httpx>=0.27.0,<1" \
-      "websockets>=12.0,<18" \
+      "websockets>=17.3,<18; python_version >= '3.11'" \
+      "websockets>=12.0,<17; python_version < '3.11'" \
       "tomli>=2,<3; python_version < '3.11'"
   fi
 

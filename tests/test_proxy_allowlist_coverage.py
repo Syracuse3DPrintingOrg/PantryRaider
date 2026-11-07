@@ -9,7 +9,9 @@ Three checks hold that together:
   against a recording transport, sends only requests classify() allows;
 - an AST scan of service/app finds the client call sites with literal or
   f-string paths (_request, _get, _post, _scoped, _cached_list,
-  _ensure_object, _list_all), and every one is allowed;
+  _ensure_object, _list_all), and every one is allowed, apart from those in
+  a GrocyClient method marked @_server_only, which a satellite refuses
+  before it sends anything (checked here too);
 - every path fielded satellites called, v0.6.0 onwards
   (tests/data/r1_fleet_proxy_client_paths.json), is still allowed.
 
@@ -189,7 +191,7 @@ _GROCY_ARGS = dict(_COMMON, **{
     # A space in the barcode: it must arrive as one path segment.
     "barcode": "4006381 333931", "stock_entry_id": "abc", "name": "Pantry Shelf",
     "bucket": "frozen", "entry": dict(_ENTRY), "item": _food(),
-    "quantity": 1.0, "unit": "Pack",
+    "quantity": 1.0, "unit": "Pack", "from_id": 1, "to_id": 2,
 })
 _MEALIE_ARGS = dict(_COMMON, **{
     "list_id": "abc", "item_id": "it1", "entry_id": 3, "date": "2026-10-01",
@@ -242,6 +244,17 @@ def _assert_all_allowed(seen):
         if verdict != proxy_policy.VERDICT_ALLOW:
             bad.append((backend, method, rel, verdict))
     assert not bad, f"requests the proxy would refuse: {bad}"
+
+
+@pytest.mark.anyio
+async def test_server_only_methods_send_nothing_from_a_satellite(satellite):
+    """The Grocy location tidy-ups (services/grocy_locations.py) hide and
+    re-flag locations, which the proxy does not carry."""
+    for call in (GrocyClient().merge_location(1, 2),
+                 GrocyClient().mark_location_freezer(1)):
+        with pytest.raises(grocy_svc.GrocyError):
+            await call
+    assert satellite == []
 
 
 def test_the_check_catches_a_path_off_the_list():
@@ -332,9 +345,15 @@ def _scan_sites():
         rel = path.relative_to(ROOT).as_posix()
         backend = "mealie" if rel.endswith("services/mealie.py") else "grocy"
         tree = ast.parse(path.read_text(), filename=rel)
+        server_only = [range(fn.lineno, fn.end_lineno + 1) for fn in ast.walk(tree)
+                       if isinstance(fn, ast.AsyncFunctionDef)
+                       and any(isinstance(d, ast.Name) and d.id == "_server_only"
+                               for d in fn.decorator_list)]
         for node in ast.walk(tree):
             if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
                     and node.func.attr in _HELPERS):
+                continue
+            if any(node.lineno in lines for lines in server_only):
                 continue
             how = _HELPERS[node.func.attr]
             args = list(node.args)

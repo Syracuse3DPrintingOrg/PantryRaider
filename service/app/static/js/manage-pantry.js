@@ -911,8 +911,13 @@ async function importAll() {
     const printedIds = result.results
       .filter(r => r.status === 'ok' && r.product_id != null)
       .map(r => r.product_id);
+    // An item Grocy already keeps in another unit, with no conversion from
+    // the one typed, went in as typed in Grocy's unit: say so.
+    const notes = result.results.filter(r => r.status === 'ok' && r.unit_note)
+      .map(r => ' ' + PR.esc(r.unit_note)).join('');
     if (err === 0) {
-      showStatus('import-status', `✅ Added ${ok} item(s) to your inventory.`, 'success');
+      showStatus('import-status', `✅ Added ${ok} item(s) to your inventory.${notes}`,
+        notes ? 'warning' : 'success');
       clearQueue();
     } else {
       const errs = result.results.filter(r => r.status === 'error').map(r => r.error).join('; ');
@@ -923,7 +928,7 @@ async function importAll() {
       queue = sent.filter((_, i) => failed.has(i));
       renderQueue();
       showStatus('import-status', `⚠️ ${ok} imported, ${err} failed: ${PR.esc(errs)}. ` +
-        'The ones that failed are still listed.', 'warning');
+        `The ones that failed are still listed.${notes}`, 'warning');
     }
     offerBatchLabels(printedIds);
   } catch(e) {

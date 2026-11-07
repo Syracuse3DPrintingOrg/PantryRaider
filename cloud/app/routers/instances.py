@@ -70,13 +70,21 @@ def verify_login(payload: VerifyLoginRequest, request: Request,
         # Password accepted; the second factor is missing or wrong. The app
         # reads the error to know whether to prompt for a code or say it failed.
         return JSONResponse(status_code=401, content={"error": gate})
-    return {"ok": True, "account_email": account.email}
+    # mfa tells the device the account's own second factor was checked just
+    # now, so it may accept this sign-in from outside the home network even
+    # when the device has no two-factor of its own. An older cloud leaves the
+    # field out, which the device reads as no.
+    return {"ok": True, "account_email": account.email,
+            "mfa": bool(account.totp_enabled)}
 
 
 class VerifyUnlockRequest(BaseModel):
     # The single-use unlock code the Google flow delivered to the device's
     # login screen (flow=unlock, purpose="unlock").
     code: str = ""
+    # The PKCE code_verifier, from a device that started the Google sign-in
+    # with a code_challenge. Required whenever the code was minted with one.
+    code_verifier: str = ""
 
 
 @router.post("/instance/verify-unlock")
@@ -109,6 +117,13 @@ def verify_unlock(payload: VerifyUnlockRequest, request: Request,
     if (not row or row.purpose != "unlock" or row.redeemed
             or row.expires_at < utc_now_iso()):
         return JSONResponse(status_code=401, content={"error": "invalid_code"})
+    # Bound to the browser that started the sign-in: a code caught on its way
+    # (a return address on someone else's machine) is worthless without the
+    # verifier the device kept in that browser's session. A wrong verifier
+    # does not burn the code, the same as /pairing/redeem.
+    if row.code_challenge and not pkce_verifier_matches(
+            row.code_challenge, payload.code_verifier.strip()):
+        return JSONResponse(status_code=401, content={"error": "invalid_code"})
     if not claim_once(db, PairingCode, row.id, "redeemed"):
         db.rollback()
         return JSONResponse(status_code=401, content={"error": "invalid_code"})
@@ -120,7 +135,10 @@ def verify_unlock(payload: VerifyUnlockRequest, request: Request,
         # A real Google sign-in, but not the account this device is linked to.
         return JSONResponse(status_code=401,
                             content={"error": "account_mismatch"})
-    return {"ok": True, "account_email": owner.email}
+    # A 2FA account's unlock code is only minted after its code was entered
+    # (oauth_google, flow=unlock), so the same mfa answer holds here.
+    return {"ok": True, "account_email": owner.email,
+            "mfa": bool(owner.totp_enabled)}
 
 
 def _create_instance(db: Session, account_id: int, name: str) -> tuple[Instance, str]:

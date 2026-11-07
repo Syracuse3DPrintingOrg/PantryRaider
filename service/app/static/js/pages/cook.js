@@ -366,9 +366,11 @@ function actions(s, tier) {
   const idArg = PR.escAttrJs(s.external_id);
   const srcArg = PR.escAttrJs(s.source);
   const slugArg = PR.escAttrJs(s.slug);
-  if (s.source === 'themealdb' || s.source === 'spoonacular') {
-    // A web recipe can be cooked straight away (set as the Current Recipe)
-    // without first saving it to Mealie (FoodAssistant-wqef).
+  if (s.source === 'themealdb' || s.source === 'spoonacular' ||
+      String(s.source || '').startsWith('catalog:')) {
+    // A web recipe (or one from a recipe database the user added) can be
+    // cooked straight away (set as the Current Recipe) without first saving
+    // it to Mealie (FoodAssistant-wqef).
     btns.push(`<button class="btn btn-sm btn-outline-primary" data-on-click="cookExternal(${idArg}, ${srcArg}, false, this)"
       title="Make this the Current Recipe (no need to save it first)"><i class="bi bi-fire me-1"></i>Cook</button>`);
     btns.push(`<button class="btn btn-sm btn-outline-secondary" data-on-click="cookExternal(${idArg}, ${srcArg}, true, this)"

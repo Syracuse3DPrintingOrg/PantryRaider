@@ -112,6 +112,27 @@ async def totp_disable(request: Request,
     return {"ok": True, "message": "Two-factor authentication is off."}
 
 
+class TOTPScopePayload(BaseModel):
+    scope: str = "always"
+    credential: str = ""
+
+
+@router.post("/totp/scope")
+async def totp_scope(payload: TOTPScopePayload):
+    """When the code is asked for: every sign-in, or only from outside. Asking
+    less often needs the same proof as turning two-factor off."""
+    if payload.scope not in ("always", "outside"):
+        return {"ok": False, "error": "Choose every sign-in or only from outside."}
+    if (payload.scope == "outside" and settings.local_totp_scope != "outside"
+            and not await asyncio.to_thread(_local_2fa_credential_ok, payload.credential)):
+        return {"ok": False,
+                "error": "Enter a current code or your password to change when the code is asked for."}
+    await asyncio.to_thread(settings.save, {"local_totp_scope": payload.scope})
+    return {"ok": True, "message": ("Saved. The code is asked for only when you sign in from outside your home network."
+                                    if payload.scope == "outside" else
+                                    "Saved. The code is asked for at every sign-in.")}
+
+
 @router.post("/totp/recovery")
 async def totp_recovery(payload: TOTPCredentialPayload = TOTPCredentialPayload()):
     """Mint a fresh set of recovery codes (the old set stops working), after the

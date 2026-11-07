@@ -155,7 +155,7 @@ docker compose --profile with-printing up -d</code></pre>
                   <input type="text" class="form-control form-control-sm" id="add-printer-host" placeholder="Host name or IP (e.g. 192.168.1.50)">
                 </div>
                 <div class="col-12 col-md-6">
-                  <select class="form-select form-select-sm" id="add-printer-type" data-on-change="onAddPrinterTypeChange()">
+                  <select class="form-select form-select-sm" id="add-printer-type" aria-label="Printer type" data-on-change="onAddPrinterTypeChange()">
                     <option value="driverless" selected>Driverless (IPP), recommended</option>
                     <option value="ipp">Network (IPP)</option>
                     <option value="zebra">Zebra label printer (ZPL)</option>
@@ -165,7 +165,7 @@ docker compose --profile with-printing up -d</code></pre>
                 <div class="col-12 col-md-6" id="add-printer-port-row" style="display:none">
                   <div class="input-group input-group-sm">
                     <span class="input-group-text">Port{{ info('A raw socket queue sends data straight to the printer with no driver. It is for advanced setups (for example a label printer that speaks its own language). Most printers work best with Driverless (IPP).') }}</span>
-                    <input type="number" class="form-control" id="add-printer-port" value="9100" min="1" max="65535">
+                    <input type="number" class="form-control" id="add-printer-port" aria-label="Port" value="9100" min="1" max="65535">
                   </div>
                 </div>
                 <div class="col-12">

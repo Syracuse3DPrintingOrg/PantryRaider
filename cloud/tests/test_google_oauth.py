@@ -24,7 +24,8 @@ def google(monkeypatch):
         if request.url.host == "openidconnect.googleapis.com":
             assert request.headers["Authorization"] == "Bearer google-at"
             return httpx.Response(200, json={"email": "Gina@Example.com",
-                                             "email_verified": True})
+                                             "email_verified": True,
+                                             "sub": "sub-gina"})
         return httpx.Response(404)
 
     monkeypatch.setattr(oauth_google, "transport", httpx.MockTransport(handler))
@@ -147,7 +148,8 @@ def test_unverified_email_is_rejected(client, google, monkeypatch):
         if request.url.host == "oauth2.googleapis.com":
             return httpx.Response(200, json={"access_token": "google-at"})
         return httpx.Response(200, json={"email": "gina@example.com",
-                                         "email_verified": False})
+                                         "email_verified": False,
+                                         "sub": "sub-gina"})
 
     monkeypatch.setattr(oauth_google, "transport", httpx.MockTransport(handler))
     assert start_and_callback(client).status_code == 403
@@ -517,3 +519,139 @@ def test_pkce_challenge_survives_the_2fa_step(client, google):
     assert client.post("/v1/pairing/redeem",
                        json={"code": code, "name": "Kitchen Pi",
                              "code_verifier": verifier}).status_code == 200
+
+
+# --- Google account id (sub) and PKCE on the leg to Google -----------------
+
+def _google_as(monkeypatch, email, sub, seen=None):
+    """Stand in for Google signing in ``email`` as Google account ``sub``,
+    recording every request in ``seen``."""
+    def handler(request: httpx.Request) -> httpx.Response:
+        if seen is not None:
+            seen.append(request)
+        if request.url.host == "oauth2.googleapis.com":
+            return httpx.Response(200, json={"access_token": "google-at"})
+        return httpx.Response(200, json={"email": email,
+                                         "email_verified": True, "sub": sub})
+    monkeypatch.setattr(oauth_google, "transport", httpx.MockTransport(handler))
+
+
+def _account(email="gina@example.com"):
+    from app.database import SessionLocal
+    from app.models import Account
+    db = SessionLocal()
+    try:
+        return db.query(Account).filter_by(email=email).first()
+    finally:
+        db.close()
+
+
+def _verified_password_account(client, email="gina@example.com"):
+    client.post("/v1/accounts/signup",
+                json={"email": email, "password": "hunter2222"})
+    from app.database import SessionLocal
+    from app.models import Account
+    db = SessionLocal()
+    db.query(Account).filter_by(email=email).first().email_verified = 1
+    db.commit()
+    db.close()
+
+
+def test_new_google_account_stores_the_sub(client, google):
+    start_and_callback(client, "/auth/google/start?intent=signup")
+    assert _account().google_sub == "sub-gina"
+
+
+def test_existing_account_picks_up_the_sub_on_first_google_sign_in(
+        client, google):
+    _verified_password_account(client)
+    assert _account().google_sub is None
+    resp = start_and_callback(client)
+    assert resp.headers["location"] == "/account"
+    assert _account().google_sub == "sub-gina"
+    # The same Google account keeps signing in.
+    assert start_and_callback(TestClient(app)).headers["location"] == "/account"
+
+
+def test_a_different_google_account_for_the_same_email_is_refused(
+        client, google, monkeypatch):
+    start_and_callback(client, "/auth/google/start?intent=signup")
+    _google_as(monkeypatch, "gina@example.com", "someone-else")
+    browser = TestClient(app)
+    resp = start_and_callback(browser)
+    assert resp.status_code == 403
+    assert "different Google account" in resp.json()["detail"]
+    assert "forager_session" not in resp.cookies
+    assert _account().google_sub == "sub-gina"  # never moved
+
+
+def test_the_sub_is_matched_before_the_email(client, google, monkeypatch):
+    start_and_callback(client, "/auth/google/start?intent=signup")
+    # The owner's Google address changed; the Google account is the same.
+    _google_as(monkeypatch, "gina.new@example.com", "sub-gina")
+    browser = TestClient(app)
+    resp = start_and_callback(browser)
+    assert resp.headers["location"] == "/account"
+    assert "gina@example.com" in browser.get("/account").text
+    assert _account("gina.new@example.com") is None  # no second account
+
+
+def test_google_reply_without_a_sub_is_refused(client, google, monkeypatch):
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "oauth2.googleapis.com":
+            return httpx.Response(200, json={"access_token": "google-at"})
+        return httpx.Response(200, json={"email": "gina@example.com",
+                                         "email_verified": True})
+    monkeypatch.setattr(oauth_google, "transport", httpx.MockTransport(handler))
+    assert start_and_callback(client).status_code == 502
+
+
+def test_google_leg_uses_pkce(client, google, monkeypatch):
+    import base64
+    import hashlib
+    seen = []
+    _google_as(monkeypatch, "gina@example.com", "sub-gina", seen)
+    start = client.get("/auth/google/start?intent=signup",
+                       follow_redirects=False)
+    query = parse_qs(urlsplit(start.headers["location"]).query)
+    assert query["code_challenge_method"] == ["S256"]
+    challenge = query["code_challenge"][0]
+    assert re.fullmatch(r"[A-Za-z0-9_-]{43}", challenge)
+    state = query["state"][0]
+    client.get(f"/auth/google/callback?code=fake-code&state={state}",
+               follow_redirects=False)
+    token_req = next(r for r in seen if r.url.host == "oauth2.googleapis.com")
+    form = parse_qs(token_req.content.decode())
+    verifier = form["code_verifier"][0]
+    assert 43 <= len(verifier) <= 128
+    expected = base64.urlsafe_b64encode(
+        hashlib.sha256(verifier.encode()).digest()).decode().rstrip("=")
+    assert expected == challenge
+    # Each sign-in gets its own pair.
+    again = client.get("/auth/google/start", follow_redirects=False)
+    assert parse_qs(urlsplit(again.headers["location"]).query)[
+        "code_challenge"][0] != challenge
+
+
+def test_sign_in_started_before_pkce_still_finishes(client, google,
+                                                    monkeypatch):
+    # A state cookie written before this release carries no verifier; the
+    # exchange then goes without one, as Google expects for that sign-in.
+    seen = []
+    _google_as(monkeypatch, "gina@example.com", "sub-gina", seen)
+    old_cookie = oauth_google._pack({"state": "s" * 32, "flow": "portal",
+                                     "intent": "signup"})
+    client.cookies.set("forager_oauth", old_cookie)
+    resp = client.get(f"/auth/google/callback?code=fake-code&state={'s' * 32}",
+                      follow_redirects=False)
+    assert resp.headers["location"] == "/account"
+    token_req = next(r for r in seen if r.url.host == "oauth2.googleapis.com")
+    assert "code_verifier" not in parse_qs(token_req.content.decode())
+
+
+def test_state_compare_survives_a_tampered_cookie(client, google):
+    client.cookies.set("forager_oauth",
+                       oauth_google._pack({"state": 12345, "flow": "portal"}))
+    resp = client.get("/auth/google/callback?code=fake-code&state=12345",
+                      follow_redirects=False)
+    assert resp.status_code == 400

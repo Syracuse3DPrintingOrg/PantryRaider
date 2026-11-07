@@ -1,4 +1,9 @@
 import asyncio
+import base64
+import hashlib
+import json
+import secrets
+import math
 import time
 
 import httpx
@@ -16,8 +21,9 @@ from .. import totp as local_totp
 from ..database import get_db
 from ..ingress import ingress_path, ingress_redirect
 from ..models.db_models import ExpiryDefault
-from ..services.grocy import GrocyClient, error_payload
+from ..services.grocy import GrocyClient, GrocyError, error_payload
 from ..services import auth_state
+from ..services import passkeys
 from ..services.request_origin import has_forwarding_headers
 from ..storage_categories import all_categories, OTHER
 from ..templating import templates
@@ -26,9 +32,9 @@ router = APIRouter(prefix="/ui", tags=["ui"])
 
 # The honest refusal when a login arrives from outside on a device that has no
 # device 2FA to challenge with. The kitchen owner sets up device 2FA from the
-# home network, or uses the setup code once and turns 2FA on then. Forager
-# sign-in does not stand in for it: a Forager account may have no second
-# factor at all, so from outside it needs device 2FA like a password does. A
+# home network, or uses the setup code once and turns 2FA on then. A Forager
+# sign-in stands in for it only when the account's own two-factor was checked
+# (the cloud answers mfa), and a passkey always does. A
 # request that came through a proxy or tunnel (a reverse proxy on this same
 # machine included) gets the proxy wording, since its owner may well be at home.
 _LOCAL_INTERNET_MSG = (
@@ -41,9 +47,10 @@ _PROXY_2FA_MSG = (
     "with the setup code from this kitchen's log and turn it on then.")
 # The Forager form's own refusal from outside, shown in its message slot.
 _FORAGER_OUTSIDE_MSG = (
-    "Signing in with Forager from outside your home network needs two-factor "
-    "turned on for this device. Turn it on in Settings, Security from your "
-    "home network first.")
+    "Signing in from outside your home network needs a second factor. Turn on "
+    "two-factor for your Forager account (on the Forager site, under Security) "
+    "and sign in again, or add a passkey for this kitchen in Settings, "
+    "Security.")
 # Linked or not, the second factor has to be this device's own, so the
 # refusal reads the same either way.
 _LOCAL_INTERNET_MSG_NO_FORAGER = _LOCAL_INTERNET_MSG
@@ -83,28 +90,131 @@ def _internet_refusal(request: Request) -> str:
     return _LOCAL_INTERNET_MSG if linked else _LOCAL_INTERNET_MSG_NO_FORAGER
 
 
-def _forager_outside_refusal(request: Request):
-    """Refuse a Forager or Google sign-in from outside when this device has no
-    2FA of its own to add, or None when it may go ahead. Checked before the
-    cloud is asked, so a refusal never reveals whether the account matched."""
+def _json_or_empty(r) -> dict:
+    try:
+        body = r.json()
+    except ValueError:
+        return {}
+    return body if isinstance(body, dict) else {}
+
+
+def _forager_outside_refusal(request: Request, answer: dict):
+    """Refuse a Forager or Google sign-in from outside when neither side added
+    a second factor, or None when it may go ahead.
+
+    Asked after the cloud confirmed the account: its answer says (mfa) whether
+    the account's own two-factor was just checked, and that is a second factor
+    as good as this device's. An older cloud does not say, which counts as no.
+    The person already knows the password was right when they see this, so
+    asking first gives nothing away."""
     if settings.local_2fa_active() or not _is_internet_request(request):
+        return None
+    if answer.get("mfa") is True:
         return None
     return _render_login(request, status_code=401,
                          forager_error=_FORAGER_OUTSIDE_MSG)
 
 
-def _open_forager_session(request: Request):
-    """Finish a sign-in the linked Forager account vouched for. With device
-    2FA on, the device's code is still asked for next, the same as after a
-    password; otherwise the admin session opens now."""
-    if settings.local_2fa_active():
-        request.session["totp_pending"] = True
-        request.session["pending_role"] = "admin"
-        return _render_login(request, step="totp")
+def _set_trust_cookie(request: Request, response) -> None:
+    """Remember this browser after a correct code, so it is not asked again
+    for 30 days (FoodAssistant-qtm5f). The cookie holds a random token whose
+    hash is on file; a password or two-factor change ends every trust."""
+    from ..services import sessions
+    from ..session_cookie import secure_request
+    token = sessions.trust(request.headers.get("user-agent", ""))
+    response.set_cookie(sessions.TRUST_COOKIE, token, max_age=sessions.TRUST_DAYS * 86400,
+                        httponly=True, samesite="lax", path="/",
+                        secure=secure_request(request.scope, request.headers))
+
+
+def _needs_device_code(request: Request) -> bool:
+    """Whether a sign-in that got past its first step must enter the device's
+    authenticator code next (FoodAssistant-qtm5f): two-factor is on, and
+    neither the "only from outside" choice (signing in from home) nor a
+    browser trusted after an earlier code lets this one skip it."""
+    if not settings.local_2fa_active():
+        return False
+    if settings.local_totp_scope == "outside" and not _is_internet_request(request):
+        return False
+    from ..services import sessions
+    return not sessions.is_trusted(request.cookies.get(sessions.TRUST_COOKIE, ""))
+
+
+def _remember_choice(remember_choice, remember) -> bool:
+    """Keep me signed in: on unless the sign-in form said otherwise. Forms
+    from before the choice existed send neither field."""
+    return not remember_choice or bool(remember)
+
+
+def _open_session(request: Request, role: str, remember: bool = True):
+    """Every finished sign-in ends here: the signed-in session, a fresh
+    sign-in id, and whether the cookie outlives the browser."""
+    request.session.pop("totp_pending", None)
+    request.session.pop("pending_role", None)
+    request.session.pop("pending_remember", None)
     request.session["authed"] = True
-    request.session["role"] = "admin"
+    request.session["role"] = role
+    request.session["remember"] = bool(remember)
     auth_state.stamp_session(request.session)
+
+
+def _open_forager_session(request: Request, answer: dict | None = None,
+                          remember: bool = True):
+    """Finish a sign-in the linked Forager account vouched for. When the
+    account's own two-factor was just checked (mfa), that is the second
+    factor and the session opens now. Otherwise, with device 2FA on, the
+    device's code is asked for next, the same as after a password."""
+    if (answer or {}).get("mfa") is not True and _needs_device_code(request):
+        _start_totp_step(request, "admin", remember)
+        return _render_login(request, step="totp")
+    _open_session(request, "admin", remember)
     return ingress_redirect(request, "/ui/")
+
+
+# How long the code step waits after the password was accepted. Past this
+# the sign-in starts over, so a half-finished sign-in left in a browser is
+# not one code away from a session.
+TOTP_STEP_SECONDS = 600
+# Codes from the authenticator app are single-use: the last time step that
+# signed someone in is refused again (one process, FoodAssistant-n6mta).
+_totp_last_step: dict[str, int] = {}
+# Wrong codes are also counted for the whole device, not only per address,
+# so many addresses do not each get their own run of guesses.
+_TOTP_DEVICE_KEY = "totp:device"
+
+
+def _start_totp_step(request: Request, role: str, remember: bool = True) -> None:
+    request.session["totp_pending"] = time.time()
+    request.session["pending_role"] = role
+    request.session["pending_remember"] = bool(remember)
+
+
+def _totp_step_live(request: Request) -> bool:
+    """Whether this browser is on the code step, dropping a stale one."""
+    started = request.session.get("totp_pending")
+    if not started:
+        return False
+    if (isinstance(started, (int, float)) and not isinstance(started, bool)
+            and 0 <= time.time() - started < TOTP_STEP_SECONDS):
+        return True
+    request.session.pop("totp_pending", None)
+    request.session.pop("pending_role", None)
+    return False
+
+
+def _totp_code_ok(code: str) -> bool:
+    secret = settings.local_totp_effective_secret()
+    step = local_totp.totp_matched_step(secret, code)
+    if step is None:
+        return False
+    # Keyed by the secret, so setting up a new authenticator starts fresh.
+    tag = hashlib.sha256(secret.encode("utf-8")).hexdigest()
+    last = _totp_last_step.get(tag)
+    if last is not None and step <= last:
+        return False
+    _totp_last_step.clear()
+    _totp_last_step[tag] = step
+    return True
 
 
 def _settings_locked_note() -> str:
@@ -114,14 +224,30 @@ def _settings_locked_note() -> str:
     return _config.SETTINGS_LOCKED_MESSAGE if _config.SETTINGS_DAMAGED else ""
 
 
+def _signin_news() -> bool:
+    from ..services import signin_news
+    return signin_news.showing(settings)
+
+
+def _passkeys_here(request) -> bool:
+    """Whether a passkey was added for the address this page is open on, so
+    the sign-in page offers the passkey button only where it can work."""
+    from ..services import access
+    raw = request.headers.get("x-forwarded-host") or request.headers.get("host") or ""
+    host = access.host_name(raw.split(",")[0].strip())
+    return bool(host) and bool(passkeys.for_site(settings, host))
+
+
 def _render_login(request, *, step="password", status_code=200, **ctx):
     base = {
         "request": request, "step": step, "error": None, "setup_done": False,
         "cloud_linked": settings.cloud_linked(),
         "google_unlock": _google_unlock_available(),
         "forager_error": None, "forager_notice": None,
-        "forager_need_code": False, "forager_email": "", "forager_password": "",
+        "forager_need_code": False, "forager_email": "",
         "settings_locked": _settings_locked_note(),
+        "passkeys_here": _passkeys_here(request),
+        "signin_news": _signin_news(),
     }
     base.update(ctx)
     return templates.TemplateResponse(request, "login.html", base,
@@ -210,7 +336,14 @@ def _google_unlock_start(request: Request):
         return ingress_redirect(request, "/ui/login")
     return_url = _request_origin(request) + ingress_path(request) + "/ui/login"
     base = settings.cloud_base_url.rstrip("/")
-    query = _urlencode({"flow": "unlock", "return_url": return_url})
+    # PKCE (S256): the verifier stays in this browser's session, so an unlock
+    # code that lands anywhere else cannot be spent here.
+    verifier = secrets.token_urlsafe(48)
+    request.session["google_unlock_verifier"] = verifier
+    challenge = base64.urlsafe_b64encode(
+        hashlib.sha256(verifier.encode("ascii")).digest()).rstrip(b"=").decode("ascii")
+    query = _urlencode({"flow": "unlock", "return_url": return_url,
+                        "code_challenge": challenge, "code_challenge_method": "S256"})
     return RedirectResponse(f"{base}/auth/google/start?{query}",
                             status_code=303)
 
@@ -237,9 +370,7 @@ async def _google_unlock_return(request: Request, code: str):
         # slot) only renders on a linked install.
         return _render_login(request, status_code=400,
                              error="This device is not connected to Forager yet.")
-    refused = _forager_outside_refusal(request)
-    if refused is not None:
-        return refused
+    verifier = request.session.pop("google_unlock_verifier", "")
     base = settings.cloud_base_url.rstrip("/")
     headers = {"Authorization": f"Bearer {settings.cloud_instance_token}",
                "X-Device-Version": APP_VERSION,
@@ -248,16 +379,21 @@ async def _google_unlock_return(request: Request, code: str):
         async with httpx.AsyncClient(timeout=_CLOUD_TIMEOUT) as client:
             r = await client.post(f"{base}/v1/instance/verify-unlock",
                                   headers=headers,
-                                  json={"code": code.strip()})
+                                  json={"code": code.strip(),
+                                        "code_verifier": verifier if isinstance(verifier, str) else ""})
     except httpx.HTTPError:
         return _render_login(
             request, status_code=502,
             forager_error=("Forager could not be reached. Check the internet "
                            "connection and try again, or use your device "
                            "password."))
-    if r.status_code == 200 and (r.json() or {}).get("ok"):
+    body = _json_or_empty(r)
+    if r.status_code == 200 and body.get("ok"):
         login_guard.reset(key)
-        return _open_forager_session(request)
+        refused = _forager_outside_refusal(request, body)
+        if refused is not None:
+            return refused
+        return _open_forager_session(request, body)
     err = ""
     try:
         err = (r.json() or {}).get("error", "")
@@ -266,6 +402,28 @@ async def _google_unlock_return(request: Request, code: str):
     login_guard.record(key)
     msg = _GOOGLE_MISMATCH_MSG if err == "account_mismatch" else _GOOGLE_EXPIRED_MSG
     return _render_login(request, status_code=401, forager_error=msg)
+
+
+async def _passkey_finish(request: Request, credential: str, key: str):
+    from ..services.rate_limit import login_guard
+    try:
+        cred = json.loads(credential or "")
+        records = passkeys.finish_authentication(settings, request.session,
+                                                 request.headers.get("origin", ""), cred)
+    except ValueError:
+        login_guard.record(key)
+        return JSONResponse({"ok": False, "error": passkeys.SIGN_IN_FAILED_MSG},
+                            status_code=401)
+    except passkeys.PasskeyError as exc:
+        login_guard.record(key)
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=401)
+    try:
+        await asyncio.to_thread(settings.save, {"local_passkeys": records})
+    except Exception:
+        pass  # the counter update is best effort; the sign-in itself stands
+    login_guard.reset(key)
+    _open_session(request, "admin")
+    return JSONResponse({"ok": True, "next": ingress_path(request) + "/ui/"})
 
 
 def _consume_local_recovery(code: str) -> bool:
@@ -280,12 +438,52 @@ def _consume_local_recovery(code: str) -> bool:
     return matched
 
 
-async def _forager_login(request: Request, email: str, password: str, code: str):
+# Between the Forager password and its code, the typed email and password
+# wait here for five minutes under a random id kept in the session, instead
+# of being written back into the page (FoodAssistant-s48wm).
+_FORAGER_PENDING_SECONDS = 300
+_forager_pending: dict[str, tuple[str, str, float]] = {}
+
+
+def _hold_forager(request: Request, email: str, password: str) -> None:
+    now = time.time()
+    for k in [k for k, v in _forager_pending.items() if v[2] <= now]:
+        _forager_pending.pop(k, None)
+    while len(_forager_pending) >= 64:
+        _forager_pending.pop(next(iter(_forager_pending)), None)
+    token = secrets.token_urlsafe(24)
+    _forager_pending[token] = (email, password, now + _FORAGER_PENDING_SECONDS)
+    request.session["forager_pending"] = token
+
+
+def _held_forager(request: Request) -> tuple[str, str] | None:
+    token = request.session.get("forager_pending")
+    held = _forager_pending.get(token) if isinstance(token, str) else None
+    if not held or held[2] <= time.time():
+        return None
+    return held[0], held[1]
+
+
+def _drop_forager(request: Request) -> None:
+    token = request.session.pop("forager_pending", None)
+    if isinstance(token, str):
+        _forager_pending.pop(token, None)
+
+
+async def _forager_login(request: Request, email: str, password: str, code: str,
+                         remember: bool = True):
     """The "Sign in with Forager" path: confirm the account credentials (and the
     account's 2FA, which the cloud enforces) against the linked account, then
     open the normal local session on success."""
     email = (email or "").strip()
     password = password or ""
+    if code and not password:
+        held = _held_forager(request)
+        if held is None:
+            _drop_forager(request)
+            return _render_login(request, status_code=400, forager_open=True,
+                                 forager_error="That took too long. Enter your Forager email and password again.")
+        email, password = held
     if not settings.cloud_linked():
         return _render_login(request, status_code=400,
                              forager_error="This device is not connected to Forager yet.")
@@ -293,9 +491,6 @@ async def _forager_login(request: Request, email: str, password: str, code: str)
         return _render_login(request, status_code=400,
                              forager_email=email,
                              forager_error="Enter your Forager email and password.")
-    refused = _forager_outside_refusal(request)
-    if refused is not None:
-        return refused
     base = settings.cloud_base_url.rstrip("/")
     headers = {"Authorization": f"Bearer {settings.cloud_instance_token}",
                "X-Device-Version": APP_VERSION,
@@ -307,29 +502,33 @@ async def _forager_login(request: Request, email: str, password: str, code: str)
                                   json={"email": email, "password": password,
                                         "totp": (code or "").strip()})
     except httpx.HTTPError:
-        # Honest degraded error: keep what was typed so a retry is one click.
+        # Honest degraded error: keep the email and the waiting code step, so
+        # a retry is short. The password is never written back into the page.
+        if code:
+            _hold_forager(request, email, password)
         return _render_login(
             request, status_code=502, forager_email=email,
-            forager_password=password, forager_need_code=bool(code),
+            forager_need_code=bool(code),
             forager_error=("Forager could not be reached. Check the internet "
                            "connection and try again, or use your device password."))
-    if r.status_code == 200 and (r.json() or {}).get("ok"):
-        return _open_forager_session(request)
-    err = ""
-    try:
-        err = (r.json() or {}).get("error", "")
-    except ValueError:
-        err = ""
-    if err == "totp_required":
+    body = _json_or_empty(r)
+    if r.status_code == 200 and body.get("ok"):
+        refused = _forager_outside_refusal(request, body)
+        _drop_forager(request)
+        if refused is not None:
+            return refused
+        return _open_forager_session(request, body, remember)
+    err = body.get("error", "")
+    if err in ("totp_required", "totp_invalid"):
+        _hold_forager(request, email, password)
+        if err == "totp_required":
+            return _render_login(
+                request, status_code=401, forager_email=email, forager_need_code=True,
+                forager_notice="Enter the code from your authenticator app to finish.")
         return _render_login(
-            request, status_code=401, forager_email=email,
-            forager_password=password, forager_need_code=True,
-            forager_notice="Enter the code from your authenticator app to finish.")
-    if err == "totp_invalid":
-        return _render_login(
-            request, status_code=401, forager_email=email,
-            forager_password=password, forager_need_code=True,
+            request, status_code=401, forager_email=email, forager_need_code=True,
             forager_error="That code did not match. Try again.")
+    _drop_forager(request)
     return _render_login(request, status_code=401, forager_email=email,
                         forager_error="That email or password was not right.")
 
@@ -340,7 +539,7 @@ async def login_page(request: Request, google: str = "", code: str = "",
     if not settings.auth_password or (request.session.get("authed")
                                       and auth_state.session_is_current(request.session)):
         return ingress_redirect(request, "/ui/")
-    if request.session.get("totp_pending"):
+    if _totp_step_live(request):
         return _render_login(request, step="totp")
     # The Google unlock legs ride this already-public path: ?google=start
     # leaves for the cloud's sign-in, ?code=... is the cloud's return with the
@@ -361,41 +560,73 @@ async def login_page(request: Request, google: str = "", code: str = "",
 @router.post("/login")
 async def login(request: Request, mode: str = Form(""), password: str = Form(None),
                 totp_code: str = Form(None), email: str = Form(None),
-                fpass: str = Form(None), fcode: str = Form(None)):
+                fpass: str = Form(None), fcode: str = Form(None),
+                credential: str = Form(None), remember: str = Form(None),
+                remember_choice: str = Form(None), trust: str = Form(None),
+                trust_choice: str = Form(None)):
     # Throttle brute force against the local password / TOTP (FoodAssistant-7svb).
     # The Forager path is checked by the cloud (its own throttling), so it is not
     # counted here.
     from ..services.rate_limit import login_guard, client_key
     key = client_key(request)
-    if mode != "forager" and login_guard.blocked(key):
-        wait = login_guard.retry_after(key)
-        step = "totp" if request.session.get("totp_pending") else "password"
+    on_code_step = _totp_step_live(request)
+    if mode != "forager" and (login_guard.blocked(key) or (
+            on_code_step and login_guard.blocked(_TOTP_DEVICE_KEY))):
+        wait = max(login_guard.retry_after(key), login_guard.retry_after(_TOTP_DEVICE_KEY))
+        if mode in ("passkey_begin", "passkey_finish"):
+            return JSONResponse({"ok": False, "error": (
+                f"Too many attempts. Wait about {max(1, wait // 60)} minute(s) "
+                "and try again.")}, status_code=429)
+        step = "totp" if on_code_step else "password"
         return _render_login(
             request, step=step, status_code=429,
             error=f"Too many attempts. Wait about {max(1, wait // 60)} minute(s) "
                   "and try again.")
 
+    # Passkey sign-in (FoodAssistant-kc2cy). Both legs answer JSON for
+    # static/js/pages/login-passkey.js. A passkey checks the person and the
+    # device together, so it opens the admin session on its own: no
+    # authenticator code after it, from home or from outside.
+    if mode == "passkey_begin":
+        options = passkeys.authentication_options(settings, request.session,
+                                                  request.headers.get("origin", ""))
+        if options is None:
+            return JSONResponse({"ok": False, "available": False})
+        return JSONResponse({"ok": True, "available": True, "options": options})
+    if mode == "passkey_finish":
+        return await _passkey_finish(request, credential, key)
+
+    # "Start over" on the code step: drop the half-finished sign-in.
+    if mode == "cancel":
+        request.session.pop("totp_pending", None)
+        request.session.pop("pending_role", None)
+        request.session.pop("pending_remember", None)
+        return ingress_redirect(request, "/ui/login")
+    keep = _remember_choice(remember_choice, remember)
+
     # Step 2: local TOTP challenge (the password was accepted this session).
-    if request.session.get("totp_pending"):
-        secret = settings.local_totp_effective_secret()
+    if on_code_step:
         code = (totp_code or "").strip()
-        if code and (local_totp.totp_verify(secret, code)
+        if code and (_totp_code_ok(code)
                      or await asyncio.to_thread(_consume_local_recovery, code)):
-            role = request.session.pop("pending_role", "admin")
-            request.session.pop("totp_pending", None)
-            request.session["authed"] = True
-            request.session["role"] = role
-            auth_state.stamp_session(request.session)
+            role = request.session.get("pending_role", "admin")
+            kept = request.session.get("pending_remember", True) is not False
+            _open_session(request, role, kept)
             login_guard.reset(key)
-            return ingress_redirect(request, "/ui/")
+            login_guard.reset(_TOTP_DEVICE_KEY)
+            response = ingress_redirect(request, "/ui/")
+            if not trust_choice or trust:
+                _set_trust_cookie(request, response)
+            return response
         login_guard.record(key)
+        login_guard.record(_TOTP_DEVICE_KEY)
         return _render_login(request, step="totp", status_code=401,
                             error="That code did not match. Try again.")
 
     # The "Sign in with Forager" form: email + password (+ code) checked against
     # the linked account by the cloud, which owns that account's 2FA.
     if mode == "forager":
-        return await _forager_login(request, email, fpass, fcode)
+        return await _forager_login(request, email, fpass, fcode, keep)
 
     internet = _is_internet_request(request)
 
@@ -408,13 +639,12 @@ async def login(request: Request, mode: str = Form(""), password: str = Form(Non
                 settings.save({"auth_password": password})
             except Exception:
                 pass
-        if settings.local_2fa_active():
+        if _needs_device_code(request):
             # A second factor is required next: on the LAN because 2FA is on, and
             # over the internet because it is forced there.
-            request.session["totp_pending"] = True
-            request.session["pending_role"] = "admin"
+            _start_totp_step(request, "admin", keep)
             return _render_login(request, step="totp")
-        if internet:
+        if internet and not settings.local_2fa_active():
             # No device 2FA to challenge with, so a bare password cannot complete
             # over the internet (FoodAssistant-x1ty). The setup code is the way in
             # for an install reachable only from outside: with this password it
@@ -426,9 +656,7 @@ async def login(request: Request, mode: str = Form(""), password: str = Form(Non
                                  error=_internet_refusal(request),
                                  setup_code_link=setup_code_router.mode_for(request) is not None)
         login_guard.reset(key)
-        request.session["authed"] = True
-        request.session["role"] = "admin"
-        auth_state.stamp_session(request.session)
+        _open_session(request, "admin", keep)
         return ingress_redirect(request, "/ui/")
 
     if settings.viewer_password and password and await asyncio.to_thread(
@@ -445,19 +673,36 @@ async def login(request: Request, mode: str = Form(""), password: str = Form(Non
             return _render_login(request, status_code=401,
                                  error=_internet_refusal(request))
         login_guard.reset(key)
-        request.session["authed"] = True
-        request.session["role"] = "viewer"
-        auth_state.stamp_session(request.session)
+        _open_session(request, "viewer", keep)
         return ingress_redirect(request, "/ui/")
 
     login_guard.record(key)
     return _render_login(request, status_code=401, error="Incorrect password.")
 
 
+def _sign_out(request: Request):
+    from ..services import sessions
+    sid = request.session.get(sessions.SID_KEY)
+    request.session.clear()
+    if isinstance(sid, str) and sid:
+        # Ends the sign-in itself, so a copy of this browser's cookie stops
+        # working too (FoodAssistant-6lbsa).
+        sessions.revoke(sid)
+    return ingress_redirect(request, "/ui/login")
+
+
+@router.post("/logout")
+def logout_post(request: Request):
+    return _sign_out(request)
+
+
 @router.get("/logout")
 def logout(request: Request):
-    request.session.clear()
-    return ingress_redirect(request, "/ui/login")
+    # Sign Out links are plain links, so GET still signs out. A link on
+    # another site cannot: its navigation is marked cross-site.
+    if request.headers.get("sec-fetch-site", "") in ("cross-site", "same-site"):
+        return ingress_redirect(request, "/ui/")
+    return _sign_out(request)
 
 
 @router.get("/pin", response_class=HTMLResponse)
@@ -631,7 +876,7 @@ async def pending_page(request: Request):
 
 @router.get("/recipes", response_class=HTMLResponse)
 async def recipes_page(request: Request):
-    from ..services import recipe_source
+    from ..services import recipe_catalogs, recipe_source
     backend = recipe_source.active_backend()
     return templates.TemplateResponse(request, "recipes.html", {
         "request": request,
@@ -648,6 +893,7 @@ async def recipes_page(request: Request):
         # (FoodAssistant-l2hk): the install must be linked to a Forager account.
         "forager_linked": settings.cloud_linked(),
         "forager_recipes_active": settings.forager_recipes_active(),
+        "recipe_catalogs_enabled": bool(recipe_catalogs.enabled()),
         # Pre-fill "who to credit" in the share hub with the user-chosen device
         # name when one is set; auto-detected hostnames make poor credits, so
         # only the explicit setting is used and the field stays editable.
@@ -657,7 +903,7 @@ async def recipes_page(request: Request):
 
 @router.get("/cook", response_class=HTMLResponse)
 async def cook_page(request: Request):
-    from ..services import recipe_source
+    from ..services import recipe_catalogs, recipe_source
     backend = recipe_source.active_backend()
     return templates.TemplateResponse(request, "cook.html", {
         "request": request,
@@ -667,6 +913,7 @@ async def cook_page(request: Request):
         "recipes_backend": backend,
         "library_name": "Mealie" if backend == "mealie" else "My Recipes",
         "mealie_url": settings.mealie_link_url() if backend == "mealie" else None,
+        "recipe_catalogs_enabled": bool(recipe_catalogs.enabled()),
     })
 
 
@@ -718,6 +965,21 @@ async def shopping_page(request: Request):
     })
 
 
+def _best_by_words(best_before_date: str | None) -> str:
+    """"best by Oct 25" for an Expiring row's questions, written the way the
+    Inventory page writes a row's date (the year only when it is far off),
+    or "" for a row without a readable date. Pure."""
+    from datetime import date
+    try:
+        day = date.fromisoformat(best_before_date or "")
+    except ValueError:
+        return ""
+    text = f"{day:%b} {day.day}"
+    if abs((day - date.today()).days) > 300:
+        text += f", {day.year}"
+    return f"best by {text}"
+
+
 @router.get("/expiring", response_class=HTMLResponse)
 async def expiring_page(request: Request, days: int = 7):
     from ..services.grocy import is_hard_expiry
@@ -728,7 +990,9 @@ async def expiring_page(request: Request, days: int = 7):
     grocy_repairable = False
     waste = None
     try:
-        items = await grocy.get_expiring(days)
+        # One row per product, place and best-by date, so a row's buttons
+        # take only the stock it shows (get_expiring_by_date).
+        items = await grocy.get_expiring_by_date(days)
     except Exception as e:
         # Keep the page shell up during a Grocy outage, but say so honestly:
         # an empty list would read as "all clear" (FoodAssistant-2cmm). A
@@ -745,12 +1009,18 @@ async def expiring_page(request: Request, days: int = 7):
         # gets no sniff test chips (FoodAssistant-uqci); consume and toss stay.
         for item in items:
             item["hard_expiry"] = is_hard_expiry(item)
+            # The row's date in words for its questions: "best by Oct 25".
+            item["best_by_words"] = _best_by_words(item.get("best_before_date"))
         # The waste picture stays None during an outage so the template does
         # not claim "no spoilage recorded" when the truth is unknowable.
         waste = await load_waste(grocy)
+    from .expiring import summary_counts
     return templates.TemplateResponse(request, "expiring.html", {
         "request": request,
         "items": items,
+        # Counted by product on its soonest row, like /expiring/count and the
+        # badge on the nav, not by row.
+        "summary": summary_counts(items),
         "waste": waste,
         "grocy_error": grocy_error,
         "grocy_hint": grocy_hint,
@@ -765,20 +1035,50 @@ async def expiring_page(request: Request, days: int = 7):
 
 @router.post("/consume/{product_id}")
 async def consume_item(request: Request, product_id: int, amount: float = Form(1.0),
-                       name: str = Form(""), location_id: int | None = Form(None)):
+                       name: str = Form(""), location_id: int | None = Form(None),
+                       best_before_date: str | None = Form(None),
+                       expected_amount: float | None = Form(None)):
+    from urllib.parse import quote
+    # Refuse what the API route refuses: NaN, infinity, zero or a negative
+    # amount would reach Grocy as a nonsense booking.
+    if not math.isfinite(amount) or amount <= 0:
+        return ingress_redirect(
+            request, f"/ui/expiring?msg={quote('Enter an amount more than 0.')}&msg_type=danger")
     grocy = GrocyClient()
     try:
-        # The Inventory page sends the row's location, so consuming a product
-        # kept in two places takes the stock from the row that was tapped (#73).
-        await grocy.consume_stock(product_id, amount, location_id=location_id)
         # Name the product in the toast so it is clear what just left stock
         # (an icon-only button plus a vague toast read wrong, FoodAssistant-w0kh).
         msg = f"{name} marked as consumed." if name.strip() else "Item marked as consumed."
         msg_type = "success"
+        if best_before_date and location_id:
+            # An Expiring row is the stock of one best-by date in one place,
+            # and takes only that, never the product's stock with a later date.
+            # With the amount the row showed, a row that changed since the
+            # page loaded is left alone (check_expected_amount).
+            result = await grocy.consume_stock_group(product_id, amount, location_id,
+                                                     best_before_date,
+                                                     expected_amount=expected_amount)
+            if not result["complete"]:
+                msg = (f"Used {result['consumed']:g} of {result['requested']:g} "
+                       f"{name.strip() or 'items'}. Grocy would use other stock for the rest.")
+                msg_type = "warning"
+        else:
+            # The Inventory page sends the row's location, so consuming a
+            # product kept in two places takes the stock from the row that was
+            # tapped (#73).
+            await grocy.consume_stock(product_id, amount, location_id=location_id)
+    except GrocyError as e:
+        if e.kind in ("gone", "group", "changed"):
+            # Nothing was used, and the reason is written for the person.
+            what = name.strip() or "this item"
+            msg = f"Could not mark {what} consumed: {e}"
+            msg_type = "warning"
+        else:
+            msg = f"Error: {e}"
+            msg_type = "danger"
     except Exception as e:
         msg = f"Error: {e}"
         msg_type = "danger"
-    from urllib.parse import quote
     return ingress_redirect(request, f"/ui/expiring?msg={quote(msg)}&msg_type={msg_type}")
 
 

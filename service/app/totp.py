@@ -87,6 +87,28 @@ def totp_verify(secret: str, code: str, now: float | None = None,
     return False
 
 
+def totp_matched_step(secret: str, code: str, now: float | None = None,
+                      window: int = 1) -> int | None:
+    """The time step ``code`` matched (see totp_verify), or None. A caller
+    that remembers the last step it accepted can refuse the same code twice."""
+    code = (code or "").strip()
+    if len(code) != _TOTP_DIGITS or not is_plain_digits(code) or not secret:
+        return None
+    try:
+        counter = int(_time.time() if now is None else now) // _TOTP_STEP
+    except (TypeError, ValueError):
+        return None
+    found = None
+    for step in range(-window, window + 1):
+        try:
+            candidate = _hotp(secret, counter + step)
+        except (ValueError, TypeError):
+            return None
+        if hmac.compare_digest(candidate, code) and found is None:
+            found = counter + step
+    return found
+
+
 def otpauth_uri(secret: str, account_label: str, issuer: str = "Pantry Raider") -> str:
     """The otpauth://totp/... URI an authenticator app reads from the QR code
     (or manual "add by URI"). Carries the issuer and account label plus the

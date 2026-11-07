@@ -499,7 +499,12 @@ async def save_setup(request: Request, payload: SetupPayload):
             data["ha_token_admin"] = None
             data["ha_token_expires"] = ""
     old_passwords = (settings.auth_password, settings.viewer_password)
+    old_grocy_url = settings.grocy_base_url
     await asyncio.to_thread(settings.save, data)
+    if settings.grocy_base_url != old_grocy_url:
+        # Learned shelf lives and usage rates belong to the old Grocy's kitchen.
+        from ...services import kitchen_history
+        await asyncio.to_thread(kitchen_history.clear_cache)
     if (settings.auth_password, settings.viewer_password) != old_passwords:
         # A new or removed password signs out every other browser; the one
         # that made the change stays signed in.

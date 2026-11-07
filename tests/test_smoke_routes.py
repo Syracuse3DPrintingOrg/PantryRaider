@@ -57,6 +57,7 @@ def _mock_services(monkeypatch):
         return []
 
     monkeypatch.setattr(GrocyClient, "get_expiring", _expiring)
+    monkeypatch.setattr(GrocyClient, "get_expiring_by_date", _expiring)
 
 
 GET_PAGES = [
@@ -256,7 +257,7 @@ def test_expiring_consume_confirms_and_names_the_item(client, monkeypatch):
             "product": {"name": "Greek Yogurt"},
         }]
 
-    monkeypatch.setattr(GrocyClient, "get_expiring", _expiring)
+    monkeypatch.setattr(GrocyClient, "get_expiring_by_date", _expiring)
     r = client.get("/ui/expiring")
     assert r.status_code == 200
     assert "PR.confirmSubmit(this, " in r.text
@@ -296,6 +297,23 @@ def test_consume_from_the_inventory_page_takes_the_rows_location(client, monkeyp
     client.post("/ui/consume/42", data={"amount": "3", "location_id": "2"},
                 follow_redirects=False)
     assert consumed == [(42, 3.0, 2)]
+
+
+def test_consume_refuses_an_amount_that_is_not_a_positive_number(client, monkeypatch):
+    from app.services.grocy import GrocyClient
+
+    consumed = []
+
+    async def _consume(self, product_id, amount=1.0, spoiled=False, location_id=None):
+        consumed.append((product_id, amount, location_id))
+        return {}
+
+    monkeypatch.setattr(GrocyClient, "consume_stock", _consume)
+    for bad in ("nan", "inf", "-inf", "0", "-2"):
+        r = client.post("/ui/consume/42", data={"amount": bad}, follow_redirects=False)
+        assert r.status_code in (302, 303, 307), bad
+        assert "msg_type=danger" in r.headers["location"], bad
+    assert consumed == []
 
 
 def test_expiring_use_it_up_button_copy(client):

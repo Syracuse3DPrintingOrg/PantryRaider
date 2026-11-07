@@ -52,16 +52,20 @@ def _normalize(r: httpx.Response) -> dict:
         if name in _VOLATILE:
             value = "*"
         elif name == "set-cookie":
-            value = re.sub(r"^session=(?!null;)[^;]*", "session=*", value)
+            value = re.sub(r"^pr_session=(?!null;)[^;]*", "pr_session=*", value)
         headers.append([name, value])
     return {"status": r.status_code, "headers": headers}
 
 
 def _session_cookie(data: dict) -> str:
     from app.main import app
-    from starlette.middleware.sessions import SessionMiddleware
+    from app.session_cookie import PRSessionMiddleware
     secret = next(m.kwargs["secret_key"] for m in app.user_middleware
-                  if m.cls is SessionMiddleware)
+                  if m.cls is PRSessionMiddleware)
+    if data.get("authed"):
+        # A sign-in already has its id (services/sessions.py), as every
+        # session opened since the id existed does.
+        data = {"sid": "pinned-sid", **data}
     signer = itsdangerous.TimestampSigner(str(secret))
     return signer.sign(b64encode(json.dumps(data).encode())).decode()
 
@@ -197,7 +201,7 @@ def _run(name, encoding, monkeypatch, tmp_path):
         session = {"authed": True, "role": "kiosk", "kiosk_gen": auth_state.kiosk_gen(),
                    "kiosk_day": "2000-01-01"}
     if session:
-        client.cookies.set("session", _session_cookie(session))
+        client.cookies.set("pr_session", _session_cookie(session))
     kw = {"json": {}} if method == "POST" else {}
     return _normalize(client.request(method, path, headers=headers, **kw))
 

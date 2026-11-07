@@ -13,8 +13,10 @@ Forager brand appears in user-facing copy, the domain, and deploy config.
 ## What it does
 
 - Accounts with password login (optional Google sign-in, two-factor codes
-  and passkeys; a passkey sign-in stands on its own and does not also ask
-  for the two-factor code) and a web portal:
+  and passkeys; a passkey sign-in that checks a fingerprint, face or PIN
+  stands on its own, while one that only takes a tap still asks for the
+  two-factor code, and adding a passkey asks for the password or a code
+  first) and a web portal:
   landing page, signup, and an account page with plan, usage, linked
   kitchens, and billing.
 - One-step linking: an install signs in with the account's email and

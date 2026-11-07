@@ -26,6 +26,7 @@ from __future__ import annotations
 
 
 from fastapi import APIRouter, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from ..config import settings
@@ -33,7 +34,7 @@ from ..services import camera_detect, ha_events
 from ..services.cameras import resolve_ha_entity
 # The one URL policy lives in services/url_safety; re-exported so existing
 # imports of routers.events.safe_nav_path keep working.
-from ..services.url_safety import safe_nav_path  # noqa: F401
+from ..services.url_safety import nav_page_path, safe_nav_path  # noqa: F401
 
 router = APIRouter(prefix="/events", tags=["events"])
 
@@ -151,10 +152,20 @@ async def camera_detect_event(payload: CameraDetectPayload):
 async def navigate(payload: NavigatePayload):
     """Queue a page-change for the display so HA can drive which page is shown
     (for example, jump the kitchen screen to the Cook page on a voice command,
-    FoodAssistant-i4rs). Same-origin relative paths only."""
-    path = safe_nav_path(payload.path)
+    FoodAssistant-i4rs). Only the app's own pages are accepted
+    (``url_safety.NAV_PAGES``), or a page's plain name such as "expiring": an
+    API path or a missing page would leave the screen on a bare reply with no
+    app script to move it along, so those get a 400 (FoodAssistant-ye112)."""
+    if not safe_nav_path(payload.path):
+        return JSONResponse(status_code=400, content={
+            "ok": False, "error": "a valid same-origin path is required (e.g. ui/cook)"})
+    path = nav_page_path(payload.path)
     if not path:
-        return {"ok": False, "error": "a valid same-origin path is required (e.g. ui/cook)"}
+        return JSONResponse(status_code=400, content={
+            "ok": False,
+            "error": "not a page in the app; use a page path such as ui/cook or "
+                     "ui/expiring, or a page name such as expiring",
+        })
     eid = ha_events.add_navigate(path)
     return {"ok": True, "id": eid, "path": path}
 

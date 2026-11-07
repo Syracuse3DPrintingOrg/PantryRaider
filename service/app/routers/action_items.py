@@ -22,7 +22,7 @@ from sqlalchemy.orm import Session
 
 from ..config import settings
 from ..database import get_db
-from ..services import action_items, upstream
+from ..services import action_items, grocy_locations, upstream
 
 router = APIRouter(prefix="/action-items", tags=["action-items"])
 
@@ -53,8 +53,8 @@ _last_refresh = 0.0
 
 
 async def _maybe_refresh(db: Session) -> None:
-    """Sync food-expired items from Grocy and the unused paired key offers,
-    throttled. Best-effort."""
+    """Sync food-expired items from Grocy, the unused paired key offers and
+    the Grocy location tidy-ups, throttled. Best-effort."""
     global _last_refresh
     now = time.monotonic()
     if now - _last_refresh < _REFRESH_THROTTLE_SECS:
@@ -68,6 +68,10 @@ async def _maybe_refresh(db: Session) -> None:
         # An offer whose device has connected since leaves the inbox here,
         # rather than at the next hourly pass.
         await run_in_threadpool(action_items.refresh_unused_paired_keys, db)
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        await grocy_locations.refresh(db)
     except Exception:  # noqa: BLE001
         pass
 

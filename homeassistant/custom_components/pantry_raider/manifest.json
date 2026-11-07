@@ -10,7 +10,7 @@
   "iot_class": "local_polling",
   "issue_tracker": "https://github.com/Syracuse3DPrintingOrg/PantryRaider/issues",
   "requirements": [],
-  "version": "0.21.132",
+  "version": "0.21.152",
   "zeroconf": [
     "_pantry-raider._tcp.local."
   ]

@@ -85,6 +85,12 @@ function bestByWords(bestBy) {
   return `best by ${shortDate(bestBy)}`;
 }
 
+// The row's unit, plural unless the amount as shown is one ("12 Pieces",
+// "1 Piece"), so 0.999 shown as "1.0" reads "1.0 Piece", not "1.0 Pieces".
+function unitLabel(item) {
+  return (Number(amountText(item.amount)) === 1 ? item.unit : item.unit_plural || item.unit) || '';
+}
+
 // An amount written the way a row writes its own: whole, or to one decimal.
 function amountText(x) {
   const n = Number(x) || 0;
@@ -127,7 +133,7 @@ function renderPanel(panelId, countId, items, bucket) {
         ${item.best_by_dates && item.best_by_dates.length > 1 ? bestByLine(item.best_by_dates) : ''}
       </div>
       ${showAdded && item.added_date ? `<span class="item-qty">${PR.esc(item.added_date.slice(0,10))}</span>` : ''}
-      <span class="item-qty"${bbd && item.product_amount != null ? ` title="${amountText(item.product_amount)} in all"` : ''}>${item.amount % 1 === 0 ? item.amount : item.amount.toFixed(1)}${item.unit ? ' ' + PR.esc(item.unit) : ''}</span>
+      <span class="item-qty"${bbd && item.product_amount != null ? ` title="${amountText(item.product_amount)} in all"` : ''}>${item.amount % 1 === 0 ? item.amount : item.amount.toFixed(1)}${item.unit ? ' ' + PR.esc(unitLabel(item)) : ''}</span>
       ${item.amount_opened > 0 ? `<span class="expiry-badge badge-opened" title="${item.amount_opened % 1 === 0 ? item.amount_opened : item.amount_opened.toFixed(1)} of these ${PR.esc(item.name)} already open">Opened</span>` : ''}
       ${expiryBadge(item)}
       <div class="item-actions">
@@ -138,7 +144,7 @@ function renderPanel(panelId, countId, items, bucket) {
       </button>
       <button class="btn btn-outline-secondary btn-icon" title="Move to another location"
               aria-label="Move ${PR.esc(namedMid)} to another location"
-              data-on-click="openMoveModal(${item.product_id}, ${PR.escAttrJs(item.name)}, ${loc}, ${bbdArg}, ${item.amount}, ${PR.escAttrJs(item.unit || '')})">
+              data-on-click="openMoveModal(${item.product_id}, ${PR.escAttrJs(item.name)}, ${loc}, ${bbdArg}, ${item.amount}, ${PR.escAttrJs(unitLabel(item))})">
         <i class="bi bi-arrow-left-right"></i>
       </button>
       ${item.amount > 0 ? `
@@ -532,9 +538,12 @@ async function markOpened(productId, name, locationId, bestBy) {
       await loadDashboard();
       return;
     }
+    // A row holding less than one opens what it holds, so say how much.
+    const opened = d.opened == null ? 1 : +Number(d.opened).toFixed(2);
+    const what = opened === 1 ? `one ${name}` : `${opened} of a ${name}`;
     showToast(d.new_best_by && d.new_best_by !== bestBy
-      ? `✓ Marked one ${name} opened, now best by ${shortDate(d.new_best_by)}`
-      : `✓ Marked one ${name} opened`);
+      ? `✓ Marked ${what} opened, now best by ${shortDate(d.new_best_by)}`
+      : `✓ Marked ${what} opened`);
     await loadDashboard();
   } catch(e) {
     showToast(`Could not mark ${name} opened: ${e.message}`, true);

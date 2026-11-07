@@ -33,3 +33,19 @@
     })
     .catch(function () {});
 })();
+
+// "Signing in has changed" note: shown until it is closed or this browser
+// signs in once, then never again here.
+(function () {
+  var box = document.getElementById('signin-news');
+  if (!box) return;
+  var KEY = 'prSigninNewsSeen';
+  try {
+    if (localStorage.getItem(KEY) === '1') { box.remove(); return; }
+  } catch (e) { /* storage blocked: keep showing it */ }
+  function seen() { try { localStorage.setItem(KEY, '1'); } catch (e) {} }
+  var close = document.getElementById('signin-news-close');
+  if (close) close.addEventListener('click', function () { seen(); box.remove(); });
+  var form = document.getElementById('login-form');
+  if (form) form.addEventListener('submit', seen);
+})();

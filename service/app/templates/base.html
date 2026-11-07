@@ -33,7 +33,7 @@
      Assistant Ingress the manifest path carries the Ingress prefix (it 404s on
      the Home Assistant host otherwise) and no worker is registered, since the
      origin root there belongs to Home Assistant (FoodAssistant-iaa0s). #}
-  <link rel="manifest" href="{{ ingress_path }}/manifest.webmanifest">
+  <link rel="manifest" href="{{ ingress_path }}/manifest.webmanifest" crossorigin="use-credentials">
   <meta name="theme-color" content="#212529">
   <link rel="icon" type="image/svg+xml" href="static/icons/favicon.svg">
   <link rel="icon" type="image/png" sizes="32x32" href="static/icons/favicon-32.png">

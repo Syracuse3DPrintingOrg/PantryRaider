@@ -31,7 +31,8 @@ def _google(monkeypatch, email="dan@example.com"):
             return httpx.Response(200, json={"access_token": "google-at"})
         if request.url.host == "openidconnect.googleapis.com":
             return httpx.Response(200, json={"email": email,
-                                             "email_verified": True})
+                                             "email_verified": True,
+                                             "sub": f"sub-{email.lower()}"})
         return httpx.Response(404)
 
     monkeypatch.setattr(oauth_google, "transport", httpx.MockTransport(handler))
@@ -72,7 +73,7 @@ def test_unlock_confirms_the_linked_account(client, instance_token, monkeypatch)
     code = _unlock_code(client)
     r = _verify(client, instance_token, code)
     assert r.status_code == 200
-    assert r.json() == {"ok": True, "account_email": "dan@example.com"}
+    assert r.json() == {"ok": True, "account_email": "dan@example.com", "mfa": False}
 
     # Single use: the code died on redemption.
     again = _verify(client, instance_token, code)
@@ -288,6 +289,62 @@ def test_unlock_honours_account_2fa(client, instance_token, monkeypatch):
     ok = _verify(client, instance_token, code)
     assert ok.status_code == 200
     assert ok.json()["account_email"] == "dan@example.com"
+    assert ok.json()["mfa"] is True
+
+
+# --- PKCE: the code is bound to the browser that started the sign-in ---------
+
+_VERIFIER = "v" * 50
+
+
+def _challenge(verifier=_VERIFIER):
+    from app.security import pkce_s256
+    return pkce_s256(verifier)
+
+
+def test_unlock_code_needs_the_verifier(client, instance_token, monkeypatch):
+    _google(monkeypatch)
+    code = _unlock_code(client, ret=RETURN + "&code_challenge=" + _challenge()
+                        + "&code_challenge_method=S256")
+    # Caught in transit without the verifier: refused, and not burned.
+    bare = _verify(client, instance_token, code)
+    assert bare.status_code == 401 and bare.json() == {"error": "invalid_code"}
+    wrong = client.post("/v1/instance/verify-unlock", headers=_headers(instance_token),
+                        json={"code": code, "code_verifier": "w" * 50})
+    assert wrong.status_code == 401
+    good = client.post("/v1/instance/verify-unlock", headers=_headers(instance_token),
+                       json={"code": code, "code_verifier": _VERIFIER})
+    assert good.status_code == 200 and good.json()["ok"] is True
+
+
+def test_unlock_start_refuses_a_malformed_challenge(client, monkeypatch):
+    _google(monkeypatch)
+    r = client.get(f"/auth/google/start?flow=unlock&return_url={RETURN}"
+                   "&code_challenge=short&code_challenge_method=S256",
+                   follow_redirects=False)
+    assert r.status_code == 400
+
+
+def test_unlock_pkce_survives_the_2fa_step(client, instance_token, monkeypatch):
+    from app.security import generate_totp_secret
+    secret = generate_totp_secret()
+    db = SessionLocal()
+    try:
+        account = db.query(Account).filter_by(email="dan@example.com").first()
+        account.totp_secret = secret
+        account.totp_enabled = 1
+        db.commit()
+    finally:
+        db.close()
+    _google(monkeypatch)
+    _start_and_callback(client, f"/auth/google/start?flow=unlock&return_url={RETURN}"
+                        f"&code_challenge={_challenge()}&code_challenge_method=S256")
+    done = client.post("/login/2fa", data={"code": totp_now(secret)}, follow_redirects=False)
+    code = parse_qs(urlsplit(done.headers["location"]).query)["code"][0]
+    assert _verify(client, instance_token, code).status_code == 401
+    good = client.post("/v1/instance/verify-unlock", headers=_headers(instance_token),
+                       json={"code": code, "code_verifier": _VERIFIER})
+    assert good.status_code == 200 and good.json()["mfa"] is True
 
 
 # --- the endpoint's own gates --------------------------------------------------

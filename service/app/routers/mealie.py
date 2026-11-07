@@ -24,7 +24,7 @@ from ..dependencies import get_enrich_provider
 from ..services.grocy import GrocyClient, GrocyError
 from ..services import (cook_counts, meal_plan, recipe_match, recipe_source,
                         recipe_store, recipe_text, recipes_external,
-                        recipes_forager, shopping_source)
+                        recipe_catalogs, recipes_forager, shopping_source)
 from ..services.current_recipe import mealie_servings_text
 from ..services.recipes_import import parse_recipe_file
 
@@ -330,6 +330,26 @@ async def search_recipes(search: str = "", per_page: int = Query(50, ge=1, le=20
             "rating_count": r.get("rating_count"),
             "attribution": r.get("attribution"),
         } for r in community if (r.get("name") or "").lower() not in seen]
+
+    # The user's own recipe databases (FoodAssistant-1sfs6), under the same
+    # "Other recipes" toggle. Like the community catalog, an empty query
+    # browses; a catalog that is down contributes nothing.
+    if external and recipe_catalogs.enabled():
+        seen = {(r.get("name") or "").lower() for r in results}
+        results += [{
+            "id": None,
+            "name": r["name"],
+            "slug": None,
+            "source": r["source"],
+            "badge": recipe_catalogs.badge(r["source"]),
+            "external_id": r["external_id"],
+            "image": r.get("image"),
+            "description": (r.get("description") or "")[:160],
+            "total_time": r.get("total_time"),
+            "rating": None,
+            "attribution": r.get("author"),
+        } for r in await recipe_catalogs.search(search)
+            if (r.get("name") or "").lower() not in seen]
 
     # Made-before counts, one batch query for the whole list, fail-soft to no
     # count (FoodAssistant-bjps).
@@ -829,6 +849,17 @@ async def suggest(
                 max_time=max_time, cuisine=cuisine)
         except Exception:
             ext_recipes = []
+        # Every recipe in the user's own recipe databases is matched against
+        # stock too (FoodAssistant-1sfs6); the listing carries the ingredient
+        # lines, so this is a few cached calls, not one per recipe.
+        if recipe_catalogs.enabled():
+            try:
+                catalog_recipes = await recipe_catalogs.all_recipes()
+            except Exception:  # noqa: BLE001 - a catalog outage is no suggestions
+                catalog_recipes = []
+            catalog_recipes = recipes_external._filter_by_diet(catalog_recipes, dietary)
+            catalog_recipes = recipes_external._filter_by_cuisine(catalog_recipes, cuisine)
+            ext_recipes = catalog_recipes + ext_recipes
         mealie_names = {(r.get("name") or "").lower() for r in recipes}
         ext_recipes = [r for r in ext_recipes if (r.get("name") or "").lower() not in mealie_names]
 
@@ -869,6 +900,8 @@ async def external_recipe_detail(external_id: str, source: str = "themealdb"):
     before the user decides to save it into Mealie."""
     if source == recipes_forager.SOURCE:
         recipe = await recipes_forager.get_recipe(external_id)
+    elif recipe_catalogs.owns(source):
+        recipe = await recipe_catalogs.get_recipe(source, external_id)
     else:
         recipe = await recipes_external.get_external_recipe(external_id, source)
     if not recipe:
@@ -1320,6 +1353,8 @@ async def import_external_recipe(payload: ImportExternalPayload,
         # description (recipes_forager._normalize_detail), so credit rides along
         # into the saved recipe (FoodAssistant-l2hk).
         recipe = await recipes_forager.get_recipe(payload.external_id)
+    elif recipe_catalogs.owns(payload.source):
+        recipe = await recipe_catalogs.get_recipe(payload.source, payload.external_id)
     else:
         recipe = await recipes_external.get_external_recipe(payload.external_id, payload.source)
     if not recipe:

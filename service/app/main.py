@@ -6,7 +6,7 @@ import time
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from starlette.datastructures import MutableHeaders
-from starlette.middleware.sessions import SessionMiddleware
+from .session_cookie import PRSessionMiddleware
 from contextlib import asynccontextmanager
 
 from .config import settings, APP_NAME, APP_VERSION, SettingsLockedError
@@ -16,7 +16,7 @@ from .models import db_models  # noqa: F401 - registers models with Base
 from .services.defaults import seed_defaults
 from .services.diagnostics import configure_console_logging
 from .services import pairing as pairing_svc
-from .services import access, auth_state, credentials, lan, local_agents, upstream
+from .services import access, auth_state, credentials, lan, local_agents, sessions, upstream
 from .services import setup_code as setup_code_svc
 from .routers import analyze, defaults, inventory, expiring, ui, setup, pending, mealie, admin, qr, tunnel, grocy, satellite, proxy, devices, current_recipe, events, action_items, nutrition, audit, affiliate, printing, cook_wizard, recipes, gadgets, pairing, ha, cub, kiosk_status, receipt
 from .routers import credentials as credentials_router
@@ -55,6 +55,13 @@ async def lifespan(app: FastAPI):
         instance_guard.check_on_startup()
         app.state.instance_guard_task = asyncio.create_task(
             instance_guard.heartbeat_task())
+    except Exception:
+        pass
+    # The sign-in page's one-time note for people who already used this
+    # kitchen: decided once, before any request can set a first password.
+    try:
+        from .services import signin_news
+        signin_news.seed(settings)
     except Exception:
         pass
     Base.metadata.create_all(bind=engine)
@@ -699,6 +706,9 @@ _SETUP_BYPASS = {
     # PWA install assets: an install can be started from the login or setup
     # screen, so the OS must fetch these before any credentials exist.
     "/manifest.webmanifest", "/sw.js",
+    # The home screen icon and favicon at the root, where iOS and browsers
+    # look for them by name.
+    "/apple-touch-icon.png", "/apple-touch-icon-precomposed.png", "/favicon.ico",
 }
 # Paths that are public REGARDLESS of configuration state: the login page,
 # the root redirect ("/" only redirects to /ui/, whose target enforces auth),
@@ -721,6 +731,7 @@ _ALWAYS_PUBLIC = {
     # the browser can offer "Install" before the user signs in (PWA install
     # needs both reachable pre-auth). Both expose only static, public assets.
     "/manifest.webmanifest", "/sw.js",
+    "/apple-touch-icon.png", "/apple-touch-icon-precomposed.png", "/favicon.ico",
     # A satellite asking to pair has no API key yet, by definition. The handler
     # enforces its own gates (LAN-only client address, the
     # local_device_pairing_enabled toggle); approving stays auth-required.
@@ -1181,6 +1192,12 @@ def _resolve_principal(request: Request, origin: str, snap, path: str) -> access
         # signed out everywhere: no longer a sign-in.
         for k in ("authed", "role", "session_gen", "totp_pending", "pending_role"):
             session.pop(k, None)
+    if (session.get("authed") and not session.get("totp_pending")
+            and not sessions.check(session, headers.get("user-agent", ""))):
+        # Signed out on purpose (Sign out, or Sign out on this browser in
+        # Settings), so a copy of the cookie is not a sign-in either.
+        for k in ("authed", "role", "session_gen", "totp_pending", "pending_role", "sid"):
+            session.pop(k, None)
     if session.get("authed") and not session.get("totp_pending"):
         role = session.get("role")
         if role == "kiosk":
@@ -1587,24 +1604,8 @@ def _add_security_headers(headers: MutableHeaders) -> None:
         headers.setdefault(name, value)
 
 
-# Session cookie hardening (FoodAssistant-g6ai): when the request itself arrived
-# over TLS, mark the session Set-Cookie Secure so the browser never replays it
-# over plain HTTP. Done in _EdgeMiddleware, outside SessionMiddleware, because
-# the cookie is only visible outside the session layer. Per-request rather than
-# SessionMiddleware's static https_only flag because the same device is
-# legitimately reached both ways: HTTP on the trusted LAN (where Secure would
-# break login) and HTTPS via direct TLS. The Forager tunnel terminates TLS
-# upstream, so those requests reach the app as HTTP and are unchanged here;
-# this hardens direct-TLS deployments without touching LAN behaviour.
-def _secure_session_cookie(headers: MutableHeaders) -> None:
-    cookies = headers.getlist("set-cookie")
-    if any(c.lower().startswith("session=") and "secure" not in c.lower()
-           for c in cookies):
-        del headers["set-cookie"]
-        for c in cookies:
-            if c.lower().startswith("session=") and "secure" not in c.lower():
-                c = c + "; Secure"
-            headers.append("set-cookie", c)
+# Session cookie hardening (FoodAssistant-g6ai) now lives in session_cookie.py,
+# which marks the cookie Secure over TLS and behind a trusted HTTPS proxy.
 
 
 # Requests that change nothing, so the cross-site check below leaves them alone.
@@ -1639,8 +1640,7 @@ class _EdgeMiddleware:
        deliberately NOT checked: behind Home Assistant Ingress and other
        reverse proxies the browser's Origin is the proxy host, and comparing
        it against the app's own address would reject every proxied install.
-    2. Over TLS, mark the session cookie Secure (_secure_session_cookie).
-    3. On image-ish paths, drop accept-encoding so GZip passes them through.
+    2. On image-ish paths, drop accept-encoding so GZip passes them through.
     """
 
     def __init__(self, app):
@@ -1656,8 +1656,6 @@ class _EdgeMiddleware:
                 response = JSONResponse({"detail": _CROSS_SITE_DETAIL}, status_code=403)
                 await response(scope, receive, send)
                 return
-        if request.url.scheme == "https":
-            send = _send_with(send, _secure_session_cookie)
         if request.url.path.startswith(_NO_GZIP_PREFIXES):
             scope["headers"] = [
                 (k, v) for k, v in scope["headers"] if k != b"accept-encoding"
@@ -1671,8 +1669,7 @@ class _EdgeMiddleware:
 # the edge must sit outside both (it rewrites the session's Set-Cookie and the
 # accept-encoding GZip reads).
 app.add_middleware(_RequestGate)
-app.add_middleware(SessionMiddleware, secret_key=settings.secret_key,
-                   max_age=60 * 60 * 24 * 30, same_site="lax")
+app.add_middleware(PRSessionMiddleware, secret_key=settings.secret_key, same_site="lax")
 # compresslevel 6, not the library default of 9: level 9 spends over twice the
 # CPU of level 6 for under half a percent of extra shrink (measured on the
 # rendered Manage Pantry page: 28,149 vs 28,071 bytes, 2.4ms vs 5.3ms on a dev
@@ -1781,6 +1778,25 @@ async def web_manifest(request: Request):
         headers={"Cache-Control": "public, max-age=86400",
                  "Vary": "X-Ingress-Path"},
     )
+
+
+# The home screen icon and favicon at the site root. iOS asks for
+# /apple-touch-icon.png by name when a page does not say where its icon is,
+# and some browsers ask for /favicon.ico the same way.
+@app.get("/apple-touch-icon.png")
+@app.get("/apple-touch-icon-precomposed.png")
+async def apple_touch_icon():
+    from fastapi.responses import FileResponse
+    return FileResponse(_PWA_DIR / "apple-touch-icon-180.png", media_type="image/png",
+                        headers={"Cache-Control": "public, max-age=86400"})
+
+
+@app.get("/favicon.ico")
+async def favicon():
+    from fastapi.responses import FileResponse
+    return FileResponse(Path(__file__).parent / "static" / "icons" / "favicon.ico",
+                        media_type="image/x-icon",
+                        headers={"Cache-Control": "public, max-age=86400"})
 
 
 @app.get("/sw.js")

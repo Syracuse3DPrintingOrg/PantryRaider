@@ -295,9 +295,11 @@ def _row_dict(row: PendingItem, duplicate: bool = False,
         "duplicate": bool(duplicate),
         # Present only when this product already has dated stock expiring
         # within the Expiring page's window: {product_id, best_before_date,
-        # days_remaining}. The review card shows the sniff test chips (the
-        # same POST /expiring/extend the Expiring page uses) only then; a
-        # fresh scan with no stock behind it gets null and no chips.
+        # days_remaining, location_id, location_name, amount, unit_name} of
+        # the soonest Expiring row. The review card shows the sniff test chips
+        # and the toss (the same POST /expiring/extend and /expiring/toss the
+        # Expiring page uses, scoped to that row) only then; a fresh scan with
+        # no stock behind it gets null and no chips.
         "sniff": sniff,
         "source": row.source,
         "created_at": row.created_at,
@@ -936,13 +938,24 @@ async def list_pending(request: Request, db: Session = Depends(get_db)):
     # chips for rows whose product is already in stock and expiring. Never
     # raises: a Grocy outage just drops the hints, the list must still load.
     stock: list[dict] = []
+    expiring: list[dict] = []
     if rows:
+        grocy = GrocyClient()
         try:
-            stock = await GrocyClient().get_stock()
+            stock = await grocy.get_stock()
         except Exception:
             stock = []
+        if stock:
+            # The sniff hint is the soonest Expiring row of the product: its
+            # amount, place and best-by date, so the card names exactly the
+            # stock its chips and toss act on, never good stock with a later
+            # date or the same item kept in the freezer.
+            try:
+                expiring = await grocy.get_expiring_by_date(7, stock=stock)
+            except Exception:
+                expiring = []
     dupes = await _duplicate_names(rows, stock)
-    sniff = stock_sniff_candidates(stock)
+    sniff = stock_sniff_candidates(expiring)
     return {"items": [
         _row_dict(r, (r.name or "").strip().lower() in dupes,
                   sniff.get((r.name or "").strip().lower()))
@@ -1145,7 +1158,8 @@ async def commit_pending(body: CommitRequest, request: Request, db: Session = De
         )
         # Read here with the rest of the row: a commit expires loaded rows,
         # and reloading one belongs in the threadpool, not on the event loop.
-        return apply_defaults(item, db), row.grocy_product_id, row.grocy_location_id
+        return (apply_defaults(item, db, grocy_product_id=row.grocy_product_id),
+                row.grocy_product_id, row.grocy_location_id)
 
     def _finish(row: PendingItem) -> bool:
         # Community shelf-life learning (FoodAssistant-ezkh): a committed

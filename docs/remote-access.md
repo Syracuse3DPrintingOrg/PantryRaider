@@ -35,7 +35,12 @@ does behind Cloudflare.
 
 A reverse proxy you run yourself (Caddy, nginx, Traefik, Pangolin) is a fourth
 path that does not involve this panel at all. See the HTTPS section of
-[Platforms and deployment](platforms.md) for that.
+[Platforms and deployment](platforms.md) for that. If your proxy asks for its
+own sign-in first (Pangolin, Authelia, Authentik), let these paths through
+without it, so phones can show the Pantry Raider icon when you add the
+kitchen to a home screen: `/static/pwa/*`, `/manifest.webmanifest`,
+`/apple-touch-icon.png`, `/apple-touch-icon-precomposed.png` and
+`/favicon.ico`. They are the app's own public icons and nothing else.
 
 Whichever path you choose, a kitchen reached from outside your home network
 needs a password, and signing in from outside needs two-factor as well. Turn

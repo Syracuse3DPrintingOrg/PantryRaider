@@ -1,6 +1,8 @@
 """Grocy-backed endpoints that don't belong in the inventory/expiring routers."""
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import APIRouter, HTTPException
 
 from ..services.grocy import GrocyClient, GrocyError
@@ -36,7 +38,8 @@ async def get_runout(horizon: int = 7):
     from ..services import kitchen_history
     if not settings.use_kitchen_history:
         return {"items": []}
-    rates = kitchen_history.consumption_rates()
+    # It reads a state file, so it runs off the event loop.
+    rates = await asyncio.to_thread(kitchen_history.consumption_rates)
     if not rates:
         return {"items": []}
     g = _client()

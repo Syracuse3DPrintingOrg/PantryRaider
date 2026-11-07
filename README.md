@@ -316,7 +316,7 @@ curl -fsSL https://raw.githubusercontent.com/Syracuse3DPrintingOrg/PantryRaider/
 docker compose --profile with-grocy up -d   # use the same --profile flags you started with
 ```
 
-Your `.env` and data are kept, and everything starts again on the new file. Keep the backup until everything works on the new version. If you edited your compose file by hand, change only the watchtower `image:` line to `ghcr.io/nicholas-fedor/watchtower:1.23.1` instead. The new file also scopes the updater to Pantry Raider with a `com.centurylinklabs.watchtower.scope=foodassistant` label on the app and on the updater, plus `WATCHTOWER_SCOPE=foodassistant` on the updater; if you copy those over, add them to both containers together, or updates stop.
+Your `.env` and data are kept, and everything starts again on the new file. Keep the backup until everything works on the new version. If you edited your compose file by hand, change only the watchtower `image:` line to `ghcr.io/nicholas-fedor/watchtower:1.23.2` instead. The new file also scopes the updater to Pantry Raider with a `com.centurylinklabs.watchtower.scope=foodassistant` label on the app and on the updater, plus `WATCHTOWER_SCOPE=foodassistant` on the updater; if you copy those over, add them to both containers together, or updates stop.
 
 Watchtower needs the Docker socket, which is host-root-equivalent access; that is the tradeoff for hands-off updates on a server with no host bridge. To keep that access narrow, Watchtower sits on its own private network shared only with Pantry Raider, so nothing else in the stack (Grocy, Mealie, Ollama, CUPS, Beszel) can reach it. The daily check runs on Watchtower's own schedule and is separate from the update switches in Settings, which control the app's own update notice.
 
@@ -339,9 +339,9 @@ Every bundled service other than Pantry Raider itself (Grocy, Mealie, Ollama, th
 |---------|-------|-----|-------|
 | Grocy   | `lscr.io/linuxserver/grocy` | `v4.7.1-ls346` | Upgrades its database on first start; see the Grocy note below |
 | Mealie  | `ghcr.io/mealie-recipes/mealie` | `v3.29.0` | Upgrades its database on first start |
-| Ollama  | `ollama/ollama` | `0.40.5` | Answers only on this machine. Converts downloaded models on first use, so an older version needs them pulled again |
-| Updater (server only) | `ghcr.io/nicholas-fedor/watchtower` | `1.23.1` | Moves when you download the current `docker-compose.prod.yml` |
-| Beszel hub and agent | `henrygd/beszel`, `henrygd/beszel-agent` | `0.21.0` | Always use the same tag for both; the hub's data upgrades in place |
+| Ollama  | `ollama/ollama` | `0.40.10` | Answers only on this machine. Converts downloaded models on first use, so an older version needs them pulled again |
+| Updater (server only) | `ghcr.io/nicholas-fedor/watchtower` | `1.23.2` | Moves when you download the current `docker-compose.prod.yml` |
+| Beszel hub and agent | `henrygd/beszel`, `henrygd/beszel-agent` | `0.21.1` | Always use the same tag for both; the hub's data upgrades in place |
 | CUPS    | `olbat/cupsd` | pinned by digest | The digest of a dated tag; refresh it every few months |
 | Print service connection | `CUPS_SERVER` | `/run/cups/cups.sock` | The app reaches the print service through a shared socket. A compose file from before 0.21 uses `cups:631` instead; see [Update your print service](docs/printing.md#update-your-print-service) |
 

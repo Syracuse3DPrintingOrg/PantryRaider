@@ -84,12 +84,89 @@ def test_freezer_moved_and_undone_entries_are_left_out():
     assert out["7"] == {"days": 4, "samples": 3}
 
 
+def test_tosses_after_the_best_by_date_are_not_evidence():
+    # Each entry was dated 5 days out and tossed on day 7: the food kept to
+    # its date, so nothing is learned (and a shortened date cannot keep
+    # shortening itself).
+    rows = []
+    for i in range(4):
+        bought = date(2026, 9, 1) + timedelta(days=i * 10)
+        label = (bought + timedelta(days=5)).isoformat()
+        toss = _spoiled(f"s{i}", 7, bought + timedelta(days=7))
+        toss["best_before_date"] = label
+        on_label = dict(_bought(f"s{i}", 7, bought), best_before_date=label)
+        rows += [on_label, toss]
+    assert kh.learn_spoil_days(rows) == {}
+    # Tossed on day 3, before the day-5 label: real early spoilage.
+    for row in rows:
+        if row["transaction_type"] == "consume":
+            bought = date.fromisoformat(row["best_before_date"]) - timedelta(days=5)
+            row["row_created_timestamp"] = f"{(bought + timedelta(days=3)).isoformat()} 09:00:00"
+    assert kh.learn_spoil_days(rows) == {"7": {"days": 3, "samples": 4}}
+
+
+def test_the_purchase_label_is_used_when_the_toss_has_none():
+    rows = _spoil_rows(7, [6, 6, 6])
+    for row in rows:
+        if row["transaction_type"] == "purchase":
+            day = date.fromisoformat(row["purchased_date"])
+            row["best_before_date"] = (day + timedelta(days=4)).isoformat()
+    assert kh.learn_spoil_days(rows) == {}
+
+
+def test_same_day_tosses_are_not_a_shelf_life():
+    assert kh.learn_spoil_days(_spoil_rows(7, [0, 0, 0])) == {}
+    assert kh.learn_spoil_days(_spoil_rows(7, [0, 2, 2, 2]))["7"] == {
+        "days": 2, "samples": 3}
+
+
+def test_one_toss_of_several_entries_is_one_sample():
+    # Three entries from one shopping trip, thrown out together: one sample.
+    d = date(2026, 9, 1)
+    rows = []
+    for i in range(3):
+        toss = _spoiled(f"s{i}", 7, d + timedelta(days=2))
+        toss["transaction_id"] = "toss-1"
+        rows += [_bought(f"s{i}", 7, d), toss]
+    assert kh.learn_spoil_days(rows) == {}
+    assert kh.learn_spoil_days(rows, min_samples=1)["7"]["samples"] == 1
+    # Without transaction ids, entries bought the same day count once.
+    for row in rows:
+        row.pop("transaction_id", None)
+    assert kh.learn_spoil_days(rows, min_samples=1)["7"]["samples"] == 1
+
+
+def test_the_apps_freezer_counts_as_a_freezer_by_name():
+    rows = _spoil_rows(7, [3, 4, 5])
+    d = date(2026, 10, 1)
+    for i in range(3):
+        rows += [_bought(f"f{i}", 7, d + timedelta(days=i), location=9),
+                 _spoiled(f"f{i}", 7, d + timedelta(days=i + 1))]
+    locations = [{"id": 1, "name": "Refrigerator", "is_freezer": 0},
+                 {"id": 9, "name": "Freezer", "is_freezer": 0}]
+    doc = kh.build_cache(rows, [{"id": 7, "name": "Peas"}], locations, today=TODAY)
+    assert doc["spoil_by_product"]["7"] == {"days": 4, "samples": 3}
+
+
 def test_consumption_rate_and_its_one_week_floor():
     rows = [_used(5, TODAY - timedelta(days=d)) for d in (20, 10, 0)]
     out = kh.learn_consumption(rows, today=TODAY)
     assert out["5"] == {"per_day": round(3 / 20, 4), "events": 3}
-    burst = [_used(6, TODAY) for _ in range(3)]
+    burst = [dict(_used(6, TODAY), transaction_id=f"t{i}") for i in range(3)]
     assert kh.learn_consumption(burst, today=TODAY)["6"]["per_day"] == round(3 / 7, 4)
+
+
+def test_consumption_counts_actions_not_journal_rows():
+    # One consume that drew from three stock entries writes three rows with
+    # one transaction_id: one event, though every amount counts.
+    rows = [dict(_used(5, TODAY - timedelta(days=10), sid=f"s{i}"),
+                 transaction_id="one") for i in range(3)]
+    out = kh.learn_consumption(rows, today=TODAY, min_events=1)
+    assert out["5"] == {"per_day": round(3 / 10, 4), "events": 1}
+    assert kh.learn_consumption(rows, today=TODAY) == {}
+    # Without transaction ids, rows on the same day are one event.
+    same_day = [_used(5, TODAY - timedelta(days=2), sid=f"s{i}") for i in range(4)]
+    assert kh.learn_consumption(same_day, today=TODAY) == {}
 
 
 def test_consumption_ignores_spoiled_old_and_sparse_rows():
@@ -126,6 +203,50 @@ def test_lookup_reads_the_cache_and_respects_the_setting(monkeypatch):
     assert kh.learned_spoil_days("Blueberries") is None
     monkeypatch.setattr(settings, "use_kitchen_history", False, raising=False)
     assert kh.learned_spoil_days("Strawberries") is None
+
+
+def test_lookup_prefers_the_product_id():
+    from app import durable
+    durable.write_json(kh._cache_file(), {
+        "spoil_by_product": {"42": {"days": 2, "samples": 3}},
+        "spoil_by_name": {"strawberries": 5}}, keep_last_good=False)
+    assert kh.learned_spoil_days("Strawberries", 42) == 2
+    assert kh.learned_spoil_days("Strawberries", 43) == 5
+    assert kh.learned_spoil_days("Strawberries") == 5
+
+
+def test_a_cache_from_another_grocy_is_ignored(monkeypatch):
+    from app import durable
+    monkeypatch.setattr(settings, "grocy_base_url", "http://grocy-a:9383", raising=False)
+    durable.write_json(kh._cache_file(), {
+        "grocy_url": "http://grocy-a:9383/", "spoil_by_name": {"strawberries": 3}},
+        keep_last_good=False)
+    assert kh.learned_spoil_days("Strawberries") == 3
+    assert not kh.is_stale()
+    monkeypatch.setattr(settings, "grocy_base_url", "http://grocy-b:9383", raising=False)
+    assert kh.learned_spoil_days("Strawberries") is None
+    assert kh.is_stale()
+
+
+def test_refresh_reads_the_journal_a_page_at_a_time(monkeypatch):
+    monkeypatch.setattr(kh, "_JOURNAL_LIMIT", 2)
+    rows = _spoil_rows(7, [2, 3, 3], start=TODAY - timedelta(days=60))
+    paths = []
+
+    class _Grocy:
+        async def _get(self, path):
+            if "locations" in path:
+                return []
+            paths.append(path)
+            offset = int(path.rsplit("offset=", 1)[1])
+            return rows[offset:offset + 2]
+
+        async def get_products(self):
+            return [{"id": 7, "name": "Strawberries"}]
+
+    assert asyncio.run(kh.refresh(_Grocy())) is True
+    assert len(paths) == 4  # 2 + 2 + 2 rows, then an empty page
+    assert kh.learned_spoil_days("strawberries") == 3
 
 
 def test_refresh_builds_the_cache_from_grocy():
@@ -247,3 +368,14 @@ def test_apply_defaults_raises_the_notice(monkeypatch, mem_db):
     assert item.best_by_source == "history"
     assert [n.title for n in _notices(mem_db)] == [
         "Best-by dates for Strawberries now follow your kitchen"]
+
+
+def test_a_history_date_is_not_reported_as_a_rule_miss():
+    from app.services.expiry_learning import build_point
+    base = date(2026, 10, 1)
+    point = build_point("Strawberries", None, "refrigerated",
+                        base + timedelta(days=5), base + timedelta(days=3),
+                        "history", base)
+    assert point["suggestion_source"] == "none"
+    assert point["suggested_days"] is None
+    assert point["shelf_life_days"] == 5

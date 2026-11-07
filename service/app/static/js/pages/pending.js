@@ -137,18 +137,21 @@ async function loadPending(signal) {
             ${[1, 3, 5].map(d => `
             <button type="button" class="btn btn-outline-info fw-semibold px-2"
                     title="Passed the sniff test: keep the ${PR.esc(item.name)} already in stock ${d} more day${d !== 1 ? 's' : ''}"
-                    data-on-click="sniffTest(${item.sniff.product_id}, ${PR.esc(JSON.stringify(item.name))}, ${d})">
+                    data-on-click="sniffTest(${item.sniff.product_id}, ${PR.esc(JSON.stringify(item.name))}, ${d}, ${PR.esc(JSON.stringify(sniffScope(item.sniff)))})">
               +${d}d
             </button>`).join('')}
           </div>
-          <span class="meta-text">${item.sniff.days_remaining < 0
-            ? `the stock you already have expired ${-item.sniff.days_remaining} day${item.sniff.days_remaining === -1 ? '' : 's'} ago`
-            : `the stock you already have is best by ${item.sniff.best_before_date}`}</span>
+          <span class="meta-text">${PR.esc(sniffHint(item.sniff, item.name))}</span>
+          ${item.sniff.tare_weight ? `
+          <span class="small text-secondary"
+                title="${PR.esc(item.name)} is weighed with its container, so toss it in Grocy, where you can weigh it.">
+            <i class="bi bi-box-seam me-1"></i>Weighed with its container: toss it in Grocy
+          </span>` : `
           <a href="#" class="small text-danger text-decoration-none"
-             title="It did not pass: toss the ${PR.esc(item.name)} already in stock (records it as spoiled and removes it)"
-             data-on-click="tossStock(${item.sniff.product_id}, ${PR.esc(JSON.stringify(item.name))}); return false;">
+             title="It did not pass: toss ${PR.esc(sniffWhat(item.sniff, item.name))} (records it as spoiled and removes it)"
+             data-on-click="tossStock(${item.sniff.product_id}, ${PR.esc(JSON.stringify(item.name))}, ${PR.esc(JSON.stringify(item.sniff))}); return false;">
             <i class="bi bi-trash me-1"></i>Toss it
-          </a>
+          </a>`}
         </div>` : ''}
         <div class="meta-text mt-1 ms-1">
           ${item.lookup_failed ? '<i class="bi bi-exclamation-triangle text-warning me-1"></i>lookup failed: ' : ''}
@@ -192,43 +195,115 @@ async function patchItem(id, field, value, el) {
   }
 }
 
+// The stock a review row's sniff hook stands for: the soonest row of the
+// Expiring page for that product, one best-by date in one place. Its hint,
+// its chips and its toss all name and act on that stock alone, never good
+// stock with a later date or the same item kept in the freezer. A hook
+// without a place keeps the product-wide calls and wording.
+function sniffScope(sniff) {
+  return sniff && sniff.location_id
+    ? { location_id: sniff.location_id, best_before_date: sniff.best_before_date }
+    : null;
+}
+
+// "Oct 25", the way the Expiring and Inventory pages write a best-by date.
+function sniffDate(iso) {
+  return new Date(`${iso}T00:00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+
+// "500 g Flour", "1 Pack Greek Yogurt", "3 Greek Yogurt": the hook's amount
+// with its stock unit, singular for exactly one.
+function sniffAmount(sniff, name) {
+  const amount = +Number(sniff.amount).toFixed(2);
+  const unit = amount === 1 ? sniff.unit_name : (sniff.unit_name_plural || sniff.unit_name);
+  return `${amount}${unit ? ` ${unit}` : ''} ${name}`;
+}
+
+// "500 g Flour in the Pantry", or "the Flour already in stock".
+function sniffWhat(sniff, name) {
+  if (!sniffScope(sniff)) return `the ${name} already in stock`;
+  const where = sniff.location_name ? ` in the ${sniff.location_name}` : '';
+  return `${sniffAmount(sniff, name)}${where}`;
+}
+
+// The hint beside the chips: which stock, and how far gone it is.
+function sniffHint(sniff, name) {
+  const days = sniff.days_remaining;
+  if (!sniffScope(sniff)) {
+    return days < 0
+      ? `the stock you already have expired ${-days} day${days === -1 ? '' : 's'} ago`
+      : `the stock you already have is best by ${sniff.best_before_date}`;
+  }
+  const when = days < 0 ? `expired ${-days} day${days === -1 ? '' : 's'} ago`
+    : days === 0 ? 'expires today'
+    : `best by ${sniffDate(sniff.best_before_date)}`;
+  return `${sniffWhat(sniff, name)} ${when}`;
+}
+
+// A refusal from the server: 404 when the row's stock is gone, 409 when it
+// changed since the list loaded or Grocy cannot act on it alone. Either way
+// nothing changed, and the hint no longer shows what is there, so the list is
+// read again.
+function sniffRefused(r, d) {
+  const err = new Error(d.detail || d.message || r.statusText);
+  err.stale = r.status === 404 || r.status === 409;
+  return err;
+}
+
 // Sniff test on a review row whose product is already in stock and expiring
 // (FoodAssistant-8kvp): the same endpoint the Expiring page uses, extending
-// every dated stock entry of that product. The pending row itself, the new
-// scan waiting to be committed, is deliberately untouched.
-async function sniffTest(productId, name, extraDays) {
+// only the row's stock (sniffScope). The pending row itself, the new scan
+// waiting to be committed, is deliberately untouched.
+async function sniffTest(productId, name, extraDays, scope) {
   try {
     const r = await fetch(`expiring/extend/${productId}`, {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ days: extraDays }),
+      body: JSON.stringify({ days: extraDays, ...(scope || {}) }),
     });
     const d = await r.json().catch(() => ({}));
-    if (!r.ok || !d.ok) throw new Error(d.detail || d.message || r.statusText);
+    if (!r.ok || !d.ok) throw sniffRefused(r, d);
     showToast(d.new_best_by
       ? `Sniff test passed: ${name} is now best by ${d.new_best_by}.`
       : `Sniff test passed, but ${name} had no best-by date to extend.`);
     await loadPending();
   } catch (e) {
     showToast(`Could not update ${name}: ${e.message}`, true);
+    if (e.stale) await loadPending();
   }
 }
 
 // Toss on a review row whose product is already in stock and expiring
 // (FoodAssistant-64eg): the sniff test's honest opposite. The same endpoint
-// the Expiring page uses removes that stock as spoiled; without an amount the
-// server tosses what is actually there. The pending row itself, the new scan
-// waiting to be committed, is deliberately untouched.
-async function tossStock(productId, name) {
-  if (!(await PR.confirmBox('This records it as spoiled and removes it from your stock.', { title: `Toss the ${name} already in stock?`, ok: 'Toss', danger: true }))) return;
+// the Expiring page uses removes the row's stock as spoiled (sniffScope),
+// and the question names it: "Toss 500 g Flour (best by Oct 25)?". It sends
+// the amount it showed, so stock that changed since the list loaded is left
+// alone. The pending row itself, the new scan waiting to be committed, is
+// deliberately untouched.
+async function tossStock(productId, name, sniff) {
+  const scope = sniffScope(sniff);
+  const title = scope
+    ? `Toss ${sniffAmount(sniff, name)} (best by ${sniffDate(sniff.best_before_date)})?`
+    : `Toss the ${name} already in stock?`;
+  if (!(await PR.confirmBox('This records it as spoiled and removes it from your stock.', { title, ok: 'Toss', danger: true }))) return;
   try {
-    const r = await fetch(`expiring/toss/${productId}`, { method: 'POST' });
+    const r = await fetch(`expiring/toss/${productId}`, scope ? {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ amount: sniff.amount, expected_amount: sniff.amount, ...scope }),
+    } : { method: 'POST' });
     const d = await r.json().catch(() => ({}));
-    if (!r.ok || !d.ok) throw new Error(d.detail || d.message || r.statusText);
-    showToast(`${name} tossed and recorded as spoiled.`);
+    if (!r.ok || !d.ok) throw sniffRefused(r, d);
+    if (d.complete === false) {
+      showToast(`Tossed ${+Number(d.consumed).toFixed(2)} of ${+Number(d.requested).toFixed(2)} ${name}. `
+        + 'Grocy would use other stock for the rest.', true);
+    } else {
+      showToast(`${name} tossed and recorded as spoiled.`);
+    }
     await loadPending();
   } catch (e) {
     showToast(`Could not toss ${name}: ${e.message}`, true);
+    if (e.stale) await loadPending();
   }
 }
 
@@ -252,12 +327,17 @@ async function doCommit(ids) {
     const d = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(d.detail || d.message || r.statusText || 'The server refused it.');
     const errs = (d.results || []).filter(x => x.status === 'error');
+    // An item Grocy already keeps in another unit, with no conversion from
+    // the one typed, went in as typed in Grocy's unit: say so.
+    const notes = (d.results || []).filter(x => x.status === 'ok' && x.unit_note)
+      .map(x => ' ' + PR.esc(x.unit_note)).join('');
     if (errs.length === 0) {
-      document.getElementById('commit-status').innerHTML = '';
+      document.getElementById('commit-status').innerHTML = notes
+        ? `<div class="alert alert-warning py-1 px-2 small">Added ${d.imported} item(s).${notes}</div>` : '';
       showToast(`✓ Added ${d.imported} item(s) to your inventory`);
     } else {
       document.getElementById('commit-status').innerHTML =
-        `<div class="alert alert-warning py-1 px-2 small">${d.imported} imported, ${errs.length} failed: ${errs.map(x => PR.esc(x.error)).join('; ')}</div>`;
+        `<div class="alert alert-warning py-1 px-2 small">${d.imported} imported, ${errs.length} failed: ${errs.map(x => PR.esc(x.error)).join('; ')}${notes}</div>`;
     }
     await loadPending();
   } catch(e) {
@@ -340,6 +420,19 @@ function actionItemCard(it) {
       && it.payload && it.payload.credential_id) {
     btns.appendChild(actionBtn('Remove key', 'outline-danger', () => removeUnusedKey(it)));
   }
+  // An older install's Grocy locations: two fridges to merge, or a Freezer
+  // Grocy does not know is one. Nothing changes until the button is pressed.
+  const grocyFix = GROCY_LOCATION_FIXES[it.kind];
+  if (grocyFix && section && section.dataset.managesSettings === '1') {
+    btns.appendChild(actionBtn(grocyFix.label, 'primary',
+      (ev) => fixGrocyLocations(it, grocyFix, ev.currentTarget, text)));
+  } else if (grocyFix) {
+    const where = document.createElement('div');
+    where.className = 'meta-text';
+    where.textContent = 'To change this, ask whoever manages Pantry Raider to open this inbox on the main server.';
+    text.appendChild(where);
+  }
+  if (grocyFix && grocyFixErrors[it.id]) showGrocyFixError(text, grocyFixErrors[it.id]);
   // Kitchen history shortened a best-by date (FoodAssistant-p3ind): keep it,
   // or turn the learning off from right here.
   if (it.kind === 'kitchen_history') {
@@ -386,6 +479,67 @@ async function turnOffKitchenHistory() {
   } catch (e) { /* the setting is off; leftover notices can be dismissed */ }
   showToast('Best-by dates will use the standard estimates again.');
   loadActionItems();
+}
+
+// noAnswer: what to say when no answer came back (the connection dropped, or
+// a proxy gave up waiting). A long merge carries on on the server regardless.
+const GROCY_LOCATION_FIXES = {
+  grocy_two_fridges: { label: 'Merge', busy: 'Merging…', path: 'setup/grocy/merge-fridges',
+    noAnswer: 'No answer from Pantry Raider. The merge may still be running: wait a minute, then press Merge again to finish it.' },
+  grocy_freezer_flag: { label: 'Mark as freezer', busy: 'Saving…', path: 'setup/grocy/mark-freezer',
+    noAnswer: 'Could not reach Pantry Raider. Try again.' },
+};
+
+// What Grocy answered when a fix failed, by item id, so the reason stays on
+// the item through the inbox's own refreshes.
+const grocyFixErrors = {};
+
+function showGrocyFixError(text, msg) {
+  const old = text.querySelector('.grocy-fix-error');
+  if (old) old.remove();
+  if (!msg) return;
+  const err = document.createElement('div');
+  err.className = 'small text-danger grocy-fix-error';
+  err.setAttribute('role', 'alert');
+  err.textContent = msg;
+  text.appendChild(err);
+}
+
+// The server reads Grocy again and does only what is still needed, so a
+// second press (or one after a merge was cut short) is safe. When Grocy
+// refuses, the reason stays on the item rather than in a passing toast.
+async function fixGrocyLocations(it, fix, btn, text) {
+  const p = it.payload || {};
+  if (it.kind === 'grocy_two_fridges') {
+    const from = p.from_name || 'Fridge';
+    const to = p.to_name || 'Refrigerator';
+    if (!(await PR.confirmBox(`Everything in ${from} moves to ${to}, and ${from} is hidden in Grocy.`,
+      { title: `Merge ${from} into ${to}?`, ok: 'Merge' }))) return;
+  }
+  delete grocyFixErrors[it.id];
+  showGrocyFixError(text, '');
+  btn.disabled = true;
+  btn.textContent = fix.busy;
+  let data = {};
+  let ok = false;
+  try {
+    const r = await fetch(fix.path, { method: 'POST',
+      headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    // A reply that is not ours (a proxy timing out) counts as no answer.
+    try { data = await r.json(); } catch (e) { data = { error: fix.noAnswer }; }
+    ok = r.ok && data.ok;
+  } catch (e) {
+    data = { error: fix.noAnswer };
+  }
+  if (ok) {
+    showToast(data.message || 'Done');
+    loadActionItems();
+    return;
+  }
+  btn.disabled = false;
+  btn.textContent = fix.label;
+  grocyFixErrors[it.id] = data.error || data.detail || 'Grocy did not take the change. Try again.';
+  showGrocyFixError(text, grocyFixErrors[it.id]);
 }
 
 function actionBtn(label, variant, onclick) {

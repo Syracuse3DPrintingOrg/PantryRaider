@@ -165,7 +165,8 @@ def seed_defaults(db: Session) -> None:
 
 
 def apply_defaults(item: FoodItem, db: Session, extra_match_text: str = "",
-                   infer_storage: bool = False) -> FoodItem:
+                   infer_storage: bool = False,
+                   grocy_product_id: int | None = None) -> FoodItem:
     """Fill in best_by_date if not already set, using the defaults table.
 
     extra_match_text lets callers supply additional keywords to match patterns
@@ -175,6 +176,9 @@ def apply_defaults(item: FoodItem, db: Session, extra_match_text: str = "",
     infer_storage lets a matching rule override the item's storage_type when
     no rule exists for the guessed storage: e.g. mayonnaise guessed "dry"
     from OFF tags adopts the "mayonnaise → refrigerated" rule's storage.
+
+    grocy_product_id, when the item is already linked to a Grocy product,
+    lets this kitchen's learned spoil age be found by id before by name.
     """
     if item.best_by_date is not None:
         return item
@@ -242,7 +246,8 @@ def apply_defaults(item: FoodItem, db: Session, extra_match_text: str = "",
         from .kitchen_history import learned_spoil_days, maybe_notify, shorten_days
         standard_days = days
         days, used_history = shorten_days(
-            days, learned_spoil_days(item.name), storage_kind(storage))
+            days, learned_spoil_days(item.name, grocy_product_id),
+            storage_kind(storage))
         if used_history:
             maybe_notify(db, item.name, days, standard_days)
     item.best_by_date = date.today() + timedelta(days=days)

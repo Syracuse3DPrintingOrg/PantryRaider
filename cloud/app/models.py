@@ -81,6 +81,14 @@ class Account(Base):
     # (a heavy vote that can publish alone), or "blocked" after abuse (the
     # submission route refuses the account and its votes weigh nothing).
     barcode_trust: Mapped[str] = mapped_column(String(10), default="")
+    # Google's stable account id (the OpenID "sub" claim) for the Google
+    # account that signs in here. Set on the first Google sign-in, which is how
+    # accounts made before this column existed pick it up. Once set, a Google
+    # sign-in for this email from a different Google account is refused, so a
+    # recycled or reassigned address cannot open the account. Null until the
+    # account first signs in with Google.
+    google_sub: Mapped[str | None] = mapped_column(
+        String(255), unique=True, index=True, nullable=True, default=None)
     created_at: Mapped[str] = mapped_column(String(40))
 
 
@@ -209,6 +217,12 @@ class WebAuthnCredential(Base):
     # Touched every time the passkey completes a sign-in, so the owner can see
     # which key they actually use. Empty until first use.
     last_used_at: Mapped[str] = mapped_column(String(40), default="")
+    # Whether the authenticator verified the person (fingerprint, face, PIN)
+    # when this passkey was added: 1 yes, 0 no. Null for passkeys added before
+    # this was recorded. Informational: each sign-in is judged on its own
+    # assertion's flag, never on this column.
+    user_verified: Mapped[int | None] = mapped_column(
+        Integer, nullable=True, default=None)
 
 
 class WebAuthnChallenge(Base):

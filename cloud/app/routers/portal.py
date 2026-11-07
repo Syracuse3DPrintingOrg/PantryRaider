@@ -44,6 +44,7 @@ from .accounts import (DISPOSABLE_EMAIL_MESSAGE, _issue_session, _valid_email,
                        totp_locked)
 from .. import turnstile
 from .oauth_google import enabled as google_enabled
+from .passkeys import RECENT_SIGNIN_MINUTES
 
 router = APIRouter(include_in_schema=False)
 
@@ -257,6 +258,20 @@ def _issue_totp_challenge(db: Session, account_id: int, return_url: str = "",
     the flow started with ("link" pairs a new install, "unlock" only proves
     identity to an already-linked device). code_challenge is the app's PKCE
     challenge, handed on to the linking code the challenge ends in."""
+    token = mint_totp_challenge(db, account_id, return_url=return_url,
+                                device_name=device_name, purpose=purpose,
+                                code_challenge=code_challenge)
+    resp = RedirectResponse("/login/2fa", status_code=303)
+    set_totp_pending_cookie(resp, token)
+    return resp
+
+
+def mint_totp_challenge(db: Session, account_id: int, return_url: str = "",
+                        device_name: str = "", purpose: str = "link",
+                        code_challenge: str = "") -> str:
+    """Store a pending second-factor challenge and return the plaintext token
+    the pending cookie carries. Shared by the redirecting flows above and the
+    passkey sign-in, which answers in JSON instead of a redirect."""
     token = new_token("prt")
     expires = datetime.now(timezone.utc) + timedelta(
         minutes=_TOTP_CHALLENGE_TTL_MINUTES)
@@ -268,11 +283,14 @@ def _issue_totp_challenge(db: Session, account_id: int, return_url: str = "",
                          purpose=purpose or "link",
                          code_challenge=code_challenge or ""))
     db.commit()
-    resp = RedirectResponse("/login/2fa", status_code=303)
+    return token
+
+
+def set_totp_pending_cookie(resp, token: str) -> None:
+    """Carry a pending second-factor challenge in its short-lived cookie."""
     resp.set_cookie(flow_cookie(TOTP_PENDING_COOKIE), token,
                     max_age=_TOTP_CHALLENGE_TTL_MINUTES * 60,
                     httponly=True, samesite="lax", secure=settings.cookie_secure)
-    return resp
 
 
 def _pending_challenge(db: Session, request: Request) -> TotpChallenge | None:
@@ -536,7 +554,7 @@ def login_2fa_submit(request: Request, code: str = Form(""),
     # unlock sign-in can never end in a linking code.
     return_url = (challenge.return_url or "").strip()
     purpose = (challenge.purpose or "link").strip() or "link"
-    pkce_challenge = (challenge.code_challenge or "") if purpose == "link" else ""
+    pkce_challenge = challenge.code_challenge or ""
     db.delete(challenge)
     db.commit()
     from .oauth_google import (_mint_provision_code,  # avoids a cycle
@@ -654,6 +672,7 @@ def account_page(request: Request,
         "inbox_shares": inbox_shares,
         "totp_enabled": bool(account.totp_enabled),
         "passkeys": passkeys,
+        "passkey_recent_minutes": RECENT_SIGNIN_MINUTES,
         # The verify banner only shows when email is set up and this address
         # is not confirmed yet; it is purely advisory, nothing is blocked.
         "email_enabled": email_configured(),

@@ -67,14 +67,12 @@
 
 <!-- Summary badges -->
 <div class="row g-3 mb-4 pr-keep-cols" id="expiring-summary">
-  {% set expired  = items | selectattr('days_remaining', 'lt', 0) | list %}
-  {% set today    = items | selectattr('days_remaining', 'eq', 0) | list %}
-  {% set soon     = items | selectattr('days_remaining', 'gt', 0) | selectattr('days_remaining', 'le', 3) | list %}
-  {% set later    = items | selectattr('days_remaining', 'gt', 3) | list %}
+  {#- Products, each counted once on its soonest row, so the numbers match
+      the expiring badge elsewhere in the app. -#}
   <div class="col-6 col-md-3">
     <div class="card text-center border-danger">
       <div class="card-body py-2">
-        <div class="fs-3 fw-bold urgency-expired">{{ expired | length }}</div>
+        <div class="fs-3 fw-bold urgency-expired">{{ summary.expired }}</div>
         <div class="text-muted small">Expired</div>
       </div>
     </div>
@@ -82,7 +80,7 @@
   <div class="col-6 col-md-3">
     <div class="card text-center border-warning">
       <div class="card-body py-2">
-        <div class="fs-3 fw-bold urgency-today">{{ today | length }}</div>
+        <div class="fs-3 fw-bold urgency-today">{{ summary.today }}</div>
         <div class="text-muted small">Today</div>
       </div>
     </div>
@@ -90,7 +88,7 @@
   <div class="col-6 col-md-3">
     <div class="card text-center">
       <div class="card-body py-2">
-        <div class="fs-3 fw-bold urgency-3d">{{ soon | length }}</div>
+        <div class="fs-3 fw-bold urgency-3d">{{ summary.within_3_days }}</div>
         <div class="text-muted small">Within 3 Days</div>
       </div>
     </div>
@@ -98,7 +96,7 @@
   <div class="col-6 col-md-3">
     <div class="card text-center">
       <div class="card-body py-2">
-        <div class="fs-3 fw-bold urgency-ok">{{ later | length }}</div>
+        <div class="fs-3 fw-bold urgency-ok">{{ summary.later }}</div>
         <div class="text-muted small">Later</div>
       </div>
     </div>
@@ -123,7 +121,8 @@
       {% set d = item.days_remaining %}
       <tr>
         <td class="exp-name"><strong>{{ item.product.name if item.product else 'Unknown' }}</strong></td>
-        <td>{{ '%g' | format(item.amount | float) }} {{ item.unit_name or '' }}</td>
+        {% set unit_word = (item.unit_name if item.amount | float == 1 else item.unit_name_plural or item.unit_name) or '' %}
+        <td>{{ '%g' | format(item.amount | float) }} {{ unit_word }}</td>
         <td><span class="badge bg-secondary">{{ item.location_name or '–' }}</span></td>
         <td>{{ item.best_before_date or '–' }}</td>
         <td>
@@ -139,6 +138,12 @@
         </td>
         <td class="text-nowrap exp-actions">
           {% set pname = item.product.name if item.product else 'this item' %}
+          {#- A row is the stock of one best-by date in one place, and its
+              buttons send both so they take only that stock, never the
+              product's good stock with a later date or in the freezer. -#}
+          {% set scoped = item.by_date and item.location_id and item.best_before_date %}
+          {% set amount_text = '%g' | format(item.amount | float) ~ (' ' ~ unit_word if unit_word else '') %}
+          {% set row_words = amount_text ~ ' ' ~ pname ~ (' (' ~ item.best_by_words ~ ')' if item.best_by_words else '') %}
           {% if not item.hard_expiry %}
           <div class="btn-group btn-group-sm me-2" role="group"
                aria-label="Sniff test passed: keep {{ pname }} a little longer">
@@ -146,7 +151,7 @@
             {% for extra in [1, 3, 5] %}
             <button type="button" class="btn btn-outline-info fw-semibold px-2"
                     title="Passed the sniff test: keep {{ pname | e }} {{ extra }} more day{{ 's' if extra != 1 }}"
-                    data-on-click="sniffTest({{ item.product_id }}, {{ pname | tojson | forceescape }}, {{ extra }})">
+                    data-on-click="sniffTest({{ item.product_id }}, {{ pname | tojson | forceescape }}, {{ extra }}{% if scoped %}, {{ item.location_id }}, {{ item.best_before_date | tojson | forceescape }}{% endif %})">
               +{{ extra }}d
             </button>
             {% endfor %}
@@ -157,23 +162,38 @@
             <i class="bi bi-shield-exclamation me-1"></i>Expiration date
           </span>
           {% endif %}
+          {#- A row of one date sends its own amount even without a place, so
+              its questions name that amount, never "all". -#}
+          {% set what = row_words if item.by_date else 'all ' ~ pname %}
+          {% if item.tare_weight %}
+          <span class="text-secondary small me-2"
+                title="{{ pname | e }} is weighed with its container, so use it up or toss it in Grocy, where you can weigh it.">
+            <i class="bi bi-box-seam me-1"></i>Weighed with its container: use or toss it in Grocy
+          </span>
+          {% else %}
           <form method="post" action="ui/consume/{{ item.product_id }}" class="d-inline"
-                data-on-submit="return PR.confirmSubmit(this, {{ ('Mark all ' ~ pname ~ ' as consumed? This removes it from your stock.') | tojson | forceescape }}, event, {ok: 'Mark consumed'})">
+                data-on-submit="return PR.confirmSubmit(this, {{ ('Mark ' ~ what ~ ' as consumed? This removes it from your stock.') | tojson | forceescape }}, event, {ok: 'Mark consumed'})">
             <input type="hidden" name="amount" value="{{ item.amount }}">
             <input type="hidden" name="name" value="{{ pname }}">
-            <button type="submit" class="btn btn-sm btn-outline-success btn-icon" title="Mark all {{ pname | e }} consumed (removes it from stock)">
+            {% if scoped %}
+            <input type="hidden" name="location_id" value="{{ item.location_id }}">
+            <input type="hidden" name="best_before_date" value="{{ item.best_before_date }}">
+            <input type="hidden" name="expected_amount" value="{{ item.amount }}">
+            {% endif %}
+            <button type="submit" class="btn btn-sm btn-outline-success btn-icon" title="Mark {{ what | e }} consumed (removes it from stock)">
               <i class="bi bi-check-lg"></i>
             </button>
           </form>
           <button type="button" class="btn btn-sm btn-outline-danger btn-icon"
-                  title="Toss all {{ pname | e }} (records it as spoiled and removes it from stock)"
-                  data-on-click="tossIt({{ item.product_id }}, {{ pname | tojson | forceescape }}, {{ item.amount }})">
+                  title="Toss {{ what | e }} (records it as spoiled and removes it from stock)"
+                  data-on-click="tossIt({{ item.product_id }}, {{ pname | tojson | forceescape }}, {{ item.amount }}{% if scoped %}, {{ {'location_id': item.location_id, 'best_before_date': item.best_before_date, 'words': row_words, 'what': amount_text ~ ' ' ~ pname, 'place': item.location_name or ''} | tojson | forceescape }}{% elif item.by_date %}, {{ {'words': row_words} | tojson | forceescape }}{% endif %})">
             <i class="bi bi-trash"></i>
           </button>
+          {% endif %}
           {% if printing_enabled %}
           <button type="button" class="btn btn-sm btn-outline-secondary btn-icon"
                   title="Print label"
-                  data-on-click="printLabel({{ item.product_id }}, {{ pname | tojson | forceescape }})">
+                  data-on-click="printLabel({{ item.product_id }}, {{ pname | tojson | forceescape }}{% if scoped %}, {{ {'best_by': item.best_before_date, 'added': (item.added_date or '')[:10], 'stock_entry_id': item.stock_entry_id} | tojson | forceescape }}{% endif %})">
             <i class="bi bi-printer"></i>
           </button>
           {% endif %}

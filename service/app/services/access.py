@@ -854,7 +854,8 @@ def _under(path: str, prefix: str) -> bool:
     return path == prefix or path.startswith(prefix + "/")
 
 
-_PUBLIC_EXACT = frozenset({"/health", "/ui/login", "/", "/manifest.webmanifest", "/sw.js"})
+_PUBLIC_EXACT = frozenset({"/health", "/ui/login", "/", "/manifest.webmanifest", "/sw.js",
+                           "/apple-touch-icon.png", "/apple-touch-icon-precomposed.png", "/favicon.ico"})
 _ADMIN_TREES = ("/setup", "/admin", "/tunnel")
 _ADMIN_EXACT_ANY = frozenset({"/api/pairing/approve", "/api/pairing/deny",
                               "/api/pairing/pending", "/docs", "/redoc",

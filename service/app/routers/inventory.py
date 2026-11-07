@@ -20,8 +20,9 @@ router = APIRouter(prefix="/inventory", tags=["inventory"])
 
 # A per-date row's action that Grocy cannot do on exactly that row's stock
 # answers 409, and one whose stock is gone answers 404, both with nothing
-# changed. They are caught before the catch-all, which would make them 500s.
-_ROW_STATUS = {"group": 409, "gone": 404}
+# changed. A row that no longer holds what the page showed answers 409 too.
+# They are caught before the catch-all, which would make them 500s.
+_ROW_STATUS = {"group": 409, "gone": 404, "changed": 409}
 
 _ISO_DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
 

@@ -298,7 +298,7 @@ async function loadRecipes(search = '') {
     }
     let html = items.map(recipeRow).join('');
     if (external && !search) {
-      html += '<div class="text-secondary small p-2"><i class="bi bi-info-circle me-1"></i>Type a search to include web recipes.</div>';
+      html += '<div class="text-secondary small p-2"><i class="bi bi-info-circle me-1"></i>Type a search to include recipes from the web too.</div>';
     }
     el.innerHTML = html;
   } catch (e) {

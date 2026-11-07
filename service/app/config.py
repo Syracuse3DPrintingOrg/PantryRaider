@@ -16,7 +16,7 @@ from . import durable as _durable
 
 # Single source of truth for the app version (shown in the UI, used by the
 # update checker, and reported by FastAPI). Bump on each tagged release.
-APP_VERSION = "0.21.132"
+APP_VERSION = "0.21.152"
 
 # Single source of truth for the product's display name. The internal runtime
 # identifiers (systemd units, install paths, the foodassistant_streamdeck
@@ -1377,6 +1377,15 @@ class Settings(BaseSettings):
     recipe_source: str = setting("themealdb", form=True, pull=True)
     themealdb_api_key: str = setting("1", form=True, pull=True, withheld=True, secret=True)
     spoonacular_api_key: str = setting("", form=True, pull=True, withheld=True, secret=True)
+    # Your own recipe databases (FoodAssistant-1sfs6): sites that serve the
+    # Pantry Raider Recipe Catalog API (docs/recipe-catalogs.md), Deeserved
+    # first. Each entry is {"id", "name", "url", "enabled"}; the optional
+    # access keys live apart in recipe_catalog_keys ({id: key}) so a backup
+    # can redact the keys and still keep the list. Managed on the server
+    # through /setup/recipe-catalogs; a satellite forwards its recipe calls
+    # there, so neither is pulled.
+    recipe_catalogs: list = setting([])
+    recipe_catalog_keys: dict = setting({}, secret=True)
 
     # Suggestion tuning. staple_items: comma-separated pantry items assumed
     # on hand (empty = built-in list). Thresholds in days.
@@ -2016,6 +2025,21 @@ class Settings(BaseSettings):
     local_totp_secret: str = setting("", secret=True)
     local_totp_enabled: bool = False
     local_totp_recovery: list = setting([], secret=True)
+    # When the device's two-factor asks for a code (FoodAssistant-qtm5f):
+    # "always" (every password sign-in, the behavior before this setting) or
+    # "outside" (only when signing in from outside the home network).
+    local_totp_scope: str = "always"
+    # The sign-in page's one-time "Signing in has changed" note. Decided once,
+    # on the first start of the release that brought it: an install that
+    # already had a password then shows it until this date (ISO), a new
+    # install never does (services/signin_news.py).
+    signin_news_checked: bool = False
+    signin_news_until: str = ""
+    # Passkeys for the admin sign-in (FoodAssistant-kc2cy): one record per
+    # enrolled passkey, holding its public key, signature counter and the site
+    # name it belongs to (services/passkeys.py). Public keys are not secret, but
+    # the list decides who may sign in, so it travels like the other secrets.
+    local_passkeys: list = setting([], secret=True)
     api_key: str = setting("", form=True, secret=True)
     # Additional keys; each satellite can use its own.
     extra_api_keys: list[str] = setting([], form=True, secret=True)

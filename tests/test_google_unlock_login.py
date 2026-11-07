@@ -174,6 +174,24 @@ def test_start_leaves_for_the_cloud_with_flow_unlock(client, monkeypatch):
     assert ret.path == "/ui/login"
 
 
+def test_start_and_return_carry_pkce(client, monkeypatch):
+    """The unlock code is bound to the browser that started the sign-in: the
+    start leg sends an S256 challenge, the return leg the verifier behind it."""
+    import base64
+    import hashlib
+    _link(monkeypatch)
+    r = client.get("/ui/login?google=start", follow_redirects=False)
+    q = parse_qs(urlsplit(r.headers["location"]).query)
+    assert q["code_challenge_method"] == ["S256"]
+    calls = []
+    ok = _Resp(200, {"ok": True, "account_email": "dan@example.com"})
+    with _cloud(post_resp=ok, calls=calls):
+        client.get("/ui/login?code=ABC23456", follow_redirects=False)
+    verifier = [c for c in calls if c[0] == "POST"][0][2]["code_verifier"]
+    digest = hashlib.sha256(verifier.encode()).digest()
+    assert base64.urlsafe_b64encode(digest).rstrip(b"=").decode() == q["code_challenge"][0]
+
+
 def test_start_without_a_link_returns_to_login(client):
     r = client.get("/ui/login?google=start", follow_redirects=False)
     assert r.status_code == 303
@@ -192,7 +210,8 @@ def test_return_happy_path_opens_the_session(client, monkeypatch):
     assert r.headers["location"].endswith("/ui/")
     posts = [c for c in calls if c[0] == "POST"]
     assert posts and posts[0][1].endswith("/v1/instance/verify-unlock")
-    assert posts[0][2] == {"code": "ABC23456"}
+    # No sign-in was started in this browser, so there is no verifier to send.
+    assert posts[0][2] == {"code": "ABC23456", "code_verifier": ""}
     # The same session a password login opens: a protected page now answers.
     assert client.get("/setup", follow_redirects=False).status_code == 200
 

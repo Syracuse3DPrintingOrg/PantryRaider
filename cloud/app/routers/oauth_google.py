@@ -2,10 +2,15 @@
 
 A hand-rolled OpenID Connect authorization-code flow over httpx (scope
 "openid email"), no OAuth library: redirect the browser to Google, swap
-the returned code for an access token, and read the verified email from
-the userinfo endpoint. The email is the identity; a known email signs in
-to its account, an unknown one becomes a new account with no password
-(they can set one on the account page later).
+the returned code for an access token, and read the verified email and
+Google's stable account id ("sub") from the userinfo endpoint. A known
+email signs in to its account, an unknown one becomes a new account with no
+password (they can set one on the account page later). The first Google
+sign-in records the sub on the account; after that the same email from a
+different Google account is refused, so an address that changes hands at
+Google cannot open someone's Forager account. The leg to Google carries its
+own PKCE (S256) pair: the verifier stays in the state cookie, so a code
+lifted from the redirect cannot be redeemed by anyone else.
 
 Three flows share the same Google round-trip, told apart by what was
 stashed in the state cookie:
@@ -38,6 +43,7 @@ unset means the buttons never render and these routes answer 404.
 from __future__ import annotations
 
 import base64
+import hashlib
 import ipaddress
 import json
 import re
@@ -71,6 +77,21 @@ _STATE_TTL_SECONDS = 600
 
 # Tests inject an httpx.MockTransport here; production uses the default.
 transport: httpx.BaseTransport | None = None
+
+# What a person sees when their email is already tied to a different Google
+# account than the one they just used.
+GOOGLE_ACCOUNT_MISMATCH_MESSAGE = (
+    "This email address is linked to a different Google account. Sign in "
+    "with the Google account you used before, or with your email and "
+    "password.")
+
+
+def _pkce_pair() -> tuple[str, str]:
+    """A fresh PKCE verifier and its S256 challenge for the leg to Google."""
+    verifier = secrets.token_urlsafe(64)
+    challenge = base64.urlsafe_b64encode(
+        hashlib.sha256(verifier.encode("ascii")).digest()).decode().rstrip("=")
+    return verifier, challenge
 
 
 def enabled() -> bool:
@@ -195,19 +216,27 @@ def _return_url_ok_for_account(db: Session, url: str, account_id: int) -> bool:
     return False
 
 
-def fetch_verified_email(code: str) -> str:
-    """Exchange the authorization code and return Google's verified email.
+def fetch_verified_identity(code: str, code_verifier: str = ""
+                            ) -> tuple[str, str]:
+    """Exchange the authorization code and return Google's verified email and
+    the Google account's stable id (sub).
 
-    Raises HTTPException(502) if Google misbehaves and 403 if the email is
-    unverified (an unverified address proves nothing about its owner)."""
+    ``code_verifier`` is the PKCE verifier from the state cookie. A sign-in
+    started before PKCE was added has none, and Google then expects none.
+    Raises HTTPException(502) if Google misbehaves (including a reply with no
+    sub) and 403 if the email is unverified (an unverified address proves
+    nothing about its owner)."""
+    form = {
+        "code": code,
+        "client_id": settings.google_client_id,
+        "client_secret": settings.google_client_secret,
+        "redirect_uri": _redirect_uri(),
+        "grant_type": "authorization_code",
+    }
+    if code_verifier:
+        form["code_verifier"] = code_verifier
     with httpx.Client(transport=transport, timeout=15.0) as client:
-        token_resp = client.post(GOOGLE_TOKEN_URL, data={
-            "code": code,
-            "client_id": settings.google_client_id,
-            "client_secret": settings.google_client_secret,
-            "redirect_uri": _redirect_uri(),
-            "grant_type": "authorization_code",
-        })
+        token_resp = client.post(GOOGLE_TOKEN_URL, data=form)
         if token_resp.status_code != 200:
             raise HTTPException(502, detail="Google sign-in failed, try again")
         access_token = token_resp.json().get("access_token", "")
@@ -217,18 +246,34 @@ def fetch_verified_email(code: str) -> str:
         raise HTTPException(502, detail="Google sign-in failed, try again")
     info = info_resp.json()
     email = (info.get("email") or "").strip().lower()
+    sub = info.get("sub")
+    if not isinstance(sub, str) or not sub.strip():
+        raise HTTPException(502, detail="Google sign-in failed, try again")
     if not email or info.get("email_verified") is not True:
         raise HTTPException(403, detail="Google did not confirm that email address")
-    return email
+    return email, sub.strip()
 
 
-def _account_for_email(db: Session, email: str, create: bool = True,
+def _account_for_email(db: Session, email: str, sub: str, create: bool = True,
                        install_key: str = ""):
-    """The account behind a Google-verified email. Returns None when no account
+    """The account behind a Google sign-in. Returns None when no account
     exists and ``create`` is False (a sign-in attempt, which must not silently
-    make an account), so the caller can offer to sign up instead."""
-    account = db.query(Account).filter_by(email=email).first()
+    make an account), so the caller can offer to sign up instead.
+
+    The Google account id (sub) is matched first, so an account keeps working
+    after its owner's Google address changes. Otherwise the email is matched:
+    an account with no sub yet takes this one (that is how every account made
+    before the sub was stored picks it up), and an account already tied to a
+    different sub is refused with a 403."""
+    account = db.query(Account).filter_by(google_sub=sub).first()
     if account:
+        return account
+    account = db.query(Account).filter_by(email=email).first()
+    if account and account.google_sub and account.google_sub != sub:
+        raise HTTPException(403, detail=GOOGLE_ACCOUNT_MISMATCH_MESSAGE)
+    if account:
+        account.google_sub = sub
+        db.commit()
         if not account.email_verified:
             # Google just proved who owns this address, and it may not be
             # whoever created the account: anyone can sign up with someone
@@ -250,7 +295,7 @@ def _account_for_email(db: Session, email: str, create: bool = True,
         # no confirmation email is needed.
         account = Account(email=email, password_hash="",
                           auth_provider="google", email_verified=1,
-                          created_at=utc_now_iso())
+                          google_sub=sub, created_at=utc_now_iso())
         db.add(account)
         db.commit()
         # Google-created accounts start the same 30-day trial as everyone,
@@ -303,7 +348,7 @@ def google_start(request: Request, flow: str = "portal", intent: str = "signin",
     # verifier itself in the URL), and a malformed challenge is refused rather
     # than silently dropped, so a code is never minted unbound by accident.
     challenge = ""
-    if flow == "app":
+    if flow in ("app", "unlock"):
         challenge = code_challenge.strip()
         if challenge or code_challenge_method:
             if (code_challenge_method != "S256"
@@ -311,23 +356,29 @@ def google_start(request: Request, flow: str = "portal", intent: str = "signin",
                 raise HTTPException(
                     400, detail="This sign-in link is not valid. Start again "
                                 "from your kitchen's own screen.")
-        elif not settings.google_app_allow_no_challenge:
+        elif flow == "app" and not settings.google_app_allow_no_challenge:
             raise HTTPException(
                 400, detail="Update Pantry Raider on your kitchen, then "
                             "start the sign-in again.")
     state = secrets.token_urlsafe(24)
+    google_verifier, google_challenge = _pkce_pair()
     auth_url = GOOGLE_AUTH_URL + "?" + urlencode({
         "client_id": settings.google_client_id,
         "redirect_uri": _redirect_uri(),
         "response_type": "code",
         "scope": "openid email",
         "state": state,
+        "code_challenge": google_challenge,
+        "code_challenge_method": "S256",
     })
     resp = RedirectResponse(auth_url, status_code=303)
     # device_name travels along for symmetry with provisioning, but the
     # app names its kitchen itself when it redeems the code.
     resp.set_cookie(flow_cookie(STATE_COOKIE),
                     _pack({"state": state, "flow": flow,
+                           # This server's own PKCE verifier for Google, not
+                           # the app's code_challenge below.
+                           "google_verifier": google_verifier,
                            "intent": intent,
                            "device_name": device_name,
                            "return_url": return_url,
@@ -345,9 +396,15 @@ def google_callback(request: Request, code: str = "", state: str = "",
                     db: Session = Depends(get_db)):
     _require_enabled()
     stashed = _unpack(request.cookies.get(flow_cookie(STATE_COOKIE), ""))
-    if not code or not state or state != stashed.get("state"):
+    if not isinstance(stashed, dict):
+        stashed = {}
+    expected = stashed.get("state")
+    if (not code or not state or not isinstance(expected, str) or not expected
+            or not secrets.compare_digest(state.encode(), expected.encode())):
         raise HTTPException(400, detail="Sign-in session did not match, start again")
-    email = fetch_verified_email(code)
+    verifier = stashed.get("google_verifier")
+    email, sub = fetch_verified_identity(
+        code, verifier if isinstance(verifier, str) else "")
     flow = stashed.get("flow", "")
     # A sign-in from the login page must not create an account: offer signup
     # instead. The signup button and the app onboarding button create. A
@@ -357,7 +414,7 @@ def google_callback(request: Request, code: str = "", state: str = "",
         create = False
     else:
         create = stashed.get("intent") == "signup" or flow == "app"
-    account = _account_for_email(db, email, create=create,
+    account = _account_for_email(db, email, sub, create=create,
                                  install_key=stashed.get("install_key", ""))
     if account is None:
         if flow == "unlock":
@@ -386,7 +443,8 @@ def google_callback(request: Request, code: str = "", state: str = "",
         # flow=unlock mints an unlock code (spendable only at verify-unlock).
         purpose = "link" if flow == "app" else "unlock"
         return_url = stashed.get("return_url", "")
-        challenge = (stashed.get("code_challenge") or "") if flow == "app" else ""
+        challenge = ((stashed.get("code_challenge") or "")
+                     if flow in ("app", "unlock") else "")
         if (flow == "app" and not challenge
                 and not settings.google_app_allow_no_challenge):
             raise HTTPException(

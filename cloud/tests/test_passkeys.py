@@ -22,6 +22,8 @@ from app import models  # noqa: F401 - registers models on Base.metadata
 
 PORTAL_SIGNUP = {"email": "dan@example.com", "password": "hunter2222",
                  "confirm_password": "hunter2222"}
+# The account password, the proof adding a passkey asks for.
+STEP_UP = {"password": "hunter2222"}
 
 
 # --- Pure helpers ---------------------------------------------------------
@@ -58,15 +60,18 @@ def test_sign_count_replay_rule():
 # --- Test doubles for the verify seam -------------------------------------
 
 class _Reg:
-    def __init__(self, cred_id=b"cred-abc", pub=b"pubkey-bytes", sign_count=0):
+    def __init__(self, cred_id=b"cred-abc", pub=b"pubkey-bytes", sign_count=0,
+                 user_verified=True):
         self.credential_id = cred_id
         self.credential_public_key = pub
         self.sign_count = sign_count
+        self.user_verified = user_verified
 
 
 class _Auth:
-    def __init__(self, new_sign_count):
+    def __init__(self, new_sign_count, user_verified=True):
         self.new_sign_count = new_sign_count
+        self.user_verified = user_verified
 
 
 def _signed_in_client():
@@ -108,7 +113,7 @@ def test_register_begin_has_rp_id_and_excludes_existing(monkeypatch):
     existing_id = "already-here"
     _insert_credential(acct, existing_id)
 
-    resp = client.post("/account/passkeys/register/begin")
+    resp = client.post("/account/passkeys/register/begin", json=STEP_UP)
     assert resp.status_code == 200
     options = json.loads(resp.json()["options"])
     # TestClient's host is "testserver", so that is the derived rp id.
@@ -129,7 +134,7 @@ def test_register_finish_stores_credential(monkeypatch):
     monkeypatch.setattr(wa, "verify_registration",
                         lambda **kw: _Reg(cred_id=b"new-cred", sign_count=1))
     client = _signed_in_client()
-    client.post("/account/passkeys/register/begin")
+    client.post("/account/passkeys/register/begin", json=STEP_UP)
     body = {"nickname": "My laptop",
             "credential": {"id": "x", "response": {"transports": ["internal"]}}}
     resp = client.post("/account/passkeys/register/finish", json=body)
@@ -156,7 +161,7 @@ def test_register_finish_rejects_bad_attestation(monkeypatch):
         raise ValueError("bad challenge or origin")
     monkeypatch.setattr(wa, "verify_registration", boom)
     client = _signed_in_client()
-    client.post("/account/passkeys/register/begin")
+    client.post("/account/passkeys/register/begin", json=STEP_UP)
     resp = client.post("/account/passkeys/register/finish",
                        json={"credential": {"id": "x", "response": {}}})
     assert resp.status_code == 400
@@ -178,7 +183,7 @@ def test_register_finish_needs_a_stashed_challenge(monkeypatch):
 
 def test_register_requires_sign_in():
     client = TestClient(app)
-    assert client.post("/account/passkeys/register/begin").status_code == 401
+    assert client.post("/account/passkeys/register/begin", json=STEP_UP).status_code == 401
 
 
 # --- Password and 2FA keep working after a passkey ------------------------
@@ -186,7 +191,7 @@ def test_register_requires_sign_in():
 def test_password_login_still_works_with_a_passkey(monkeypatch):
     monkeypatch.setattr(wa, "verify_registration", lambda **kw: _Reg())
     client = _signed_in_client()
-    client.post("/account/passkeys/register/begin")
+    client.post("/account/passkeys/register/begin", json=STEP_UP)
     client.post("/account/passkeys/register/finish",
                 json={"credential": {"id": "x", "response": {}}})
     # The password is untouched: a fresh browser still signs in with it.

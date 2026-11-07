@@ -181,6 +181,8 @@ before this change keeps the keys it already holds, and never needs them.
 | `shopping_backend` | | Editable | Editable | Inherited (read-only) |
 | `themealdb_api_key` | Secret | Editable | Editable | Inherited (read-only) |
 | `spoonacular_api_key` | Secret | Editable | Editable | Inherited (read-only) |
+| `recipe_catalogs` | | Editable | Editable | Not synced |
+| `recipe_catalog_keys` | Secret | Editable | Editable | Not synced |
 | `staple_items` | | Editable | Editable | Inherited (read-only) |
 | `cook_ai_context` | | Editable | Editable | Inherited (read-only) |
 | `kitchen_appliances` | | Editable | Editable | Inherited (read-only) |
@@ -570,6 +572,10 @@ password, TOTP secret, and API keys are never synced.
 | `local_totp_secret` | Secret | Editable | Editable | Device-local |
 | `local_totp_enabled` | Toggle | Editable | Editable | Device-local |
 | `local_totp_recovery` | Secret | Editable | Editable | Device-local |
+| `local_passkeys` | Secret | Editable | Editable | Device-local |
+| `local_totp_scope` | | Editable | Editable | Device-local |
+| `signin_news_checked` | | Not shown (automatic) | Not shown (automatic) | Not shown (automatic) |
+| `signin_news_until` | | Not shown (automatic) | Not shown (automatic) | Not shown (automatic) |
 | `api_key` | Secret | Editable | Editable | Device-local |
 | `extra_api_keys` | Secret | Editable | Editable | Device-local |
 | `proxy_path_policy` | | Not shown (config/env) | Not shown (config/env) | Not applicable |
@@ -647,6 +653,18 @@ to a Forager account's 2FA). The secret and the hashed recovery codes are
 device-local secrets, never shown back to the browser and redacted from the
 support bundle; `totp_secret` is the earlier single-secret form, still honoured
 so an install that turned 2FA on before this feature keeps working.
+
+`local_passkeys` lists the passkeys that can sign in to this device as the
+admin. A passkey belongs to the web address it was added on, so it is never
+synced to another device, and it is redacted from the support bundle like the
+other sign-in secrets.
+
+`local_totp_scope` decides when two-factor asks for its code: at every
+sign-in (`always`, the default and the behavior before the setting) or only
+from outside the home network (`outside`). Choosing `outside` needs a current
+code or the password. `signin_news_checked` and `signin_news_until` are set
+once by the app to show existing users a short note about the sign-in
+changes for 30 days; they are never edited by hand.
 
 `proxy_path_policy` decides what the main server does when a satellite asks it
 to pass along a Grocy or Mealie request that no Pantry Raider release makes.

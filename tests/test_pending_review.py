@@ -118,6 +118,29 @@ def test_earliest_date_wins_for_a_repeated_name():
     assert got["milk"]["best_before_date"] == _in(1).isoformat()
 
 
+def test_on_expiring_rows_the_soonest_row_is_the_hook_with_its_place_and_amount():
+    """3 yogurts expired in the fridge, 1 due in two days in the freezer:
+    the Review card names the 3 in the fridge, the stock its toss will take,
+    not the product's total and earliest date."""
+    from app.services.grocy import expiring_by_date
+    stock = [{"product_id": 7, "amount": 6, "product": {"id": 7, "name": "Greek Yogurt"}}]
+    raw = [
+        {"id": 1, "product_id": 7, "amount": 3, "location_id": 2,
+         "best_before_date": _in(-2).isoformat()},
+        {"id": 2, "product_id": 7, "amount": 2, "location_id": 2,
+         "best_before_date": _in(9).isoformat()},       # good: outside the week
+        {"id": 3, "product_id": 7, "amount": 1, "location_id": 3,
+         "best_before_date": _in(2).isoformat()},
+    ]
+    rows = expiring_by_date(stock, raw, 7, TODAY)
+    rows[0]["location_name"] = "Fridge"
+    got = stock_sniff_candidates(rows, today=TODAY)
+    assert got == {"greek yogurt": {
+        "product_id": 7, "best_before_date": _in(-2).isoformat(),
+        "days_remaining": -2, "location_id": 2, "location_name": "Fridge",
+        "amount": 3.0, "unit_name": "", "unit_name_plural": ""}}
+
+
 def test_the_window_matches_the_expiring_pages_cut():
     # get_expiring keeps delta <= days; the boundary day is in, one past is out.
     on_edge = [{"product_id": 7, "amount": 1, "name": "Milk",
@@ -157,7 +180,11 @@ def _empty_grocy_stock(monkeypatch):
     """Keep Grocy off the network; tests that need stock override this."""
     async def _empty(self):
         return []
+
+    async def _no_rows(self, days=7, *, stock=None):
+        return []
     monkeypatch.setattr(GrocyClient, "get_stock", _empty)
+    monkeypatch.setattr(GrocyClient, "get_expiring_by_date", _no_rows)
 
 
 def _clear_pending(client):
@@ -264,16 +291,26 @@ def test_sniff_hook_only_on_rows_with_expiring_stock_behind_them(client, monkeyp
              "best_before_date": later},
         ]
 
+    async def _rows(self, days=7, *, stock=None):
+        # The Expiring page's rows: only the milk is inside the week.
+        assert days == 7 and stock  # the list's own /stock read is reused
+        return [{"product_id": 7, "amount": 2.0, "product": {"name": "Whole Milk"},
+                 "best_before_date": soon, "location_id": 2, "by_date": True,
+                 "location_name": "Fridge", "unit_name": "Carton"}]
+
     monkeypatch.setattr(GrocyClient, "get_stock", _stock)
+    monkeypatch.setattr(GrocyClient, "get_expiring_by_date", _rows)
     for name in ("Whole Milk", "Ketchup", "Dragonfruit"):
         client.post("pending/items",
                     json={"items": [{"name": name, "quantity": 1}]})
     rows = {r["name"]: r for r in client.get("pending/").json()["items"]}
 
-    # In stock AND expiring: the chips have everything they need.
+    # In stock AND expiring: the chips and the toss name exactly that stock.
     assert rows["Whole Milk"]["duplicate"] is True
     assert rows["Whole Milk"]["sniff"] == {
-        "product_id": 7, "best_before_date": soon, "days_remaining": 2}
+        "product_id": 7, "best_before_date": soon, "days_remaining": 2,
+        "location_id": 2, "location_name": "Fridge", "amount": 2.0,
+        "unit_name": "Carton", "unit_name_plural": "Carton"}
     # In stock but nowhere near expiring: duplicate badge only, no chips.
     assert rows["Ketchup"]["duplicate"] is True
     assert rows["Ketchup"]["sniff"] is None
@@ -308,3 +345,9 @@ def test_pending_page_wires_the_sniff_chips(client):
     assert "expiring/extend/" in page
     # Chips render only for rows the server marked eligible.
     assert "item.sniff" in page
+    # The chips and the toss send the hook's place and date, so they act on
+    # the stock the hint names, and a refusal reloads the list.
+    assert "sniffScope(item.sniff)" in page
+    assert "tossStock(${item.sniff.product_id}" in page
+    assert "JSON.stringify({ amount: sniff.amount, expected_amount: sniff.amount, ...scope })" in page
+    assert "e.stale" in page

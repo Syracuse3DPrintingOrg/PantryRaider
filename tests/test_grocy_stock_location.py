@@ -80,3 +80,80 @@ def test_add_stock_without_a_location_leaves_grocys_default(monkeypatch):
     sent = _mock_grocy(monkeypatch, [], [])
     asyncio.run(GrocyClient().add_stock(5, FoodItem(name="Rice")))
     assert "location_id" not in _add_body(sent, 5)
+
+
+def _location_writes(sent):
+    return [(m, b) for m, p, b in sent if p.endswith("/objects/locations") and m != "GET"]
+
+
+def test_a_fresh_grocys_fridge_is_used_instead_of_a_second_one(monkeypatch):
+    # A fresh Grocy 4.7.1 has one location, "Fridge" (id 2).
+    locations = [{"id": 2, "name": "Fridge", "is_freezer": 0, "active": 1}]
+    sent = _mock_grocy(monkeypatch, [], locations)
+    item = FoodItem(name="Milk", storage_type=StorageType.refrigerated)
+    asyncio.run(GrocyClient().import_item(item))
+    assert _add_body(sent, 777).get("location_id") == 2
+    assert _location_writes(sent) == []
+
+
+def test_an_existing_refrigerator_still_wins_over_the_fridge(monkeypatch):
+    locations = [{"id": 2, "name": "Fridge"}, {"id": 3, "name": "Refrigerator"}]
+    sent = _mock_grocy(monkeypatch, [], locations)
+    item = FoodItem(name="Milk", storage_type=StorageType.refrigerated)
+    asyncio.run(GrocyClient().import_item(item))
+    assert _add_body(sent, 777).get("location_id") == 3
+    assert _location_writes(sent) == []
+
+
+def test_an_inactive_fridge_is_not_reused(monkeypatch):
+    locations = [{"id": 2, "name": "Fridge", "active": 0}]
+    sent = _mock_grocy(monkeypatch, [], locations)
+    item = FoodItem(name="Milk", storage_type=StorageType.refrigerated)
+    asyncio.run(GrocyClient().import_item(item))
+    assert _location_writes(sent) == [("POST", {"name": "Refrigerator"})]
+
+
+def test_a_fridge_marked_as_a_freezer_is_not_reused(monkeypatch):
+    locations = [{"id": 2, "name": "Fridge", "is_freezer": 1, "active": 1}]
+    sent = _mock_grocy(monkeypatch, [], locations)
+    item = FoodItem(name="Milk", storage_type=StorageType.refrigerated)
+    asyncio.run(GrocyClient().import_item(item))
+    assert _location_writes(sent) == [("POST", {"name": "Refrigerator"})]
+
+
+def test_a_fridge_a_custom_category_owns_is_not_reused(monkeypatch):
+    # The user files drinks in Grocy's Fridge through a category of their own,
+    # so everyday fridge food still gets a place of its own.
+    monkeypatch.setattr(grocy_mod.settings, "custom_storage_categories",
+                        [{"label": "Drinks", "location": "Fridge"}], raising=False)
+    locations = [{"id": 2, "name": "Fridge", "is_freezer": 0, "active": 1}]
+    sent = _mock_grocy(monkeypatch, [], locations)
+    item = FoodItem(name="Milk", storage_type=StorageType.refrigerated)
+    asyncio.run(GrocyClient().import_item(item))
+    assert _location_writes(sent) == [("POST", {"name": "Refrigerator"})]
+
+
+def test_a_freezer_created_here_is_a_freezer_in_grocy(monkeypatch):
+    sent = _mock_grocy(monkeypatch, [], [{"id": 2, "name": "Fridge"}])
+    item = FoodItem(name="Peas", storage_type=StorageType.frozen)
+    asyncio.run(GrocyClient().import_item(item))
+    assert _location_writes(sent) == [("POST", {"name": "Freezer", "is_freezer": 1})]
+
+
+def test_an_existing_freezer_is_left_as_it_is(monkeypatch):
+    # An install whose Freezer predates the flag keeps it unchanged.
+    locations = [{"id": 4, "name": "Freezer", "is_freezer": 0}]
+    sent = _mock_grocy(monkeypatch, [], locations)
+    item = FoodItem(name="Peas", storage_type=StorageType.frozen)
+    asyncio.run(GrocyClient().import_item(item))
+    assert _add_body(sent, 777).get("location_id") == 4
+    assert _location_writes(sent) == []
+
+
+def test_other_places_are_created_without_the_freezer_flag(monkeypatch):
+    sent = _mock_grocy(monkeypatch, [], [])
+    for storage in (StorageType.refrigerated, StorageType.room_temp, StorageType.dry):
+        asyncio.run(GrocyClient().import_item(FoodItem(name="Rice", storage_type=storage)))
+    assert [b for _, b in _location_writes(sent)] == [
+        {"name": "Refrigerator"}, {"name": "Counter / Room Temp"},
+        {"name": "Pantry / Dry Storage"}]

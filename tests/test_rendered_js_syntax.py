@@ -158,6 +158,7 @@ def _stock(monkeypatch):
 
     monkeypatch.setattr(GrocyClient, "get_full_stock", _full_stock)
     monkeypatch.setattr(GrocyClient, "get_expiring", _expiring)
+    monkeypatch.setattr(GrocyClient, "get_expiring_by_date", _expiring)
     monkeypatch.setattr(GrocyClient, "get_stock", _stock_rows)
     monkeypatch.setattr(GrocyClient, "get_products", _products)
 

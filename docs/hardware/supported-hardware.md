@@ -34,8 +34,11 @@ applies, see [Pi reliability and memory tiers](pi-reliability.md).
 Debian 12 and 13, and Ubuntu 24.04.
 
 **Stream Deck and Bluetooth thermometer helpers:** these run directly on the host
-rather than in Docker, so they need Python 3.10 or newer on that machine. Every
-tested operating system above already ships a recent enough Python.
+rather than in Docker, so they need Python 3.10 or newer on that machine, and
+3.11 or newer is recommended: on Python 3.10 the Stream Deck stays on Pillow
+12.3 and misses the image security fixes in Pillow 13 (see
+[Stream Deck controllers](../hardware.md#stream-deck-controllers)). Every tested
+operating system above already ships Python 3.11 or newer.
 
 ## Tested boards
 

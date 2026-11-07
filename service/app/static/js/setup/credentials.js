@@ -427,6 +427,7 @@
       var res = await postJSON('setup/security/signout-everywhere', {});
       result('signout-everywhere-result', res.ok,
              res.ok ? 'Every other browser is signed out.' : errorText(res.data, 'That did not work.'));
+      if (res.ok && typeof loadSignins === 'function') loadSignins();
     });
     var signout = el('kiosk-signout-btn');
     if (signout) signout.addEventListener('click', async function () {

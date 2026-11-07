@@ -160,3 +160,41 @@ def test_synonyms_reach_the_shopping_list_split():
     out = partition_recipe_ingredients(
         [{"note": "aubergine"}, {"note": "rocket"}], [{"name": "Eggplant"}])
     assert out == {"owned": ["aubergine"], "needed": ["rocket"]}
+
+
+def test_plural_forms_and_synonyms_count_as_in_stock():
+    tiers = classify_recipes(
+        [recipe("Peach Cobbler", ["4 peaches, sliced", "heavy cream"]),
+         recipe("Soup", ["2 potatoes", "chicken broth", "broccoli florets"])],
+        [stock("Peach"), stock("Cream"), stock("Potato", bucket="pantry"),
+         stock("Chicken Stock", bucket="pantry"), stock("Broccoli")])
+    assert sorted(r["name"] for r in tiers["ready"]) == ["Peach Cobbler", "Soup"]
+
+
+def test_a_different_food_with_the_same_last_word_is_not_in_stock():
+    tiers = classify_recipes(
+        [recipe("Mash", ["potatoes", "cream"])],
+        [stock("Sweet Potatoes"), stock("Vanilla Ice Cream", bucket="frozen", days=60)])
+    assert not tiers["ready"] and not tiers["staples"]
+
+
+def test_the_first_matching_stock_row_wins_across_alternatives():
+    # "butter or margarine" offers two heads; the stock row that comes first
+    # is the one credited, exactly as a full scan would pick it.
+    tiers = classify_recipes(
+        [recipe("Toast", ["margarine or butter"])],
+        [stock("Butter", days=2), stock("Margarine", days=1)])
+    assert tiers["ready"][0]["expiring_items_used"] == ["Butter"]
+
+
+def test_classify_scales_to_a_large_library():
+    import time
+    foods = ["chicken breast", "onion", "tomato", "potato", "milk", "rice",
+             "spinach", "lemon", "beef", "salmon", "egg", "yogurt"]
+    inv = [stock(f"Brand {foods[i % len(foods)]} {chr(97 + i % 26)}x")
+           for i in range(400)]
+    lib = [recipe(f"r{n}", [f"1 cup {foods[(n + k) % len(foods)]}"
+                            for k in range(12)]) for n in range(1000)]
+    start = time.perf_counter()
+    classify_recipes(lib, inv)
+    assert time.perf_counter() - start < 5

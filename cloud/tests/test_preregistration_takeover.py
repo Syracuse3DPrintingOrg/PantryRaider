@@ -72,7 +72,8 @@ def google_as_victim(monkeypatch):
     def handler(request):
         if request.url.host == "oauth2.googleapis.com":
             return httpx.Response(200, json={"access_token": "at"})
-        return httpx.Response(200, json={"email": VICTIM, "email_verified": True})
+        return httpx.Response(200, json={"email": VICTIM, "email_verified": True,
+                                         "sub": "sub-victim"})
     monkeypatch.setattr(oauth_google, "transport", httpx.MockTransport(handler))
 
 

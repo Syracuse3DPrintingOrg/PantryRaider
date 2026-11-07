@@ -177,7 +177,7 @@ the device screen; the kiosk polls for them.
 |---|---|
 | `POST /events/notify` | Show a notification toast on the screen |
 | `POST /events/camera-popup` | Pop a named camera up full-screen for a few seconds |
-| `POST /events/navigate` | Navigate the kiosk to a page |
+| `POST /events/navigate` | Navigate the kiosk to a page: `{"path": "ui/cook"}` or a page name such as `"expiring"`; anything that is not a page is refused with a 400 |
 | `POST /events/test` | Send a test notification |
 | `GET /events/poll` | Long-poll for queued on-screen events (used by the kiosk) |
 
@@ -190,6 +190,22 @@ the device screen; the kiosk polls for them.
 | `POST /mealie/recipes/import-external` | Save an external-source recipe into the library |
 | `POST /mealie/recipes/extract-photo` | Vision-LLM extraction from a photographed recipe |
 | `POST /mealie/recipes/generate` | Ask the LLM to write a full recipe for a dish name |
+
+## Grocy Locations
+
+The buttons on the two Grocy location items in the Pending inbox. Both are
+Settings routes, so they take a signed-in owner or an admin key, and both
+answer `403` on a Bandit, whose Grocy is the main server's. Each reads Grocy
+again and does only what is still needed, so calling it twice is safe.
+
+| Endpoint | Description |
+|---|---|
+| `POST /setup/grocy/merge-fridges` | Move everything in Grocy's Fridge to Refrigerator, point products at Refrigerator, then hide Fridge (never deleted) |
+| `POST /setup/grocy/mark-freezer` | Mark the Freezer location as a freezer in Grocy |
+
+Both answer `{"ok": true, "message": ...}` when done. A merge that could not
+hide Fridge yet (stock Grocy would not move) answers `409`, and one Grocy
+refused answers `502`; both carry the reason in `error`.
 
 ## Appliance (Pi-only)
 

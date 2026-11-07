@@ -907,6 +907,29 @@ def test_grocys_own_freezer_date_on_arrival_stands(grocy):
     assert (result["new_best_by"], result["best_by_change"]) == (_d(60), "extended")
 
 
+def test_a_whole_move_reports_grocys_own_freezer_date(grocy):
+    """The whole-product Move dates each row before its transfer, and Grocy
+    then dates it again on the way into its freezer: the answer (and the
+    toast) carries the date Grocy holds."""
+    grocy.product["default_best_before_days_after_freezing"] = 60
+    grocy.add(3, _d(30))
+    grocy.add(1, _d(4))
+    result = _move(propose_best_by=plus_90)
+    assert grocy.at(FREEZER) == [(_d(60), 1), (_d(60), 3)]
+    assert sorted(u["new"] for u in result["best_by_updates"]) == [_d(60), _d(60)]
+    assert sorted(u["old"] for u in result["best_by_updates"]) == [_d(4), _d(30)]
+    assert (result["new_best_by"], result["best_by_change"]) == (_d(60), "extended")
+
+
+def test_a_whole_move_thawing_with_grocys_days_reports_them(grocy):
+    grocy.product["default_best_before_days_after_thawing"] = 2
+    grocy.add(1, _d(200), FREEZER)
+    result = _move(bucket="refrigerated")
+    assert grocy.at(FRIDGE) == [(_d(2), 1)]
+    assert result["best_by_updates"] == [{"old": _d(200), "new": _d(2)}]
+    assert (result["new_best_by"], result["best_by_change"]) == (_d(2), "shortened")
+
+
 def test_a_move_grocy_would_mix_with_other_stock_writes_nothing(grocy):
     """Checked before anything is written, even the new place: the pantry
     location does not exist yet in this Grocy."""
@@ -1131,3 +1154,76 @@ def test_a_finished_move_of_part_of_a_place_leaves_nothing_behind(grocy, first, 
     result = _move(from_location_id=FRIDGE, amount=want)
     assert result["moved_amount"] == pytest.approx(want)
     assert result["left_behind"] == 0
+
+
+# --- What the page showed, and the place-wide toss --------------------------------
+
+def test_a_row_that_still_holds_what_the_page_showed_is_used(grocy):
+    grocy.add(0.1, _d(9))
+    grocy.add(0.2, _d(9), price=1.0)
+    result = _run(GrocyClient().consume_stock_group(
+        1, 0.3, FRIDGE, _d(9), spoiled=True, expected_amount=0.1 + 0.2))
+    assert result["complete"] is True
+    assert grocy.at(FRIDGE) == []
+
+
+def test_a_row_that_changed_since_the_page_loaded_writes_nothing(grocy):
+    grocy.add(2, _d(9))                 # the page showed 3; someone used one
+    refused = _refused(GrocyClient().consume_stock_group(
+        1, 3, FRIDGE, _d(9), spoiled=True, expected_amount=3))
+    assert refused.kind == "changed"
+    assert str(refused) == ("This row changed since the page loaded: it now holds 2, "
+                            "not 3. Nothing was changed.")
+    assert grocy.writes() == []
+
+
+def test_a_row_emptied_since_the_page_loaded_is_gone(grocy):
+    grocy.add(2, _d(3))
+    refused = _refused(GrocyClient().consume_stock_group(
+        1, 1, FRIDGE, _d(9), expected_amount=1))
+    assert (refused.kind, str(refused)) == ("gone", BEST_BY_ROW_GONE)
+
+
+def test_an_opened_twin_refusal_says_the_place_wide_toss_can_help(grocy):
+    opened = grocy.add(1, _d(20), opened=True)
+    grocy.add(3, _d(9), stock_id=opened["stock_id"])
+    refused = _refused(GrocyClient().consume_stock_group(1, 3, FRIDGE, _d(9), spoiled=True))
+    assert refused.opened_first is True
+
+
+def test_an_earlier_date_refusal_offers_no_place_wide_toss(grocy):
+    earlier = grocy.add(1, _d(2))
+    grocy.add(2, _d(12), stock_id=earlier["stock_id"])
+    refused = _refused(GrocyClient().consume_stock_group(1, 2, FRIDGE, _d(12)))
+    assert refused.opened_first is False
+
+
+def test_the_place_wide_toss_takes_the_rows_amount_in_grocys_order(grocy):
+    opened = grocy.add(1, _d(20), opened=True)
+    grocy.add(3, _d(9), stock_id=opened["stock_id"])
+    grocy.add(5, _d(9), FREEZER)
+    result = _run(GrocyClient().consume_stock_at_place(
+        1, 3, FRIDGE, _d(9), spoiled=True, expected_amount=3))
+    assert grocy.sent("POST", "/consume") == [
+        {"amount": 3, "spoiled": True, "location_id": FRIDGE}]
+    assert result["complete"] is True and result["place_wide"] is True
+    # The opened one went first, as the question said; the freezer is untouched.
+    assert grocy.at(FRIDGE) == [(_d(9), 1)]
+    assert grocy.at(FREEZER) == [(_d(9), 5)]
+
+
+def test_the_place_wide_toss_still_checks_what_the_page_showed(grocy):
+    opened = grocy.add(1, _d(20), opened=True)
+    grocy.add(2, _d(9), stock_id=opened["stock_id"])
+    refused = _refused(GrocyClient().consume_stock_at_place(
+        1, 3, FRIDGE, _d(9), spoiled=True, expected_amount=3))
+    assert refused.kind == "changed"
+    assert grocy.writes() == []
+
+
+def test_the_place_wide_toss_refuses_tare_weight(grocy):
+    grocy.product["enable_tare_weight_handling"] = 1
+    grocy.add(400, _d(9))
+    refused = _refused(GrocyClient().consume_stock_at_place(1, 400, FRIDGE, _d(9)))
+    assert (refused.kind, str(refused)) == ("group", BEST_BY_ROW_TARE)
+    assert grocy.writes() == []

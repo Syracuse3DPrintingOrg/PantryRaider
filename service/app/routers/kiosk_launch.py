@@ -54,6 +54,8 @@ async def launch(request: Request, ticket: str = "", next: str = "", probe: str 
             request.session["role"] = "kiosk"
             request.session["kiosk_day"] = date.today().isoformat()
             request.session["kiosk_gen"] = auth_state.kiosk_gen()
+            from ..services import sessions
+            sessions.new_id(request.session)
             if pin_ok:
                 request.session["pin_ok"] = True
             try:

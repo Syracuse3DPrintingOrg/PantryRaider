@@ -39,6 +39,7 @@ nav:
   - Recipes and cooking:
       - "Recipes: built in, Mealie optional": recipe-backend-comparison.md
       - Cook page and Cook wizard: cooking.md
+      - Your own recipe databases: recipe-catalogs.md
   - Extending and adjusting best-by dates: reducing-waste.md
   - Using your phone's camera: phone-camera.md
   - Personalization and on-screen features: personalization.md

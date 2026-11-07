@@ -330,7 +330,9 @@ def test_remote_mode_streamdeck_drives_local_app(tmp_path):
     rc, out = run_firstboot(
         tmp_path,
         "DEPLOYMENT_MODE=pi_remote\nREMOTE_SERVER_URL=http://server.local:9284\n",
-        extra_env={"FORCE_STREAMDECK": "1"},
+        # Name the device account, so the deck step runs on a test host that
+        # has no uid 1000 user (a container, for one).
+        extra_env={"FORCE_STREAMDECK": "1", "APPLIANCE_USER": "pi"},
     )
     assert rc == 0, out
     # The satellite's deck drives its own local app on port 80, not the server.

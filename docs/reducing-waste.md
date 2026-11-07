@@ -11,18 +11,24 @@ Waste summary can show you what keeps losing the race.
 
 The Expiring page (under Inventory) lists everything within a week of its
 best-by date, soonest first, with a colored badge showing how many days are
-left or how long ago it lapsed. From each row you can mark the item consumed
-(which removes it from your stock), toss it when it went bad, print a label
-for it when printing is set up, and pass it the sniff test.
+left or how long ago it lapsed. Each row is the stock with one best-by date in
+one place: three yogurts that expired in the fridge and two that are still
+good get rows of their own, and the good ones only show up once their own date
+comes into the window. From each row you can mark that stock consumed (which
+removes it from your stock), toss it when it went bad, print a label for it
+when printing is set up, and pass it the sniff test. Every button acts on the
+row's own stock and nothing else, so tossing the expired yogurts never takes
+the good ones with them.
 
 ## The sniff test: keep it a little longer
 
 A date on the package is a guess, and plenty of food is still good past it.
 When you have checked an item and it looks and smells fine, the **Sniff test**
 buttons on its row push the best-by date out without you editing anything:
-**+1d**, **+3d**, or **+5d**. Pantry Raider moves every dated entry of that
-product forward by that many days (counting from today when the item is already
-past its date) and tells you the new best-by date. The item then drops down the
+**+1d**, **+3d**, or **+5d**. Pantry Raider moves that row's best-by date
+forward by that many days (counting from today when the item is already past
+its date) and tells you the new date. The same item kept somewhere else, like a
+chicken in the freezer good until next year, keeps its own date. The item then drops down the
 list, or off it, so it stops nagging you until the new date comes around.
 
 The sniff test only appears where it makes sense. An item whose date is a
@@ -32,14 +38,17 @@ silent gap; using the item up or tossing it still takes one tap. The sniff
 test also meets you on the Review screen: when a scanned item is already
 sitting in your stock and about to expire, its review card offers the same
 +1, +3, and +5 buttons, so you can deal with the older stock without leaving
-the review.
+the review. The card names the stock it means, for example "3 Greek Yogurt in
+the Fridge expired 2 days ago", and its buttons act on just that.
 
 ## Toss it: when something did not make it
 
 When an item on the Expiring list is past saving, the toss button beside the
 consume check removes it from stock recorded as spoiled instead of eaten. It
-asks first, then confirms what happened. The Review screen's sniff-test card
-offers the same way out for older stock that fails the sniff. The distinction
+asks first, naming how much and which date ("Toss 3 Greek Yogurt (best by
+Oct 25)?"), then confirms what happened. The Review screen's sniff-test card
+offers the same way out for older stock that fails the sniff, and it tosses
+only the stock the card names. The distinction
 matters: consumed food fed someone and tossed food did not, and keeping the
 two honest is what makes the Waste summary worth reading.
 
@@ -138,3 +147,34 @@ Expiry Defaults the app uses everywhere else, so an expiry rule you have edited
 for a product is what a move uses, ahead of the community table and the
 built-in rules of thumb (the full order is on
 [Community shelf life and privacy](community-shelf-life.md)).
+
+Grocy can set the date too. If you give a product freezing or thawing days in
+Grocy itself, Grocy dates it as it goes into or comes out of a place Grocy
+knows is a freezer, and the confirmation shows the date Grocy kept. Products
+without those days, which includes every product Pantry Raider adds, keep the
+dates described above.
+
+### One fridge and one freezer in Grocy
+
+A new Grocy comes with a place called Fridge, and Pantry Raider files fridge
+food there. A Freezer that Pantry Raider adds is marked as a freezer in Grocy.
+
+An install set up with an earlier release may have two fridges in Grocy, Fridge and
+Refrigerator, and a Freezer that Grocy does not know is a freezer. The Pending
+page offers to fix each one, and nothing changes in Grocy until you press its
+button:
+
+- **Merge** moves everything in Fridge to Refrigerator with the same amounts,
+  best-by dates and opened items, sets products that belonged in Fridge to
+  Refrigerator, then hides Fridge in Grocy. Nothing is deleted, and Grocy's
+  history keeps its old entries. If the merge is interrupted, press Merge again
+  and it carries on from where it stopped. Grocy cannot move a product weighed
+  with its container, so the item names any such product; change its location
+  in Grocy and press Merge again.
+- **Mark as freezer** marks Freezer as a freezer in Grocy and changes nothing
+  else.
+
+Either item can be snoozed or archived instead, and once it is done or archived
+it does not come back. Only someone who can change Settings sees the buttons.
+A place of your own, such as a Garage Fridge, or one a custom storage category
+uses, is never merged.

@@ -38,12 +38,17 @@ from . import (
     streamdeck_profiles,
     access_point,
     calibrate,
+    grocy_locations,
+    recipe_databases,
+    passkeys,
+    signins,
 )
 
 _SUBMODULES = (
     _common, deployment, page, appearance, cloud, remote_access, presets, save,
     connections, totp, display, system, updates, streamdeck, cameras,
-    streamdeck_profiles, access_point, calibrate,
+    streamdeck_profiles, access_point, calibrate, grocy_locations,
+    recipe_databases, passkeys, signins,
 )
 
 for _mod in _SUBMODULES:

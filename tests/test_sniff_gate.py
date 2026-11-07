@@ -124,7 +124,7 @@ def _page(client, items):
     async def fake_products(self):
         return []
 
-    with patch.object(GrocyClient, "get_expiring", fake_expiring), \
+    with patch.object(GrocyClient, "get_expiring_by_date", fake_expiring), \
          patch.object(GrocyClient, "_get", fake_get), \
          patch.object(GrocyClient, "get_products", fake_products), \
          patch.object(type(settings), "is_configured", lambda self: True):

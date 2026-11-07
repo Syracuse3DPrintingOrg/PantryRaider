@@ -11,6 +11,8 @@
 // Deliberate properties:
 //   * Zero cost on the app's own pages: the script returns before touching
 //     the DOM when the origin matches, so kiosk pages are byte-identical.
+//     The one exception is an app address that is not a page (a JSON reply
+//     or error body), which goes home after a minute without a touch.
 //   * Fails closed: an unbaked or unparseable home URL means no button and
 //     no gesture, never a navigation to a junk address.
 //   * Page-proof: styles are set inline with !important so site CSS cannot
@@ -28,14 +30,28 @@
   var home;
   try { home = new URL(HOME); } catch (e) { return; }
   if (home.protocol !== "http:" && home.protocol !== "https:") return;
+  // Captured once: the page can neither read this (isolated world) nor
+  // change where the button goes.
+  var HOME_HREF = home.href;
+  // The app's own address showing something that is not a page (a JSON reply,
+  // an error body, an image): it has no app script to move the screen along,
+  // so go home after a minute without a touch (FoodAssistant-ye112). Real app
+  // pages are HTML and skip this, so they stay untouched.
+  if (location.origin === home.origin && window.top === window &&
+      !/html/i.test(document.contentType || "text/html")) {
+    var STRANDED_MS = 60000;
+    var strandedTimer = setTimeout(function () { location.assign(HOME_HREF); }, STRANDED_MS);
+    window.addEventListener("touchstart", function () {
+      clearTimeout(strandedTimer);
+      strandedTimer = setTimeout(function () { location.assign(HOME_HREF); }, STRANDED_MS);
+    }, { passive: true, capture: true });
+    return;
+  }
   // Never on the app's own pages, and only in the top frame (the manifest
   // already says all_frames: false; this guards a future manifest edit).
   if (location.origin === home.origin) return;
   if (window.top !== window) return;
 
-  // Captured once: the page can neither read this (isolated world) nor
-  // change where the button goes.
-  var HOME_HREF = home.href;
   function goHome() { location.assign(HOME_HREF); }
 
   var BTN_ID = "pantry-raider-return";

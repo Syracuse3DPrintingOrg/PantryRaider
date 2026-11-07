@@ -11,12 +11,22 @@ Two ceremonies, each a begin/finish pair:
   session, exactly like a password login.
 
 A passkey is always an addition. Registering one never touches the password or
-two-factor sign-in, and both keep working. Challenges live server-side in
+two-factor sign-in, and both keep working. Adding one needs proof beyond the
+session cookie (the password, a current authenticator code, or for an account
+with no password a sign-in in the last few minutes), because a passkey outlives
+a password change: a stolen cookie must not be able to enrol its own. The owner
+is emailed whenever one is added.
+
+A sign-in whose assertion carries user verification (the device checked a
+fingerprint, face or PIN) counts as both factors and opens a session straight
+away. One without it is only something the person has, so an account with
+two-factor on goes on to the code step, exactly as after a password. Challenges live server-side in
 webauthn_challenges, named by a short-lived HttpOnly cookie, so a finish cannot
 be replayed or guessed. Only public keys are stored, never a secret.
 """
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Request
@@ -28,10 +38,15 @@ from .. import ratelimit, webauthn_service as wa
 from ..config import settings
 from ..deps import (ACCOUNT_DISABLED_MESSAGE, client_ip, cookie_account,
                     delete_flow_cookie, flow_cookie, get_db, rate_ip,
-                    require_same_origin, set_session_cookie, utc_now_iso)
-from ..models import Account, WebAuthnChallenge, WebAuthnCredential
+                    require_same_origin, session_cookie_token,
+                    set_session_cookie, utc_now_iso)
+from ..email import base_url, send_email
+from ..models import Account, AuthSession, WebAuthnChallenge, WebAuthnCredential
 from ..security import new_token, token_hash
-from .accounts import _issue_session
+from .accounts import (_issue_session, authenticate, clear_totp_failures,
+                       consume_totp, register_totp_failure, totp_locked)
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(include_in_schema=False)
 
@@ -47,6 +62,18 @@ _ADD_FAILED = ("That did not work. Try adding your passkey again, and make sure 
                "you finish the prompt from your device.")
 _SIGNIN_FAILED = ("That did not work. Try again, and make sure you finish the "
                   "prompt from your device.")
+
+# How recently an account with no password must have signed in for that
+# sign-in to stand in for re-entering a password when it adds a passkey.
+RECENT_SIGNIN_MINUTES = 10
+
+_STEP_UP_PASSWORD = "To add a passkey, first enter your account password."
+_STEP_UP_PASSWORD_OR_CODE = ("To add a passkey, first enter your account "
+                             "password or a code from your authenticator app.")
+_STEP_UP_CODE = ("To add a passkey, first enter a code from your "
+                 "authenticator app.")
+_STEP_UP_REAUTH = ("To add a passkey, sign out and sign back in, then add it "
+                   f"within {RECENT_SIGNIN_MINUTES} minutes.")
 
 
 def _client(request: Request) -> str:
@@ -119,17 +146,131 @@ async def _json_body(request: Request) -> dict:
     return body if isinstance(body, dict) else {}
 
 
+# --- Step-up before adding a passkey ---------------------------------------
+
+def _step_up_fail(account: Account, message: str = "") -> JSONResponse:
+    """Refuse a passkey add that has not proved it is the owner, saying which
+    proof this account can give. ``step_up`` tells the page what to ask for:
+    "password", "code", or "reauth" (sign in again)."""
+    has_password = bool(account.password_hash)
+    has_code = bool(account.totp_enabled)
+    accepts = []
+    if has_password:
+        accepts.append("password")
+    if has_code:
+        accepts.append("code")
+    if not accepts:
+        accepts = ["reauth"]
+    if not message:
+        if has_password and has_code:
+            message = _STEP_UP_PASSWORD_OR_CODE
+        elif has_password:
+            message = _STEP_UP_PASSWORD
+        elif has_code:
+            message = _STEP_UP_CODE
+        else:
+            message = _STEP_UP_REAUTH
+    return JSONResponse(status_code=403,
+                        content={"error": message, "step_up": accepts})
+
+
+def _signed_in_recently(db: Session, request: Request) -> bool:
+    """Whether this browser's session was opened in the last few minutes."""
+    token = session_cookie_token(request, db)
+    if not token:
+        return False
+    sess = (db.query(AuthSession)
+            .filter_by(token_hash=token_hash(token)).first())
+    if not sess or not sess.created_at:
+        return False
+    try:
+        opened = datetime.fromisoformat(sess.created_at)
+    except ValueError:
+        return False
+    if opened.tzinfo is None:
+        opened = opened.replace(tzinfo=timezone.utc)
+    age = datetime.now(timezone.utc) - opened
+    return timedelta(0) <= age <= timedelta(minutes=RECENT_SIGNIN_MINUTES)
+
+
+def _step_up(db: Session, request: Request, account: Account,
+             body: dict) -> JSONResponse | None:
+    """None when the caller has proved it is the owner, else the refusal.
+
+    A session cookie alone is not enough: a passkey keeps working after the
+    password changes and skips the code step, so a stolen cookie that could
+    add one would keep the account for good. Accepted proof, in order: the
+    account password (through authenticate, so wrong guesses count toward the
+    same lockout as the login page), a current authenticator or recovery code
+    (with the same lockout as the code step), or, for an account with no
+    password, a session opened in the last few minutes."""
+    password = body.get("password") or ""
+    code = body.get("code") or ""
+    if not isinstance(password, str) or not isinstance(code, str):
+        return _step_up_fail(account)
+    code = code.strip()
+    refusal = None
+    if password and account.password_hash:
+        ok, locked = authenticate(db, account.email, password)
+        if locked:
+            return _fail(locked, 429)
+        if ok and ok.id == account.id:
+            return None
+        refusal = _step_up_fail(account, "That password did not match.")
+    if code and account.totp_enabled:
+        if totp_locked(account):
+            return _fail("Too many attempts. Wait a few minutes and try "
+                         "again.", 429)
+        if consume_totp(db, account, code):
+            clear_totp_failures(db, account)
+            return None
+        register_totp_failure(db, account)
+        refusal = _step_up_fail(account, "That code did not match.")
+    if refusal is not None:
+        return refusal
+    if not account.password_hash and _signed_in_recently(db, request):
+        return None
+    return _step_up_fail(account)
+
+
+def _send_passkey_added(account: Account, nickname: str) -> None:
+    """Tell the owner a passkey was just added, so one they did not add is
+    noticed. A no-op when outgoing email is not set up; never raises."""
+    text = (
+        f"A passkey named \"{nickname}\" was just added to your Forager "
+        "account. It can now be used to sign in.\n\n"
+        "If you added it, there is nothing else to do.\n\n"
+        "If you did not, remove it from the Security section of your account "
+        "page right away, then change your password:\n"
+        f"{base_url()}/account#security\n"
+    )
+    try:
+        send_email(account.email, "A passkey was added to your Forager account",
+                   text)
+    except Exception:  # pragma: no cover - send_email already never raises
+        log.warning("passkey-added email failed for account %s", account.id)
+
+
 # --- Registration: a signed-in account adds a passkey ---------------------
 
 @router.post("/account/passkeys/register/begin")
-def register_begin(request: Request,
-                   account: Account | None = Depends(cookie_account),
-                   db: Session = Depends(get_db),
-                   _csrf: None = Depends(require_same_origin)):
+async def register_begin(request: Request,
+                         account: Account | None = Depends(cookie_account),
+                         db: Session = Depends(get_db),
+                         _csrf: None = Depends(require_same_origin)):
+    body = await _json_body(request)
+    return await run_in_threadpool(_register_begin, request, account, db, body)
+
+
+def _register_begin(request: Request, account: Account | None, db: Session,
+                    body: dict) -> JSONResponse:
     if not account:
         return _fail("Please sign in first.", 401)
     if _too_many(request, account.id):
         return _fail("Too many attempts. Wait a minute and try again.", 429)
+    refused = _step_up(db, request, account, body)
+    if refused is not None:
+        return refused
     rp_id, _origin = wa.rp_id_and_origin(request)
     existing = (db.query(WebAuthnCredential)
                 .filter_by(account_id=account.id).all())
@@ -199,8 +340,10 @@ def _register_finish(request: Request, account: Account | None, db: Session,
         account_id=account.id, credential_id=cred_id_b64,
         public_key=wa.bytes_to_base64url(verified.credential_public_key),
         sign_count=verified.sign_count or 0, transports=transports,
-        nickname=nickname, created_at=utc_now_iso()))
+        nickname=nickname, created_at=utc_now_iso(),
+        user_verified=1 if getattr(verified, "user_verified", False) else 0))
     db.commit()
+    _send_passkey_added(account, nickname)
     out = JSONResponse(content={"ok": True, "nickname": nickname})
     delete_flow_cookie(out, REG_COOKIE)
     return out
@@ -304,6 +447,16 @@ def _login_finish(request: Request, db: Session, body: dict) -> JSONResponse:
     cred.sign_count = verified.new_sign_count
     cred.last_used_at = utc_now_iso()
     db.commit()
+    if account.totp_enabled and not getattr(verified, "user_verified", False):
+        # The device did not check who was holding it, so this proves only
+        # that someone has the key. Treat it like a correct password: the
+        # account's code step still stands between it and a session.
+        from .portal import mint_totp_challenge, set_totp_pending_cookie
+        pending = mint_totp_challenge(db, account.id)
+        out = JSONResponse(content={"ok": True, "next": "/login/2fa"})
+        set_totp_pending_cookie(out, pending)
+        delete_flow_cookie(out, AUTH_COOKIE)
+        return out
     # Open the normal portal session, the same one a password login gets.
     token = _issue_session(db, account.id)
     out = JSONResponse(content={"ok": True, "next": "/account"})

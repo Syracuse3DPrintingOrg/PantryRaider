@@ -714,14 +714,25 @@ def session_is_current(session) -> bool:
 
 
 def stamp_session(session) -> None:
-    """Mark a session as opened now, so it survives until the next bump."""
+    """Mark a session as opened now, so it survives until the next bump.
+
+    Every sign-in comes through here, so it also gives the browser a fresh
+    sign-in id (services/sessions.py): an id from before the sign-in, or one
+    copied out of this browser earlier, never carries over."""
     session["session_gen"] = session_gen()
+    from . import sessions
+    old = session.get(sessions.SID_KEY)
+    sessions.new_id(session)
+    if isinstance(old, str) and old:
+        sessions.revoke(old)
 
 
 def sign_out_others(session) -> int:
     """Bump the generation and keep only ``session`` signed in."""
     gen = bump_session_gen()
     session["session_gen"] = gen
+    from . import sessions
+    sessions.revoke_all_but(session.get(sessions.SID_KEY))
     return gen
 
 

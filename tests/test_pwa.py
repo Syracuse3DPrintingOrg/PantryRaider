@@ -98,7 +98,7 @@ def test_base_html_wires_manifest_and_theme_color(client):
     # /ui/ now redirects to the chrome-free Glance home; the manifest wiring lives
     # in the shared base.html chrome, so check a content page (FoodAssistant-gg33).
     page = client.get("/ui/inventory").text
-    assert '<link rel="manifest" href="/manifest.webmanifest">' in page
+    assert '<link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials">' in page
     assert 'name="theme-color"' in page
     # The service worker is registered, guarded to a secure context / localhost.
     assert "serviceWorker" in with_page_scripts(page)
@@ -135,7 +135,7 @@ def test_manifest_and_link_follow_the_ingress_prefix(client):
     prefix = "/api/hassio_ingress/tok"
     hdr = {"X-Ingress-Path": prefix}
     page = client.get("/ui/inventory", headers=hdr).text
-    assert f'<link rel="manifest" href="{prefix}/manifest.webmanifest">' in page
+    assert f'<link rel="manifest" href="{prefix}/manifest.webmanifest" crossorigin="use-credentials">' in page
     assert 'head-boot.js?v=' in page and 'data-sw="off"' in page
     data = client.get("/manifest.webmanifest", headers=hdr).json()
     assert data["start_url"] == prefix + "/"

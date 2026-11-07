@@ -132,7 +132,8 @@ class _Auth:
 def test_passkey_register_finish_is_off_loop(seen, monkeypatch):
     monkeypatch.setattr(wa, "verify_registration", lambda **kw: _Reg())
     browser = _portal_client()
-    browser.post("/account/passkeys/register/begin")
+    browser.post("/account/passkeys/register/begin",
+                 json={"password": "hunter2222"})
     seen.clear()
     resp = browser.post("/account/passkeys/register/finish",
                         json={"credential": {"id": "x", "response": {}}})

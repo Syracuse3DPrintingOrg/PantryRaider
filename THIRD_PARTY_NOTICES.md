@@ -74,7 +74,7 @@ package's own license text ships inside its installed distribution.
 | python-multipart | Apache-2.0 |
 | jinja2 | BSD-3-Clause |
 | google-genai | Apache-2.0 |
-| anthropic | MIT |
+| anthropic | Apache-2.0 |
 | Pillow | MIT-CMU (HPND) |
 | pypdf | BSD-3-Clause |
 | pypdfium2 | BSD-3-Clause and Apache-2.0 (bundles PDFium, BSD-3-Clause) |

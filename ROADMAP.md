@@ -39,6 +39,8 @@ history of what's actually shipped, see the [changelog](CHANGELOG.md).
 ## Ahead
 
 - A dashboard builder for arranging your own home screen layout
+- Language settings: use Pantry Raider in your own language, from the
+  screens to food names and the recipes the AI writes
 - NFC tags for tracking leftovers
 - Smart scale support
 - Appliance orchestration, built safety-first: the app will only ever be

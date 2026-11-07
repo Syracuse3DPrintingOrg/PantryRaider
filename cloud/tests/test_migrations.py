@@ -381,3 +381,59 @@ def test_subscription_plan_migration_backfills_from_the_entitlement(tmp_path):
             "stripe_subscription_id, status, current_period_end, "
             "cancel_at_period_end, updated_at, plan) VALUES "
             "(NULL, '', 'sub_2', 'active', '', 0, 't', 'basic')"))
+
+
+def test_google_sub_and_passkey_uv_migration_keeps_existing_rows(tmp_path):
+    """The google_sub / user_verified migration applies on a database that
+    already holds accounts and passkeys, leaves both columns null on those
+    rows (so every existing sign-in works as before), and downgrades
+    cleanly."""
+    engine = create_engine(f"sqlite:///{tmp_path / 'sub.db'}")
+    cfg = _alembic_config()
+    with engine.begin() as connection:
+        cfg.attributes["connection"] = connection
+        command.upgrade(cfg, "4d5e6f7a8b9c")
+    with engine.begin() as c:
+        for i in (1, 2):
+            c.execute(text(
+                "INSERT INTO accounts (id, email, password_hash, auth_provider,"
+                " email_verified, disabled, failed_logins, locked_until, "
+                "totp_secret, totp_enabled, totp_failures, totp_locked_until, "
+                "totp_last_step, recipe_upload_authorized, "
+                "recipe_upload_blocked, pending_trial_key, barcode_trust, "
+                f"created_at) VALUES ({i}, 'u{i}@example.com', '', 'google', 1,"
+                " 0, 0, '', '', 0, 0, '', 0, 0, 0, '', '', 't')"))
+        c.execute(text(
+            "INSERT INTO webauthn_credentials (account_id, credential_id, "
+            "public_key, sign_count, transports, nickname, created_at, "
+            "last_used_at) VALUES (1, 'cred', 'pk', 3, 'usb', 'Key', 't', '')"))
+
+    with engine.begin() as connection:
+        cfg.attributes["connection"] = connection
+        command.upgrade(cfg, "head")
+    with engine.begin() as c:
+        assert c.execute(text(
+            "SELECT COUNT(*) FROM accounts WHERE google_sub IS NULL")
+        ).scalar() == 2
+        assert c.execute(text(
+            "SELECT user_verified FROM webauthn_credentials")).scalar() is None
+        # Two different subs are fine; the same one twice is refused.
+        c.execute(text("UPDATE accounts SET google_sub='a' WHERE id=1"))
+    try:
+        with engine.begin() as c:
+            c.execute(text("UPDATE accounts SET google_sub='a' WHERE id=2"))
+        raise AssertionError("a Google account id was stored twice")
+    except Exception as exc:  # IntegrityError from the unique index
+        assert "UNIQUE" in str(exc).upper()
+
+    with engine.begin() as connection:
+        cfg.attributes["connection"] = connection
+        command.downgrade(cfg, "4d5e6f7a8b9c")
+    insp = inspect(engine)
+    assert "google_sub" not in {c["name"] for c in insp.get_columns("accounts")}
+    assert "user_verified" not in {
+        c["name"] for c in insp.get_columns("webauthn_credentials")}
+    with engine.begin() as c:
+        assert c.execute(text("SELECT COUNT(*) FROM accounts")).scalar() == 2
+        assert c.execute(text(
+            "SELECT sign_count FROM webauthn_credentials")).scalar() == 3

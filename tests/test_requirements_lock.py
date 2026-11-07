@@ -14,10 +14,16 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from packaging.markers import Marker
+
 REPO = Path(__file__).resolve().parents[1]
 REQUIREMENTS = REPO / "service" / "requirements.txt"
 LOCK = REPO / "service" / "requirements.lock"
 DOCKERFILE = REPO / "service" / "Dockerfile"
+# The image's Python (service/Dockerfile) and the oldest Python a Pi Remote
+# host pip-installs requirements.txt into (Ubuntu 22.04).
+IMAGE_PYTHON = "3.12"
+OLDEST_HOST_PYTHON = "3.10"
 
 # "name[extra]==1.2.3  # trailing comment" -> ("name", "1.2.3")
 _PIN = re.compile(r"^([A-Za-z0-9._-]+)\s*(?:\[[^\]]*\])?\s*==\s*([^\s;#]+)")
@@ -39,12 +45,25 @@ def _requirement_lines() -> list[str]:
     return lines
 
 
-def _direct_pins() -> dict[str, str]:
+def _applies(line: str, python: str) -> bool:
+    """Whether a line's environment marker (if any) holds on that Python."""
+    spec = line.split("#")[0]
+    if ";" not in spec:
+        return True
+    return Marker(spec.split(";", 1)[1].strip()).evaluate({"python_version": python})
+
+
+def _direct_pins(python: str = IMAGE_PYTHON) -> dict[str, str]:
+    """Name -> the pinned version that installs on that Python."""
     pins = {}
     for line in _requirement_lines():
         m = _PIN.match(line)
         assert m, f"requirements.txt line is not an exact pin: {line!r}"
-        pins[_normalize(m.group(1))] = m.group(2)
+        if not _applies(line, python):
+            continue
+        name = _normalize(m.group(1))
+        assert name not in pins, f"{name} is pinned twice for Python {python}"
+        pins[name] = m.group(2)
     return pins
 
 
@@ -68,9 +87,23 @@ def test_every_requirement_is_an_exact_pin():
     """No floors. `anthropic>=0.45.0` silently shipped a different SDK on every
     rebuild, which is exactly what a lock is supposed to prevent."""
     for line in _requirement_lines():
-        assert "==" in line, f"requirements.txt line is not pinned: {line!r}"
-        assert not re.search(r"[<>~!]=|[<>]", line.split("#")[0]), (
+        spec = line.split("#")[0].split(";")[0]
+        assert "==" in spec, f"requirements.txt line is not pinned: {line!r}"
+        assert not re.search(r"[<>~!]=|[<>]", spec), (
             f"requirements.txt line uses a range instead of a pin: {line!r}")
+
+
+def test_every_package_is_pinned_for_the_image_and_for_python_3_10():
+    """Pi Remote hosts pip-install this file into their own Python, 3.10 on
+    Ubuntu 22.04. A pin that needs 3.11 comes as a marker pair, and the pair
+    has to cover both sides, or one side installs nothing for that package."""
+    assert set(_direct_pins(IMAGE_PYTHON)) == set(_direct_pins(OLDEST_HOST_PYTHON))
+    for line in _requirement_lines():
+        spec = line.split("#")[0]
+        if ";" in spec:
+            assert re.fullmatch(r"python_version\s*[<>]=?\s*'3\.\d+'",
+                                spec.split(";", 1)[1].strip()), (
+                f"only python_version markers are expected here: {line!r}")
 
 
 def test_lock_covers_every_direct_pin_at_the_same_version():

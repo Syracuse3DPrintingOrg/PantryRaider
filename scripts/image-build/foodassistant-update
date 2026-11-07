@@ -39,6 +39,8 @@
 #   SERVICE    - the web UI systemd unit to restart after an app refresh
 #   SD_DST     - deployed Stream Deck package the deck service runs from
 #   SD_SERVICE - the Stream Deck systemd unit to restart after a deck refresh
+#   SD_REQ_DST - deployed copy of streamdeck/requirements.txt, the record of
+#                which deck pins the venv last installed
 set -uo pipefail
 
 # Candidate locations for the git checkout, in priority order. The first that
@@ -50,6 +52,10 @@ VENV_DIR="${VENV_DIR:-/opt/foodassistant/venv}"
 SERVICE="${SERVICE:-foodassistant-remote.service}"
 SD_DST="${SD_DST:-/opt/foodassistant/foodassistant_streamdeck}"
 SD_SERVICE="${SD_SERVICE:-foodassistant-streamdeck.service}"
+SD_REQ_DST="${SD_REQ_DST:-$(dirname "$SD_DST")/streamdeck-requirements.txt}"
+# Most seconds the deck's pip install may take (the budget may allow fewer).
+SD_PIP_TIMEOUT="${FA_SD_PIP_TIMEOUT:-300}"
+[[ "$SD_PIP_TIMEOUT" =~ ^[0-9]+$ ]] || SD_PIP_TIMEOUT=300
 GD_DST="${GD_DST:-/opt/foodassistant/foodassistant_gadgets}"
 GD_SERVICE="${GD_SERVICE:-foodassistant-gadgets.service}"
 # The kiosk browser caches the loaded page, so after redeploying the app we
@@ -1430,6 +1436,7 @@ fi
 restarted=0
 svc_synced=0
 sd_synced=0
+sd_deps=0
 gd_synced=0
 deps=0
 
@@ -1513,6 +1520,49 @@ sync_streamdeck() {
     sd_synced=1
   else
     log "WARN: could not sync $SD_DST"
+  fi
+}
+
+# Install the Stream Deck's Python dependencies when streamdeck/requirements.txt
+# changed (FoodAssistant-s50hg). The deck package sync above only copies code,
+# so without this a pin bump (a Pillow security fix, say) reached only devices
+# flashed afterwards. Gated like the service step: the checkout's file is
+# compared to the deployed copy at SD_REQ_DST, which is written only after pip
+# succeeds, so a failed or timed-out install keeps the packages already there,
+# never fails the update, and is tried again on the next run. A device without
+# the deck venv or package skips this. Sets sd_deps=1 on success; the caller
+# restarts SD_SERVICE.
+sync_streamdeck_deps() {
+  local src_req="$SRC/streamdeck/requirements.txt"
+  [ -f "$src_req" ] || return 0
+  [ -x "$VENV_DIR/bin/pip" ] || return 0
+  [ -d "$SD_DST" ] || return 0
+  if [ -f "$SD_REQ_DST" ]; then
+    local sa da
+    sa="$(sha1sum "$src_req" 2>/dev/null | cut -d' ' -f1)"
+    da="$(sha1sum "$SD_REQ_DST" 2>/dev/null | cut -d' ' -f1)"
+    if [ -n "$sa" ] && [ "$sa" = "$da" ]; then
+      log "Stream Deck requirements unchanged; skipping pip install."
+      return 0
+    fi
+  fi
+  # Leave room for the rest of the run (the health wait and a restart).
+  local _pt=$(( $(_budget_left) - HEALTH_TIMEOUT - 60 ))
+  [ "$_pt" -gt "$SD_PIP_TIMEOUT" ] && _pt="$SD_PIP_TIMEOUT"
+  if [ "$_pt" -lt 30 ]; then
+    log "Stream Deck requirements changed, but too little time is left this run; installing them next time."
+    return 0
+  fi
+  log "Stream Deck requirements changed; installing into venv at $VENV_DIR (up to ${_pt}s)"
+  if timeout "$_pt" "$VENV_DIR/bin/pip" install --quiet -r "$src_req"; then
+    if cp -f "$src_req" "$SD_REQ_DST" 2>/dev/null; then
+      chmod a+r "$SD_REQ_DST" 2>/dev/null || true
+    else
+      log "WARN: could not record $SD_REQ_DST; the deck dependencies will reinstall next run."
+    fi
+    sd_deps=1
+  else
+    log "WARN: Stream Deck dependency install failed; keeping the packages already installed."
   fi
 }
 
@@ -2779,40 +2829,94 @@ if [ -f "$COMPOSE_FILE" ] && command -v docker >/dev/null 2>&1; then
   # PHP fix for CVE-2026-109618 and CVE-2026-109619). Pull the new image, stop
   # Grocy, save its database beside the original, then start it on the new
   # image. A Grocy 4.6 database is upgraded to 4.7 on first start and cannot
-  # go back, which is why the copy comes first. Best effort: when the pull
-  # fails Grocy keeps running as it was, and the next update tries again.
+  # go back, which is why the copy comes first and why Grocy never moves
+  # without one. Best effort: when the pull, the copy or the start fails,
+  # Grocy stays on the image it had and the next update tries again.
+  # _grocy_held records that case, so nothing later in this run (the log-limit
+  # restart below) recreates Grocy on the new image without the copy.
+  _grocy_held=""
   _refresh_grocy_image() {
-    local cid want have src db stamp _gl
+    local cid want have old_id src db stamp _gl _f _copied _back
+    local rollback_tag="foodassistant/grocy-rollback:previous"
     cid="$(docker compose ps -q grocy 2>/dev/null | head -n1)"
     [ -n "$cid" ] || return 0
     want="$(REPO_DIR="$REPO" docker compose config --images grocy 2>/dev/null | head -n1)"
     have="$(docker inspect -f '{{.Config.Image}}' "$cid" 2>/dev/null)"
-    if [ -z "$want" ] || [ -z "$have" ] || [ "$want" = "$have" ]; then return 0; fi
+    if [ -z "$want" ] || [ -z "$have" ]; then
+      _grocy_held=1
+      log "WARN: could not tell which Grocy image is running, so Grocy stays as it is for now."
+      return 0
+    fi
+    [ "$want" = "$have" ] && return 0
+    _grocy_held=1
     log "Grocy runs $have; moving it to $want."
+    old_id="$(docker inspect -f '{{.Image}}' "$cid" 2>/dev/null)"
+    src="$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/config"}}{{.Source}}{{end}}{{end}}' "$cid" 2>/dev/null)"
+    db="$src/data/grocy.db"
+    if [ -z "$src" ] || [ ! -f "$db" ]; then
+      log "WARN: could not find Grocy's database to save a copy first, so Grocy stays on $have for now."
+      return 0
+    fi
     if ! _gl="$(REPO_DIR="$REPO" docker compose pull grocy 2>&1)"; then
       log "$_gl"
       log "WARN: could not download $want; Grocy keeps running as it was and the next update tries again."
       return 0
     fi
-    src="$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/config"}}{{.Source}}{{end}}{{end}}' "$cid" 2>/dev/null)"
-    REPO_DIR="$REPO" docker compose stop grocy >/dev/null 2>&1 || true
-    db="$src/data/grocy.db"
-    if [ -n "$src" ] && [ -f "$db" ]; then
-      stamp="$(date +%Y%m%d-%H%M%S)"
-      if cp -fp "$db" "$db.bak-$stamp"; then
-        log "Saved Grocy's database to $db.bak-$stamp."
+    if ! REPO_DIR="$REPO" docker compose stop grocy >/dev/null 2>&1; then
+      log "WARN: could not stop Grocy to save a copy of its database, so Grocy stays on $have for now."
+      docker start "$cid" >/dev/null 2>&1 || true
+      return 0
+    fi
+    # SQLite can hold recent writes in the -wal file beside the database, so
+    # the copy takes the -wal and -shm files along when they are there.
+    stamp="$(date +%Y%m%d-%H%M%S)"
+    _copied=1
+    for _f in "$db" "$db-wal" "$db-shm"; do
+      [ -e "$_f" ] || continue
+      cp -fp "$_f" "$_f.bak-$stamp" || { _copied=""; break; }
+    done
+    if [ -z "$_copied" ]; then
+      for _f in "$db" "$db-wal" "$db-shm"; do rm -f "$_f.bak-$stamp" 2>/dev/null || true; done
+      log "WARN: could not save a copy of Grocy's database (is the storage full?), so Grocy stays on $have for now."
+      if docker start "$cid" >/dev/null 2>&1; then
+        log "Started Grocy again on $have."
       else
-        log "WARN: could not save a copy of Grocy's database, so Grocy stays on $have for now."
-        docker start "$cid" >/dev/null 2>&1 || true
-        return 0
+        log "WARN: could not start Grocy again; it starts with the next restart of the device."
+      fi
+      return 0
+    fi
+    log "Saved Grocy's database to $db.bak-$stamp."
+    if _gl="$(REPO_DIR="$REPO" docker compose up -d --no-deps --pull never grocy 2>&1)"; then
+      _grocy_held=""
+      log "Grocy now runs $want."
+      return 0
+    fi
+    log "$_gl"
+    log "WARN: could not start Grocy on $want; going back to $have."
+    # Compose may already have removed the old container, so a plain
+    # 'docker start' has nothing to start. Recreate Grocy from the old image
+    # instead: a local tag for it and an extra compose file naming that tag.
+    # The container then still differs from the compose file, so the next
+    # update tries the move again, with a fresh copy first.
+    _back=""
+    _gl=""
+    if [ -n "$old_id" ] && docker tag "$old_id" "$rollback_tag" >/dev/null 2>&1; then
+      local -a _files=(-f "$COMPOSE_FILE")
+      for _f in docker-compose.override.yml docker-compose.override.yaml; do
+        if [ -f "$INSTALL_DIR/$_f" ]; then _files+=(-f "$INSTALL_DIR/$_f"); fi
+      done
+      if printf 'services:\n  grocy:\n    image: %s\n' "$rollback_tag" > "$RUN_TMP/grocy-rollback.yml"; then
+        _files+=(-f "$RUN_TMP/grocy-rollback.yml")
+        if _gl="$(REPO_DIR="$REPO" docker compose "${_files[@]}" up -d --no-deps --pull never grocy 2>&1)"; then
+          _back=1
+        fi
       fi
     fi
-    if _gl="$(REPO_DIR="$REPO" docker compose up -d --no-deps grocy 2>&1)"; then
-      log "Grocy now runs $want."
+    if [ -n "$_back" ]; then
+      log "Grocy runs $have again. The copy of its database is at $db.bak-$stamp."
     else
-      log "$_gl"
-      log "WARN: could not start Grocy on $want; starting it as it was."
-      docker start "$cid" >/dev/null 2>&1 || true
+      [ -n "$_gl" ] && log "$_gl"
+      log "WARN: could not start Grocy again on $have, so it is stopped. The copy of its database is at $db.bak-$stamp."
     fi
   }
 
@@ -2861,8 +2965,19 @@ if [ -f "$COMPOSE_FILE" ] && command -v docker >/dev/null 2>&1; then
       # fd 3, so a docker call inside the loop cannot read the list.
       while IFS= read -r _svc <&3; do
         case "$_svc" in ''|beszel|*[!A-Za-z0-9._-]*) continue ;; esac
+        # A Grocy held on its old image keeps it: recreating it here would
+        # move it to the new one without a copy of its database. Grocy never
+        # pulls here either, so a recreate stays on the image already local.
+        _pull=()
+        if [ "$_svc" = "grocy" ]; then
+          if [ -n "$_grocy_held" ]; then
+            log "Grocy's log limit takes effect once it moves to the new image."
+            continue
+          fi
+          _pull=(--pull never)
+        fi
         if [ -n "$(docker compose ps -q "$_svc" 2>/dev/null | head -n1)" ]; then
-          if _svc_log="$(REPO_DIR="$REPO" docker compose up -d --no-deps "$_svc" 2>&1)"; then
+          if _svc_log="$(REPO_DIR="$REPO" docker compose up -d --no-deps ${_pull[@]+"${_pull[@]}"} "$_svc" 2>&1)"; then
             log "Restarted $_svc so its log limit takes effect."
           else
             log "$_svc_log"
@@ -3174,7 +3289,8 @@ REPO_DIR=$REPO
   # Docker app update above never touches it. Sync and restart it here or a
   # pi_hosted device never receives deck code changes (FoodAssistant-aus1).
   sync_streamdeck
-  if [ "$sd_synced" = "1" ]; then _restart_unit "$SD_SERVICE" && restarted=1; fi
+  sync_streamdeck_deps
+  if [ "$sd_synced" = "1" ] || [ "$sd_deps" = "1" ]; then _restart_unit "$SD_SERVICE" && restarted=1; fi
   sync_gadgets
   if [ "$gd_synced" = "1" ]; then _restart_unit "$GD_SERVICE" && restarted=1; fi
 
@@ -3250,6 +3366,7 @@ fi
 
 # --- Stream Deck controller -------------------------------------------------
 sync_streamdeck
+sync_streamdeck_deps
 
 # --- Bluetooth thermometer reader ---------------------------------------------
 sync_gadgets
@@ -3322,7 +3439,7 @@ if [ "$svc_synced" = "1" ] || [ "$deps" = "1" ]; then
     fi
   fi
 fi
-if [ "$sd_synced" = "1" ]; then
+if [ "$sd_synced" = "1" ] || [ "$sd_deps" = "1" ]; then
   _restart_unit "$SD_SERVICE" && restarted=1
 fi
 if [ "$gd_synced" = "1" ]; then

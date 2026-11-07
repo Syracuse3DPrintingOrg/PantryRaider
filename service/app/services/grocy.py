@@ -1,5 +1,7 @@
 import asyncio
+import functools
 import html as _html
+import json
 import re
 
 import httpx
@@ -7,7 +9,7 @@ from urllib.parse import quote
 from datetime import date, timedelta
 from ..config import settings
 from ..models.food import FoodItem
-from ..storage_categories import classify_location, location_for
+from ..storage_categories import classify_location, custom_categories, location_for
 from . import proxy_policy, upstream
 from ..plain_digits import plain_int
 
@@ -83,7 +85,9 @@ class GrocyError(Exception):
 
     A per-date Inventory row's actions add two, both raised before anything
     is written: "group" (Grocy would take other stock than the row's own) and
-    "gone" (the row's stock is no longer there).
+    "gone" (the row's stock is no longer there). An add raises "unit", also
+    before anything is written, when the unit typed measures something other
+    than the product's own unit and Grocy has no conversion between them.
     """
 
     def __init__(self, message: str = "", hint: str | None = None,
@@ -91,6 +95,25 @@ class GrocyError(Exception):
         super().__init__(message)
         self.hint = hint
         self.kind = kind
+
+
+_STATUS_PREFIX = re.compile(r"^Grocy \d{3} on \S+: ")
+
+
+def grocy_said(e: Exception) -> str:
+    """Grocy's own words from a GrocyError, as one sentence. Pure.
+
+    Drops the status and path in front ("Grocy 400 on /objects/...: ") and
+    takes error_message out of a JSON answer, for copy shown in the inbox.
+    """
+    text = _STATUS_PREFIX.sub("", str(e).strip())
+    if text.startswith("{"):
+        try:
+            text = str(json.loads(text).get("error_message") or text)
+        except (ValueError, AttributeError):
+            pass
+    text = text.strip() or "Grocy did not answer."
+    return text if text[-1] in ".!?" else text + "."
 
 
 def unreachable_message() -> str:
@@ -367,6 +390,12 @@ def stock_sniff_candidates(stock: list[dict], days: int = 7,
     a safety date, not a quality guess, so no sniff test is offered on it
     anywhere. When a name appears more than once the earliest date wins,
     since that is the entry driving the expiring row.
+
+    Fed the Expiring page's rows (expiring_by_date), the hook is the soonest
+    of those rows and also carries its ``location_id``, ``location_name``,
+    ``amount``, ``unit_name`` and ``unit_name_plural``, so the Review card
+    names exactly that stock and its chips and toss act on that row alone.
+    A product weighed with its container carries ``tare_weight``.
     """
     if today is None:
         today = date.today()
@@ -393,6 +422,19 @@ def stock_sniff_candidates(stock: list[dict], days: int = 7,
             out[name] = {"product_id": pid,
                          "best_before_date": bbd,
                          "days_remaining": remaining}
+            if entry.get("tare_weight") or is_tare_weighed(product):
+                # Weighed with its container: the card leaves the toss to
+                # Grocy (is_tare_weighed).
+                out[name]["tare_weight"] = True
+            if entry.get("by_date"):
+                out[name].update({
+                    "location_id": entry.get("location_id"),
+                    "location_name": entry.get("location_name") or "",
+                    "amount": float(entry.get("amount") or 0),
+                    "unit_name": entry.get("unit_name") or "",
+                    "unit_name_plural": (entry.get("unit_name_plural")
+                                         or entry.get("unit_name") or ""),
+                })
     return out
 
 
@@ -586,6 +628,51 @@ def _row_after_date_write(entries: list[dict], from_id: int,
 BEST_BY_ROW_GONE = "This row is no longer in stock."
 BEST_BY_ROW_TARE = ("Pantry Raider can't split a product weighed with its container "
                     "by date, so nothing was changed.")
+# A raced scoped sniff test: the row's stock was there at the read but merged
+# or moved before any of it could be written.
+BEST_BY_ROW_MOVED = "This row changed since the page loaded, so its date was not moved."
+
+
+def is_tare_weighed(product: dict | None) -> bool:
+    """True for a product Grocy weighs with its container (tare weight). Pure.
+
+    Grocy reads a consume amount for such a product as what the scale shows,
+    container included, so an amount from a page row means something else
+    there."""
+    return str((product or {}).get("enable_tare_weight_handling") or "0") not in ("0", "")
+
+
+# How far a row's current total may drift from the amount the page showed
+# before it counts as changed: float sums, never a real difference.
+_EXPECTED_TOLERANCE = 1e-6
+
+
+def best_by_group_total(entries: list[dict], location_id, best_before_date: str) -> float:
+    """How much stock a per-date row holds right now. Pure."""
+    return sum(_amount(e) for e in entries or []
+               if in_best_by_group(e, location_id, best_before_date))
+
+
+def check_expected_amount(entries: list[dict], location_id, best_before_date: str,
+                          expected: float | None) -> None:
+    """Refuse a per-date action when the row no longer holds what the page
+    showed. Pure.
+
+    ``expected`` is the amount the page showed for the row (None skips the
+    check). Raises GrocyError "gone" when the row is empty and "changed" when
+    its total differs by more than float dust, so nothing is written on stock
+    the person never saw.
+    """
+    if expected is None:
+        return
+    total = best_by_group_total(entries, location_id, best_before_date)
+    if total <= _DUST:
+        raise GrocyError(BEST_BY_ROW_GONE, kind="gone")
+    if abs(total - float(expected)) > max(_EXPECTED_TOLERANCE,
+                                          _EXPECTED_TOLERANCE * abs(float(expected))):
+        raise GrocyError(
+            f"This row changed since the page loaded: it now holds {total:g}, "
+            f"not {float(expected):g}. Nothing was changed.", kind="changed")
 
 
 def _amount(entry: dict) -> float:
@@ -716,8 +803,12 @@ def best_by_take(entries: list[dict], location_id, best_before_date: str,
         raise GrocyError(BEST_BY_ROW_GONE, kind="gone")
     want = total if amount >= total - _DUST else float(amount)
     if best_by_group_reach(entries, location_id, best_before_date, want) < want - _DUST:
-        raise GrocyError(_use_refusal(best_by_group_blocker(
-            entries, location_id, best_before_date), best_before_date), kind="group")
+        blocker = best_by_group_blocker(entries, location_id, best_before_date)
+        err = GrocyError(_use_refusal(blocker, best_before_date), kind="group")
+        # An opened unit in the same place is what Grocy takes first there;
+        # the Expiring page offers a toss from the whole place for that case.
+        err.opened_first = blocker is not None and _is_open(blocker)
+        raise err
     return want
 
 
@@ -740,6 +831,69 @@ def best_by_label_stock_id(rows: list[dict], location_id,
     newest = max(own or group, key=lambda r: (str(r.get("row_created_timestamp") or ""),
                                               _int_or_none(r.get("id")) or 0))
     return newest["stock_id"]
+
+
+# What /stock reports for the whole product: on a row of one best-by date
+# those would contradict the row's own amount, so they are left off it.
+_PRODUCT_TOTALS = ("amount_aggregated", "amount_opened_aggregated",
+                   "is_aggregated_amount", "value")
+
+
+def expiring_by_date(stock: list[dict], stock_rows: list[dict], days: int,
+                     today: date | None = None) -> list[dict]:
+    """The Expiring page's rows: one per product, place and best-by date
+    within ``days`` (expired included), soonest first. Pure.
+
+    ``stock`` is /stock (one row per product, for the product itself) and
+    ``stock_rows`` the raw /objects/stock rows. A product's /stock row sums
+    every entry and carries only the earliest date, so three expired yogurts
+    and two good ones read as five expired, and acting on that row took all
+    five. Each row here is the stock of one per-date row instead
+    (stock_by_location_and_date): its own ``amount`` and
+    ``amount_opened``, its place as ``location_id``, its newest ``added_date``,
+    ``by_date`` set, ``stock_entry_id`` for its label
+    (best_by_label_stock_id), and ``tare_weight`` for a product weighed with
+    its container (is_tare_weighed). Stock outside the window and undated stock get
+    no row, whatever else the product holds.
+    """
+    if today is None:
+        today = date.today()
+    products = {_int_or_none(e.get("product_id")): e for e in stock or []}
+    product_rows: dict[int, list[dict]] = {}
+    for row in stock_rows or []:
+        product_rows.setdefault(_int_or_none(row.get("product_id")) or 0, []).append(row)
+    out = []
+    for pid, places in stock_by_location_and_date(stock_rows).items():
+        entry = products.get(pid)
+        if entry is None:
+            continue  # /stock names the product; without it there is no row to show
+        for loc_id, dated in places.items():
+            for day, part in dated.items():
+                if not day:
+                    continue
+                remaining = (date.fromisoformat(day) - today).days
+                if remaining > days:
+                    continue
+                row = {k: v for k, v in entry.items() if k not in _PRODUCT_TOTALS}
+                row.update({
+                    "amount": part["amount"],
+                    "amount_opened": part["amount_opened"],
+                    "best_before_date": day,
+                    "days_remaining": remaining,
+                    "location_id": int(loc_id) if loc_id.isdigit() else None,
+                    "added_date": part["added"],
+                    "by_date": True,
+                    "stock_entry_id": best_by_label_stock_id(
+                        product_rows.get(pid), loc_id, day),
+                    # Weighed with its container: an amount from this row
+                    # is not what Grocy's consume means for it.
+                    "tare_weight": is_tare_weighed(entry.get("product")),
+                })
+                out.append(row)
+    out.sort(key=lambda r: (r["days_remaining"],
+                            ((r.get("product") or {}).get("name") or "").lower(),
+                            r["location_id"] or 0))
+    return out
 
 
 def _log_rows(booked, kind: str) -> list[dict]:
@@ -778,6 +932,23 @@ def _best_by_arrivals(booked, location_id,
         else:
             other.append(row)
     return own, other
+
+
+def _transfer_redates(booked) -> list[tuple[str | None, str | None]]:
+    """(date the stock left with, date it arrived with) for each row of a
+    transfer answer that Grocy re-dated on the way (its own freezer rule).
+    Pure."""
+    sent = {r.get("correlation_id"): r for r in _log_rows(booked, "transfer_from")}
+    out = []
+    for row in _log_rows(booked, "transfer_to"):
+        source = sent.get(row.get("correlation_id"))
+        if source is None:
+            continue
+        left_with = source.get("best_before_date") or None
+        arrived_with = row.get("best_before_date") or None
+        if left_with != arrived_with:
+            out.append((left_with, arrived_with))
+    return out
 
 
 def _nothing_booked(e: Exception) -> bool:
@@ -829,17 +1000,208 @@ def qu_conversion_factor(conversions: list[dict], product_id: int,
 
 
 def unit_matches(unit: dict, name: str) -> bool:
-    """True when ``name`` is this Grocy quantity unit's singular or plural. Pure."""
-    low = (name or "").strip().lower()
-    return bool(low) and low in (
-        (unit.get("name") or "").strip().lower(),
-        (unit.get("name_plural") or "").strip().lower(),
+    """True when ``name`` is this Grocy quantity unit's singular or plural. Pure.
+
+    Read the way a typed unit is (_unit_key): case and dots do not matter,
+    except that "T" (a tablespoon) is never "t" (a teaspoon).
+    """
+    key = _unit_key(name)
+    return bool(key) and key in (
+        _unit_key(unit.get("name") or ""),
+        _unit_key(unit.get("name_plural") or ""),
     )
+
+
+# Units people type, as the Grocy quantity unit each one means: (name, plural,
+# other spellings). "item" is the queue's default when no unit was typed, so it
+# and its kin mean Grocy's own Piece, which is what every add used before.
+# Spellings are lowercase, except "T", the one place case matters.
+_KNOWN_UNITS = (
+    ("Piece", "Pieces", ("item", "items", "pc", "pcs", "ea", "each", "unit",
+                         "units", "count", "ct")),
+    ("Milligram", "Milligrams", ("mg", "mgs", "milligramme", "milligrammes")),
+    ("Gram", "Grams", ("g", "gr", "grs", "gm", "gms")),
+    ("Kilogram", "Kilograms", ("kg", "kgs", "kilo", "kilos")),
+    ("Ounce", "Ounces", ("oz",)),
+    ("Pound", "Pounds", ("lb", "lbs")),
+    ("Milliliter", "Milliliters", ("ml", "millilitre", "millilitres")),
+    ("Liter", "Liters", ("l", "ltr", "litre", "litres")),
+    ("Teaspoon", "Teaspoons", ("tsp", "tsps", "t")),
+    ("Tablespoon", "Tablespoons", ("tbsp", "tbsps", "tbs", "tbl", "T")),
+    ("Fluid ounce", "Fluid ounces", ("fl oz", "floz")),
+    ("Cup", "Cups", ("c",)),
+    ("Pint", "Pints", ("pt",)),
+    ("Quart", "Quarts", ("qt",)),
+    ("Gallon", "Gallons", ("gal",)),
+    ("Pack", "Packs", ("pk", "package", "packages", "pkg", "packet", "packets")),
+    ("Box", "Boxes", ()),
+    ("Bunch", "Bunches", ()),
+    ("Loaf", "Loaves", ()),
+)
+
+# How big a unit with a fixed size is: (what it measures, how many grams or
+# milliliters one holds, in US kitchen measures). Used to convert between two
+# of them only when Grocy has no conversion of its own, so "500 g" into a
+# product kept in Kilograms is 0.5. A Piece is a count, which no weight or
+# volume turns into.
+_UNIT_SIZES = {
+    "Milligram": ("weight", 0.001),
+    "Gram": ("weight", 1.0),
+    "Kilogram": ("weight", 1000.0),
+    "Ounce": ("weight", 28.349523125),
+    "Pound": ("weight", 453.59237),
+    "Milliliter": ("volume", 1.0),
+    "Liter": ("volume", 1000.0),
+    "Teaspoon": ("volume", 4.92892159375),
+    "Tablespoon": ("volume", 14.78676478125),
+    "Fluid ounce": ("volume", 29.5735295625),
+    "Cup": ("volume", 236.5882365),
+    "Pint": ("volume", 473.176473),
+    "Quart": ("volume", 946.352946),
+    "Gallon": ("volume", 3785.411784),
+    "Piece": ("count", 1.0),
+}
+
+# Counts with a fixed size are Pieces, never a unit of their own: a dozen
+# eggs is 12 Pieces, so using one leaves 11.
+_FIXED_COUNTS = {
+    "dozen": 12, "dozens": 12, "doz": 12,
+    "half dozen": 6, "half a dozen": 6, "half-dozen": 6,
+    "pair": 2, "pairs": 2,
+}
+
+# Plurals the s-and-es rule gets wrong, by their singular.
+_IRREGULAR_PLURALS = {
+    "leaf": "leaves", "half": "halves", "loaf": "loaves", "knife": "knives",
+    "potato": "potatoes", "tomato": "tomatoes",
+}
+_IRREGULAR_SINGULARS = {p: s for s, p in _IRREGULAR_PLURALS.items()}
+
+
+# What the queue sends when no unit was typed. An existing product takes the
+# amount in its own stock unit, as every add did before units were read.
+_NO_UNIT = frozenset({"", "item", "items"})
+
+
+def _unit_key(typed: str) -> str:
+    """``typed`` as one spelling: no dots, single spaces, lowercase. Pure.
+
+    "Fl. Oz.", "fl  oz" and "fl oz" are all "fl oz"; "doz." is "doz". A lone
+    capital "T" stays as it is: in a recipe it is a tablespoon, and "t" a
+    teaspoon.
+    """
+    key = " ".join((typed or "").replace(".", " ").split())
+    return key if key == "T" else key.lower()
+
+
+def counted_out(quantity: float, typed: str) -> tuple[float, str] | None:
+    """``quantity`` of a fixed count ("dozen") as (Pieces, "Piece"). Pure.
+
+    None when ``typed`` is not a fixed count, so the unit stays as typed.
+    """
+    size = _FIXED_COUNTS.get(_unit_key(typed))
+    return (quantity * size, "Piece") if size else None
+
+
+def unit_names(typed: str) -> tuple[str, str, set[str]]:
+    """The Grocy unit a typed unit means: (name, plural, every spelling). Pure.
+
+    Known units ("kg", "Kilograms", "pcs") come back as the one name Grocy
+    should hold them under. Anything else keeps the word typed, made singular
+    and capitalized like Grocy's own units ("bags" is Bag, Bags). Nothing
+    typed is Piece, and so is anything that cannot be a unit's name (digits,
+    brackets or other symbols, more than two words, one letter that is no
+    known unit). The spellings are as _unit_key reads them, for finding a
+    unit Grocy already has under any of them.
+    """
+    low = _unit_key(typed)
+    if (len(low) > 30 or len(low.split()) > 2
+            or not re.fullmatch(r"[^\W\d_]+(?:[ '-][^\W\d_]+)*", low)):
+        low = ""
+    for name, plural, aliases in _KNOWN_UNITS:
+        spellings = {name.lower(), plural.lower(), *aliases}
+        if not low or low in spellings:
+            return name, plural, spellings
+    if len(low) == 1:
+        # "x" or "q" is no unit anyone keeps food in, so it is a count.
+        return unit_names("")
+    if low in _IRREGULAR_SINGULARS:
+        singular = _IRREGULAR_SINGULARS[low]
+    elif re.search(r"(ss|x|ch|sh)es$", low):
+        singular = low[:-2]
+    elif low.endswith("s") and not re.search(r"(ss|us|is)$", low):
+        # "bus", "citrus" and "glass" are already singular.
+        singular = low[:-1]
+    else:
+        singular = low
+    plural = _IRREGULAR_PLURALS.get(singular) or (
+        singular + ("es" if re.search(r"(s|x|ch|sh)$", singular) else "s"))
+    return (singular[:1].upper() + singular[1:], plural[:1].upper() + plural[1:],
+            {low, singular, plural})
+
+
+def unit_size(name: str) -> tuple[str, float] | None:
+    """What the unit ``name`` measures and its size (_UNIT_SIZES), or None. Pure.
+
+    None for a unit with no fixed size, such as a Pack or a Bag, and for
+    nothing typed at all.
+    """
+    return _UNIT_SIZES.get(unit_names(name)[0]) if _unit_key(name) else None
+
+
+def builtin_factor(from_unit: str, to_unit: str) -> float | None:
+    """How many ``to_unit`` make one ``from_unit``, from _UNIT_SIZES. Pure.
+
+    None when either unit has no fixed size or the two measure different
+    things (a weight and a volume).
+    """
+    src, dst = unit_size(from_unit), unit_size(to_unit)
+    if not src or not dst or src[0] != dst[0]:
+        return None
+    return src[1] / dst[1]
+
+
+def unit_label(unit: dict, amount: float) -> str:
+    """``unit``'s name for ``amount`` of it: plural unless exactly one. Pure."""
+    name = unit.get("name") or ""
+    try:
+        one = float(amount) == 1
+    except (TypeError, ValueError):
+        one = False
+    return name if one else (unit.get("name_plural") or name)
+
+
+def find_unit(units: list[dict], typed: str) -> dict | None:
+    """The Grocy quantity unit ``typed`` names, by any spelling, or None. Pure.
+
+    A unit named exactly as typed wins over one that only shares a spelling,
+    so a kitchen holding both "kg" and "Kilogram" gets the one it typed.
+    """
+    exact = next((u for u in units or [] if unit_matches(u, typed)), None)
+    if exact is not None:
+        return exact
+    spellings = unit_names(typed)[2]
+    return next((u for u in units or [] if any(
+        unit_matches(u, s) for s in spellings)), None)
 
 
 # Shared connection pool for the life of the app
 _client = httpx.AsyncClient(timeout=15.0)
 _JSON = {"Content-Type": "application/json"}
+
+SERVER_ONLY_MESSAGE = "Grocy is managed on the main server."
+
+
+def _server_only(fn):
+    """For a method that changes how Grocy itself is set up. A Bandit's calls
+    go through its main server's proxy, which carries none of these, so on a
+    Bandit it refuses before anything is sent."""
+    @functools.wraps(fn)
+    async def wrapper(self, *args, **kwargs):
+        if self._upstream or settings.is_satellite():
+            raise GrocyError(SERVER_ONLY_MESSAGE, kind="config")
+        return await fn(self, *args, **kwargs)
+    return wrapper
 
 
 def _stock_unit_name(entry: dict, product: dict, units: dict[str, str]) -> str | None:
@@ -979,21 +1341,59 @@ class GrocyClient:
         return new_id
 
     async def ensure_location(self, name: str) -> int:
-        return await self._ensure_object("/objects/locations", name)
+        """Find the Grocy location ``name`` or create it. Updates cache.
+
+        A place Grocy already has under its own name (see _LOCATION_ALIASES)
+        is used when ``name`` itself is missing, so a fresh Grocy keeps one
+        fridge. That place is skipped when it is hidden in Grocy, marked as a
+        freezer, or filed under a custom storage category of its own. A
+        Freezer created here is marked as one in Grocy. Locations that already
+        exist are never changed.
+        """
+        rows = await self._cached_list("/objects/locations")
+        if not any(row["name"].lower() == name.lower() for row in rows):
+            owned = {c["location"].strip().lower() for c in custom_categories()}
+            for alias in _LOCATION_ALIASES.get(name.lower(), ()):
+                if alias.lower() in owned:
+                    continue
+                for row in rows:
+                    if (row["name"].lower() == alias.lower()
+                            and str(row.get("active", 1)) != "0"
+                            and str(row.get("is_freezer") or 0) in ("0", "")):
+                        return int(row["id"])
+        extra = None
+        if name.lower() == (location_for("frozen") or "").lower():
+            # Grocy re-dates a transfer into or out of a freezer only for a
+            # product with its own freezing/thawing days, which the products
+            # created here leave at 0, so the Move dates stay Pantry Raider's.
+            extra = {"is_freezer": 1}
+        return await self._ensure_object("/objects/locations", name, extra)
 
     async def ensure_product_group(self, name: str) -> int:
         return await self._ensure_object("/objects/product_groups", name)
 
     async def ensure_quantity_unit(self, name: str = "Piece") -> int:
+        """The id of the Grocy unit ``name`` means (unit_names), made if missing."""
         rows = await self._cached_list("/objects/quantity_units")
-        for row in rows:
-            if row["name"].lower() in (name.lower(), name.lower() + "s"):
-                return int(row["id"])
-        result = await self._post(
-            "/objects/quantity_units", {"name": name, "name_plural": name + "s"}
-        )
+        row = find_unit(rows, name)
+        if row is not None:
+            return int(row["id"])
+        singular, plural, _ = unit_names(name)
+        try:
+            result = await self._post(
+                "/objects/quantity_units", {"name": singular, "name_plural": plural}
+            )
+        except GrocyError:
+            # Grocy refuses a second unit of the same name, so when two adds
+            # make the same new unit at once, the one that loses finds the
+            # other's unit here instead of failing.
+            rows[:] = await self._get("/objects/quantity_units")
+            row = find_unit(rows, name)
+            if row is None:
+                raise
+            return int(row["id"])
         new_id = int(result["created_object_id"])
-        rows.append({"id": new_id, "name": name})
+        rows.append({"id": new_id, "name": singular, "name_plural": plural})
         return new_id
 
     async def ensure_product(self, item: FoodItem, location_id: int, group_id: int) -> int:
@@ -1002,7 +1402,10 @@ class GrocyClient:
         for p in products:
             if p["name"].lower() == name_lower:
                 return int(p["id"])
-        qu_id = await self.ensure_quantity_unit("Piece")
+        # A new product is stocked, bought, used and priced in the unit typed
+        # for it, so "2 kg" rice is 2 Kilograms. Grocy fills the consume and
+        # price units from the stock unit itself.
+        qu_id = await self.ensure_quantity_unit(item.unit)
         result = await self._post("/objects/products", {
             "name": item.name,
             "location_id": location_id,
@@ -1013,7 +1416,7 @@ class GrocyClient:
             "description": item.notes or "",
         })
         new_id = int(result["created_object_id"])
-        products.append({"id": new_id, "name": item.name})
+        products.append({"id": new_id, "name": item.name, "qu_id_stock": qu_id})
         return new_id
 
     async def add_stock(self, product_id: int, item: FoodItem,
@@ -1068,13 +1471,14 @@ class GrocyClient:
         """
         for product in await self.get_products():
             if _int_or_none(product.get("id")) == int(product_id):
-                if str(product.get("enable_tare_weight_handling") or "0") not in ("0", ""):
+                if is_tare_weighed(product):
                     raise GrocyError(BEST_BY_ROW_TARE, kind="group")
                 return
 
     async def consume_stock_group(self, product_id: int, amount: float,
                                   location_id: int, best_before_date: str,
-                                  spoiled: bool = False) -> dict:
+                                  spoiled: bool = False,
+                                  expected_amount: float | None = None) -> dict:
         """Consume ``amount`` from one per-date row: only the stock with
         ``best_before_date`` ("none" for stock with no date) at ``location_id``.
 
@@ -1090,10 +1494,14 @@ class GrocyClient:
         books nothing) is read again once. Another writer can still get in the
         way part-way, so the answer says how much was ``consumed`` of how much
         was ``requested``, and ``complete`` is False when that fell short.
+
+        ``expected_amount`` is what the page showed for the row; when the row
+        holds something else now, nothing is written (check_expected_amount).
         """
         await self._refuse_tare_weight(product_id)
         entries_path = f"/stock/products/{product_id}/entries"
         entries = await self._get(entries_path) or []
+        check_expected_amount(entries, location_id, best_before_date, expected_amount)
         want = best_by_take(entries, location_id, best_before_date, amount)
         consumed, stopped, reread = 0.0, False, False
         # Each call takes one row, so this only caps a Grocy that keeps
@@ -1128,6 +1536,8 @@ class GrocyClient:
                 entries = await self._get(entries_path) or []
                 if consumed <= _DUST:
                     # Nothing is used yet, so the refusals still come first.
+                    check_expected_amount(entries, location_id, best_before_date,
+                                          expected_amount)
                     want = best_by_take(entries, location_id, best_before_date, amount)
                 continue
             rows = _log_rows(booked, "consume")
@@ -1143,6 +1553,39 @@ class GrocyClient:
             "consumed": consumed,
             "requested": want,
             "complete": not stopped and want - consumed <= _DUST,
+        }
+
+    async def consume_stock_at_place(self, product_id: int, amount: float,
+                                     location_id: int, best_before_date: str,
+                                     spoiled: bool = False,
+                                     expected_amount: float | None = None) -> dict:
+        """Consume ``amount`` from one place in Grocy's own order, for a
+        per-date row Grocy cannot take alone (an opened unit there goes first).
+
+        This is the explicit second step after consume_stock_group refused:
+        the amount is the row's, but Grocy picks which stock in the place it
+        takes, opened units and earlier dates first, so it can take stock
+        with another best-by date. The row is still checked against what the
+        page showed (``expected_amount``), and the place must hold the amount.
+        """
+        await self._refuse_tare_weight(product_id)
+        entries = await self._get(f"/stock/products/{product_id}/entries") or []
+        check_expected_amount(entries, location_id, best_before_date, expected_amount)
+        if best_by_group_total(entries, location_id, best_before_date) <= _DUST:
+            raise GrocyError(BEST_BY_ROW_GONE, kind="gone")
+        at_place = sum(_amount(e) for e in entries
+                       if _location_id(e) == int(location_id) and _amount(e) > _DUST)
+        if float(amount) - at_place > _DUST:
+            raise GrocyError("There is not that much in this place any more, "
+                             "so nothing was changed.", kind="changed")
+        await self.consume_stock(product_id, float(amount), spoiled=spoiled,
+                                 location_id=location_id)
+        return {
+            "product_id": product_id,
+            "consumed": float(amount),
+            "requested": float(amount),
+            "complete": True,
+            "place_wide": True,
         }
 
     async def open_stock_group(self, product_id: int, location_id: int,
@@ -1285,6 +1728,23 @@ class GrocyClient:
             await self._name_locations_and_units(expiring)
         return expiring
 
+    async def get_expiring_by_date(self, days: int = 7, *,
+                                   stock: list[dict] | None = None) -> list[dict]:
+        """The Expiring page's rows (expiring_by_date): one per product, place
+        and best-by date within ``days``, so its buttons act on that stock
+        alone. get_expiring keeps one row per product for the counts and
+        sensors that only ask how many products are expiring. A caller that
+        already holds /stock passes it as ``stock``, saving that read."""
+        if stock is None:
+            stock, stock_rows = await asyncio.gather(
+                self._get("/stock"), self._get("/objects/stock"))
+        else:
+            stock_rows = await self._get("/objects/stock")
+        expiring = expiring_by_date(stock, stock_rows, days)
+        if expiring:
+            await self._name_locations_and_units(expiring)
+        return expiring
+
     async def _name_locations_and_units(self, entries: list[dict]) -> None:
         """Add location_name and unit_name to /stock rows, in place.
 
@@ -1301,11 +1761,15 @@ class GrocyClient:
             _rows("/objects/locations"), _rows("/objects/quantity_units"))
         locations = {str(r.get("id")): r.get("name") or "" for r in location_rows}
         units = {str(u.get("id")): u.get("name") for u in unit_rows if u.get("id") is not None}
+        plurals = {str(u.get("id")): u.get("name_plural") or u.get("name")
+                   for u in unit_rows if u.get("id") is not None}
         for entry in entries:
             product = entry.get("product") or {}
             loc_id = str(entry.get("location_id") or product.get("location_id") or "")
             entry["location_name"] = locations.get(loc_id, "")
             entry["unit_name"] = _stock_unit_name(entry, product, units) or ""
+            entry["unit_name_plural"] = (_stock_unit_name(entry, product, plurals)
+                                         or entry["unit_name"])
 
     def dashboard_product_groups(self) -> list[dict]:
         """Every Grocy product group as ``{"id", "name"}``, sorted by name.
@@ -1367,6 +1831,8 @@ class GrocyClient:
         if isinstance(unit_rows, BaseException):
             unit_rows = []
         units = {str(u.get("id")): u.get("name") for u in unit_rows if u.get("id") is not None}
+        plurals = {str(u.get("id")): u.get("name_plural") or u.get("name")
+                   for u in unit_rows if u.get("id") is not None}
         locations = {str(loc["id"]): loc["name"] for loc in location_rows}
         groups = {str(g["id"]): g["name"] for g in group_rows}
         self._dashboard_groups = group_rows   # for dashboard_product_groups()
@@ -1416,6 +1882,8 @@ class GrocyClient:
                 "product_id": pid,
                 "name": name,
                 "unit": _stock_unit_name(entry, product, units),
+                # For an amount other than one: "12 Pieces", not "12 Piece".
+                "unit_plural": _stock_unit_name(entry, product, plurals),
                 "category": groups.get(group_id, ""),
                 # The same group by id and name, for the Inventory page's
                 # category filter. No group, or a group since deleted, is
@@ -1607,9 +2075,20 @@ class GrocyClient:
         return await self._write_best_by(
             await self._fresh_entry(product_id, entry_id), new_date)
 
-    async def extend_best_by(self, product_id: int, delta_days: int) -> dict:
-        """Sniff test passed: push every dated stock entry's best-by out by
+    async def extend_best_by(self, product_id: int, delta_days: int, *,
+                             location_id: int | None = None,
+                             best_before_date: str | None = None,
+                             within_days: int = 7) -> dict:
+        """Sniff test passed: push the expiring stock's best-by out by
         ``delta_days`` (from today when the entry is already past its date).
+
+        Only stock that is actually expiring moves. ``best_before_date`` (an
+        ISO date) takes the entries with that date, in ``location_id`` when it
+        is given: an Expiring row's own stock. Without it, the dated entries
+        due within ``within_days`` of today, the Expiring page's default
+        window. A chicken kept good in the freezer until next year never
+        moves because the one in the fridge passed a sniff test. A row whose
+        stock has gone answers kind "gone" before anything is written.
 
         Reuses the same per-entry PUT path as edit_product, but keeps each
         entry's own date instead of flattening them all to one. Returns the
@@ -1622,15 +2101,30 @@ class GrocyClient:
         into it (see _fresh_entry). Landing on an entry already extended is
         harmless: that merge sums the amounts and nothing writes it again.
         """
+        if best_before_date is not None:
+            def expiring(e: dict) -> bool:
+                return (_amount(e) > _DUST
+                        and e.get("best_before_date") == best_before_date
+                        and (location_id is None or _location_id(e) == int(location_id)))
+        else:
+            last_day = (date.today() + timedelta(days=within_days)).isoformat()
+
+            def expiring(e: dict) -> bool:
+                return bool(e.get("best_before_date")) and e["best_before_date"] <= last_day
+
         entries = await self._get(f"/stock/products/{product_id}/entries") or []
         candidates = sorted(
-            (e for e in entries if e.get("id") and e.get("best_before_date")),
+            (e for e in entries if e.get("id") and e.get("best_before_date") and expiring(e)),
             key=lambda e: e["best_before_date"], reverse=True)
+        if best_before_date is not None and not candidates:
+            raise GrocyError(BEST_BY_ROW_GONE, kind="gone")
         updated = 0
         new_dates: list[str] = []
         for candidate in candidates:
             row = await self._fresh_entry(product_id, candidate["id"])
-            if row is None:
+            # A row that has moved since the read (another writer, or a merge
+            # into a row already extended) is no longer this one's to extend.
+            if row is None or not expiring(row):
                 continue
             new_date = sniff_test_new_date(row.get("best_before_date"), delta_days)
             if not new_date:
@@ -1639,6 +2133,10 @@ class GrocyClient:
                 continue
             updated += 1
             new_dates.append(new_date)
+        if best_before_date is not None and not updated:
+            # The row's stock was there at the read but merged or moved before
+            # any of it was written: say so rather than "no date to extend".
+            raise GrocyError(BEST_BY_ROW_MOVED, kind="gone")
         return {
             "product_id": product_id,
             "updated": updated,
@@ -1786,6 +2284,7 @@ class GrocyClient:
         entries = await self._get(entries_path) or []
         moved = 0.0
         best_by_updates: list[dict] = []
+        grocy_dated: set[int] = set()
         settled: set[str] = set()
         # Each pass moves one whole row, so this only caps a Grocy that never
         # lets go of one.
@@ -1814,8 +2313,19 @@ class GrocyClient:
             # above already accounts for.
             if first.get("stock_id"):
                 transfer["stock_entry_id"] = first["stock_id"]
-            await self._post(f"/stock/products/{product_id}/transfer", transfer)
+            booked = await self._post(f"/stock/products/{product_id}/transfer", transfer)
             moved += amount
+            # Into or out of a Grocy freezer, Grocy dates the arrival itself
+            # for a product with its own freezing or thawing days, over the
+            # date written above. Report the date Grocy holds.
+            for left_with, arrived_with in _transfer_redates(booked):
+                i = next((i for i, u in enumerate(best_by_updates)
+                          if i not in grocy_dated and u["new"] == left_with), None)
+                if i is None:
+                    best_by_updates.append({"old": left_with, "new": left_with})
+                    i = len(best_by_updates) - 1
+                best_by_updates[i]["new"] = arrived_with
+                grocy_dated.add(i)
             entries = await self._get(entries_path) or []
 
         # Entries without a location can't be transferred, but changing the
@@ -1828,17 +2338,18 @@ class GrocyClient:
 
         # One transfer moves in one temperature direction, so every update
         # agrees; the earliest resulting date is the one the user will see
-        # drive the expiring list.
+        # drive the expiring list. Grocy can date undated stock it freezes.
+        dated = [u for u in best_by_updates if u["old"] and u["new"]]
         change = None
-        if best_by_updates:
-            change = ("extended" if best_by_updates[0]["new"] > best_by_updates[0]["old"]
-                      else "shortened")
+        if dated:
+            change = "extended" if dated[0]["new"] > dated[0]["old"] else "shortened"
+        new_dates = [u["new"] for u in best_by_updates if u["new"]]
         return {
             "product_id": product_id,
             "moved_amount": moved,
             "location_id": to_id,
             "best_by_updates": best_by_updates,
-            "new_best_by": min(u["new"] for u in best_by_updates) if best_by_updates else None,
+            "new_best_by": min(new_dates) if new_dates else None,
             "best_by_change": change,
         }
 
@@ -2157,18 +2668,94 @@ class GrocyClient:
 
         ``unit`` is a Grocy quantity unit name (singular or plural). A unit
         Grocy does not know, or one with no conversion for this product, is
-        taken as the stock unit itself, which is what the add used before."""
+        taken as the stock unit itself, which is what the add used before,
+        unless it plainly measures something else (_in_stock_unit)."""
         product = await self._get(f"/objects/products/{product_id}")
+        return (await self._in_stock_unit(product, quantity, unit))[0]
+
+    async def _in_stock_unit(self, product: dict, quantity: float, unit: str,
+                             typed: str | None = None) -> tuple[float, str | None]:
+        """``quantity`` of ``unit`` in ``product``'s stock unit, and a note.
+
+        Grocy's own conversion wins; with none, two units of a fixed size that
+        measure the same thing convert by _UNIT_SIZES ("500 g" into Kilograms
+        is 0.5). The note is None when the amount is right as it stands: the
+        units match or convert, the product's stock unit is unknown, or no
+        unit was typed (the queue's "item", which is never converted).
+
+        A weight, a volume or a fixed count ("1 dozen") into a product kept in
+        a unit that measures something else raises GrocyError, so the item
+        stays in the queue to be fixed rather than "2 kg" going in as 2
+        Pieces. Anything else with no conversion (a Bag, or "pcs" into a
+        product kept in Pounds) is kept as it was, in the stock unit, and the
+        note says so. ``typed`` is the amount as typed when a fixed count was
+        turned into Pieces."""
+        if _unit_key(unit) in _NO_UNIT and not typed:
+            # Nothing typed: the amount is in the product's own unit, as it
+            # always was. Read as Piece it could be scaled by a Piece
+            # conversion the kitchen set up for something else.
+            return quantity, None
+        product_id = _int_or_none(product.get("id"))
         stock_qu = _int_or_none(product.get("qu_id_stock"))
-        unit_row = next((u for u in await self._cached_list("/objects/quantity_units")
-                         if unit_matches(u, unit)), None)
-        unit_qu = _int_or_none(unit_row and unit_row.get("id"))
-        if not stock_qu or not unit_qu:
-            return quantity
-        factor = qu_conversion_factor(
-            await self._product_conversions(product_id),
-            product_id, unit_qu, stock_qu)
-        return quantity * factor if factor else quantity
+        if not stock_qu:
+            return quantity, None
+        units = await self._cached_list("/objects/quantity_units")
+        unit_qu = _int_or_none((find_unit(units, unit) or {}).get("id"))
+        stock = next((u for u in units if _int_or_none(u.get("id")) == stock_qu), {})
+        factor = None
+        if unit_qu:
+            factor = 1.0 if unit_qu == stock_qu else qu_conversion_factor(
+                await self._product_conversions(product_id),
+                product_id, unit_qu, stock_qu)
+        if not factor and stock.get("name"):
+            factor = builtin_factor(unit, stock["name"])
+        if factor:
+            return quantity * factor, None
+        name = product.get("name") or "This product"
+        stock_names = stock.get("name_plural") or stock.get("name") or "another unit"
+        source = f"Pieces ({typed})" if typed else unit.strip()
+        size, stock_size = unit_size(unit), unit_size(stock.get("name") or "")
+        loose_count = unit_names(unit)[0] == "Piece" and not typed
+        if size and stock_size and size[0] != stock_size[0] and not loose_count:
+            raise GrocyError(
+                f"{name} is kept in {stock_names} in Grocy, and "
+                f"{typed or unit.strip()} cannot "
+                f"be turned into {stock_names} without a unit conversion. Change "
+                f"the unit to {stock_names}, or add a conversion for it in "
+                f"Grocy, then add it again.", kind="unit")
+        label = unit_label(stock, quantity) or "stock units"
+        return quantity, (
+            f"{name} is kept in {stock_names} in Grocy, which has no conversion "
+            f"from {source}, so it was added as {quantity:g} {label}.")
+
+    async def _count_out(self, product: dict | None,
+                         item: FoodItem) -> tuple[FoodItem, str | None]:
+        """``item`` with a fixed count ("1 dozen") as Pieces, and what was typed.
+
+        Left as it is, with None, when the unit is no fixed count, or when
+        ``product`` already uses a Grocy unit of that name under any spelling
+        ("doz." finds a Dozen unit): a kitchen that keeps eggs in its own
+        Dozen unit adds 1 Dozen, never 12 of them."""
+        counted = counted_out(item.quantity, item.unit)
+        if not counted:
+            return item, None
+        stock_qu = _int_or_none((product or {}).get("qu_id_stock"))
+        if stock_qu:
+            units = await self._cached_list("/objects/quantity_units")
+            # Every spelling of this count, read the way a typed unit is
+            # (unit_matches), so "doz." finds a unit named Dozen. Not
+            # find_unit: it reads "half a dozen" as no unit, which is Piece.
+            size = _FIXED_COUNTS[_unit_key(item.unit)]
+            same_size = [k for k, v in _FIXED_COUNTS.items() if v == size]
+            row = next((u for u in units if any(
+                unit_matches(u, s) for s in same_size)), None)
+            unit_qu = _int_or_none((row or {}).get("id"))
+            if unit_qu and (unit_qu == stock_qu or qu_conversion_factor(
+                    await self._product_conversions(int(product["id"])),
+                    int(product["id"]), unit_qu, stock_qu)):
+                return item.model_copy(update={"unit": row["name"]}), None
+        typed = f"{item.quantity:g} {item.unit.strip()}"
+        return item.model_copy(update={"quantity": counted[0], "unit": counted[1]}), typed
 
     async def add_to_product(self, product_id: int, item: FoodItem,
                              location_id: int | None = None) -> dict:
@@ -2178,16 +2765,37 @@ class GrocyClient:
         on that exact product, never on a new one created by name.
         ``location_id`` is the product's own Grocy location, kept from the scan
         while the review screen left it chosen. Without one the stock goes to
-        the storage area the user picked on review."""
-        amount = await self.stock_amount(product_id, item.quantity, item.unit)
+        the storage area the user picked on review. Carries the same
+        ``unit_note`` as import_item when the amount went in unconverted."""
+        product = await self._get(f"/objects/products/{product_id}")
+        item, typed = await self._count_out(product, item)
+        amount, note = await self._in_stock_unit(product, item.quantity,
+                                                 item.unit, typed)
         if location_id is None:
             location_id = await self.ensure_location(
                 _STORAGE_LABEL[item.storage_type.value])
         await self.add_stock(product_id, item.model_copy(update={"quantity": amount}),
                              location_id)
-        return {"product_id": product_id, "name": item.name, "amount": amount}
+        result = {"product_id": product_id, "name": item.name, "amount": amount}
+        if note:
+            result["unit_note"] = note
+        return result
 
     async def import_item(self, item: FoodItem) -> dict:
+        existing = next((p for p in await self.get_products()
+                         if p["name"].lower() == item.name.lower()), None)
+        # "1 dozen" is 12 Pieces before anything else sees it, so a new
+        # product is made in Pieces and never in a Dozen unit.
+        item, typed = await self._count_out(existing, item)
+        note = None
+        if existing is not None:
+            # A product Grocy already has keeps its own unit: "500 g" of
+            # flour kept in Kilograms goes in as 0.5. Worked out before
+            # anything is made in Grocy, since a unit that cannot go in
+            # refuses the whole add.
+            amount, note = await self._in_stock_unit(existing, item.quantity,
+                                                     item.unit, typed)
+            item = item.model_copy(update={"quantity": amount})
         storage_name = _STORAGE_LABEL[item.storage_type.value]
         location_id = await self.ensure_location(storage_name)
         group_id = await self.ensure_product_group(item.category.value)
@@ -2201,7 +2809,10 @@ class GrocyClient:
                 await self.ensure_product_barcode(product_id, item.barcode)
             except Exception:  # noqa: BLE001
                 pass
-        return {"product_id": product_id, "name": item.name}
+        result = {"product_id": product_id, "name": item.name}
+        if note:
+            result["unit_note"] = note
+        return result
 
     async def get_shopping_lists(self) -> list[dict]:
         return await self._cached_list("/objects/shopping_lists")
@@ -2320,6 +2931,126 @@ class GrocyClient:
             })
         return result
 
+    # --- Tidying up older installs' locations (services/grocy_locations.py) ---
+
+    async def get_locations(self) -> list[dict]:
+        """Grocy's locations as they are now, never the per-instance cache."""
+        return await self._get("/objects/locations") or []
+
+    @_server_only
+    async def mark_location_freezer(self, location_id: int) -> None:
+        """Mark one location as a freezer in Grocy. Nothing else changes."""
+        await self._request("PUT", f"/objects/locations/{int(location_id)}",
+                            {"is_freezer": 1})
+
+    @_server_only
+    async def _held_at(self, location_id: int) -> list[dict]:
+        """The stock rows in one location, for merge_location only (the main
+        server's proxy does not carry this read for a Bandit)."""
+        rows = await self._get(f"/stock/locations/{int(location_id)}/entries") or []
+        return [e for e in rows if _amount(e) > _DUST]
+
+    async def _transfer_all_rows(self, product_id: int, from_id: int, to_id: int) -> int:
+        """Move every stock row of one product from ``from_id`` to ``to_id``,
+        one whole row per transfer. Returns how many rows moved.
+
+        As in move_product, each transfer names the stock id and exact amount
+        of the row Grocy takes first for that id, and the entries are read
+        again after each one. Dust is not stock (see _DUST), the same rule
+        _held_at applies, so a crumb is neither sent nor counted as left.
+        """
+        entries_path = f"/stock/products/{product_id}/entries"
+        entries = await self._get(entries_path) or []
+        moved = 0
+        for _ in range(len(entries) + 10):
+            row = next((e for e in entries
+                        if _amount(e) > _DUST and _location_id(e) == from_id), None)
+            if row is None:
+                break
+            first = (_transfer_pool(entries, row, from_id) or [row])[0]
+            body = {"amount": _amount(first), "location_id_from": from_id,
+                    "location_id_to": to_id}
+            if first.get("stock_id"):
+                body["stock_entry_id"] = first["stock_id"]
+            await self._post(f"/stock/products/{product_id}/transfer", body)
+            moved += 1
+            entries = await self._get(entries_path) or []
+        return moved
+
+    @_server_only
+    async def merge_location(self, from_id: int, to_id: int) -> dict:
+        """Move everything in location ``from_id`` to ``to_id``, then hide
+        ``from_id`` in Grocy (active=0). Nothing is deleted.
+
+        Stock moves row by row (_transfer_all_rows), so each row keeps its
+        amount, best-by date, opened state, price and purchase date. Grocy
+        re-dates a transfer only between a freezer and a non-freezer, so the
+        caller checks that neither place is a freezer. Then every product whose
+        default location or default consume location is ``from_id`` points at
+        ``to_id``, and so does Grocy's preset location for new products. The
+        stock journal keeps its history as it was.
+
+        Every step reads Grocy again before it writes, so a merge cut short (a
+        power cut on a Pi) carries on from where it stopped when run again.
+        The place is hidden only once no stock and no product is left in it;
+        until then ``left`` names the products still there, ``weighed`` those
+        weighed with their container (Grocy transfers none of them) and
+        ``errors`` what Grocy answered. Returns {"moved_rows", "products",
+        "left", "weighed", "errors", "hidden"}.
+        """
+        from_id, to_id = int(from_id), int(to_id)
+        products = await self._get("/objects/products") or []
+        names = {str(p.get("id")): str(p.get("name") or "") for p in products}
+        tare = {str(p.get("id")) for p in products
+                if str(p.get("enable_tare_weight_handling") or "0") not in ("0", "")}
+        moved_rows = 0
+        errors: list[str] = []
+        weighed: list[str] = []
+        held = await self._held_at(from_id)
+        stuck: set[str] = set()
+        for pid in dict.fromkeys(str(e.get("product_id")) for e in held):
+            if pid in tare:
+                # Grocy 4.7.1 refuses to transfer these at all.
+                weighed.append(names.get(pid) or "A product")
+                stuck.add(pid)
+                continue
+            try:
+                moved_rows += await self._transfer_all_rows(int(pid), from_id, to_id)
+            except GrocyError as e:
+                if e.kind == "unreachable":
+                    raise
+                errors.append(f"{names.get(pid) or 'A product'}: {grocy_said(e)}")
+                stuck.add(pid)
+
+        # A product whose stock could not move keeps pointing where that stock
+        # is; it moves over on the next press, once its stock has.
+        repointed = 0
+        for p in await self._get("/objects/products") or []:
+            if str(p.get("id")) in stuck:
+                continue
+            change = {}
+            if _location_id(p) == from_id:
+                change["location_id"] = to_id
+            if _int_or_none(p.get("default_consume_location_id")) == from_id:
+                change["default_consume_location_id"] = to_id
+            if change:
+                await self._request("PUT", f"/objects/products/{int(p['id'])}", change)
+                repointed += 1
+        preset = "/user/settings/product_presets_location_id"
+        if _int_or_none((await self._get(preset) or {}).get("value")) == from_id:
+            await self._request("PUT", preset, {"value": to_id})
+
+        left = list(dict.fromkeys(names.get(str(e.get("product_id"))) or "A product"
+                                  for e in await self._held_at(from_id)))
+        pointing = [p for p in await self._get("/objects/products") or []
+                    if from_id in (_location_id(p),
+                                   _int_or_none(p.get("default_consume_location_id")))]
+        hidden = not left and not pointing
+        if hidden:
+            await self._request("PUT", f"/objects/locations/{from_id}", {"active": 0})
+        return {"moved_rows": moved_rows, "products": repointed, "left": left,
+                "weighed": weighed, "errors": errors, "hidden": hidden}
+
     # Why the last health check failed, in a short plain sentence, or "" when
     # it passed (or never ran). /health carries it so support can see the
     # cause (a broken config.php, an unreachable host) without shell access.
@@ -2372,6 +3103,15 @@ _STORAGE_LABEL = {
     "frozen": "Freezer",
     "room_temp": "Counter / Room Temp",
     "dry": "Pantry / Dry Storage",
+}
+
+# Pantry Raider's location name (lower case) → Grocy's own name for the same
+# place, used by ensure_location only when the first is missing. A fresh Grocy
+# ships with a single "Fridge"; filing fridge stock there, not in a new
+# "Refrigerator" beside it, leaves one fridge. An install that already has a
+# "Refrigerator" keeps using it.
+_LOCATION_ALIASES = {
+    "refrigerator": ("Fridge",),
 }
 
 

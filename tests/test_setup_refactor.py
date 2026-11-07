@@ -38,11 +38,16 @@ SHAPES = {
 PINNED = {
     "server": {
         "ids": [
+            # Added after the pin: Your recipe databases (FoodAssistant-1sfs6),
+            # the add-by-address form under Recipes (hidden on a satellite).
+            'catalog_key', 'catalog_name', 'catalog_url',
             # Added after the pin: the 0.21 Security pane (keys, home network
             # access, screens and satellites), saved through /setup/security.
             'cred-name', 'cred-scope', 'sec-lan-cidrs', 'sec-home-host-names',
             'sec-kiosk-admin', 'sec-legacy-mirror', 'sec-auto-retire',
             'sec-sat-keys',
+            # Added after the pin: the Passkeys row (FoodAssistant-kc2cy).
+            'passkey-name', 'passkey-credential',
             # Added after the pin: kiosk auto-return-to-home (FoodAssistant-6e5m),
             # on the Screen pane in every mode (Pi and non-Pi kiosks alike).
             'kiosk_auto_home_enabled', 'kiosk_auto_home_seconds',
@@ -296,11 +301,16 @@ PINNED = {
     },
     "pi_hosted": {
         "ids": [
+            # Added after the pin: Your recipe databases (FoodAssistant-1sfs6),
+            # the add-by-address form under Recipes (hidden on a satellite).
+            'catalog_key', 'catalog_name', 'catalog_url',
             # Added after the pin: the 0.21 Security pane (keys, home network
             # access, screens and satellites), saved through /setup/security.
             'cred-name', 'cred-scope', 'sec-lan-cidrs', 'sec-home-host-names',
             'sec-kiosk-admin', 'sec-legacy-mirror', 'sec-auto-retire',
             'sec-sat-keys',
+            # Added after the pin: the Passkeys row (FoodAssistant-kc2cy).
+            'passkey-name', 'passkey-credential',
             # Added after the pin: kiosk auto-return-to-home (FoodAssistant-6e5m).
             'kiosk_auto_home_enabled', 'kiosk_auto_home_seconds',
             # Added after the pin: the two-pane split view (FoodAssistant-dqpq).
@@ -579,6 +589,8 @@ PINNED = {
     },
     "pi_remote": {
         "ids": [
+            # Added after the pin: the Passkeys row (FoodAssistant-kc2cy).
+            'passkey-name', 'passkey-credential',
             # Added after the pin: the 0.21 Security pane (keys, home network
             # access, screens and satellites), saved through /setup/security.
             'cred-name', 'cred-scope', 'sec-lan-cidrs', 'sec-home-host-names',
@@ -856,7 +868,11 @@ def _render(client, monkeypatch, *, mode: str, is_pi: bool, configured: bool) ->
     # /setup to /ui/getting-ready while the inventory key is missing, and this
     # bare fixture never has one. The gate has its own tests; this pin is about
     # the settings page's DOM, so render with the gate out of the picture.
+    # The pin was taken on a host with no print stack. A machine running a
+    # CUPS scheduler would also render the Add a printer form, so the page is
+    # rendered as if printing were unavailable whatever the host has.
     with patch.object(type(settings), "is_configured", lambda self: configured), \
+         patch("app.routers.setup.page._printing_available", return_value=False), \
          patch("app.services.readiness.gate_possible", return_value=False), \
          patch("app.routers.setup.is_raspberry_pi", return_value=is_pi), \
          patch("app.templating.is_raspberry_pi", return_value=is_pi):

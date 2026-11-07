@@ -7,7 +7,8 @@ address got through, so the checks live here once:
 
 - ``safe_href`` for a link the user saved (http, https, or a page in the app);
 - ``is_external`` to decide whether that link opens in a new tab;
-- ``safe_nav_path`` for a remote "go to this page" request (same-origin only);
+- ``safe_nav_path`` for a remote "go to this page" request (same-origin only),
+  and ``nav_page_path`` on top of it to keep that request to a real app page;
 - ``clean_custom_tabs`` and ``report_blocked_tabs`` for the custom nav tabs.
 
 The helpers are pure (no settings, no database) apart from the last two, which
@@ -109,6 +110,74 @@ def safe_nav_path(path: str) -> str:
     if not p or p[0] <= " " or ":" in p.split("/", 1)[0]:
         return ""
     return p
+
+
+# The app pages a remote "go to this page" request may open. Each one is a full
+# page that carries the app's own scripts, so the screen keeps polling for the
+# next event and the idle timer can still take it home. Anything else (a JSON
+# API such as /expiring/, an image, a 404) would leave the kiosk on a bare page
+# with no way off it. tests/test_nav_pages.py checks every entry against the
+# registered HTML routes and fails when a new page is not listed here or in its
+# exclusions, so the list cannot drift.
+NAV_PAGES = frozenset({
+    "ui/", "setup",
+    "ui/start", "ui/split", "ui/inventory", "ui/expiring", "ui/add",
+    "ui/pending", "ui/audit", "ui/journal", "ui/cook", "ui/recipes",
+    "ui/current-recipe", "ui/mealplan", "ui/shopping", "ui/kitchen-guide",
+    "ui/nutrition", "ui/convert", "ui/shop", "ui/timers", "ui/weather",
+    "ui/camera", "ui/defaults", "ui/about", "ui/scanner-setup", "ui/cubs",
+})
+
+# Plain names a caller may send instead of a page path: "home", and every built
+# nav tab's key and label ("expiring", "review", "on the line", "glance").
+_NAV_EXTRA_ALIASES = {"home": "ui/", "ui": "ui/", "dashboard": "ui/"}
+
+
+def _nav_aliases() -> dict[str, str]:
+    from ..navigation import NAV_TABS
+
+    aliases: dict[str, str] = {}
+    for page in NAV_PAGES:
+        name = page.rstrip("/").rsplit("/", 1)[-1]
+        if name and name != "ui":
+            aliases.setdefault(name, page)
+    for tab in NAV_TABS:
+        href = tab.get("href") or ""
+        if href not in NAV_PAGES:
+            continue
+        for word in (tab.get("key", ""), tab.get("label", "")):
+            slug = re.sub(r"[\s_&]+", "-", str(word).strip().lower()).strip("-")
+            slug = re.sub(r"-+", "-", slug)
+            if slug:
+                aliases.setdefault(slug, href)
+    aliases.update(_NAV_EXTRA_ALIASES)
+    return aliases
+
+
+def nav_page_path(path: str) -> str:
+    """Reduce a "go to this page" request to one of the app's pages.
+
+    Runs ``safe_nav_path`` first, then keeps the result only when its page
+    part is in ``NAV_PAGES``; a query string or ``#fragment`` rides along
+    untouched. A bare name such as "expiring" or "review" is mapped to its
+    page. Returns "" for anything that is not an app page, API paths included.
+    """
+    p = safe_nav_path(path)
+    if not p:
+        return ""
+    cut = min((i for i in (p.find("?"), p.find("#")) if i >= 0), default=len(p))
+    base, rest = p[:cut], p[cut:]
+    page = base.rstrip("/")
+    if page == "ui":
+        page = "ui/"
+    if page in NAV_PAGES:
+        return page + rest
+    # Only a bare name maps: "expiring/" is the Expiring API, not the page.
+    if "/" not in base:
+        target = _nav_aliases().get(base.lower())
+        if target:
+            return target + rest
+    return ""
 
 
 def clean_custom_tabs(rows) -> tuple[list[dict], list[dict]]:

@@ -10,11 +10,24 @@ guess. For what happens to your data specifically, see the
 
 ## The app itself
 
-- Sign-in is required whenever a password is set; browsers get a session
+- Sign-in is required whenever a password is set; browsers get a sign-in
+  cookie (`pr_session`) that lasts 30 days from the last visit, or until the
+  browser closes when Keep me signed in is unticked, with a one-year cap.
+  Settings, Security lists every signed-in browser; signing out, or Sign out
+  on one browser there, ends that sign-in on the kitchen itself, so a copied
+  cookie stops working too. Browsers get that
   cookie, and devices and scripts use a key from Settings, Security (see
   [Keys and what they can reach](#keys-and-what-they-can-reach)). Optional
-  two-factor (TOTP) and a read-only viewer role are available for shared
-  households.
+  two-factor (TOTP), passkeys and a read-only viewer role are available for
+  shared households.
+- A passkey (Face ID, Touch ID, Windows Hello, your phone, or a security key
+  with a PIN) signs you in with one tap. It checks you on the device and
+  works only on the web address it was added on, so it counts as two factors
+  by itself: no code afterwards, from home or from outside. Add one in
+  Settings, Security after entering your password. Passkeys need the kitchen
+  open over HTTPS by its web address (Forager remote access, or your own
+  domain); browsers do not offer them over plain http or by IP address.
+  Removing a passkey signs out every other browser.
 - Programs on the device itself sign in like everything else. The kitchen
   screen gets a one-time sign-in ticket each time it starts, and the Stream
   Deck and the sensor reader each have a key of their own. Until 0.21 anything
@@ -58,9 +71,13 @@ guess. For what happens to your data specifically, see the
   signs in with the password alone, and so does one on a range listed under
   Home networks or one that reaches the kitchen over Tailscale (whose
   `100.64.0.0/10` addresses are not the open internet). When a kitchen has a
-  password but two-factor is not on yet, the setup code from its log signs you
+  password but two-factor is not on yet, a passkey, or Sign in with Forager
+  when your Forager account has its own two-factor turned on, also counts as
+  the second factor. Otherwise the setup code from its log signs you
   in once from outside and takes you straight to turning two-factor on. One
-  setup code allows 10 wrong passwords in all; after that, opening the setup
+  setup code allows 10 wrong passwords in all; each authenticator code works
+  once, and wrong codes are counted for the whole kitchen as well as for each
+  address; after that, opening the setup
   code page again prints a new code to the log. The sign-in,
   PIN, setup code and pairing screens are also rate limited: a burst of wrong
   guesses is locked out for a few minutes. That throttle is per app process

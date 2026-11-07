@@ -1114,7 +1114,7 @@
    ],
    [
     "set-cookie",
-    "session=*; path=/; Max-Age=2592000; httponly; samesite=lax"
+    "pr_session=*; path=/; Max-Age=2592000; httponly; samesite=lax"
    ]
   ]
  },
@@ -1151,7 +1151,7 @@
    ],
    [
     "set-cookie",
-    "session=*; path=/; Max-Age=2592000; httponly; samesite=lax"
+    "pr_session=*; path=/; Max-Age=2592000; httponly; samesite=lax"
    ]
   ]
  },
@@ -1188,7 +1188,7 @@
    ],
    [
     "set-cookie",
-    "session=*; path=/; Max-Age=2592000; httponly; samesite=lax; Secure"
+    "pr_session=*; path=/; Max-Age=2592000; httponly; samesite=lax; Secure"
    ]
   ]
  },
@@ -1225,7 +1225,7 @@
    ],
    [
     "set-cookie",
-    "session=*; path=/; Max-Age=2592000; httponly; samesite=lax; Secure"
+    "pr_session=*; path=/; Max-Age=2592000; httponly; samesite=lax; Secure"
    ]
   ]
  },

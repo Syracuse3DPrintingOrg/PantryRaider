@@ -115,6 +115,17 @@ pictures in the results load in your browser from the catalog's own site.
 **Off switch:** in Settings, Recipes, set External recipe suggestions to Off
 (my recipes only).
 
+### Your own recipe databases
+
+A recipe database you add under Settings, Recipes, is only contacted when you
+search recipes with Other recipes on, open the Cook page, or preview or save one
+of its recipes. Pantry Raider downloads the database's recipe list and matches it
+against your stock on your own box, so nothing about your inventory is sent to
+it. Searches are matched locally too. If you gave the database an access key, that
+key goes along with each request.
+
+**Off switch:** switch the database off, or remove it, in Settings, Recipes.
+
 ### Importing a recipe from a link
 
 Pasting a recipe URL makes your install fetch that page, so the site you

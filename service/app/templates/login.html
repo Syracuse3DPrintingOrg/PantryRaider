@@ -29,8 +29,9 @@
      only registers in a secure context or on localhost, a no-op over plain-http.
      Under Home Assistant Ingress the manifest path carries the Ingress prefix
      and no worker registers, since the origin root belongs to Home Assistant. #}
-  <link rel="manifest" href="{{ ingress_path }}/manifest.webmanifest">
+  <link rel="manifest" href="{{ ingress_path }}/manifest.webmanifest" crossorigin="use-credentials">
   <meta name="theme-color" content="#212529">
+  <meta name="apple-mobile-web-app-title" content="Pantry Raider">
   <script src="static/js/head-boot.js?v={{ app_version }}" data-sw="{{ 'off' if ingress_path else 'on' }}"></script>
   {# ?v= is not optional (FoodAssistant-9k2v): a kiosk caches this file and
    keeps running the copy it first saw, so panel scale, rotation, and
@@ -156,22 +157,64 @@
                  inputmode="numeric" autocomplete="one-time-code"
                  autofocus required>
         </div>
+        <input type="hidden" name="trust_choice" value="1">
+        <div class="form-check mb-3 small">
+          <input class="form-check-input" type="checkbox" name="trust" value="1" id="login-trust" checked>
+          <label class="form-check-label" for="login-trust">Don't ask for a code on this device for 30 days</label>
+        </div>
         <button type="submit" class="btn btn-primary w-100">
           <i class="bi bi-shield-check me-1"></i>Verify
         </button>
       </form>
+      <form method="post" action="ui/login" class="mt-2 text-center">
+        <input type="hidden" name="mode" value="cancel">
+        <button type="submit" class="btn btn-link btn-sm">Start over</button>
+      </form>
       {% else %}
-      <form method="post" action="ui/login">
+      {% if signin_news %}
+      {# Shown to people who already used this kitchen before signing in
+         changed, until they close it or sign in (login.js remembers). #}
+      <div id="signin-news" class="alert alert-info py-2 small" role="note">
+        <div class="fw-semibold mb-1">Signing in has changed</div>
+        <p class="mb-1">Your password works the same as before. You now stay signed in
+          as long as you keep using this kitchen, and you can untick Keep me signed in
+          on a shared computer.</p>
+        <p class="mb-2">You can also add a passkey (Face ID, a fingerprint or your
+          phone) in Settings, Security, and two-factor can ask for its code only
+          when you are away from home.</p>
+        <button type="button" class="btn btn-sm btn-outline-info" id="signin-news-close">Got it</button>
+      </div>
+      {% endif %}
+      <form method="post" action="ui/login" id="login-form">
         <input type="hidden" name="mode" value="local">
-        <div class="mb-3">
+        {# A fixed user name, so password managers save and fill this
+           kitchen's password like any other sign-in. #}
+        <input type="text" name="username" value="admin" autocomplete="username"
+               class="d-none" tabindex="-1" aria-hidden="true" readonly>
+        <div class="mb-2">
           <label for="login-password" class="visually-hidden">Password</label>
           <input type="password" class="form-control" id="login-password" name="password"
-                 placeholder="Password" autofocus required>
+                 placeholder="Password" autocomplete="current-password" autofocus required>
+        </div>
+        <input type="hidden" name="remember_choice" value="1">
+        <div class="form-check mb-3 small">
+          <input class="form-check-input" type="checkbox" name="remember" value="1" id="login-remember" checked>
+          <label class="form-check-label" for="login-remember">Keep me signed in</label>
         </div>
         <button type="submit" class="btn btn-primary w-100">
           <i class="bi bi-unlock me-1"></i>Sign In
         </button>
       </form>
+      {% if passkeys_here %}
+      <div id="passkey-signin" class="d-none mt-2">
+        <button type="button" class="btn btn-outline-primary w-100" id="passkey-signin-btn">
+          <i class="bi bi-fingerprint me-1"></i>Sign in with a passkey
+        </button>
+        <div id="passkey-signin-msg" class="alert alert-danger py-2 small mt-2 d-none" role="alert"></div>
+      </div>
+      <script src="static/js/lib/webauthn.js?v={{ app_version }}"></script>
+      <script src="static/js/pages/login-passkey.js?v={{ app_version }}"></script>
+      {% endif %}
       {% if setup_code_link %}
       <p class="small mt-2 mb-0"><a href="ui/setup-code">{{ setup_code_link_text or 'Use the setup code instead' }}</a></p>
       {% endif %}
@@ -183,13 +226,12 @@
       <script src="static/js/pages/login.js?v={{ app_version }}"></script>
 
       {% if cloud_linked %}
-      <div class="d-flex align-items-center my-3 text-secondary small">
-        <hr class="flex-grow-1"><span class="px-2">or</span><hr class="flex-grow-1">
-      </div>
-
-      {# These two ways to sign in are separate. The device password above works
-         offline; the Forager sign-in below is a convenience that needs the
-         Forager server (FoodAssistant-vg1f). #}
+      {# These ways to sign in need the Forager server; the device password
+         above works offline (FoodAssistant-vg1f). Folded away unless one of
+         them is in progress or has something to say (FoodAssistant-2w35t). #}
+      <details class="mt-3" {% if forager_error or forager_notice or forager_need_code or forager_open %}open{% endif %}>
+        <summary class="small text-secondary">Other ways to sign in</summary>
+        <div class="mt-3">
       <p class="text-secondary small mb-3">Your device password above always works,
         even if Forager is offline. Sign in with Forager is an added convenience,
         using your Forager account.</p>
@@ -203,27 +245,30 @@
 
       <form method="post" action="ui/login">
         <input type="hidden" name="mode" value="forager">
+        <input type="hidden" name="remember_choice" value="1">
+        <input type="hidden" name="remember" value="1">
+        {% if forager_need_code %}
+        <p class="text-secondary small mb-2">Signing in as {{ forager_email }}.</p>
+        <input type="hidden" name="email" value="{{ forager_email }}">
+        <div class="mb-2">
+          <label for="forager-code" class="visually-hidden">Forager verification code</label>
+          <input type="text" class="form-control text-center font-monospace"
+                 id="forager-code" name="fcode" placeholder="000000"
+                 inputmode="numeric" autocomplete="one-time-code" autofocus required>
+        </div>
+        {% else %}
         <p class="text-secondary small mb-2">Sign in with your Forager email and
           password.</p>
         <div class="mb-2">
           <label for="forager-email" class="visually-hidden">Forager email</label>
           <input type="email" class="form-control" id="forager-email" name="email"
                  placeholder="Forager email" autocomplete="username"
-                 value="{{ forager_email }}"
-                 {% if forager_need_code %}readonly{% endif %} required>
+                 value="{{ forager_email }}" required>
         </div>
         <div class="mb-2">
           <label for="forager-password" class="visually-hidden">Forager password</label>
           <input type="password" class="form-control" id="forager-password" name="fpass"
-                 placeholder="Forager password" autocomplete="current-password"
-                 {% if forager_need_code %}value="{{ forager_password }}"{% endif %} required>
-        </div>
-        {% if forager_need_code %}
-        <div class="mb-2">
-          <label for="forager-code" class="visually-hidden">Forager verification code</label>
-          <input type="text" class="form-control text-center font-monospace"
-                 id="forager-code" name="fcode" placeholder="000000"
-                 inputmode="numeric" autocomplete="one-time-code" autofocus required>
+                 placeholder="Forager password" autocomplete="current-password" required>
         </div>
         {% endif %}
         <button type="submit" class="btn btn-outline-primary w-100">
@@ -247,6 +292,8 @@
         with Google? Set a password on the Forager site first (under your
         account), or use your device password above.</p>
       {% endif %}
+        </div>
+      </details>
       {% endif %}
       {% endif %}
     </div>

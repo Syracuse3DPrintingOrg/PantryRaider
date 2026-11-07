@@ -42,7 +42,7 @@ def _d(days: int) -> str:
 
 LOCATIONS = [
     {"id": 1, "name": "Refrigerator"},
-    {"id": 2, "name": "Freezer"},
+    {"id": 2, "name": "Freezer", "is_freezer": 1},
     {"id": 3, "name": "Counter / Room Temp"},
     {"id": 4, "name": "Pantry / Dry Storage"},
 ]

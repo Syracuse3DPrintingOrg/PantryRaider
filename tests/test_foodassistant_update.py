@@ -302,6 +302,9 @@ def test_diverged_local_checkout_is_recovered(rig):
     marker = rig["device"] / "scripts" / "image-build" / "foodassistant-set-rotation"
     marker.write_text("#!/usr/bin/env bash\n# local hack\n")
     _git(rig["device"], "add", "-A")
+    # Unsigned on purpose, so a signing default in the tester's own git config
+    # cannot fail this commit.
+    _use_key(rig["device"], None)
     _git(rig["device"], "commit", "-m", "local hack")
     (rig["work"] / "scripts" / "image-build" / "foodassistant-display-power").write_text(
         "#!/usr/bin/env bash\n# display-power v2\n")
@@ -1164,6 +1167,8 @@ def test_hosted_update_recreates_running_grocy_and_mealie_for_their_log_limit(ri
         f'echo "$*" >> "{calls}"\n'
         'if [ "$1 $2" = "compose up" ]; then cat > /dev/null; fi\n'
         'for a in "$@"; do case "$a" in images) echo sha256:same; exit 0;; esac; done\n'
+        'case "$*" in "inspect -f {{.Config.Image}} abc123"|"compose config --images grocy")'
+        ' echo lscr.io/linuxserver/grocy:4.6.0; exit 0;; esac\n'
         'if [ "$1 $2 $3" = "compose ps -q" ] && { [ "$4" = "grocy" ] || [ "$4" = "mealie" ]; }; then echo abc123; fi\n'
         "exit 0\n"
     )
@@ -1173,13 +1178,15 @@ def test_hosted_update_recreates_running_grocy_and_mealie_for_their_log_limit(ri
     result, out = run_update(rig)
     assert "    logging:" in (install / "docker-compose.yml").read_text()
     log = calls.read_text().splitlines()
-    assert "compose up -d --no-deps grocy" in log
+    # Grocy never pulls on this restart, so it stays on the image it runs.
+    assert "compose up -d --no-deps --pull never grocy" in log
     assert "compose up -d --no-deps mealie" in log
     assert "Restarted grocy so its log limit takes effect." in out
     assert "Restarted mealie so its log limit takes effect." in out
 
 
-def _grocy_move_rig(rig, tmp_path, *, pull_ok=True):
+def _grocy_move_rig(rig, tmp_path, *, pull_ok=True, up_ok=True, rollback_ok=True,
+                    db=True, wal=False):
     helper = ROOT / "scripts" / "image-build" / "foodassistant-compose-migrate"
     dest = rig["work"] / "scripts" / "image-build" / "foodassistant-compose-migrate"
     shutil.copy(helper, dest)
@@ -1191,7 +1198,10 @@ def _grocy_move_rig(rig, tmp_path, *, pull_ok=True):
                 install / "docker-compose.yml")
     config = install / "grocy"
     (config / "data").mkdir(parents=True)
-    (config / "data" / "grocy.db").write_text("grocy 4.6 data")
+    if db:
+        (config / "data" / "grocy.db").write_text("grocy 4.6 data")
+    if wal:
+        (config / "data" / "grocy.db-wal").write_text("recent writes")
     d = tmp_path / "docker-grocy"
     d.mkdir()
     calls = tmp_path / "docker-calls"
@@ -1205,8 +1215,13 @@ def _grocy_move_rig(rig, tmp_path, *, pull_ok=True):
         ' grep -o "lscr.io/linuxserver/grocy:[^ ]*" docker-compose.yml; exit 0; fi\n'
         'case "$*" in\n'
         '  "inspect -f {{.Config.Image}} abc123") echo lscr.io/linuxserver/grocy:4.6.0; exit 0;;\n'
+        '  "inspect -f {{.Image}} abc123") echo sha256:old46; exit 0;;\n'
         f'  "inspect -f "*Mounts*" abc123") echo "{config}"; exit 0;;\n'
         + ('  "compose pull grocy") echo "manifest unknown" >&2; exit 1;;\n' if not pull_ok else "")
+        + ('  "compose up -d --no-deps --pull never grocy") echo "port is already allocated" >&2; exit 1;;\n'
+           if not up_ok else "")
+        + ('  "compose -f "*" up -d --no-deps --pull never grocy") echo "no such image" >&2; exit 1;;\n'
+           if not rollback_ok else "")
         + 'esac\n'
         'for a in "$@"; do case "$a" in images) echo sha256:same; exit 0;; esac; done\n'
         "exit 0\n"
@@ -1227,7 +1242,7 @@ def test_hosted_update_moves_grocy_to_the_php_fix_after_saving_its_database(rig,
     assert [b.read_text() for b in backups] == ["grocy 4.6 data"]
     log = calls.read_text().splitlines()
     order = [log.index(c) for c in ("compose pull grocy", "compose stop grocy",
-                                    "compose up -d --no-deps grocy")]
+                                    "compose up -d --no-deps --pull never grocy")]
     assert order == sorted(order)
     assert "Grocy runs lscr.io/linuxserver/grocy:4.6.0; moving it to" in out
     assert "Grocy now runs lscr.io/linuxserver/grocy:v4.7.1-ls346." in out
@@ -1241,6 +1256,81 @@ def test_a_failed_grocy_pull_leaves_grocy_running(rig, tmp_path):
     assert "compose stop grocy" not in log
     assert not list((config / "data").glob("grocy.db.bak-*"))
     assert "could not download lscr.io/linuxserver/grocy:v4.7.1-ls346" in out
+    # The log-limit restart must not move Grocy either: a plain 'compose up'
+    # would pull the new image and upgrade the database with no copy.
+    assert not [c for c in log if c.startswith("compose") and " up " in c and c.endswith("grocy")]
+    assert "Restarted grocy" not in out
+
+
+def _grocy_ups(calls):
+    return [c for c in calls.read_text().splitlines()
+            if c.startswith("compose") and " up " in c and c.endswith(" grocy")]
+
+
+def test_grocy_without_a_database_copy_stays_on_its_old_image(rig, tmp_path):
+    # The copy fails (a full SD card, say): Grocy starts again as it was, and
+    # neither the move nor the log-limit restart recreates it on the new image.
+    install, config, calls = _grocy_move_rig(rig, tmp_path)
+    data = config / "data"
+    data.chmod(0o555)
+    try:
+        if os.access(data, os.W_OK):
+            pytest.skip("running as root, the directory stays writable")
+        result, out = run_update(rig)
+    finally:
+        data.chmod(0o755)
+    log = calls.read_text().splitlines()
+    assert "compose stop grocy" in log
+    assert "start abc123" in log
+    assert _grocy_ups(calls) == []
+    assert not list(data.glob("grocy.db.bak-*"))
+    assert "could not save a copy of Grocy's database" in out
+    assert "Grocy now runs" not in out
+    assert "Restarted grocy" not in out
+
+
+def test_grocy_is_not_moved_when_its_database_cannot_be_found(rig, tmp_path):
+    install, config, calls = _grocy_move_rig(rig, tmp_path, db=False)
+    result, out = run_update(rig)
+    log = calls.read_text().splitlines()
+    assert "compose pull grocy" not in log
+    assert "compose stop grocy" not in log
+    assert _grocy_ups(calls) == []
+    assert "could not find Grocy's database" in out
+
+
+def test_grocy_database_copy_takes_the_wal_file_along(rig, tmp_path):
+    install, config, calls = _grocy_move_rig(rig, tmp_path, wal=True)
+    result, out = run_update(rig)
+    wal = list((config / "data").glob("grocy.db-wal.bak-*"))
+    assert [w.read_text() for w in wal] == ["recent writes"]
+    assert "Grocy now runs lscr.io/linuxserver/grocy:v4.7.1-ls346." in out
+
+
+def test_a_failed_grocy_start_goes_back_to_the_old_image(rig, tmp_path):
+    # Compose removes the old container while it recreates, so going back
+    # means a new container on the old image (tagged locally, named by an
+    # extra compose file), never a 'docker start' of the old one.
+    install, config, calls = _grocy_move_rig(rig, tmp_path, up_ok=False)
+    result, out = run_update(rig)
+    log = calls.read_text().splitlines()
+    assert "tag sha256:old46 foodassistant/grocy-rollback:previous" in log
+    back = [c for c in _grocy_ups(calls) if c.startswith("compose -f ")]
+    assert len(back) == 1 and "grocy-rollback.yml" in back[0]
+    assert "start abc123" not in log
+    # Only the failed move and the rollback; the log-limit restart leaves it.
+    assert len(_grocy_ups(calls)) == 2
+    assert "Grocy runs lscr.io/linuxserver/grocy:4.6.0 again." in out
+    assert "starting it as it was" not in out
+    assert "Restarted grocy" not in out
+
+
+def test_a_failed_grocy_rollback_says_grocy_is_stopped(rig, tmp_path):
+    install, config, calls = _grocy_move_rig(rig, tmp_path, up_ok=False, rollback_ok=False)
+    result, out = run_update(rig)
+    assert "could not start Grocy again on lscr.io/linuxserver/grocy:4.6.0, so it is stopped" in out
+    assert "again. The copy" not in out
+    assert len(_grocy_ups(calls)) == 2
 
 
 def _add_streamdeck_package(rig):
@@ -1298,6 +1388,112 @@ def test_venv_path_syncs_the_streamdeck_package(rig, tmp_path):
     result, out = run_update(rig)
     assert result["streamdeck_synced"] is True, out
     assert (Path(rig["env"]["SD_DST"]) / "actions.py").is_file()
+
+
+# --- Stream Deck dependencies (FoodAssistant-s50hg) ---------------------------
+# The deck sync copies code only, so a pin bump in streamdeck/requirements.txt
+# (a Pillow security fix) never reached a flashed device. The updater now
+# reinstalls the deck requirements when they differ from the deployed copy.
+
+DECK_REQS = "streamdeck>=0.9.8,<1\nPillow>=12.3.0,<13\n"
+
+
+def _deck_deps_rig(rig, tmp_path, *, pip_ok=True, reqs=DECK_REQS):
+    """A deck package with a requirements file in the checkout, a deck dir to
+    sync into, and a venv whose pip records its arguments and then succeeds
+    or fails."""
+    _add_streamdeck_package(rig)
+    req = rig["work"] / "streamdeck" / "requirements.txt"
+    req.write_text(reqs)
+    _git(rig["work"], "add", "-A")
+    _git(rig["work"], "commit", "-m", "deck requirements")
+    _git(rig["work"], "push", "origin", "main")
+    sd_parent = tmp_path / "deck-deps"
+    sd_parent.mkdir()
+    rig["env"]["SD_DST"] = str(sd_parent / "foodassistant_streamdeck")
+    venv = tmp_path / "deck-venv"
+    (venv / "bin").mkdir(parents=True)
+    pip_log = tmp_path / "pip.log"
+    pip = venv / "bin" / "pip"
+    pip.write_text("#!/usr/bin/env bash\n"
+                   f"printf '%s\\n' \"$*\" >> '{pip_log}'\n"
+                   f"exit {0 if pip_ok else 1}\n")
+    pip.chmod(0o755)
+    rig["env"]["VENV_DIR"] = str(venv)
+    return {"req_dst": sd_parent / "streamdeck-requirements.txt",
+            "pip_log": pip_log}
+
+
+def _deck_pip_calls(deck):
+    if not deck["pip_log"].exists():
+        return []
+    return [l for l in deck["pip_log"].read_text().splitlines()
+            if "streamdeck/requirements.txt" in l]
+
+
+def test_changed_deck_requirements_are_installed_and_recorded(rig, tmp_path):
+    deck = _deck_deps_rig(rig, tmp_path)
+    result, out = run_update(rig)
+    assert result["ok"] is True, out
+    calls = _deck_pip_calls(deck)
+    assert len(calls) == 1 and calls[0].startswith("install --quiet -r "), calls
+    assert "Stream Deck requirements changed" in out
+    assert deck["req_dst"].read_text() == DECK_REQS
+
+    # A second run with the same file skips the slow pip step.
+    result, out = run_update(rig)
+    assert len(_deck_pip_calls(deck)) == 1, out
+    assert "Stream Deck requirements unchanged" in out
+
+
+def test_unchanged_deck_requirements_skip_pip(rig, tmp_path):
+    deck = _deck_deps_rig(rig, tmp_path)
+    deck["req_dst"].write_text(DECK_REQS)
+    result, out = run_update(rig)
+    assert _deck_pip_calls(deck) == [], out
+
+
+def test_a_pin_bump_reinstalls_the_deck_requirements(rig, tmp_path):
+    deck = _deck_deps_rig(rig, tmp_path)
+    deck["req_dst"].write_text("streamdeck>=0.9.8,<1\nPillow>=12.0.0,<13\n")
+    result, out = run_update(rig)
+    assert len(_deck_pip_calls(deck)) == 1, out
+    assert deck["req_dst"].read_text() == DECK_REQS
+
+
+def test_a_failed_deck_install_keeps_the_update_and_retries_next_run(rig, tmp_path):
+    deck = _deck_deps_rig(rig, tmp_path, pip_ok=False)
+    old = "streamdeck>=0.9.8,<1\nPillow>=12.0.0,<13\n"
+    deck["req_dst"].write_text(old)
+    result, out = run_update(rig)
+    assert result["ok"] is True, out
+    assert result["streamdeck_synced"] is True, out
+    assert "Stream Deck dependency install failed" in out
+    # The old record stays, so the next run tries again.
+    assert deck["req_dst"].read_text() == old
+    run_update(rig)
+    assert len(_deck_pip_calls(deck)) == 2
+
+
+def test_hosted_path_installs_changed_deck_requirements(rig, tmp_path):
+    # A Pi Hosted device runs the deck from the host venv the app container
+    # never touches, so the Docker path needs the same step.
+    deck = _deck_deps_rig(rig, tmp_path)
+    _hosted_rig(rig, tmp_path)
+    rig["env"]["PATH"] = f"{_succeeding_docker(tmp_path)}:{rig['env']['PATH']}"
+    result, out = run_update(rig)
+    assert result["streamdeck_synced"] is True, out
+    assert len(_deck_pip_calls(deck)) == 1, out
+    assert deck["req_dst"].read_text() == DECK_REQS
+
+
+def test_no_deck_venv_skips_the_deck_requirements(rig, tmp_path):
+    deck = _deck_deps_rig(rig, tmp_path)
+    rig["env"]["VENV_DIR"] = str(tmp_path / "no-venv-here")
+    result, out = run_update(rig)
+    assert result["ok"] is True, out
+    assert not deck["req_dst"].exists()
+    assert "Stream Deck requirements" not in out
 
 
 def test_cec_pointer_ignore_rule_installed(rig, tmp_path):

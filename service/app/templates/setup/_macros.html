@@ -340,6 +340,35 @@
             {% endif %}
           {% endcall %}
 
+          {% call panel('Your recipe databases',
+                        'Add a recipe website you or your family keep, and its recipes show up in recipe search and in "What can I cook?", matched against what you have.',
+                        pill_text=(s.recipe_catalogs|length ~ ' added') if s.recipe_catalogs else 'None yet',
+                        pill_kind=('good' if s.recipe_catalogs else 'neutral'), pill_id='catalogs-pill') %}
+            {% if features.satellite %}
+            <div class="form-text mb-1"><i class="bi bi-hdd-network me-1"></i>Recipe databases are added on the main server, and its recipes show up here automatically.</div>
+            {% else %}
+            <div id="catalog-list" class="mb-2" data-catalog-list></div>
+            <div id="catalog-presets" class="mb-2"></div>
+            {% call srow('Add by address', 'The recipe database address from the site.',
+                         'Any site that offers the Pantry Raider recipe catalog connection works. The site tells you its address, and whether you need an access key.') %}
+              <div style="max-width:420px" class="d-flex flex-column gap-2">
+                <input type="url" class="form-control form-control-sm" id="catalog_url" placeholder="https://example.com/api/pantry-raider" aria-label="Recipe database address">
+                <input type="text" class="form-control form-control-sm" id="catalog_name" placeholder="Name (optional, the site suggests one)" aria-label="Recipe database name">
+                <input type="password" class="form-control form-control-sm" id="catalog_key" placeholder="Access key (only if the site gave you one)" aria-label="Access key" autocomplete="off">
+              </div>
+            {% endcall %}
+            <div class="set-row-actions">
+              <button type="button" class="btn btn-outline-info btn-sm" data-on-click="testCatalog(this)">
+                <i class="bi bi-plug me-1"></i>Test
+              </button>
+              <button type="button" class="btn btn-outline-secondary btn-sm" data-on-click="addCatalog(this)">
+                <i class="bi bi-plus-lg me-1"></i>Add
+              </button>
+            </div>
+            <div class="test-result mt-1" id="catalog-result"></div>
+            {% endif %}
+          {% endcall %}
+
           {% if features.satellite %}
           <div class="form-text mb-3"><i class="bi bi-hdd-network me-1"></i>Recipe settings are managed on the main server and synced here automatically. Edit them there, then Sync.</div>
           {% else %}

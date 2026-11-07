@@ -68,7 +68,7 @@ _STOCK_ROWS = [
 ]
 
 _YOGURT = {"product_id": 5, "name": "Coconut Yogurt", "unit": "cup", "category": "Dairy",
-           "product_group_id": 2, "product_group_name": "Dairy",
+           "unit_plural": "cup", "product_group_id": 2, "product_group_name": "Dairy",
            "added_date": "2026-10-18 09:30:00", "product_amount": 14.0}
 # The rows get_full_stock() gave for that stock before the breakdown existed,
 # key for key.
@@ -80,7 +80,7 @@ PLAIN_ROWS = [
      "urgency": "ok", "location_id": FREEZER, "location_name": "Freezer",
      "storage_bucket": "frozen", "amount_opened": 0.0},
     {"product_id": 6, "name": "Butter", "unit": None, "category": "Dairy",
-     "product_group_id": 2, "product_group_name": "Dairy",
+     "unit_plural": None, "product_group_id": 2, "product_group_name": "Dairy",
      "added_date": "2026-10-10 12:00:00", "product_amount": 1.0, "amount": 1.0,
      "best_before_date": _d(10), "days_remaining": 10, "urgency": "ok",
      "location_id": FRIDGE, "location_name": "Kitchen Fridge",

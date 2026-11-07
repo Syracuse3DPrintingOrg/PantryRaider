@@ -81,6 +81,9 @@ def source_badge(source: str | None, has_source_url: bool = False) -> dict:
       * native WITHOUT one                 -> "My recipes"
       * themealdb / spoonacular            -> "Web"
       * forager                            -> "Forager cloud"
+      * catalog:<id>                       -> the recipe database's own name
+                                              (FoodAssistant-1sfs6; the one rule
+                                              that reads settings, for the name)
       * anything else                      -> "Web" (a safe generic for a source
                                               added later)
     """
@@ -93,4 +96,7 @@ def source_badge(source: str | None, has_source_url: bool = False) -> dict:
         return dict(_FORAGER)
     if src in _WEB_SOURCES:
         return dict(_WEB)
+    if src.startswith("catalog:"):
+        from . import recipe_catalogs
+        return recipe_catalogs.badge(src)
     return dict(_WEB)

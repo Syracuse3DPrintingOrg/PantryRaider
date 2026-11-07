@@ -2,6 +2,12 @@
 # hash-locked resolution of this file that the image actually installs. Change a
 # pin and the lock has to be regenerated in the same commit (README:
 # Dependencies); tests/test_requirements_lock.py fails the build otherwise.
+#
+# The image runs Python 3.12, but Pi Remote satellites pip-install this file
+# into the host's own Python, which is 3.10 on Ubuntu 22.04. A pin whose release
+# needs Python 3.11 therefore comes as a pair: the current release for 3.11 and
+# newer (the one the lock carries), and the last release that still installs on
+# 3.10 behind `python_version < '3.11'`.
 
 # Web framework and server (required)
 # Starlette is pinned explicitly, not left to fastapi: 1.3.1 or later caps a
@@ -10,16 +16,19 @@
 # worker for seconds of CPU), and it carries the URL and form-limit security
 # fixes. Pi Remote satellites pip-install this file rather than the lock, so the
 # pin has to live here to reach them.
-fastapi==0.143.3
-starlette==1.8.0
+fastapi==0.162.0
+starlette==1.9.0; python_version >= '3.11'
+starlette==1.7.0; python_version < '3.11'
 uvicorn[standard]==0.54.0
 
 # Database ORM for SQLite inventory (required)
-sqlalchemy==2.1.5
+sqlalchemy==2.1.6; python_version >= '3.11'
+sqlalchemy==2.0.57; python_version < '3.11'
 
 # Data validation and settings management (required)
 pydantic==2.14.1
-pydantic-settings==2.16.0
+pydantic-settings==2.16.1; python_version >= '3.11'
+pydantic-settings==2.15.0; python_version < '3.11'
 
 # Async HTTP client - used for Grocy, Mealie, and cloud provider APIs (required)
 httpx==0.28.1
@@ -33,20 +42,28 @@ httpx==0.28.1
 # body in memory).
 python-multipart==0.0.32
 
+# Passkey sign-in (required): checks the browser's WebAuthn answers (the
+# signature, the challenge, the site name) for services/passkeys.py. It pulls
+# in cbor2 and pyOpenSSL beside cryptography, which is already here.
+webauthn==2.8.0
+
 # HTML templating engine for the web UI (required)
 jinja2==3.1.6
 
 # AI vision providers (optional - install whichever providers you use)
-google-genai==2.31.0         # Gemini vision/enrichment provider
-anthropic==1.15.0            # Anthropic Claude vision/enrichment provider
+google-genai==2.33.0         # Gemini vision/enrichment provider
+anthropic==2.3.0             # Anthropic Claude vision/enrichment provider
 # OpenAI is accessed via httpx directly - no SDK needed
 
 # Image resizing before sending to AI providers (required for photo analysis),
 # and the label and document renderers. 12.3.0 or newer: the 10.4.0 line is
 # open to a long list of malformed-image advisories, including heap
 # out-of-bounds writes reachable from Image.paste / Image.crop, ImageCms, and
-# the RankFilter this app's renderers use on uploaded photos.
-Pillow==13.0.0
+# the RankFilter this app's renderers use on uploaded photos. Pillow 13 needs
+# Python 3.11, so 3.10 stays on 12.3.0, the last 12.x release (it lacks the fix
+# for GHSA-78g4-xqwv-q3g8, which only 13 carries).
+Pillow==13.0.0; python_version >= '3.11'
+Pillow==12.3.0; python_version < '3.11'
 
 # PDF text extraction for the "Import from PDF" recipe upload. Pure Python (no
 # poppler or other system deps); the recipe's text is handed to the same LLM
@@ -62,10 +79,11 @@ pypdfium2==5.14.0
 # Structured-data recipe scraping for the "From URL" import (the same library
 # Mealie wraps, now run in-process for the native recipe store). Pure Python;
 # pages the scraper cannot read fall back to the existing LLM extraction.
-recipe-scrapers==15.12.0
+recipe-scrapers==15.13.0; python_version >= '3.11'
+recipe-scrapers==15.12.0; python_version < '3.11'
 
 # Flexible date parsing for expiry date extraction (required)
-python-dateutil==2.9.0
+python-dateutil==3.0.0
 
 # Signed session cookies for browser authentication (required)
 itsdangerous==2.2.0

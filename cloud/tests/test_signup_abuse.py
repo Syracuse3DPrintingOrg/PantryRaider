@@ -220,7 +220,8 @@ def _google(monkeypatch, email):
     def handler(request):
         if request.url.host == "oauth2.googleapis.com":
             return httpx.Response(200, json={"access_token": "at"})
-        return httpx.Response(200, json={"email": email, "email_verified": True})
+        return httpx.Response(200, json={"email": email, "email_verified": True,
+                                         "sub": f"sub-{email}"})
     monkeypatch.setattr(oauth_google, "transport", httpx.MockTransport(handler))
 
 

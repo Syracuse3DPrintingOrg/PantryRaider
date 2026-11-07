@@ -127,10 +127,13 @@ def build_point(name: str, barcode: Optional[str], storage_type: str,
         sd = (suggested_date - base_date).days
         if 0 <= sd <= _MAX_DAYS:
             suggested_days = sd
-    # A date shortened by this kitchen's own history is still a rule-based
-    # estimate as far as the shared dataset (and Forager's validation) knows.
+    # A date shortened by this kitchen's own history is neither a rule nor a
+    # shared value, so reporting it as "default" would count this kitchen's
+    # habit as a miss by the built-in rules. Forager takes only "default",
+    # "llm", "community" and "none", so it goes up as "none" with no
+    # suggested day count; the chosen shelf life is still a real data point.
     if suggestion_source == "history":
-        suggestion_source = "default"
+        suggestion_source, suggested_days = "none", None
     source = suggestion_source if suggestion_source in SUGGESTION_SOURCES else "none"
     return {
         "barcode": _clean_barcode(barcode),

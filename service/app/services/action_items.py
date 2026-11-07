@@ -251,7 +251,11 @@ def sync_food_expired(db: Session, expiring_items: list[dict]) -> int:
     genuinely new expiry later raises a fresh alert even if the old item was
     archived or resolved (FoodAssistant-wf62).
     """
-    seen: set[str] = set()
+    # The list can hold a row per best-by date and place (get_expiring_by_date),
+    # so a product's expired rows fold into one item: the earliest date, and
+    # the amount that is actually expired or due today, never the good stock
+    # with a later date that the product's own total would count.
+    per_product: dict = {}
     for it in expiring_items or []:
         prod = it.get("product") or {}
         pid = it.get("product_id") or prod.get("id")
@@ -260,6 +264,20 @@ def sync_food_expired(db: Session, expiring_items: list[dict]) -> int:
         days = int(it.get("days_remaining", 0) or 0)
         if days > 0:
             continue
+        amt = it.get("amount")
+        prev = per_product.get(pid)
+        if prev is None:
+            per_product[pid] = {**it, "days_remaining": days}
+            continue
+        if days < prev["days_remaining"]:
+            prev["days_remaining"] = days
+            prev["best_before_date"] = it.get("best_before_date", "")
+        if amt is not None:
+            prev["amount"] = float(prev.get("amount") or 0) + float(amt)
+    seen: set[str] = set()
+    for pid, it in per_product.items():
+        prod = it.get("product") or {}
+        days = it["days_remaining"]
         name = prod.get("name") or it.get("name") or "An item"
         key = expired_dedupe_key(pid)
         seen.add(key)
@@ -267,6 +285,8 @@ def sync_food_expired(db: Session, expiring_items: list[dict]) -> int:
         level = "error" if days < 0 else "warning"
         bb = it.get("best_before_date", "")
         amt = it.get("amount")
+        if isinstance(amt, float):
+            amt = f"{amt:g}"
         body = f"Best-before {bb}." + (f" Quantity {amt}." if amt is not None else "")
         create(db, KIND_FOOD_EXPIRED, title, body=body.strip(), dedupe_key=key,
                level=level, payload={"product_id": pid, "name": name,
@@ -539,7 +559,7 @@ async def refresh_food_expired(db: Session) -> int:
     than wiping items on a transient outage."""
     from .grocy import GrocyClient
     try:
-        items = await GrocyClient().get_expiring(days=0)
+        items = await GrocyClient().get_expiring_by_date(days=0)
     except Exception:
         return -1
     from fastapi.concurrency import run_in_threadpool

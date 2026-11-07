@@ -166,6 +166,16 @@ The Python controller pins `streamdeck>=0.9.8`, because 0.9.5 does not recognise
 the USB product id used on current XL / Module 32 hardware. Setup and the
 controller service live in [`streamdeck/`](https://github.com/Syracuse3DPrintingOrg/PantryRaider/blob/main/streamdeck/README.md).
 
+The deck draws its key images with Pillow, including camera snapshots it
+fetches over the network, so it follows Pillow's security fixes. Pillow 13
+needs Python 3.11 or newer. On a machine with Python 3.10 (Ubuntu 22.04, for
+example) the deck stays on Pillow 12.3, the last 12.x release, and does not
+get the image-decoding fixes that only shipped in Pillow 13. For a deck that
+shows camera feeds, use a system with Python 3.11 or newer: Raspberry Pi OS
+Bookworm or Trixie, Debian 12 or 13, or Ubuntu 24.04. Updates install a new
+Pillow on the deck by themselves whenever Pantry Raider raises the version it
+needs.
+
 If a connected deck is never detected (`No Stream Deck found` in the service
 log), or it drops off and comes back at random, see
 [Power and cabling](#power-and-cabling) above: a charge-only USB cable and an

@@ -269,16 +269,33 @@ def test_forager_login_still_asks_for_the_device_code(client, monkeypatch):
     assert client.get("/setup", follow_redirects=False).status_code == 200
 
 
-def test_forager_login_from_outside_needs_device_2fa(client, monkeypatch):
+def test_forager_login_from_outside_needs_a_second_factor(client, monkeypatch):
     _link(monkeypatch)
     monkeypatch.setattr(settings, "tunnel_enabled", True, raising=False)
     calls = []
+    # The account has no two-factor of its own (an older cloud says nothing).
     r = _forager_post(client, calls, _Resp(200, {"ok": True}), host=_PUBLIC_HOST)
     assert r.status_code == 401
     assert "two-factor" in r.text.lower()
-    # Refused before the cloud is asked, and no session was opened.
-    assert calls == []
     assert client.get("/setup", follow_redirects=False).status_code in (401, 302, 303, 307)
+
+
+def test_forager_login_from_outside_with_account_2fa_signs_in(client, monkeypatch):
+    _link(monkeypatch)
+    monkeypatch.setattr(settings, "tunnel_enabled", True, raising=False)
+    r = _forager_post(client, [], _Resp(200, {"ok": True, "mfa": True}), host=_PUBLIC_HOST)
+    assert r.status_code == 303
+    assert client.get("/setup", follow_redirects=False, headers={"host": _PUBLIC_HOST}
+                      ).status_code == 200
+
+
+def test_forager_account_2fa_skips_the_device_code(client, monkeypatch):
+    _link(monkeypatch)
+    monkeypatch.setattr(settings, "local_totp_secret",
+                        local_totp.generate_totp_secret(), raising=False)
+    monkeypatch.setattr(settings, "local_totp_enabled", True, raising=False)
+    r = _forager_post(client, [], _Resp(200, {"ok": True, "mfa": True}))
+    assert r.status_code == 303
 
 
 def test_forager_login_from_outside_with_device_2fa_challenges(client, monkeypatch):
@@ -291,16 +308,19 @@ def test_forager_login_from_outside_with_device_2fa_challenges(client, monkeypat
     assert r.status_code == 200 and "authenticator" in r.text.lower()
 
 
-def test_google_unlock_from_outside_needs_device_2fa(client, monkeypatch):
+def test_google_unlock_from_outside_needs_a_second_factor(client, monkeypatch):
     _link(monkeypatch)
     monkeypatch.setattr(settings, "tunnel_enabled", True, raising=False)
-    calls = []
     with patch("app.routers.ui.httpx.AsyncClient",
-               side_effect=lambda *a, **k: _FakeCloud(_Resp(200, {"ok": True}), calls)):
+               side_effect=lambda *a, **k: _FakeCloud(_Resp(200, {"ok": True}), [])):
         r = client.get("/ui/login?code=ABC23456", headers={"host": _PUBLIC_HOST},
                        follow_redirects=False)
     assert r.status_code == 401
-    assert calls == []
+    with patch("app.routers.ui.httpx.AsyncClient",
+               side_effect=lambda *a, **k: _FakeCloud(_Resp(200, {"ok": True, "mfa": True}), [])):
+        r = client.get("/ui/login?code=ABC23456", headers={"host": _PUBLIC_HOST},
+                       follow_redirects=False)
+    assert r.status_code == 303
 
 
 def test_google_unlock_still_asks_for_the_device_code(client, monkeypatch):

@@ -103,10 +103,10 @@ def test_reading_across_sites_is_still_allowed(client_factory):
 
 
 def test_the_session_cookie_declares_samesite_lax():
-    from starlette.middleware.sessions import SessionMiddleware
+    from app.session_cookie import PRSessionMiddleware
 
     from app.main import app
-    sessions = [m for m in app.user_middleware if m.cls is SessionMiddleware]
+    sessions = [m for m in app.user_middleware if m.cls is PRSessionMiddleware]
     assert sessions, "the session middleware is no longer installed"
     assert sessions[0].kwargs.get("same_site") == "lax"
 

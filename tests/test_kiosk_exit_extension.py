@@ -80,6 +80,17 @@ def test_content_never_touches_the_apps_own_pages():
     assert "location.origin === home.origin) return" in text
 
 
+def test_content_sends_a_stranded_non_page_home():
+    # FoodAssistant-ye112: the app's own address showing a JSON reply has no
+    # app script to leave it, so the extension takes the screen home after a
+    # minute without a touch. HTML pages never reach this branch.
+    text = (EXT / "content.js").read_text()
+    assert '!/html/i.test(document.contentType || "text/html")' in text
+    assert "STRANDED_MS = 60000" in text
+    branch = text.index("STRANDED_MS = 60000")
+    assert branch < text.index("location.origin === home.origin) return")
+
+
 def test_content_touch_listeners_are_passive():
     text = (EXT / "content.js").read_text()
     for ev in ("touchstart", "touchmove", "touchend"):

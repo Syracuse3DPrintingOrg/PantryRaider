@@ -27,7 +27,7 @@ import logging
 import statistics
 import threading
 import time
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Optional
 from urllib.parse import quote
@@ -51,7 +51,8 @@ _MIN_RATE_SPAN_DAYS = 7
 # The run-out forecast shows items expected to run out within this many days.
 RUNOUT_HORIZON_DAYS = 7
 
-_JOURNAL_LIMIT = 10000
+_JOURNAL_LIMIT = 5000
+_JOURNAL_MAX_PAGES = 20
 _MAX_AGE_SECONDS = 6 * 3600
 
 _lock = threading.Lock()
@@ -85,6 +86,14 @@ def _amount(value) -> float:
         return 0.0
 
 
+def _event_key(row, day: date) -> str:
+    """One user action in the journal. Grocy gives every row written by the
+    same action one transaction_id (a toss of three stock entries is three
+    rows, one action); without it the day stands in."""
+    tid = str(row.get("transaction_id") or "").strip()
+    return f"t:{tid}" if tid else f"d:{day.isoformat()}"
+
+
 def learn_spoil_days(rows, *, freezer_locations=frozenset(),
                      min_samples: int = MIN_SPOIL_SAMPLES) -> dict[str, dict]:
     """Per-product days until spoiled, from Grocy stock_log rows. Pure.
@@ -93,12 +102,21 @@ def learn_spoil_days(rows, *, freezer_locations=frozenset(),
     stock_id) and takes the days between them. Entries bought into a freezer
     location or moved between locations are left out: their clock does not
     run at fridge speed, so they would only blur the number. Undone rows are
-    ignored. Returns {product_id: {"days": int, "samples": int}} for products
-    with at least ``min_samples`` observations; days is the median, at least 1.
+    ignored, and so is a toss on or after the entry's own best-by date: food
+    thrown out once its date has passed says nothing about it spoiling early,
+    and counting it would let a shortened date keep shortening itself. A
+    same-day toss (age 0) is a mistake fixed or a bad purchase rather than a
+    shelf life, so it is left out too.
+
+    One toss that clears several entries is a single observation, not
+    several: entries are grouped by the toss's transaction_id (by purchase
+    day when the journal has none) and each group adds one sample, its
+    median age. Returns {product_id: {"days": int, "samples": int}} for
+    products with at least ``min_samples`` observations; days is the median.
     """
-    purchases: dict[str, tuple[str, date]] = {}
+    purchases: dict[str, tuple[str, date, Optional[date]]] = {}
     moved: set[str] = set()
-    spoiled: dict[str, date] = {}
+    spoiled: dict[str, tuple[date, Optional[date], dict]] = {}
     freezers = {str(x) for x in freezer_locations}
     for row in rows or []:
         if not isinstance(row, dict) or _flag(row.get("undone")):
@@ -114,22 +132,32 @@ def learn_spoil_days(rows, *, freezer_locations=frozenset(),
             day = _day(row.get("purchased_date")) or _day(row.get("row_created_timestamp"))
             pid = str(row.get("product_id") or "")
             if day and pid:
-                purchases[sid] = (pid, day)
+                purchases[sid] = (pid, day, _day(row.get("best_before_date")))
         elif kind in ("transfer_from", "transfer_to"):
             moved.add(sid)
         elif kind == "consume" and _flag(row.get("spoiled")):
             day = _day(row.get("row_created_timestamp"))
-            if day and (sid not in spoiled or day < spoiled[sid]):
-                spoiled[sid] = day
+            if day and (sid not in spoiled or day < spoiled[sid][0]):
+                spoiled[sid] = (day, _day(row.get("best_before_date")), row)
 
-    ages: dict[str, list[int]] = {}
-    for sid, gone in spoiled.items():
+    groups: dict[tuple[str, str], list[int]] = {}
+    for sid, (gone, label, row) in spoiled.items():
         if sid in moved or sid not in purchases:
             continue
-        pid, bought = purchases[sid]
+        pid, bought, bought_label = purchases[sid]
+        label = label or bought_label
+        if label is not None and gone >= label:
+            continue
         age = (gone - bought).days
-        if 0 <= age <= _LOOKBACK_DAYS:
-            ages.setdefault(pid, []).append(age)
+        if not 1 <= age <= _LOOKBACK_DAYS:
+            continue
+        tid = str(row.get("transaction_id") or "").strip()
+        key = f"t:{tid}" if tid else f"d:{bought.isoformat()}"
+        groups.setdefault((pid, key), []).append(age)
+
+    ages: dict[str, list[int]] = {}
+    for (pid, _key), values in groups.items():
+        ages.setdefault(pid, []).append(statistics.median_low(values))
 
     out = {}
     for pid, values in ages.items():
@@ -146,13 +174,16 @@ def learn_consumption(rows, *, today: date,
 
     Counts ordinary (not spoiled, not undone) consumes from the last
     ``window_days`` days. The rate is the total amount over the days since the
-    first of those consumes, never less than a week. Returns
+    first of those consumes, never less than a week. One consume that draws
+    from several stock entries writes several journal rows, so events are
+    counted per action (transaction_id, or the day when there is none) while
+    every row's amount adds up. Returns
     {product_id: {"per_day": float, "events": int}} for products with at least
     ``min_events`` consumes.
     """
     cutoff = today - timedelta(days=window_days)
     totals: dict[str, float] = {}
-    events: dict[str, int] = {}
+    events: dict[str, set[str]] = {}
     first: dict[str, date] = {}
     for row in rows or []:
         if not isinstance(row, dict) or _flag(row.get("undone")):
@@ -165,16 +196,17 @@ def learn_consumption(rows, *, today: date,
         if not day or not pid or amount <= 0 or day < cutoff or day > today:
             continue
         totals[pid] = totals.get(pid, 0.0) + amount
-        events[pid] = events.get(pid, 0) + 1
+        events.setdefault(pid, set()).add(_event_key(row, day))
         if pid not in first or day < first[pid]:
             first[pid] = day
 
     out = {}
     for pid, total in totals.items():
-        if events[pid] < min_events:
+        count = len(events[pid])
+        if count < min_events:
             continue
         span = max((today - first[pid]).days, _MIN_RATE_SPAN_DAYS)
-        out[pid] = {"per_day": round(total / span, 4), "events": events[pid]}
+        out[pid] = {"per_day": round(total / span, 4), "events": count}
     return out
 
 
@@ -271,10 +303,25 @@ def maybe_notify(db, name: str, days: int, standard_days: int) -> bool:
         return False
 
 
-def build_cache(rows, products, locations, *, today: date) -> dict:
-    """The state-file document from raw Grocy rows. Pure."""
+def _is_freezer(loc: dict) -> bool:
+    """A Grocy location that freezes: flagged as a freezer in Grocy, or the
+    one Pantry Raider files frozen food under (matched by name, since a
+    Freezer location made by hand in Grocy may not carry the flag)."""
+    if _flag(loc.get("is_freezer")):
+        return True
+    try:
+        from ..storage_categories import classify_location
+        return classify_location(str(loc.get("name") or "")) == "frozen"
+    except Exception:
+        return False
+
+
+def build_cache(rows, products, locations, *, today: date,
+                grocy_url: str = "") -> dict:
+    """The state-file document from raw Grocy rows. Pure apart from reading
+    the storage categories to recognize the freezer by name."""
     freezers = {str(loc.get("id")) for loc in locations or []
-                if isinstance(loc, dict) and _flag(loc.get("is_freezer"))}
+                if isinstance(loc, dict) and _is_freezer(loc)}
     names = {str(p.get("id")): str(p.get("name") or "")
              for p in products or [] if isinstance(p, dict)}
     spoil = learn_spoil_days(rows, freezer_locations=freezers)
@@ -286,6 +333,9 @@ def build_cache(rows, products, locations, *, today: date) -> dict:
     return {
         "version": 1,
         "built": today.isoformat(),
+        # Which Grocy the history came from: pointing the app at another
+        # Grocy makes this cache someone else's kitchen (see _load).
+        "grocy_url": _url_key(grocy_url),
         "spoil_by_product": spoil,
         "spoil_by_name": by_name,
         "consumption": learn_consumption(rows, today=today),
@@ -308,19 +358,42 @@ def _load() -> dict:
                 return {}
             _cache = doc if isinstance(doc, dict) else {}
             _mtime = mtime
+        if not _same_grocy(_cache):
+            return {}
         return _cache
 
 
-def learned_spoil_days(name: str) -> Optional[int]:
-    """This kitchen's learned days-until-spoiled for a product name, or None.
+def _url_key(url) -> str:
+    return str(url or "").strip().rstrip("/").lower()
 
-    Gated by the use_kitchen_history setting and served from the local cache
-    only. Never raises."""
+
+def _same_grocy(doc: dict) -> bool:
+    """False when the cache was built from a different Grocy than the one
+    configured now. A cache with no recorded Grocy (older builds) is kept."""
+    built_from = doc.get("grocy_url") if isinstance(doc, dict) else None
+    if not built_from:
+        return True
+    from ..config import settings
+    return _url_key(built_from) == _url_key(settings.grocy_base_url)
+
+
+def learned_spoil_days(name: str, product_id=None) -> Optional[int]:
+    """This kitchen's learned days-until-spoiled for a product, or None.
+
+    Looked up by Grocy product id when one is known (two products can share a
+    name, and a renamed product keeps its id), then by name. Gated by the
+    use_kitchen_history setting and served from the local cache only. Never
+    raises."""
     try:
         from ..config import settings
         if not settings.use_kitchen_history:
             return None
-        value = (_load().get("spoil_by_name") or {}).get(normalize_name(name))
+        doc = _load()
+        if product_id not in (None, ""):
+            info = (doc.get("spoil_by_product") or {}).get(str(product_id))
+            if isinstance(info, dict) and info.get("days"):
+                return int(info["days"])
+        value = (doc.get("spoil_by_name") or {}).get(normalize_name(name))
         return int(value) if value else None
     except Exception:
         return None
@@ -341,7 +414,30 @@ def is_stale(max_age_seconds: int = _MAX_AGE_SECONDS,
         mtime = _cache_file().stat().st_mtime
     except OSError:
         return True
+    try:
+        if not _load():
+            return True  # unreadable, or built from a different Grocy
+    except Exception:
+        return True
     return ((time.time() if now is None else now) - mtime) > max_age_seconds
+
+
+async def _read_journal(grocy, since: str) -> list:
+    """Every stock_log row since ``since``, a page at a time, newest first.
+    Stops at _JOURNAL_MAX_PAGES pages so a huge journal cannot run away."""
+    query = quote(f"row_created_timestamp>={since}", safe="")
+    rows: list = []
+    for page in range(_JOURNAL_MAX_PAGES):
+        batch = await grocy._get(
+            f"/objects/stock_log?query%5B%5D={query}"
+            f"&order=row_created_timestamp%3Adesc"
+            f"&limit={_JOURNAL_LIMIT}&offset={page * _JOURNAL_LIMIT}")
+        if not isinstance(batch, list):
+            break
+        rows.extend(batch)
+        if len(batch) < _JOURNAL_LIMIT:
+            break
+    return rows
 
 
 async def refresh(grocy=None) -> bool:
@@ -351,15 +447,15 @@ async def refresh(grocy=None) -> bool:
         if grocy is None:
             from .grocy import GrocyClient
             grocy = GrocyClient()
-        today = datetime.now(timezone.utc).date()
+        from ..config import settings
+        # Local date: Grocy writes the journal in the kitchen's local time.
+        today = date.today()
         since = (today - timedelta(days=_LOOKBACK_DAYS)).isoformat()
-        query = quote(f"row_created_timestamp>={since}", safe="")
-        rows = await grocy._get(
-            f"/objects/stock_log?query%5B%5D={query}"
-            f"&order=row_created_timestamp%3Adesc&limit={_JOURNAL_LIMIT}")
+        rows = await _read_journal(grocy, since)
         products = await grocy.get_products()
         locations = await grocy._get("/objects/locations")
-        doc = build_cache(rows, products, locations, today=today)
+        doc = build_cache(rows, products, locations, today=today,
+                          grocy_url=settings.grocy_base_url)
         from .. import durable
         await asyncio.to_thread(durable.write_json, _cache_file(), doc,
                                 keep_last_good=False)

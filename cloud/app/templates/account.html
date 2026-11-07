@@ -232,6 +232,26 @@
 
         <div id="passkey-add-msg" class="alert" role="status"
              style="display:none;margin:0.75rem 0;"></div>
+        {% if has_password or totp_enabled %}
+        <div id="passkey-step-up">
+          <p class="muted small">To keep your account safe, confirm it is you
+          before adding a passkey.</p>
+          {% if has_password %}
+          <label for="passkey-password">Your password</label>
+          <input type="password" id="passkey-password" autocomplete="current-password">
+          {% endif %}
+          {% if totp_enabled %}
+          <label for="passkey-code">{% if has_password %}Or a code from your
+            authenticator app{% else %}A code from your authenticator app{% endif %}</label>
+          <input type="text" id="passkey-code" autocomplete="one-time-code"
+                 inputmode="numeric">
+          {% endif %}
+        </div>
+        {% else %}
+        <p class="muted small">For your security, a passkey can only be added
+        within {{ passkey_recent_minutes }} minutes of signing in. If it has been
+        longer, sign out and sign back in first.</p>
+        {% endif %}
         <button class="btn btn-outline" type="button" id="passkey-add-btn"
                 onclick="addPasskey()">Add a passkey</button>
         <p id="passkey-unsupported" class="muted small" style="display:none;margin-top:0.6rem;">
@@ -539,13 +559,25 @@
     _passkeyMsg("", true);
     document.getElementById("passkey-add-msg").style.display = "none";
     try {
-      var begin = await fetch("/account/passkeys/register/begin",
-                              {method: "POST"});
+      var pw = document.getElementById("passkey-password");
+      var code = document.getElementById("passkey-code");
+      var begin = await fetch("/account/passkeys/register/begin", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({password: pw ? pw.value : "",
+                              code: code ? code.value : ""})
+      });
       if (!begin.ok) {
         var eb = await begin.json().catch(function () { return {}; });
         _passkeyMsg(eb.error || "Could not start. Please try again.", false);
+        var ask = eb.step_up || [];
+        if (ask.indexOf("password") !== -1 && pw) { pw.focus(); }
+        else if (ask.indexOf("code") !== -1 && code) { code.focus(); }
         return;
       }
+      // Proof was accepted; clear it so it does not linger on the page.
+      if (pw) pw.value = "";
+      if (code) code.value = "";
       var options = JSON.parse((await begin.json()).options);
       options.challenge = b64urlToBytes(options.challenge);
       options.user.id = b64urlToBytes(options.user.id);

@@ -66,7 +66,7 @@ OLD_SAVEABLE = {
     "label_show_logo", "label_width_in", "lan_cidrs", "lan_scan_cidr",
     "legacy_key_auto_retire", "legacy_mirror", "llm_expiry_enabled",
     "local_device_pairing_enabled", "local_totp_enabled",
-    "local_totp_recovery", "local_totp_secret", "mealie_admin_password",
+    "local_totp_recovery", "local_passkeys", "local_totp_scope", "signin_news_checked", "signin_news_until", "local_totp_secret", "mealie_admin_password",
     "mealie_api_key", "mealie_base_url", "mealie_connected",
     "mealie_public_url", "nav_blocked_notified", "nav_hidden", "nav_order",
     "nav_parents", "nav_visibility", "neokey_rest_color", "neokey_timer_color",
@@ -84,6 +84,7 @@ OLD_SAVEABLE = {
     "screensaver_all_clients", "screensaver_ken_burns",
     "screensaver_ken_burns_speed", "screensaver_minutes", "screensaver_mode",
     "screensaver_photo_seconds", "screensaver_pill_scale", "screensaver_speed",
+    "recipe_catalog_keys", "recipe_catalogs",
     "secret_key", "share_barcode_corrections", "share_expiry_learning",
     "shopping_backend",
     "spoonacular_api_key", "staple_items", "start_page_enabled",
@@ -167,6 +168,7 @@ OLD_SECRET_SETTING_KEYS = {
     "grocy_admin_password", "grocy_api_key", "hosted_config_snapshot",
     "immich_api_key", "kiosk_pin", "local_totp_recovery", "local_totp_secret",
     "mealie_admin_password", "mealie_api_key", "openai_api_key", "secret_key",
+    "recipe_catalog_keys",
     "spoonacular_api_key", "streamdeck_ha_token", "themealdb_api_key",
     "totp_secret", "tunnel_token", "upstream_api_key", "viewer_password",
 }
@@ -369,7 +371,7 @@ ADDED_TO_SETUP_PAYLOAD = {
     'inventory_rows_per_best_by': ('bool', True),
 }
 # The pre-setup Forager browser marker is a session-binding value.
-ADDED_SECRETS = {"cloud_link_session"}
+ADDED_SECRETS = {"cloud_link_session", "local_passkeys"}
 
 # The "blank keeps the stored value" fields of /setup/save, as they were kept
 # by hand in routers/setup.py.

@@ -76,10 +76,10 @@ _STOCK_ROWS = [
 ]
 
 _YOGURT = {"product_id": 5, "name": "Coconut Yogurt", "unit": "cup", "category": "Dairy",
-           "product_group_id": 2, "product_group_name": "Dairy",
+           "unit_plural": "cup", "product_group_id": 2, "product_group_name": "Dairy",
            "added_date": "2026-10-18 09:30:00", "product_amount": 14.0}
 _BUTTER = {"product_id": 6, "name": "Butter", "unit": None, "category": "Dairy",
-           "product_group_id": 2, "product_group_name": "Dairy",
+           "unit_plural": None, "product_group_id": 2, "product_group_name": "Dairy",
            "added_date": "2026-10-11 12:00:00", "product_amount": 4.0}
 
 
