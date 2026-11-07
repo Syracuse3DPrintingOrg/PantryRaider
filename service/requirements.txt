@@ -17,17 +17,17 @@
 # fixes. Pi Remote satellites pip-install this file rather than the lock, so the
 # pin has to live here to reach them.
 fastapi==0.162.0
-starlette==1.9.0; python_version >= '3.11'
+starlette==1.10.0; python_version >= '3.11'
 starlette==1.7.0; python_version < '3.11'
 uvicorn[standard]==0.54.0
 
 # Database ORM for SQLite inventory (required)
-sqlalchemy==2.1.6; python_version >= '3.11'
+sqlalchemy==2.1.8; python_version >= '3.11'
 sqlalchemy==2.0.57; python_version < '3.11'
 
 # Data validation and settings management (required)
-pydantic==2.14.1
-pydantic-settings==2.16.1; python_version >= '3.11'
+pydantic==2.14.2
+pydantic-settings==2.16.2; python_version >= '3.11'
 pydantic-settings==2.15.0; python_version < '3.11'
 
 # Async HTTP client - used for Grocy, Mealie, and cloud provider APIs (required)
@@ -40,7 +40,7 @@ httpx==0.28.1
 # preamble/epilogue, arbitrary file write, Content-Disposition and querystring
 # parameter smuggling, and a negative Content-Length that buffers the whole
 # body in memory).
-python-multipart==0.0.32
+python-multipart==0.0.33
 
 # Passkey sign-in (required): checks the browser's WebAuthn answers (the
 # signature, the challenge, the site name) for services/passkeys.py. It pulls
@@ -51,8 +51,8 @@ webauthn==2.8.0
 jinja2==3.1.6
 
 # AI vision providers (optional - install whichever providers you use)
-google-genai==2.33.0         # Gemini vision/enrichment provider
-anthropic==2.3.0             # Anthropic Claude vision/enrichment provider
+google-genai==2.34.0         # Gemini vision/enrichment provider
+anthropic==2.4.0             # Anthropic Claude vision/enrichment provider
 # OpenAI is accessed via httpx directly - no SDK needed
 
 # Image resizing before sending to AI providers (required for photo analysis),
@@ -68,7 +68,7 @@ Pillow==12.3.0; python_version < '3.11'
 # PDF text extraction for the "Import from PDF" recipe upload. Pure Python (no
 # poppler or other system deps); the recipe's text is handed to the same LLM
 # extractor the URL import fallback uses.
-pypdf==6.21.2
+pypdf==6.21.4
 
 # Renders a scanned / image-only PDF's pages to images so the vision AI can read
 # them (the "Import from PDF" fallback). Its wheels bundle the PDFium engine and
@@ -99,4 +99,4 @@ qrcode[pil]==8.2
 # mDNS advertisement so the Home Assistant integration can find this install
 # on the LAN without the owner typing an IP into the config flow (required).
 # Pure Python; pulls in ifaddr transitively for interface enumeration.
-zeroconf==0.151.5
+zeroconf==0.153.0
