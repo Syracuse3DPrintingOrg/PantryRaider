@@ -41,16 +41,23 @@ import time
 from datetime import datetime, timezone
 from urllib.parse import urlsplit
 
-from webauthn import (base64url_to_bytes, generate_authentication_options,
-                      generate_registration_options, options_to_json,
-                      verify_authentication_response,
-                      verify_registration_response)
-from webauthn.helpers import bytes_to_base64url
-from webauthn.helpers.structs import (AuthenticatorSelectionCriteria,
-                                      AuthenticatorTransport,
-                                      PublicKeyCredentialDescriptor,
-                                      ResidentKeyRequirement,
-                                      UserVerificationRequirement)
+# py_webauthn is optional at import time: an install whose code updated
+# before its Python packages did (a git pull on a satellite, a hand-run
+# server) must still start. Passkeys are then simply not offered.
+try:
+    from webauthn import (base64url_to_bytes, generate_authentication_options,
+                          generate_registration_options, options_to_json,
+                          verify_authentication_response,
+                          verify_registration_response)
+    from webauthn.helpers import bytes_to_base64url
+    from webauthn.helpers.structs import (AuthenticatorSelectionCriteria,
+                                          AuthenticatorTransport,
+                                          PublicKeyCredentialDescriptor,
+                                          ResidentKeyRequirement,
+                                          UserVerificationRequirement)
+    AVAILABLE = True
+except ImportError:  # pragma: no cover - exercised by test_passkeys_without_the_package
+    AVAILABLE = False
 
 RP_NAME = "Pantry Raider"
 CEREMONY_SECONDS = 300
@@ -117,6 +124,8 @@ def _iso(ts: float | None = None) -> str:
 
 def for_site(settings, rp_id: str) -> list[dict]:
     """The stored passkeys made on ``rp_id``."""
+    if not AVAILABLE:
+        return []
     return [r for r in _records(settings) if r.get("rp_id") == rp_id]
 
 
@@ -206,6 +215,8 @@ def reset() -> None:
 
 
 def registration_options(settings, session, origin_header: str, name: str) -> dict:
+    if not AVAILABLE:
+        raise PasskeyError(MISSING_MSG)
     site = site_for(origin_header)
     if site is None:
         raise PasskeyError(NOT_HERE_MSG)
@@ -242,6 +253,8 @@ def verify_registration(credential: dict, challenge: bytes, rp_id: str, origin: 
 def finish_registration(settings, session, origin_header: str, credential) -> dict:
     """Check the browser's answer and return the record to store. Raises
     PasskeyError with a message for the person on any failure."""
+    if not AVAILABLE:
+        raise PasskeyError(MISSING_MSG)
     row = _take(session, "register")
     site = site_for(origin_header)
     if site is None or site != (row["rp_id"], row["origin"]):
@@ -309,6 +322,8 @@ def verify_authentication(credential: dict, challenge: bytes, rp_id: str, origin
 def finish_authentication(settings, session, origin_header: str, credential) -> list[dict]:
     """Check a sign-in and return the updated passkey list to save (new
     signature counter and last-used time). Raises PasskeyError on failure."""
+    if not AVAILABLE:
+        raise PasskeyError(SIGN_IN_FAILED_MSG)
     row = _take(session, "login")
     site = site_for(origin_header)
     if site is None or site != (row["rp_id"], row["origin"]):
@@ -348,3 +363,5 @@ ADD_FAILED_MSG = "That did not work. Try adding the passkey again."
 NO_UV_MSG = ("That passkey did not check who you are. Use a phone or computer "
              "passkey, or set a PIN on your security key, and try again.")
 SIGN_IN_FAILED_MSG = "That passkey did not work here. Try again or use your password."
+MISSING_MSG = ("Passkeys need this kitchen's latest update to finish installing. "
+               "Update again from Settings, then try once more.")

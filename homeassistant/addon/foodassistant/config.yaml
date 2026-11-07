@@ -2,7 +2,7 @@ name: Pantry Raider
 # The Dockerfile builds FROM the release image this version names, so it must
 # always be a published release. scripts/sync-public.sh moves it forward on
 # the public repo.
-version: "0.21.132"
+version: "0.21.152"
 slug: foodassistant
 description: Food spoilage tracker with Grocy inventory and optional AI
 url: https://github.com/Syracuse3DPrintingOrg/PantryRaider
