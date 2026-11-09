@@ -45,6 +45,7 @@
       --bs-primary: {{ custom_theme_primary }}; --bs-link-color: {{ custom_theme_primary }};
       --bs-body-bg: {{ custom_theme_bg }}; --bs-body-color: {{ custom_theme_text }};
       --bs-secondary-bg: {{ custom_theme_surface }}; --bs-tertiary-bg: {{ custom_theme_surface }};
+      --bs-border-color: {{ custom_theme_surface }}; --bs-emphasis-color: {{ custom_theme_text }};
     }
     body { background-color: var(--bs-body-bg); color: var(--bs-body-color); }
   </style>
@@ -148,19 +149,44 @@
     /* Glance as a landing page (FoodAssistant-l697 follow-on): the visual
        language of pantryraider.app brought onto the kiosk. Same tokens as the
        website's global.css: the near-black stage, raised cards, the brand
-       gradient, and the soft pink glow. The app's custom theme accent replaces
-       the pink when one is set, so a re-themed kitchen stays coherent. */
+       gradient, and the soft pink glow. That is the brand theme's look; every
+       other theme (custom ones included) swaps in its own colors through the
+       glance-themed block below, so a re-themed kitchen stays coherent. */
     .glance-landing {
       --pr-bg: #0d0d12; --pr-card: #1a1a23; --pr-border: #2a2a35;
       --pr-fg: #ebebf0; --pr-muted: #a0a0aa;
-      --pr-accent: {{ custom_theme_primary if custom_theme_active else '#f2006e' }};
+      --pr-accent: #f2006e; --pr-accent-2: #b5179e;
+      --pr-glow-2: rgba(140, 50, 210, 0.22); --pr-glow-3: rgba(60, 60, 190, 0.14);
+      /* --pr-ink tints the frosted glass, hairlines and highlights: white on
+         the dark stage. --pr-chip backs the eyebrow and pills, and
+         --pr-shadow is the drop shadow strength. */
+      --pr-ink: #fff; --pr-chip: rgba(22, 22, 29, 0.72);
+      --pr-shadow: rgba(0, 0, 0, 0.35); --pr-shadow-lift: rgba(0, 0, 0, 0.45);
       --pr-accent-soft: color-mix(in srgb, var(--pr-accent) 72%, #fff);
-      --pr-grad: linear-gradient(115deg, var(--pr-accent-soft) 0%, var(--pr-accent) 45%, #b5179e 100%);
+      --pr-grad: linear-gradient(115deg, var(--pr-accent-soft) 0%, var(--pr-accent) 45%, var(--pr-accent-2) 100%);
       background: var(--pr-bg); color: var(--pr-fg);
       isolation: isolate; overflow-y: auto;
       /* The whole welcome (hero, cards, pills) centers as one composition, so
          a tall window never opens dead bands between the pieces. */
       justify-content: center; gap: clamp(0.6rem, 2.6vmin, 2rem);
+    }
+    /* Any theme other than the brand one: the landing takes its stage,
+       cards, text and accents from the active theme, so a light theme gets a
+       light welcome and a neon theme gets its own neon. The glass, glow and
+       tile layout stay the same; only the colors follow the theme. */
+    .glance-landing.glance-themed {
+      --pr-bg: var(--bs-body-bg); --pr-card: var(--bs-secondary-bg);
+      --pr-border: var(--bs-border-color);
+      --pr-fg: var(--bs-body-color); --pr-muted: var(--bs-secondary-color);
+      --pr-accent: var(--bs-primary); --pr-accent-2: {{ custom_theme_accent if custom_theme_active else 'var(--bs-info)' }};
+      --pr-glow-2: color-mix(in srgb, var(--pr-accent-2) 22%, transparent);
+      --pr-glow-3: color-mix(in srgb, var(--pr-accent-2) 12%, transparent);
+      --pr-ink: var(--bs-body-color);
+      --pr-chip: color-mix(in srgb, var(--bs-secondary-bg) 72%, transparent);
+      {% if theme_mode == 'light' %}
+      --pr-shadow: rgba(0, 0, 0, 0.1); --pr-shadow-lift: rgba(0, 0, 0, 0.16);
+      {% endif %}
+      --pr-accent-soft: color-mix(in srgb, var(--pr-accent) 72%, var(--pr-fg));
     }
     /* A full-stage ambient color field instead of one hero blob: three soft
        glows drifting slowly across the whole stage. This is what the frosted
@@ -170,8 +196,8 @@
       content: ""; position: fixed; inset: -12%; z-index: -1; pointer-events: none;
       background:
         radial-gradient(38% 34% at 24% 12%, color-mix(in srgb, var(--pr-accent) 26%, transparent), transparent 70%),
-        radial-gradient(34% 38% at 82% 30%, rgba(140, 50, 210, 0.22), transparent 72%),
-        radial-gradient(40% 36% at 55% 96%, color-mix(in srgb, var(--pr-accent) 13%, rgba(60, 60, 190, 0.14)), transparent 74%);
+        radial-gradient(34% 38% at 82% 30%, var(--pr-glow-2), transparent 72%),
+        radial-gradient(40% 36% at 55% 96%, color-mix(in srgb, var(--pr-accent) 13%, var(--pr-glow-3)), transparent 74%);
       background-repeat: no-repeat;
       filter: blur(40px);
       animation: glance-glow 14s ease-in-out infinite alternate;
@@ -207,7 +233,7 @@
     }
     .glance-eyebrow { display: inline-block; margin-bottom: 0.3rem; padding: 0.22rem 0.85rem;
       border: 1px solid var(--pr-border); border-radius: 999px;
-      background: rgba(22, 22, 29, 0.72); color: var(--pr-accent-soft);
+      background: var(--pr-chip); color: var(--pr-accent-soft);
       font-size: clamp(0.62rem, 1.8vmin, 0.8rem); font-weight: 600;
       letter-spacing: 0.06em; text-transform: uppercase; }
     .glance-title { margin: 0; font-weight: 700; letter-spacing: -0.02em; line-height: 1.12;
@@ -248,14 +274,14 @@
       flex: 0 1 clamp(180px, 22%, 280px); min-width: min(160px, 92vw);
       gap: clamp(0.3rem, 1vmin, 0.55rem);
       padding: clamp(0.9rem, 2.8vmin, 1.6rem) clamp(0.7rem, 2vmin, 1.1rem);
-      background: var(--pr-card); border: 1px solid rgba(255, 255, 255, 0.1);
+      background: var(--pr-card); border: 1px solid color-mix(in srgb, var(--pr-ink) 10%, transparent);
       border-radius: 18px;
-      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07), 0 8px 26px rgba(0, 0, 0, 0.35);
+      box-shadow: inset 0 1px 0 color-mix(in srgb, var(--pr-ink) 7%, transparent), 0 8px 26px var(--pr-shadow);
       color: var(--pr-fg); text-decoration: none; cursor: pointer; user-select: none;
       transition: transform 0.22s cubic-bezier(0.2, 0.7, 0.2, 1), border-color 0.22s ease,
         box-shadow 0.22s ease, background-color 0.22s ease; }
     @supports (backdrop-filter: blur(1px)) {
-      .glance-card { background: rgba(255, 255, 255, 0.055);
+      .glance-card { background: color-mix(in srgb, var(--pr-ink) 5.5%, transparent);
         backdrop-filter: blur(16px) saturate(1.35);
         -webkit-backdrop-filter: blur(16px) saturate(1.35); }
     }
@@ -263,9 +289,9 @@
       background: var(--pr-grad); opacity: 0; transition: opacity 0.22s ease; }
     .glance-card:hover, .glance-card:focus-visible {
       transform: translateY(-4px);
-      background: rgba(255, 255, 255, 0.09);
-      border-color: color-mix(in srgb, var(--pr-accent) 55%, rgba(255, 255, 255, 0.14));
-      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1), 0 14px 34px rgba(0, 0, 0, 0.45);
+      background: color-mix(in srgb, var(--pr-ink) 9%, transparent);
+      border-color: color-mix(in srgb, var(--pr-accent) 55%, color-mix(in srgb, var(--pr-ink) 14%, transparent));
+      box-shadow: inset 0 1px 0 color-mix(in srgb, var(--pr-ink) 10%, transparent), 0 14px 34px var(--pr-shadow-lift);
       outline: none; }
     .glance-card:hover::before, .glance-card:focus-visible::before { opacity: 1; }
     .glance-card:active { transform: translateY(-1px) scale(0.99); }
@@ -288,24 +314,24 @@
        footer, lit in the tile's neon when it carries a nonzero reading. */
     .glance-card-live { margin-top: clamp(0.25rem, 1vmin, 0.5rem);
       padding-top: clamp(0.25rem, 1vmin, 0.5rem);
-      border-top: 1px solid rgba(255, 255, 255, 0.09);
+      border-top: 1px solid color-mix(in srgb, var(--pr-ink) 9%, transparent);
       width: 100%; font-size: clamp(0.78rem, 2.2vmin, 0.95rem);
       font-size: clamp(0.78rem, 7cqi, 1.05rem); font-weight: 600;
       color: var(--pr-muted); font-variant-numeric: tabular-nums; }
-    .glance-card-live.live-hot { color: color-mix(in srgb, var(--neon, var(--pr-accent)) 80%, #fff); }
+    .glance-card-live.live-hot { color: color-mix(in srgb, var(--neon, var(--pr-accent)) 80%, var(--pr-fg)); }
     /* Status pills: the website's eyebrow-pill look, warming to the accent
        (count + glow) when something needs attention. */
     .glance-pills { flex: 0 0 auto; display: flex; flex-wrap: wrap; gap: clamp(0.4rem, 1.2vmin, 0.8rem);
       justify-content: center; align-items: center; padding-top: clamp(0.5rem, 1.6vmin, 1rem); }
     .glance-pill { display: inline-flex; align-items: center; gap: 0.5rem;
-      text-decoration: none; color: var(--pr-fg); background: rgba(22, 22, 29, 0.72);
-      border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 999px;
-      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+      text-decoration: none; color: var(--pr-fg); background: var(--pr-chip);
+      border: 1px solid color-mix(in srgb, var(--pr-ink) 10%, transparent); border-radius: 999px;
+      box-shadow: inset 0 1px 0 color-mix(in srgb, var(--pr-ink) 6%, transparent);
       padding: clamp(0.3rem, 1vmin, 0.5rem) clamp(0.8rem, 2.2vmin, 1.2rem);
       cursor: pointer; user-select: none;
       transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease; }
     @supports (backdrop-filter: blur(1px)) {
-      .glance-pill { background: rgba(255, 255, 255, 0.05);
+      .glance-pill { background: color-mix(in srgb, var(--pr-ink) 5%, transparent);
         backdrop-filter: blur(14px) saturate(1.3);
         -webkit-backdrop-filter: blur(14px) saturate(1.3); }
     }
@@ -314,7 +340,7 @@
     .glance-pill .pill-label { font-size: clamp(0.75rem, 2.2vmin, 0.95rem); font-weight: 600; line-height: 1; }
     .glance-pill .pill-count { font-size: clamp(0.75rem, 2.2vmin, 0.95rem); font-weight: 700; line-height: 1;
       min-width: 1.4em; text-align: center; padding: 0.18em 0.55em;
-      background: rgba(255, 255, 255, 0.12); border-radius: 999px; }
+      background: color-mix(in srgb, var(--pr-ink) 12%, transparent); border-radius: 999px; }
     .glance-pill .pill-count.pill-clear { background: transparent; opacity: 0.75; padding: 0.18em 0.3em; }
     .glance-pill.has-count { border-color: var(--pr-accent);
       box-shadow: 0 4px 18px color-mix(in srgb, var(--pr-accent) 30%, transparent); }
@@ -403,6 +429,8 @@
      the kitchen screen's home page shows it too. The grid and the corner
      buttons move down by its height while it shows (see the style block). #}
   {% include "_access_banner.html" %}
+  {# The public demo's theme picker; nothing on a normal install. #}
+  {% include "_demo_theme_picker.html" %}
   <main id="startMain">
   {% if not enabled %}
   <div class="d-flex flex-column align-items-center justify-content-center" style="height:100%; gap:1rem; text-align:center; padding:2rem">
@@ -417,7 +445,7 @@
   {% else %}
   <a href="setup" class="btn btn-outline-secondary btn-sm start-settings" title="Settings" aria-label="Settings"><i class="bi bi-gear"></i></a>
   <a href="ui/inventory" class="btn btn-outline-secondary btn-sm start-exit" title="Exit the Start Page" aria-label="Exit the Start Page"><i class="bi bi-box-arrow-up-right"></i></a>
-  <div class="start-wrap{% if glance %} glance-landing{% endif %}">
+  <div class="start-wrap{% if glance %} glance-landing{% if ui_theme != 'pantryraider' %} glance-themed{% endif %}{% endif %}">
     {% if glance %}
     {# Glance as a landing page (FoodAssistant-l697 follow-on, Dan): a welcome
        hero and option cards in the pantryraider.app website's visual language
@@ -448,7 +476,15 @@
        the label, a muted hint, and a LIVE status line (fed below by the same
        gentle pollers as the pills) separated by a hairline, so the launcher
        reads like a device OS, not a web page. #}
+    {% if ui_theme == 'pantryraider' %}
     {% set _neons = ['#ff4d9b', '#b16bff', '#f2006e', '#8b5cf6', '#e879f9', '#7c6bff', '#ff6bcb', '#c026d3'] %}
+    {% else %}
+    {# Other themes: the tiles glow in the theme's own primary and second
+       accent, alternating, with blends between them. #}
+    {% set _neons = ['var(--pr-accent)', 'var(--pr-accent-2)',
+                     'color-mix(in srgb, var(--pr-accent) 60%, var(--pr-accent-2))',
+                     'color-mix(in srgb, var(--pr-accent-2) 60%, var(--pr-accent))'] * 2 %}
+    {% endif %}
     <div class="glance-cards">
       {% for k in layout if k.kind == 'builtin' %}
       <a class="glance-card" href="{{ k.href }}" style="--neon: {{ _neons[loop.index0 % 8] }}" data-tile="{{ k.key }}">

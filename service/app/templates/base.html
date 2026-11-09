@@ -231,6 +231,7 @@
   <script src="static/js/err-text.js?v={{ app_version }}"></script>
   {# Read-only DEMO MODE banner (FoodAssistant-pxp0), pinned above the navbar. #}
   {% include "_demo_banner.html" %}
+  {% include "_demo_theme_picker.html" %}
   {# Open-install notice and grace-period banner, pinned above the navbar.
      Renders nothing once the install has a password, or in demo mode. #}
   {% with access_banner_fixed = true %}{% include "_access_banner.html" %}{% endwith %}

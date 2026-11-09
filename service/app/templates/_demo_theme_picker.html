@@ -1,0 +1,41 @@
+{# Demo theme picker. Only the public demo shows it: a small tab on the right
+   edge that opens a list of themes. A pick is saved in a cookie for this
+   browser alone (see templating.active_theme), so a visitor can see every
+   theme without changing the demo for anyone else. Renders nothing on a
+   normal install. #}
+{% if demo_mode and demo_themes %}
+<div class="pr-demo-theme" id="prDemoTheme">
+  <button type="button" class="pr-demo-theme-tab" id="prDemoThemeTab"
+          aria-expanded="false" aria-controls="prDemoThemePanel" title="Try a theme">
+    <i class="bi bi-palette-fill" aria-hidden="true"></i>
+    <span class="visually-hidden">Try a theme</span>
+  </button>
+  <div class="pr-demo-theme-panel" id="prDemoThemePanel" hidden>
+    <label for="prDemoThemeSelect" class="pr-demo-theme-title">Try a theme</label>
+    <select id="prDemoThemeSelect" class="form-select form-select-sm">
+      {% for t in demo_themes %}
+      <option value="{{ t.key }}"{% if t.key == ui_theme %} selected{% endif %}>{{ t.label }}</option>
+      {% endfor %}
+    </select>
+    <p class="pr-demo-theme-note">Only changes this browser.</p>
+  </div>
+</div>
+<style>
+  .pr-demo-theme { position: fixed; z-index: 1055; right: var(--kiosk-inset-right, 0px);
+    top: 50%; transform: translateY(-50%); display: flex; align-items: center;
+    flex-direction: row-reverse; }
+  .pr-demo-theme-tab { border: 0; border-radius: 0.6rem 0 0 0.6rem; padding: 0.55rem 0.5rem;
+    background: #d80062; color: #fff; font-size: 1.1rem; line-height: 1;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3); opacity: 0.85; cursor: pointer; }
+  .pr-demo-theme-tab:hover, .pr-demo-theme-tab:focus-visible,
+  .pr-demo-theme-tab[aria-expanded="true"] { opacity: 1; }
+  .pr-demo-theme-panel { width: 14rem; padding: 0.7rem 0.8rem; margin-right: 0.35rem;
+    border-radius: 0.6rem; background: var(--bs-secondary-bg, #23272c);
+    color: var(--bs-body-color, #e7eaed); border: 1px solid var(--bs-border-color, #333a42);
+    box-shadow: 0 8px 26px rgba(0, 0, 0, 0.35); }
+  .pr-demo-theme-title { display: block; font-weight: 600; font-size: 0.85rem; margin-bottom: 0.4rem; }
+  .pr-demo-theme-note { margin: 0.4rem 0 0; font-size: 0.75rem; color: var(--bs-secondary-color, #949ca4); }
+  @media (pointer: coarse) { .pr-demo-theme-tab { padding: 0.8rem 0.65rem; } }
+</style>
+<script src="static/js/demo-theme.js?v={{ app_version }}" defer></script>
+{% endif %}

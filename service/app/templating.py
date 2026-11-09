@@ -6,7 +6,7 @@ from datetime import datetime
 from fastapi import Request
 from fastapi.templating import Jinja2Templates
 
-from .config import settings, theme_info, ui_scale_factor, resolve_custom_colors, nav_chrome_hidden, timer_chips_hidden, format_local, APP_NAME, APP_VERSION, AI_WRITING_UNAVAILABLE_MSG
+from .config import settings, THEMES, theme_info, ui_scale_factor, resolve_custom_colors, nav_chrome_hidden, timer_chips_hidden, format_local, APP_NAME, APP_VERSION, AI_WRITING_UNAVAILABLE_MSG
 from .hardware import is_raspberry_pi
 from .ingress import template_globals
 from .navigation import (visible_tabs, auto_hidden_groups, build_nav_tree,
@@ -79,6 +79,28 @@ def _update_notice_allowed(request: Request) -> bool:
         return True
 
 
+# The public demo lets a visitor try each theme in their own browser: the choice
+# rides in this cookie and changes only how pages render for them. The demo's
+# saved settings never change (demo mode refuses every save anyway), and a
+# normal install ignores the cookie entirely.
+DEMO_THEME_COOKIE = "pr_demo_theme"
+DEMO_THEMES = [{"key": k, "label": v["label"]} for k, v in THEMES.items() if k != "custom"]
+
+
+def active_theme(request: Request | None) -> str:
+    """The theme this request renders with.
+
+    That is the saved ui_theme, except in demo mode, where a visitor's own
+    pick from the demo theme picker wins for their browser. Only a built-in
+    theme key is honored, so the cookie cannot name a stylesheet path.
+    """
+    if settings.demo_mode and request is not None:
+        picked = request.cookies.get(DEMO_THEME_COOKIE, "")
+        if picked in THEMES and picked != "custom":
+            return picked
+    return settings.ui_theme
+
+
 def theme_context(request: Request) -> dict:
     """Context processor: expose the current UI theme to every render.
 
@@ -92,11 +114,12 @@ def theme_context(request: Request) -> dict:
     ``pin_readonly`` : True when the user is browsing in read-only mode because
                         kiosk_readonly_when_locked is set and no PIN session exists.
     """
-    info = theme_info(settings.ui_theme)
+    theme = active_theme(request)
+    info = theme_info(theme)
     # Resolve the active custom palette (live "custom" swatches or a saved
     # "custom:<id>" theme). None for built-in themes. base.html emits its inline
     # override <style> whenever custom_theme_active is true, using these values.
-    cc = resolve_custom_colors(settings.ui_theme)
+    cc = resolve_custom_colors(theme)
     custom_active = cc is not None
     if cc is None:
         cc = {
@@ -108,7 +131,9 @@ def theme_context(request: Request) -> dict:
             "text": settings.custom_theme_text,
         }
     return {
-        "ui_theme": settings.ui_theme,
+        "ui_theme": theme,
+        # The demo's theme picker (_demo_theme_picker.html) lists these.
+        "demo_themes": DEMO_THEMES if settings.demo_mode else [],
         "theme_mode": info["mode"],
         "theme_css": info["stylesheet"],
         "theme_overlay": info.get("overlay"),
