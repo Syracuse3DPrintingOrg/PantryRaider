@@ -133,7 +133,7 @@ services:
     logging: *default-logging
 
   mealie:
-    image: ghcr.io/mealie-recipes/mealie:v3.29.0   # pinned; see "Upgrading pinned images" in README
+    image: ghcr.io/mealie-recipes/mealie:v3.30.0   # pinned; see "Upgrading pinned images" in README
     container_name: foodassistant-mealie
     profiles: ["with-mealie"]
     environment:
@@ -150,7 +150,7 @@ services:
     logging: *default-logging
 
   ollama:
-    image: ollama/ollama:0.40.10   # pinned; see "Upgrading pinned images" in README
+    image: ollama/ollama:0.40.15   # pinned; see "Upgrading pinned images" in README
     container_name: foodassistant-ollama
     profiles: ["with-ollama"]
     volumes:
@@ -313,7 +313,7 @@ services:
   # auto-updates OFF, stop this one service (docker compose stop watchtower)
   # or pin PANTRYRAIDER_TAG to a fixed version.
   watchtower:
-    image: ghcr.io/nicholas-fedor/watchtower:1.23.2   # pinned; see "Upgrading pinned images" in README
+    image: ghcr.io/nicholas-fedor/watchtower:1.24.0   # pinned; see "Upgrading pinned images" in README
     container_name: foodassistant-watchtower
     environment:
       - TZ=${TZ:-America/New_York}
