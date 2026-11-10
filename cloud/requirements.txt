@@ -5,12 +5,12 @@
 # older Starlette lets a few hundred kilobytes of junk form keys posted to
 # /signup hold the worker for tens of seconds.
 fastapi==0.162.0
-starlette==1.9.0
+starlette==1.10.0
 uvicorn[standard]==0.54.0
 
 # Database ORM (required); psycopg2 is the production Postgres driver.
 # Tests run on SQLite and do not need it.
-sqlalchemy==2.1.6
+sqlalchemy==2.1.8
 psycopg2-binary==2.9.13
 
 # Schema migrations. Startup runs `alembic upgrade head` for a database
@@ -18,8 +18,8 @@ psycopg2-binary==2.9.13
 alembic==1.20.1
 
 # Settings management (required)
-pydantic==2.14.1
-pydantic-settings==2.16.1
+pydantic==2.14.3
+pydantic-settings==2.16.2
 
 # Templates for the web portal (required). 3.1.6 carries the 2024-2025
 # security fixes (sandbox escapes and the xmlattr injection advisory).
@@ -38,7 +38,7 @@ sniffio==1.3.1
 # of parser advisories after 0.0.18, including unbounded part headers, an
 # oversized preamble, an arbitrary file write, and Content-Disposition and
 # querystring smuggling.
-python-multipart==0.0.32
+python-multipart==0.0.33
 
 # QR codes for two-factor sign-in enrollment. The SVG image factory renders
 # the authenticator QR with no Pillow dependency, so it stays light.
