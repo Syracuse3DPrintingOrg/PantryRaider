@@ -109,6 +109,7 @@ Analyze this image of food. Return a JSON object with these exact fields:
   "notes": "any other useful details or null",
   "confidence": 0.95
 }
+storage_type is where it is kept before opening: frozen for anything sold frozen, ice cream included; refrigerated for anything sold chilled, like milk, eggs, butter, yogurt and fresh meat; room_temp only for the few foods kept out on a counter, like bananas, tomatoes, avocados, bread and whole garlic; dry for everything else that keeps at room temperature, like oils, canned and boxed food, snacks, spices, onions, potatoes and unchilled drinks.
 Be as specific as possible with the name. If you see a best-by date, use-by date, or sell-by date on packaging, extract it.
 quantity is how many packages there are, so a 64 fl oz bottle of milk is quantity 1 with package_size "64 fl oz".
 Return ONLY valid JSON. No markdown, no explanation.
@@ -122,7 +123,8 @@ Return a JSON object with these exact fields:
   "purchase_date": "YYYY-MM-DD date of purchase printed on the receipt, or null if not visible",
   "items": [
     {
-      "name": "specific food name",
+      "name": "the full name as printed, with the brand and every word that says which kind it is, and what the food is when the line gives only a brand or product name, e.g. Marcona almonds, canola oil cooking spray, Ben & Jerry's Chunky Monkey ice cream",
+      "code": "the item number printed on the line, usually before the name, digits only, otherwise null",
       "quantity": 1.0,
       "unit": "item | lbs | oz | etc",
       "package_size": "what one unit holds as printed on the line, e.g. 64 oz or 500 g, otherwise null",
@@ -137,6 +139,8 @@ Return a JSON object with these exact fields:
 }
 Include only food/beverage items in "items". Skip non-food items, taxes, fees, and totals.
 Infer storage_type and category from your knowledge of the product.
+storage_type is where it is kept before opening: frozen for anything sold frozen, ice cream included; refrigerated for anything sold chilled, like milk, eggs, butter, yogurt and fresh meat; room_temp only for the few foods kept out on a counter, like bananas, tomatoes, avocados, bread and whole garlic; dry for everything else that keeps at room temperature, like oils, canned and boxed food, snacks, spices, onions, potatoes and unchilled drinks.
+Spell out receipt abbreviations, but never shorten a name to a plain food: Marcona almonds are not just almonds.
 quantity is how many were bought, so two 24 oz jars are quantity 2 with package_size "24 oz". Food sold by weight, like 1.5 lbs of apples, is quantity 1.5, unit lbs and package_size null.
 For purchase_date, convert any printed date into YYYY-MM-DD; use null if no date is legible.
 Return ONLY valid JSON. No markdown, no explanation.
@@ -158,8 +162,8 @@ Use your knowledge of the actual product. Return a JSON object with these exact 
   "shelf_life_days": 60,
   "brand": "brand name or null"
 }}
-storage_type is where this product is typically kept at home (e.g. Kewpie mayonnaise
-is refrigerated, canned soup is dry, soda is room_temp). shelf_life_days is a realistic
+storage_type is where it is kept before opening: frozen for anything sold frozen, ice cream included; refrigerated for anything sold chilled, like milk, eggs, butter, yogurt and fresh meat; room_temp only for the few foods kept out on a counter, like bananas, tomatoes, avocados, bread and whole garlic; dry for everything else that keeps at room temperature, like oils, canned and boxed food, snacks, spices, onions, potatoes and unchilled drinks. Kewpie mayonnaise is refrigerated even though it is sold unchilled, since it is kept cold at home.
+shelf_life_days is a realistic
 integer estimate of days from purchase until best-by for that storage.
 Return ONLY valid JSON. No markdown, no explanation.
 """.strip()
@@ -183,7 +187,7 @@ Use your knowledge of each product. Return a JSON object with this exact shape, 
     {{"index": 1, "storage_type": "refrigerated | frozen | room_temp | dry", "shelf_life_days": 7}}
   ]
 }}
-Copy each item's index into its entry. storage_type is where the item is typically kept at home.
+Copy each item's index into its entry. storage_type is where it is kept before opening: frozen for anything sold frozen, ice cream included; refrigerated for anything sold chilled, like milk, eggs, butter, yogurt and fresh meat; room_temp only for the few foods kept out on a counter, like bananas, tomatoes, avocados, bread and whole garlic; dry for everything else that keeps at room temperature, like oils, canned and boxed food, snacks, spices, onions, potatoes and unchilled drinks.
 shelf_life_days is a realistic integer estimate of days from purchase until best-by for that storage.
 Return ONLY valid JSON. No markdown, no explanation.
 """.strip()

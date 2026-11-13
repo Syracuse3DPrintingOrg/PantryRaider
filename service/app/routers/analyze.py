@@ -8,9 +8,11 @@ from ..config import settings
 from ..database import get_db
 from ..models.food import AnalysisResult
 from ..services.defaults import apply_defaults
-from ..services.barcode import lookup_barcode, BarcodeNotFound, BarcodeServiceError, BarcodeStoreLocal
+from ..services.barcode import (lookup_barcode, resolve_receipt_codes, BarcodeNotFound,
+                                BarcodeServiceError, BarcodeStoreLocal)
 from ..services.shelf_life import parse_llm_shelf_life, apply_shelf_life
 from ..services import usage
+from ..services.grocy import GrocyClient
 from ..dependencies import get_vision_provider
 
 logger = logging.getLogger(__name__)
@@ -103,6 +105,16 @@ async def _estimate_shelf_lives(items) -> None:
 
     await asyncio.gather(*(one(item) for item in todo))
 
+async def _remember_places(items) -> None:
+    """Items Grocy already has go where those products live (see
+    GrocyClient.remember_places). Best effort: with Grocy unreachable, the
+    AI's own guess of where each one goes stands."""
+    try:
+        await GrocyClient().remember_places(items)
+    except Exception as e:  # noqa: BLE001 - never costs the scan
+        logger.warning("Could not look up where known products live: %s", e)
+
+
 _ALLOWED_MIME = {"image/jpeg", "image/png", "image/webp", "image/heic"}
 _BUDGET_MSG = ("AI token budget reached for this month. Raise it in "
                "Settings, Scanning & AI, or wait for the next month.")
@@ -171,6 +183,7 @@ async def analyze_food(
         result = await provider.analyze_food(data, mime)
         if settings.llm_expiry_effective() and settings.ai_configured():
             await _estimate_shelf_lives(result.items)
+        await _remember_places(result.items)
         result.items = await run_in_threadpool(
             _apply_defaults_all, result.items, db)
         return result
@@ -213,8 +226,10 @@ async def analyze_receipt(
         _downscale, await file.read(), file.content_type, _MAX_DIM_RECEIPT)
     try:
         result = await provider.analyze_receipt(data, mime)
+        await resolve_receipt_codes(result.items, db)
         if settings.llm_expiry_effective() and settings.ai_configured():
             await _estimate_shelf_lives(result.items)
+        await _remember_places(result.items)
         result.items = await run_in_threadpool(
             _apply_defaults_all, result.items, db)
         return result

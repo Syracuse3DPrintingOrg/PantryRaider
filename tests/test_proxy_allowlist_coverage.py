@@ -192,6 +192,8 @@ _GROCY_ARGS = dict(_COMMON, **{
     "barcode": "4006381 333931", "stock_entry_id": "abc", "name": "Pantry Shelf",
     "bucket": "frozen", "entry": dict(_ENTRY), "item": _food(),
     "quantity": 1.0, "unit": "Pack", "from_id": 1, "to_id": 2,
+    "product": {"id": 1, "name": "Oat Milk", "location_id": 1}, "storage": "dry",
+    "items": [_food()],
 })
 _MEALIE_ARGS = dict(_COMMON, **{
     "list_id": "abc", "item_id": "it1", "entry_id": 3, "date": "2026-10-01",

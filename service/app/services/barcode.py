@@ -1,5 +1,7 @@
 """Open Food Facts barcode lookup, shared by /analyze/barcode and /pending/scan."""
+import asyncio
 import logging
+import re
 from datetime import date, timedelta
 from urllib.parse import quote
 
@@ -260,14 +262,16 @@ async def _community_item(fix: dict, db: Session) -> FoodItem:
     return await run_in_threadpool(apply_defaults, item, db)
 
 
-async def lookup_barcode(barcode: str, db: Session) -> FoodItem:
+async def lookup_barcode(barcode: str, db: Session, guess: bool = True) -> FoodItem:
     """Look up a barcode and return a FoodItem with defaults applied.
 
     Open Food Facts supplies the product, and a community fix (the names
     other kitchens corrected, services/community_barcodes.py) replaces its
     name, brand and category. A barcode Open Food Facts does not know, or a
     lookup while it is unreachable, is answered from the fix alone, before
-    any AI guess. Raises BarcodeNotFound / BarcodeServiceError.
+    any AI guess. ``guess`` False skips that guess, for digits that may be
+    misread (a receipt's item numbers). Raises BarcodeNotFound /
+    BarcodeServiceError.
     """
     fix = _community_fix(barcode)
     async with httpx.AsyncClient(timeout=10.0, headers={"User-Agent": OFF_UA},
@@ -301,7 +305,7 @@ async def lookup_barcode(barcode: str, db: Session) -> FoodItem:
                 "product barcode"
             )
         # OFF didn't recognise this barcode: optionally try the LLM
-        if settings.barcode_llm_fallback:
+        if guess and settings.barcode_llm_fallback:
             item = await _llm_identify_barcode(barcode)
             if item:
                 return await run_in_threadpool(
@@ -464,3 +468,127 @@ async def _llm_enrich(item: FoodItem, product: dict, generic: str, tags: list[st
         except (ValueError, TypeError, OverflowError):
             pass
     return True
+
+
+# --- Item numbers printed on a receipt -------------------------------------------
+
+def _gs1_check_digit(body: str) -> str:
+    """The GS1 check digit for ``body`` (UPC, EAN): weights 3 and 1 from the
+    right. Pure."""
+    total = sum(int(d) * (3 if i % 2 == 0 else 1) for i, d in enumerate(reversed(body)))
+    return str((10 - total % 10) % 10)
+
+
+def receipt_code_barcodes(code: str | None) -> list[str]:
+    """The barcodes a receipt's item number may stand for, likeliest first.
+    Pure.
+
+    Most US receipts print a product's UPC without its check digit and
+    without leading zeros: Kings prints 89520300101 for the 895203001011 on a
+    tub of Organic Girl spinach, and 7989340064 for 079893400648. A number
+    that is already a whole UPC or EAN, check digit and all, is tried as it
+    is first. Store codes too short to be a product barcode (a produce PLU
+    like 4011) give nothing.
+    """
+    digits = re.sub(r"\D", "", code or "")
+    if not 6 <= len(digits) <= 14:
+        return []
+    out = []
+    if len(digits) in (8, 12, 13, 14) and _gs1_check_digit(digits[:-1]) == digits[-1]:
+        out.append(digits)
+    if len(digits) <= 11:
+        body = digits.zfill(11)
+        out.append(body + _gs1_check_digit(body))
+    elif len(digits) == 12 and not out:
+        out.append(digits + _gs1_check_digit(digits))
+    return list(dict.fromkeys(out))
+
+
+# Words a receipt abbreviates or shares with almost anything, so a match on
+# them says nothing about the product.
+_RECEIPT_NOISE = {"org", "organic", "organics", "the", "and", "with", "fresh",
+                  "natural", "brand", "pack", "whl", "whole", "free", "large"}
+
+
+def _line_words(text: str) -> set[str]:
+    return {w for w in re.findall(r"[a-z]+", (text or "").lower())
+            if len(w) >= 3 and w not in _RECEIPT_NOISE}
+
+
+def same_product(line: str, found: str) -> bool:
+    """True when the product a code found shares a word with the receipt
+    line, a receipt's abbreviation counting ("ARUGU" for arugula). Pure.
+
+    A misread digit can land on a real but different product; this keeps
+    that from replacing the line."""
+    for a in _line_words(line):
+        for b in _line_words(found):
+            if a == b or (min(len(a), len(b)) >= 4 and (a.startswith(b) or b.startswith(a))):
+                return True
+    return False
+
+
+_RECEIPT_LOOKUPS = 4
+
+
+async def resolve_receipt_codes(items: list[FoodItem], db: Session) -> None:
+    """Fill in each receipt line from the product its printed item number
+    names: the full name, the brand, what one package holds, and the barcode,
+    which Grocy then keeps so a later scan of the package finds the product.
+
+    A product already in Grocy under that barcode comes in as the user left
+    it, with their name for it and the size they gave it, so a size fixed
+    once on the review screen fills every later purchase. Otherwise Open Food
+    Facts (or a kitchen's fix) is asked.
+
+    A receipt prints "ORG BBY SPINACH"; the code says it is a 5 oz tub of
+    Organic Girl baby spinach. The line keeps its own quantity and the AI's
+    storage and category, and a size printed on the line wins over the
+    catalog's. No AI ever guesses a product from these digits, and a product
+    that shares no word with the line is passed over (same_product). Any
+    failure leaves the line as the receipt printed it.
+    """
+    from .grocy import GrocyClient  # grocy imports this module's neighbours
+    gate = asyncio.Semaphore(_RECEIPT_LOOKUPS)
+    grocy = GrocyClient()
+
+    async def one(item: FoodItem) -> None:
+        code, item.receipt_code = item.receipt_code, None
+        for barcode in receipt_code_barcodes(code):
+            if is_store_local_barcode(barcode):
+                continue
+            try:
+                async with gate:
+                    known = await grocy.known_barcode(barcode)
+            except Exception as e:  # noqa: BLE001 - Open Food Facts can still answer
+                logger.warning("Grocy barcode check failed for %s: %s", barcode, e)
+                known = None
+            if known:
+                # The user's own product. A misread digit landing exactly on
+                # another barcode they keep is far less likely than a name
+                # they changed sharing no word with the receipt, so no
+                # same_product check here.
+                item.name = known["name"]
+                item.barcode = barcode
+                if known["size"]:
+                    item.package_size, item.package_unit = known["size"]
+                return
+            try:
+                async with gate:
+                    found = await lookup_barcode(barcode, db, guess=False)
+            except BarcodeNotFound:
+                continue
+            except Exception as e:  # noqa: BLE001 - the line stays as printed
+                logger.warning("Receipt code %s lookup failed: %s", barcode, e)
+                return
+            if not same_product(item.name, f"{found.brand or ''} {found.name}"):
+                continue
+            item.name = found.name
+            item.brand = found.brand or item.brand
+            item.barcode = barcode
+            if item.package_size is None and found.package_size:
+                item.package_size = found.package_size
+                item.package_unit = found.package_unit
+            return
+
+    await asyncio.gather(*(one(item) for item in items))

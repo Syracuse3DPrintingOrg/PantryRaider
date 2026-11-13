@@ -68,7 +68,7 @@ def test_receipt_prompt_asks_for_store_date_and_items():
     _, body = _run("receipt", "{}")
     prompt = _prompt(body)
     for field in ("store", "purchase_date", "items", "storage_type",
-                  "category", "package_size"):
+                  "category", "package_size", "code"):
         assert f'"{field}"' in prompt
 
 

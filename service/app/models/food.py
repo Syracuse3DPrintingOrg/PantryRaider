@@ -52,6 +52,11 @@ class FoodItem(BaseModel):
     # category-rule estimate (services/defaults.py), "llm" is an AI guess
     # (services/barcode.py). Left None until something actually sets a date.
     best_by_source: Optional[str] = None
+    # The item number a receipt printed on the line, read by the AI: most US
+    # receipts print the product's UPC without its check digit. Only used to
+    # look the product up (barcode.resolve_receipt_codes) and never sent back
+    # out, since the digits may be misread.
+    receipt_code: Optional[str] = Field(default=None, exclude=True)
     # How many single ones one package holds when its size is a count ("12
     # ct" eggs): counted out by apply_package_size, never sent back out.
     package_count: Optional[int] = Field(default=None, exclude=True)

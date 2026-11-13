@@ -10,7 +10,7 @@ import httpx
 from urllib.parse import quote
 from datetime import date, timedelta
 from ..config import settings
-from ..models.food import FoodItem
+from ..models.food import FoodItem, StorageType
 from ..storage_categories import classify_location, custom_categories, location_for
 from . import proxy_policy, upstream
 from ..plain_digits import plain_int
@@ -1382,6 +1382,44 @@ class GrocyClient:
 
     async def get_products(self) -> list[dict]:
         return await self._cached_list("/objects/products")
+
+    async def home_location(self, product: dict | None, storage: str) -> dict | None:
+        """The Grocy location ``product`` lives in, when it keeps food as cold
+        as ``storage`` needs, else None.
+
+        A product lives where it was first stocked until the user moves it
+        (move_product makes the new place its default). Stock of it bought
+        later goes there too, so olive oil moved to the counter stays on the
+        counter. Only a place of the same temperature counts: a chicken once
+        moved to the fridge to thaw never sends the next frozen one there.
+        """
+        if not product or not product.get("location_id"):
+            return None
+        rows = await self._cached_list("/objects/locations")
+        row = next((r for r in rows
+                    if str(r.get("id")) == str(product["location_id"])), None)
+        if row is None or str(row.get("active", 1)) == "0":
+            return None
+        if location_coldness(row) != _STORAGE_COLDNESS.get(storage):
+            return None
+        return row
+
+    async def remember_places(self, items: list[FoodItem]) -> None:
+        """Set each item a product already in Grocy to where that product
+        lives (see home_location), so the review screen shows the place it
+        will go and the shelf life is worked out for it. A place of the
+        user's own has no storage area of its own and is left to import_item.
+        """
+        products = {p["name"].lower(): p for p in await self.get_products()}
+        for item in items:
+            home = await self.home_location(products.get(item.name.lower()),
+                                            item.storage_type.value)
+            if home is None:
+                continue
+            bucket = classify_location(home["name"])
+            bucket = "dry" if bucket == "pantry" else bucket
+            if bucket in StorageType._value2member_map_:
+                item.storage_type = StorageType(bucket)
 
     async def get_stock(self) -> list[dict]:
         return await self._get("/stock")
@@ -2903,6 +2941,16 @@ class GrocyClient:
             f"?query%5B%5D=product_id%3D{product_id}")
         return product, stock_qu, package_size_of(rows, product_id, stock_qu, names)
 
+    async def known_barcode(self, barcode: str) -> dict | None:
+        """The product Grocy keeps under ``barcode``, as the user left it:
+        {"name", "size"}, the size being (amount, unit) or None. None when
+        Grocy has no product with that barcode."""
+        found = await self.find_barcode(barcode)
+        if not found:
+            return None
+        _, _, held = await self._held_size(int(found["product_id"]))
+        return {"name": found["name"], "size": held}
+
     async def _note_package_size(self, product_id: int, item: FoodItem) -> str | None:
         """ensure_package_size, best effort: the stock is already in, so a
         failure to record the size costs the size, never the add."""
@@ -2981,8 +3029,15 @@ class GrocyClient:
             amount, note = await self._in_stock_unit(existing, item.quantity,
                                                      item.unit, typed)
             item = item.model_copy(update={"quantity": amount})
-        storage_name = _STORAGE_LABEL[item.storage_type.value]
-        location_id = await self.ensure_location(storage_name)
+        # A product kept in a place of the user's own (a Lazy Susan, a spice
+        # drawer) goes back there when that place is as cold as this item
+        # needs. A built-in place was already set on review (remember_places).
+        home = await self.home_location(existing, item.storage_type.value)
+        if home is not None and classify_location(home["name"]) not in _BUCKET_COLDNESS:
+            location_id = int(home["id"])
+        else:
+            location_id = await self.ensure_location(
+                _STORAGE_LABEL[item.storage_type.value])
         group_id = await self.ensure_product_group(item.category.value)
         product_id = await self.ensure_product(item, location_id, group_id)
         await self.add_stock(product_id, item, location_id)
@@ -3297,6 +3352,30 @@ _STORAGE_LABEL = {
 # ships with a single "Fridge"; filing fridge stock there, not in a new
 # "Refrigerator" beside it, leaves one fridge. An install that already has a
 # "Refrigerator" keeps using it.
+# How cold each place keeps food: 1 at room temperature (counter, pantry, or
+# a cupboard of the user's own), 2 in a fridge, 3 in a freezer.
+_STORAGE_COLDNESS = {"room_temp": 1, "dry": 1, "refrigerated": 2, "frozen": 3}
+_BUCKET_COLDNESS = {"room_temp": 1, "pantry": 1, "refrigerated": 2, "frozen": 3}
+
+
+def location_coldness(location: dict) -> int:
+    """How cold the Grocy ``location`` keeps food, as _STORAGE_COLDNESS
+    counts it. Pure. A place of the user's own is a room-temperature cupboard
+    unless Grocy marks it a freezer or its name says fridge or freezer."""
+    if str(location.get("is_freezer") or 0) not in ("0", ""):
+        return 3
+    name = location.get("name") or ""
+    bucket = classify_location(name)
+    if bucket in _BUCKET_COLDNESS:
+        return _BUCKET_COLDNESS[bucket]
+    low = name.lower()
+    if "freez" in low or "frozen" in low:
+        return 3
+    if any(word in low for word in ("fridge", "refriger", "cooler", "chill")):
+        return 2
+    return 1
+
+
 _LOCATION_ALIASES = {
     "refrigerator": ("Fridge",),
 }

@@ -27,6 +27,7 @@ Return ONLY a JSON object, no markdown, no explanation:
   "storage_type": "refrigerated | frozen | room_temp | dry",
   "shelf_life_days": 365
 }}
+storage_type is where it is kept before opening: frozen for anything sold frozen, ice cream included; refrigerated for anything sold chilled, like milk, eggs, butter, yogurt and fresh meat; room_temp only for the few foods kept out on a counter, like bananas, tomatoes, avocados, bread and whole garlic; dry for everything else that keeps at room temperature, like oils, canned and boxed food, snacks, spices, onions, potatoes and unchilled drinks.
 """.strip()
 from ..models.food import AnalysisResult, FoodCategory, FoodItem, StorageType
 from ..services.package_size import (apply_package_size, normalize_size, parse_count,
@@ -275,6 +276,10 @@ def _parse_receipt(data, default_confidence: float, raw: str) -> AnalysisResult:
         try:
             item = _parse_item(row, default_confidence=default_confidence)
             item.purchased_on = purchased_on
+            code = row.get("code")
+            if isinstance(code, (str, int)) and not isinstance(code, bool):
+                digits = re.sub(r"\D", "", str(code))
+                item.receipt_code = digits if 6 <= len(digits) <= 14 else None
         except Exception:  # noqa: BLE001 - drop the row, keep the receipt
             logger.warning("Skipped a receipt line the parser could not read",
                            exc_info=True)
