@@ -97,6 +97,26 @@ function amountText(x) {
   return n % 1 === 0 ? n : n.toFixed(1);
 }
 
+// The row's amount as shown: "2 Bottles", or with a package size "2 × 64 fl oz".
+function qtyText(item) {
+  const amount = amountText(item.amount);
+  if (item.package_label) return `${amount} \u00d7 ${item.package_label}`;
+  return `${amount}${item.unit ? ' ' + unitLabel(item) : ''}`;
+}
+
+// The amount's tooltip: what a package size adds up to ("128 fl oz in all,
+// 2 Bottles of 64 fl oz"), and the product's total when this row is one date.
+function qtyTitle(item, oneDate) {
+  const parts = [];
+  if (item.package_label && item.package_size) {
+    const total = Number(item.amount) * Number(item.package_size);
+    const unit = item.package_label.replace(/^[\d.]+\s*/, '');
+    parts.push(`${amountText(total)} ${unit} in all, ${amountText(item.amount)}${item.unit ? ' ' + unitLabel(item) : ''} of ${item.package_label}`);
+  }
+  if (oneDate && item.product_amount != null) parts.push(`${amountText(item.product_amount)} in all`);
+  return parts.join('; ');
+}
+
 
 function renderPanel(panelId, countId, items, bucket) {
   const el = document.getElementById(panelId);
@@ -133,7 +153,7 @@ function renderPanel(panelId, countId, items, bucket) {
         ${item.best_by_dates && item.best_by_dates.length > 1 ? bestByLine(item.best_by_dates) : ''}
       </div>
       ${showAdded && item.added_date ? `<span class="item-qty">${PR.esc(item.added_date.slice(0,10))}</span>` : ''}
-      <span class="item-qty"${bbd && item.product_amount != null ? ` title="${amountText(item.product_amount)} in all"` : ''}>${item.amount % 1 === 0 ? item.amount : item.amount.toFixed(1)}${item.unit ? ' ' + PR.esc(unitLabel(item)) : ''}</span>
+      <span class="item-qty"${qtyTitle(item, !!bbd) ? ` title="${PR.esc(qtyTitle(item, !!bbd))}"` : ''}>${PR.esc(qtyText(item))}</span>
       ${item.amount_opened > 0 ? `<span class="expiry-badge badge-opened" title="${item.amount_opened % 1 === 0 ? item.amount_opened : item.amount_opened.toFixed(1)} of these ${PR.esc(item.name)} already open">Opened</span>` : ''}
       ${expiryBadge(item)}
       <div class="item-actions">

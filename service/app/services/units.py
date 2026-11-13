@@ -7,8 +7,12 @@ uses these to decide whether the stock on hand actually covers a recipe
 amount (the "recipe wants 200 g, stock tracks bottles" case). Resolution
 never guesses: a factor comes back only when the same unit name appears on
 both sides or Grocy has the rows for it (product-specific rows beating
-global ones), followed transitively at most one hop (a to b to c). Anything
-unresolvable returns None so the caller keeps its name-only matching.
+global ones), followed transitively at most one hop (a to b to c). Where
+Grocy has no rows, the fixed ratios between measures stand in (16 cups to
+the gallon, 16 ounces to the pound), also through the product's own size row:
+a half-gallon carton kept in Pieces covers 8 cups. Weight never converts to
+volume. Anything unresolvable returns None so the caller keeps its name-only
+matching.
 """
 
 
@@ -82,6 +86,47 @@ def _edges(product_id, conversions: list[dict]) -> dict[tuple[int, int], float]:
 def conversion_factor(product_id, from_unit, to_unit,
                       units: list[dict] | None,
                       conversions: list[dict] | None) -> float | None:
+    """How many ``to_unit`` one ``from_unit`` of this product equals, or None:
+    Grocy's own rows first (_grocy_factor), else the fixed ratios between
+    measures (_fixed_factor)."""
+    factor = _grocy_factor(product_id, from_unit, to_unit, units, conversions)
+    if factor is not None:
+        return factor
+    return _fixed_factor(product_id, from_unit, to_unit, units, conversions)
+
+
+def _fixed_factor(product_id, from_unit, to_unit,
+                  units: list[dict] | None,
+                  conversions: list[dict] | None) -> float | None:
+    """The answer from fixed measure ratios, for a pair Grocy has no rows
+    for: directly between two measures (cups to gallons), or into the stock
+    unit through one of the product's own rows (cups to gallons, then a
+    carton holds half a gallon). Nothing is written to Grocy."""
+    from .grocy import builtin_factor  # grocy is heavy; only needed here
+    direct = builtin_factor(str(from_unit or ""), str(to_unit or ""))
+    if direct is not None:
+        return direct
+    to_id = _unit_ids(units or []).get(_norm(to_unit))
+    if to_id is None:
+        return None
+    names = {}
+    for row in units or []:
+        try:
+            names[int(row.get("id"))] = str(row.get("name") or "")
+        except (TypeError, ValueError):
+            continue
+    for (a, b), factor in sorted(_edges(product_id, conversions or []).items()):
+        if b != to_id or a not in names:
+            continue
+        first = builtin_factor(str(from_unit or ""), names[a])
+        if first is not None:
+            return first * factor
+    return None
+
+
+def _grocy_factor(product_id, from_unit, to_unit,
+                  units: list[dict] | None,
+                  conversions: list[dict] | None) -> float | None:
     """How many ``to_unit`` one ``from_unit`` of this product equals, or None.
 
     Unit names match Grocy's quantity_units table case-insensitively, plural

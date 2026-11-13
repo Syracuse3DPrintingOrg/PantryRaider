@@ -19,9 +19,10 @@ from ..services.barcode import (
 )
 from ..services.defaults import (apply_defaults, propose_review_best_by,
                                  resolve_rule_days)
-from ..services.grocy import (GrocyClient, parse_grocycode, stock_has_product,
-                              stock_sniff_candidates)
+from ..services.grocy import (GrocyClient, parse_grocycode, size_label,
+                              stock_has_product, stock_sniff_candidates)
 from ..services.label_render import prettify_date
+from ..services.package_size import apply_package_size, not_a_size, parse_size, split_name
 from ..services import (barcode_corrections, best_by_provenance, expiry_learning,
                         nutrition, scan_session, scanner_mode, shopping_source, upstream)
 from ..storage_categories import classify_location
@@ -256,6 +257,8 @@ class PendingUpdate(BaseModel):
     best_by_date: Optional[str] = None   # "" clears the date
     brand: Optional[str] = None
     notes: Optional[str] = None
+    # What one package holds, as typed ("64 oz", "1.5 L"); "" clears it.
+    size: Optional[str] = None
 
 
 class CommitRequest(BaseModel):
@@ -270,6 +273,10 @@ def _row_dict(row: PendingItem, duplicate: bool = False,
         "name": row.name,
         "quantity": row.quantity,
         "unit": row.unit,
+        "package_size": row.package_size,
+        "package_unit": row.package_unit,
+        # The size as the review card shows it ("64 fl oz"), "" when unknown.
+        "size": size_label(row.package_size, row.package_unit),
         "category": row.category,
         "storage_type": row.storage_type,
         # The Grocy location this row stocks into instead of the storage
@@ -679,6 +686,8 @@ async def enrich_pending_item(item_id: int, barcode: str) -> None:
             item = await lookup_barcode(barcode, db)
             row.name = item.name
             row.unit = item.unit
+            row.package_size = item.package_size
+            row.package_unit = item.package_unit
             row.category = item.category.value
             row.storage_type = item.storage_type.value
             row.best_by_date = (item.best_by_date.isoformat()
@@ -751,12 +760,14 @@ async def add_pending_items(body: PendingItemsRequest, request: Request, db: Ses
         for raw in body.items:
             if not (raw.name or "").strip():
                 continue
-            item = apply_defaults(raw, db)
+            item = apply_defaults(apply_package_size(raw), db)
             row = PendingItem(
                 barcode=item.barcode,
                 name=item.name,
                 quantity=item.quantity or 1.0,
                 unit=item.unit or "item",
+                package_size=item.package_size,
+                package_unit=item.package_unit,
                 category=item.category.value,
                 storage_type=item.storage_type.value,
                 best_by_date=item.best_by_date.isoformat() if item.best_by_date else None,
@@ -990,6 +1001,12 @@ async def update_pending(item_id: int, body: PendingUpdate, request: Request, db
         if not row:
             raise HTTPException(404, "Pending item not found")
         data = body.model_dump(exclude_none=True)
+        typed_size = data.pop("size", None)
+        if typed_size is not None:
+            size = parse_size(typed_size) if typed_size.strip() else None
+            if typed_size.strip() and size is None:
+                raise HTTPException(422, not_a_size(typed_size))
+            row.package_size, row.package_unit = size or (None, None)
         if "best_by_date" in data and data["best_by_date"] == "":
             data["best_by_date"] = None
         if "best_by_date" in data and row.suggested_source is None:
@@ -1038,6 +1055,12 @@ async def update_pending(item_id: int, body: PendingUpdate, request: Request, db
                 # The date is now the new area's rule estimate, so it badges and
                 # records as one (FoodAssistant-vb60).
                 row.best_by_source = "default"
+        if body.name and typed_size is None and row.package_size is None:
+            # A size typed into the name ("Whole milk 64 oz") fills the size.
+            name, from_name = split_name(row.name)
+            if from_name:
+                row.name = name
+                row.package_size, row.package_unit = from_name
         if body.name:
             row.lookup_failed = 0
             if row.grocy_product_id and data["name"] != old_name:
@@ -1148,6 +1171,8 @@ async def commit_pending(body: CommitRequest, request: Request, db: Session = De
             name=row.name,
             quantity=row.quantity or 1.0,
             unit=row.unit or "item",
+            package_size=row.package_size,
+            package_unit=row.package_unit,
             category=FoodCategory(row.category) if row.category in FoodCategory._value2member_map_ else FoodCategory.other,
             storage_type=StorageType(row.storage_type) if row.storage_type in StorageType._value2member_map_ else StorageType.refrigerated,
             best_by_date=date.fromisoformat(row.best_by_date) if row.best_by_date else None,

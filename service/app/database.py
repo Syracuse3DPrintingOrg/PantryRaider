@@ -337,7 +337,10 @@ _COLUMN_ADDITIONS: dict[str, list[tuple[str, str]]] = {
                       # FoodAssistant-mypf0: what the barcode lookup said.
                       ("lookup_name", "VARCHAR"),
                       ("lookup_brand", "VARCHAR"),
-                      ("lookup_category", "VARCHAR")],
+                      ("lookup_category", "VARCHAR"),
+                      # What one package holds (services/package_size.py).
+                      ("package_size", "FLOAT"),
+                      ("package_unit", "VARCHAR")],
     # FoodAssistant-v7gj: cook time alongside the existing prep/total time.
     "recipes": [("cook_time", "VARCHAR")],
     # FoodAssistant-zq7k: ingredient section headings (grouped recipes). NULL on

@@ -295,13 +295,19 @@
                    aria-describedby="manual-name-error" data-on-input="clearManualNameError()">
             <div class="invalid-feedback" id="manual-name-error">Type what the item is, then add it.</div>
           </div>
-          <div class="col-md-3">
+          <div class="col-4 col-md-2">
             <label class="form-label" for="manual-qty">Quantity</label>
             <input type="number" id="manual-qty" class="form-control" value="1" min="0.1" step="0.1">
           </div>
-          <div class="col-md-3">
+          <div class="col-4 col-md-2">
             <label class="form-label" for="manual-unit">Unit</label>
             <input type="text" id="manual-unit" class="form-control" value="item">
+          </div>
+          <div class="col-4 col-md-2">
+            <label class="form-label" for="manual-size">Size each</label>
+            <input type="text" id="manual-size" class="form-control" placeholder="64 oz"
+                   title="What one holds, like 64 oz, 500 g or 1.5 L">
+            <div class="invalid-feedback"></div>
           </div>
           <div class="col-md-4">
             <label class="form-label" for="manual-category">Category</label>

@@ -14,13 +14,64 @@ let pendingFile = null;
 let queue = [];   // array of item objects
 
 // A field edited in the review list writes straight back to its queue item.
+// A queued item's size as its box shows it: "64 Ounce" from a photo, or the
+// text typed into the box.
+function queueSize(item) {
+  if (item.package_size == null || item.package_size === '') return '';
+  return item.package_unit ? `${item.package_size} ${item.package_unit}` : String(item.package_size);
+}
+
 function setQueueField(i, field, value) {
   const item = queue[i];
   if (!item) return;
   if (field === 'quantity') item.quantity = parseFloat(value);
   else if (field === 'best_by_date') item.best_by_date = value || null;
-  else item[field] = value;
+  else if (field === 'size') {
+    // Typed text goes to the server as it is, which reads it ("64 oz").
+    item.package_size = value.trim() || null;
+    item.package_unit = null;
+  } else item[field] = value;
 }
+// A typed size, read by the server: {package_size, package_unit, size} or
+// {error}. Unreachable, the text goes through as it is and import reads it.
+async function readSize(typed) {
+  const text = (typed || '').trim();
+  if (!text) return { package_size: null, package_unit: null, size: '' };
+  try {
+    const r = await fetch('inventory/size?text=' + encodeURIComponent(text));
+    const body = await r.json();
+    if (r.status === 422) return { error: body.detail || 'That is not a size.' };
+    if (r.ok) return body;
+  } catch (e) { /* offline: fall through */ }
+  return { package_size: text, package_unit: null, size: text };
+}
+
+// Marks a size box as unreadable (message) or fine (null).
+function markSize(box, message) {
+  box.classList.toggle('is-invalid', !!message);
+  if (message) box.setAttribute('aria-invalid', 'true'); else box.removeAttribute('aria-invalid');
+  const hint = box.parentElement && box.parentElement.querySelector('.invalid-feedback');
+  if (hint) hint.textContent = message || '';
+}
+
+// A size typed into a queued item's box is checked right away, so one the
+// server cannot read is marked in its box rather than lost at import.
+async function setQueueSize(i, box) {
+  const item = queue[i];
+  if (!item) return;
+  const read = await readSize(box.value);
+  if (read.error) {
+    item.package_size = null;
+    item.package_unit = null;
+    markSize(box, read.error);
+    return;
+  }
+  item.package_size = read.package_size;
+  item.package_unit = read.package_unit;
+  box.value = read.size;
+  markSize(box, null);
+}
+
 // Whether label printing is turned on (FoodAssistant-fb8x). Gates the
 // "Print labels for this batch" affordance shown after an import.
 const PRINTING_ENABLED = _mpConfig.printing === '1';
@@ -794,7 +845,7 @@ async function analyzePhoto() {
 }
 
 // Manual Entry
-function addManualItem() {
+async function addManualItem() {
   const nameBox = document.getElementById('manual-name');
   const name = nameBox.value.trim();
   if (!name) {
@@ -805,10 +856,20 @@ function addManualItem() {
     return;
   }
   clearManualNameError();
+  const sizeBox = document.getElementById('manual-size');
+  const size = await readSize(sizeBox.value);
+  if (size.error) {
+    markSize(sizeBox, size.error);
+    sizeBox.focus();
+    return;
+  }
+  markSize(sizeBox, null);
   addToQueue([{
     name,
     quantity: parseFloat(document.getElementById('manual-qty').value) || 1,
     unit: document.getElementById('manual-unit').value || 'item',
+    package_size: size.package_size,
+    package_unit: size.package_unit,
     category: document.getElementById('manual-category').value,
     storage_type: document.getElementById('manual-storage').value,
     best_by_date: document.getElementById('manual-bestby').value || null,
@@ -817,6 +878,7 @@ function addManualItem() {
     confidence: 1.0,
   }]);
   document.getElementById('manual-name').value = '';
+  document.getElementById('manual-size').value = '';
   document.getElementById('manual-brand').value = '';
   document.getElementById('manual-notes').value = '';
   document.getElementById('manual-bestby').value = '';
@@ -857,7 +919,7 @@ function renderQueue() {
     <div class="card mb-2">
       <div class="card-body py-2">
         <div class="row g-2 align-items-center">
-          <div class="col-md-3">
+          <div class="col-md-2">
             <input class="form-control form-control-sm" value="${PR.esc(item.name)}"
                    data-on-change="setQueueField(${i}, 'name', this.value)" placeholder="Name">
           </div>
@@ -868,6 +930,12 @@ function renderQueue() {
           <div class="col-6 col-md-1">
             <input class="form-control form-control-sm" value="${PR.esc(item.unit||'item')}"
                    data-on-change="setQueueField(${i}, 'unit', this.value)" placeholder="Unit">
+          </div>
+          <div class="col-6 col-md-1">
+            <input class="form-control form-control-sm" value="${PR.esc(queueSize(item))}"
+                   data-on-change="setQueueSize(${i}, this)" placeholder="Size each"
+                   aria-label="Size of each, like 64 oz" title="What one holds, like 64 oz, 500 g or 1.5 L">
+            <div class="invalid-feedback"></div>
           </div>
           <div class="col-md-2">
             <select class="form-select form-select-sm" data-on-change="setQueueField(${i}, 'category', this.value)">

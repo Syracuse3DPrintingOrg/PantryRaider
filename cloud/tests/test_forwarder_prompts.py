@@ -24,8 +24,8 @@ from tests.conftest import activate_entitlement
 APP_GEMINI = (Path(__file__).resolve().parents[2]
               / "service" / "app" / "providers" / "gemini.py")
 
-FOOD_FIELDS = ("name", "quantity", "unit", "best_by_date", "storage_type",
-               "category", "confidence")
+FOOD_FIELDS = ("name", "quantity", "unit", "package_size", "best_by_date",
+               "storage_type", "category", "confidence")
 
 
 def _gemini_reply(text):
@@ -68,7 +68,7 @@ def test_receipt_prompt_asks_for_store_date_and_items():
     _, body = _run("receipt", "{}")
     prompt = _prompt(body)
     for field in ("store", "purchase_date", "items", "storage_type",
-                  "category"):
+                  "category", "package_size", "code"):
         assert f'"{field}"' in prompt
 
 

@@ -79,6 +79,7 @@
  "GET /health": "public",
  "GET /inventory/dashboard": "kitchen",
  "GET /inventory/stock": "kitchen",
+ "GET /inventory/size": "kitchen",
  "GET /kiosk/status": "kitchen",
  "GET /manifest.webmanifest": "public",
  "GET /mealie/foods/suggest": "kitchen",

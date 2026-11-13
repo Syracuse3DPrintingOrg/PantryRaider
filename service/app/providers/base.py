@@ -27,8 +27,11 @@ Return ONLY a JSON object, no markdown, no explanation:
   "storage_type": "refrigerated | frozen | room_temp | dry",
   "shelf_life_days": 365
 }}
+storage_type is where it is kept before opening: frozen for anything sold frozen, ice cream included; refrigerated for anything sold chilled, like milk, eggs, butter, yogurt and fresh meat; room_temp only for the few foods kept out on a counter, like bananas, tomatoes, avocados, bread and whole garlic; dry for everything else that keeps at room temperature, like oils, canned and boxed food, snacks, spices, onions, potatoes and unchilled drinks.
 """.strip()
 from ..models.food import AnalysisResult, FoodCategory, FoodItem, StorageType
+from ..services.package_size import (apply_package_size, normalize_size, parse_count,
+                                     size_is_for_each)
 
 logger = logging.getLogger(__name__)
 
@@ -209,10 +212,20 @@ def _parse_item(data, default_confidence: float) -> FoodItem:
     which is an item named Unknown with every default.
     """
     data = _first_dict(data)
-    return FoodItem(
+    try:
+        size = normalize_size(data.get("package_size"), data.get("package_unit"))
+    except Exception:  # noqa: BLE001 - an unreadable size is just no size
+        size = None
+    # "12 CT" eggs or a "12PK 12 FL OZ": how many come in one package.
+    typed = data.get("package_size") if isinstance(data.get("package_size"), str) else None
+    item = FoodItem(
         name=_item_name(data.get("name")),
         quantity=_quantity(data.get("quantity")),
         unit=clean_text(data.get("unit"), _UNIT_MAX) or "item",
+        package_size=size[0] if size else None,
+        package_unit=size[1] if size else None,
+        package_count=parse_count(typed),
+        package_count_each=size_is_for_each(typed),
         best_by_date=_safe_date(data.get("best_by_date")),
         storage_type=_safe_storage(data.get("storage_type")),
         category=_safe_category(data.get("category")),
@@ -220,6 +233,13 @@ def _parse_item(data, default_confidence: float) -> FoodItem:
         notes=clean_text(data.get("notes"), _NOTES_MAX),
         confidence=_confidence(data.get("confidence"), default_confidence),
     )
+    # A size the model missed may still be in the name it wrote ("Whole milk
+    # 64 oz"), and one given as the amount itself is moved to the size.
+    try:
+        return apply_package_size(item)
+    except Exception:  # noqa: BLE001 - keep the item, without a size
+        logger.warning("Could not read a package size", exc_info=True)
+        return item
 
 
 def _parse_receipt(data, default_confidence: float, raw: str) -> AnalysisResult:
@@ -256,6 +276,10 @@ def _parse_receipt(data, default_confidence: float, raw: str) -> AnalysisResult:
         try:
             item = _parse_item(row, default_confidence=default_confidence)
             item.purchased_on = purchased_on
+            code = row.get("code")
+            if isinstance(code, (str, int)) and not isinstance(code, bool):
+                digits = re.sub(r"\D", "", str(code))
+                item.receipt_code = digits if 6 <= len(digits) <= 14 else None
         except Exception:  # noqa: BLE001 - drop the row, keep the receipt
             logger.warning("Skipped a receipt line the parser could not read",
                            exc_info=True)
