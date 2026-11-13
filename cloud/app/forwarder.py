@@ -101,6 +101,7 @@ Analyze this image of food. Return a JSON object with these exact fields:
   "name": "specific food name, e.g. chicken breast, sharp cheddar, roma tomatoes",
   "quantity": 1.0,
   "unit": "lbs | oz | pieces | package | bunch | etc",
+  "package_size": "what one package holds as printed on it, e.g. 64 fl oz or 500 g, otherwise null",
   "best_by_date": "YYYY-MM-DD if visible on packaging, otherwise null",
   "storage_type": "refrigerated | frozen | room_temp | dry",
   "category": "Poultry | Meat | Seafood | Dairy | Produce | Grains | Condiments | Beverages | Snacks | Frozen | Canned | Other",
@@ -109,6 +110,7 @@ Analyze this image of food. Return a JSON object with these exact fields:
   "confidence": 0.95
 }
 Be as specific as possible with the name. If you see a best-by date, use-by date, or sell-by date on packaging, extract it.
+quantity is how many packages there are, so a 64 fl oz bottle of milk is quantity 1 with package_size "64 fl oz".
 Return ONLY valid JSON. No markdown, no explanation.
 """.strip()
 
@@ -123,6 +125,7 @@ Return a JSON object with these exact fields:
       "name": "specific food name",
       "quantity": 1.0,
       "unit": "item | lbs | oz | etc",
+      "package_size": "what one unit holds as printed on the line, e.g. 64 oz or 500 g, otherwise null",
       "best_by_date": null,
       "storage_type": "refrigerated | frozen | room_temp | dry",
       "category": "Poultry | Meat | Seafood | Dairy | Produce | Grains | Condiments | Beverages | Snacks | Frozen | Canned | Other",
@@ -134,6 +137,7 @@ Return a JSON object with these exact fields:
 }
 Include only food/beverage items in "items". Skip non-food items, taxes, fees, and totals.
 Infer storage_type and category from your knowledge of the product.
+quantity is how many were bought, so two 24 oz jars are quantity 2 with package_size "24 oz". Food sold by weight, like 1.5 lbs of apples, is quantity 1.5, unit lbs and package_size null.
 For purchase_date, convert any printed date into YYYY-MM-DD; use null if no date is legible.
 Return ONLY valid JSON. No markdown, no explanation.
 """.strip()

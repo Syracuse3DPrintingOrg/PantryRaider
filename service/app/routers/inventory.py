@@ -13,7 +13,8 @@ from ..models.food import ImportRequest, FoodItem, FoodItemOverride
 from ..services import best_by_provenance
 from ..services import defaults as defaults_service
 from ..services.defaults import apply_defaults
-from ..services.grocy import GrocyClient, GrocyError, error_payload
+from ..services.grocy import GrocyClient, GrocyError, error_payload, size_label
+from ..services.package_size import not_a_size, parse_size
 from ..storage_categories import category_keys
 
 router = APIRouter(prefix="/inventory", tags=["inventory"])
@@ -64,6 +65,20 @@ def _apply_override(item: FoodItem, override: FoodItemOverride) -> FoodItem:
         # guess, so the provenance must not still claim it.
         data["best_by_source"] = "manual"
     return FoodItem(**data)
+
+
+@router.get("/size")
+async def read_size(text: str = ""):
+    """What a size typed on the Add page means, read as it is typed, so one
+    that names no weight or volume is pointed out in its box instead of
+    being dropped at import. Blank is no size."""
+    typed = text.strip()
+    if not typed:
+        return {"package_size": None, "package_unit": None, "size": ""}
+    size = parse_size(typed)
+    if size is None:
+        raise HTTPException(422, not_a_size(typed))
+    return {"package_size": size[0], "package_unit": size[1], "size": size_label(*size)}
 
 
 @router.post("/import")

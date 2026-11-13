@@ -111,6 +111,10 @@ class PendingItem(Base):
     name = Column(String, nullable=False)
     quantity = Column(Float, default=1.0)
     unit = Column(String, default="item")
+    # What one of them holds (64 and "Fluid ounce"), or NULL when unknown.
+    # Added after release: database.ensure_schema() backfills the columns.
+    package_size = Column(Float, nullable=True)
+    package_unit = Column(String, nullable=True)
     category = Column(String, default="Other")
     storage_type = Column(String, default="refrigerated")
     best_by_date = Column(String, nullable=True)   # ISO date string

@@ -11,6 +11,7 @@ from ..models.food import FoodItem, FoodCategory, StorageType
 from ..providers.base import clean_text
 from . import usage
 from .defaults import apply_defaults
+from .package_size import apply_package_size, parse_size
 from .tls import default_context
 from ..plain_digits import is_plain_digits
 
@@ -319,10 +320,16 @@ async def lookup_barcode(barcode: str, db: Session) -> FoodItem:
     storage = _off_storage(tags, category)
     generic = (product.get("generic_name_en") or product.get("generic_name") or "")
 
+    # What the package holds, from Open Food Facts' own "quantity" text
+    # ("1.89 l", "16.9 fl oz (500 ml)", "6 x 330 ml"). None when it is
+    # missing or names no weight or volume.
+    size = parse_size(product.get("quantity"))
     item = FoodItem(
         name=name,
         quantity=1.0,
         unit="item",
+        package_size=size[0] if size else None,
+        package_unit=size[1] if size else None,
         storage_type=storage,
         category=category,
         brand=brand,
@@ -332,6 +339,9 @@ async def lookup_barcode(barcode: str, db: Session) -> FoodItem:
     enriched = await _llm_enrich(item, product, generic, tags)
     if fix:
         apply_community_fix(item, fix)
+    # A cleaned-up name can carry the size as well ("Whole Milk 64 oz"); it
+    # comes out of the name when it is the same size, or fills a missing one.
+    item = apply_package_size(item)
 
     # OFF tags ("en:yogurts", "en:potato-chips") let branded names match
     # generic defaults rules like "yogurt" or "chips". When the LLM didn't

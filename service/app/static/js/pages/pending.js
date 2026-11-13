@@ -70,7 +70,7 @@ async function loadPending(signal) {
       </div>` : ''}
       <div class="card-body py-2">
         <div class="row g-2 align-items-center">
-          <div class="col-md-3">
+          <div class="col-md-2">
             <label class="form-label small text-body-secondary mb-0 d-md-none" for="pending-name-${item.id}">Name</label>
             <input class="form-control form-control-sm ${item.lookup_failed ? 'border-warning' : ''}"
                    id="pending-name-${item.id}" aria-label="Name"
@@ -90,7 +90,14 @@ async function loadPending(signal) {
                    id="pending-unit-${item.id}" aria-label="Unit"
                    data-on-change="patchItem(${item.id}, 'unit', this.value, this)">
           </div>
-          <div class="col-4 col-md-2">
+          <div class="col-4 col-md-1">
+            <label class="form-label small text-body-secondary mb-0 d-md-none" for="pending-size-${item.id}">Size each</label>
+            <input class="form-control form-control-sm" value="${PR.esc(item.size || '')}"
+                   id="pending-size-${item.id}" aria-label="Size of each, like 64 oz"
+                   placeholder="64 oz" title="What one holds, like 64 oz, 500 g or 1.5 L"
+                   data-on-change="patchItem(${item.id}, 'size', this.value, this)">
+          </div>
+          <div class="col-6 col-md-2">
             <label class="form-label small text-body-secondary mb-0 d-md-none" for="pending-category-${item.id}">Category</label>
             <select class="form-select form-select-sm" id="pending-category-${item.id}" aria-label="Category"
                     data-on-change="patchItem(${item.id}, 'category', this.value, this)">
@@ -180,6 +187,14 @@ async function patchItem(id, field, value, el) {
     if (el) {
       el.classList.add('field-saved');
       setTimeout(() => el.classList.remove('field-saved'), 800);
+    }
+    // A size typed into the name moves to the size field, and a typed size
+    // comes back in its own spelling ("64oz" shows as "64 oz").
+    if (field === 'name' || field === 'size') {
+      const nameEl = document.getElementById(`pending-name-${id}`);
+      const sizeEl = document.getElementById(`pending-size-${id}`);
+      if (nameEl && item.name && nameEl.value !== item.name) nameEl.value = item.name;
+      if (sizeEl && (item.size || '') !== sizeEl.value) sizeEl.value = item.size || '';
     }
     // A storage change recomputes the best-by from the new area's shelf-life
     // rule on the server; reflect the returned date so the row shows what

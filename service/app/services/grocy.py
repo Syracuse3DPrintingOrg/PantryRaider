@@ -2,6 +2,8 @@ import asyncio
 import functools
 import html as _html
 import json
+import logging
+import math
 import re
 
 import httpx
@@ -12,6 +14,8 @@ from ..models.food import FoodItem
 from ..storage_categories import classify_location, custom_categories, location_for
 from . import proxy_policy, upstream
 from ..plain_digits import plain_int
+
+logger = logging.getLogger(__name__)
 
 
 def sniff_test_new_date(old_iso: str | None, delta_days: int,
@@ -999,6 +1003,48 @@ def qu_conversion_factor(conversions: list[dict], product_id: int,
     return None
 
 
+def package_size_of(conversions: list[dict], product_id: int, stock_qu: int | None,
+                    units: dict[str, str]) -> tuple[float, str] | None:
+    """What one stock unit of ``product_id`` holds, from its conversions. Pure.
+
+    The product's own conversion from its stock unit to a weight or a volume
+    (1 Bottle = 64 Fluid ounces) is its package size, as (64.0, "Fluid
+    ounce"). ``units`` maps a unit id (as text) to its name. None when the
+    stock unit is itself a weight or a volume, or no such conversion exists.
+    """
+    if stock_qu is None:
+        return None
+    stock_name = units.get(str(stock_qu)) or ""
+    if (_UNIT_SIZES.get(unit_names(stock_name)[0], ("count",))[0] != "count"
+            and stock_name):
+        return None
+    for c in conversions or []:
+        if (_int_or_none(c.get("product_id")) != product_id
+                or _int_or_none(c.get("from_qu_id")) != stock_qu):
+            continue
+        name = units.get(str(_int_or_none(c.get("to_qu_id")))) or ""
+        kind = _UNIT_SIZES.get(unit_names(name)[0], ("count",))[0] if name else "count"
+        try:
+            factor = float(c.get("factor") or 0)
+        except (TypeError, ValueError):
+            continue
+        if kind != "count" and factor > 0:
+            return factor, unit_names(name)[0]
+    return None
+
+
+def _same_size(held: tuple[float, str], amount: float, unit: str) -> bool:
+    """True when ``amount`` ``unit`` is the size ``held`` (64 Ounces), in
+    any unit of the same measure, to within 1%. Ounces and fluid ounces of
+    the same number are one size: a carton first kept as "64 oz" is the one
+    now read as "64 fl oz". Pure."""
+    if ({unit_names(unit)[0], unit_names(held[1])[0]} == {"Ounce", "Fluid ounce"}
+            and math.isclose(amount, held[0], rel_tol=0.01)):
+        return True
+    factor = builtin_factor(unit, held[1])
+    return factor is not None and math.isclose(amount * factor, held[0], rel_tol=0.01)
+
+
 def unit_matches(unit: dict, name: str) -> bool:
     """True when ``name`` is this Grocy quantity unit's singular or plural. Pure.
 
@@ -1159,6 +1205,28 @@ def builtin_factor(from_unit: str, to_unit: str) -> float | None:
     if not src or not dst or src[0] != dst[0]:
         return None
     return src[1] / dst[1]
+
+
+# Short forms for showing a size. A unit not listed here shows its plural.
+_SHORT = {
+    "Milligram": "mg", "Gram": "g", "Kilogram": "kg", "Ounce": "oz",
+    "Pound": "lb", "Milliliter": "ml", "Liter": "L", "Fluid ounce": "fl oz",
+    "Teaspoon": "tsp", "Tablespoon": "tbsp", "Pint": "pt", "Quart": "qt",
+    "Gallon": "gal",
+}
+
+
+def size_label(amount, unit: str | None) -> str:
+    """A size as shown: "64 fl oz", "1.5 L", "500 g". Empty when unknown."""
+    try:
+        amount = float(amount)
+    except (TypeError, ValueError):
+        return ""
+    if not unit or not math.isfinite(amount) or amount <= 0:
+        return ""
+    name, plural, _ = unit_names(unit)
+    short = _SHORT.get(name) or (name if amount == 1 else plural)
+    return f"{round(amount, 3):g} {short}"
 
 
 def unit_label(unit: dict, amount: float) -> str:
@@ -1819,12 +1887,16 @@ class GrocyClient:
             self._cached_list("/objects/product_groups"),
             self._get("/objects/stock"),
             self._cached_list("/objects/quantity_units"),
+            self.get_unit_conversions(),
             return_exceptions=True,
         )
         for r in results[:4]:
             if isinstance(r, BaseException):
                 raise r
-        raw, location_rows, group_rows, stock_rows, unit_rows = results
+        raw, location_rows, group_rows, stock_rows, unit_rows, conversions = results
+        # Package sizes are a nicety too: without them a row shows its count.
+        if isinstance(conversions, BaseException):
+            conversions = []
         # Grocy 4.7's /stock rows name the stock unit only by qu_id_stock, so
         # the name comes from the units table. Units are a nicety: a failed
         # read leaves the unit blank rather than failing the whole dashboard.
@@ -1897,6 +1969,14 @@ class GrocyClient:
                 # (the recipe matcher) that ask "is there enough of it".
                 "product_amount": total,
             }
+            # What one stock unit holds (a 64 fl oz Bottle), from the
+            # product's own unit conversion. Only a product with one carries
+            # the keys.
+            size = package_size_of(conversions, pid,
+                                   _int_or_none(product.get("qu_id_stock")), units)
+            if size:
+                row["package_size"], row["package_unit"] = size
+                row["package_label"] = size_label(*size)
             splits = by_location.get(pid)
             places = by_date.get(pid)
             # Only a place the rows themselves name is split by date: a
@@ -2757,6 +2837,82 @@ class GrocyClient:
         typed = f"{item.quantity:g} {item.unit.strip()}"
         return item.model_copy(update={"quantity": counted[0], "unit": counted[1]}), typed
 
+    async def ensure_package_size(self, product_id: int, item: FoodItem) -> str | None:
+        """Record what one stock unit of the product holds, from ``item``.
+
+        Grocy keeps a package size as the product's own unit conversion from
+        its stock unit (1 Bottle = 64 Fluid ounces), which the Inventory page
+        shows and recipe matching reads. Nothing is written when ``item`` has
+        no size, when the product is stocked in a weight or a volume already,
+        or when it has a size of its own. A different size from the one Grocy
+        holds is left alone, and the returned note says so; otherwise None.
+        Grocy 4 adds the reverse conversion itself; on an older Grocy it is
+        added here, so the recipe matcher finds it either way.
+        """
+        if not item.package_size or not item.package_unit:
+            return None
+        product, stock_qu, held = await self._held_size(product_id)
+        if stock_qu is None:
+            return None
+        if held is not None:
+            if _same_size(held, item.package_size, item.package_unit):
+                return None
+            name = product.get("name") or item.name
+            return (f"Grocy keeps {name} as {size_label(*held)} each, so this "
+                    f"{size_label(item.package_size, item.package_unit)} one was "
+                    f"added as one more of those.")
+        size_qu = await self.ensure_quantity_unit(item.package_unit)
+        if size_qu == stock_qu:
+            return None
+        await self._post("/objects/quantity_unit_conversions", {
+            "from_qu_id": stock_qu, "to_qu_id": size_qu,
+            "factor": item.package_size, "product_id": product_id,
+        })
+        rows = await self._get(
+            "/objects/quantity_unit_conversions"
+            f"?query%5B%5D=product_id%3D{product_id}")
+        if not any(_int_or_none(r.get("from_qu_id")) == size_qu
+                   and _int_or_none(r.get("to_qu_id")) == stock_qu for r in rows or []):
+            await self._post("/objects/quantity_unit_conversions", {
+                "from_qu_id": size_qu, "to_qu_id": stock_qu,
+                "factor": 1.0 / item.package_size, "product_id": product_id,
+            })
+        self._cache.pop("unit_conversions", None)
+        return None
+
+    async def _held_size(self, product_id: int):
+        """(product, stock unit id, package size Grocy holds for it).
+
+        The stock unit id is None when the product is stocked in a weight or
+        a volume itself, so it has no package size to hold; the size is None
+        when it holds none yet."""
+        product = next((p for p in await self.get_products()
+                        if _int_or_none(p.get("id")) == product_id), None)
+        if product is None or "qu_id_stock" not in product:
+            product = await self._get(f"/objects/products/{product_id}")
+        stock_qu = _int_or_none(product.get("qu_id_stock"))
+        units = await self._cached_list("/objects/quantity_units")
+        names = {str(u.get("id")): u.get("name") or "" for u in units}
+        stock_name = names.get(str(stock_qu), "")
+        if stock_qu is None or (
+                stock_name and _UNIT_SIZES.get(unit_names(stock_name)[0],
+                                               ("count",))[0] != "count"):
+            return product, None, None
+        rows = await self._get(
+            "/objects/quantity_unit_conversions"
+            f"?query%5B%5D=product_id%3D{product_id}")
+        return product, stock_qu, package_size_of(rows, product_id, stock_qu, names)
+
+    async def _note_package_size(self, product_id: int, item: FoodItem) -> str | None:
+        """ensure_package_size, best effort: the stock is already in, so a
+        failure to record the size costs the size, never the add."""
+        try:
+            return await self.ensure_package_size(product_id, item)
+        except Exception:  # noqa: BLE001
+            logger.warning("Could not record the package size of product %s",
+                           product_id, exc_info=True)
+            return None
+
     async def add_to_product(self, product_id: int, item: FoodItem,
                              location_id: int | None = None) -> dict:
         """Stock ``item`` onto an existing product, converting its unit.
@@ -2776,14 +2932,43 @@ class GrocyClient:
                 _STORAGE_LABEL[item.storage_type.value])
         await self.add_stock(product_id, item.model_copy(update={"quantity": amount}),
                              location_id)
+        size_note = await self._note_package_size(product_id, item)
         result = {"product_id": product_id, "name": item.name, "amount": amount}
-        if note:
-            result["unit_note"] = note
+        if note or size_note:
+            result["unit_note"] = " ".join(n for n in (note, size_note) if n)
         return result
 
     async def import_item(self, item: FoodItem) -> dict:
+        # A size written into the name ("Whole milk 64 oz") is the package
+        # size, and the product is the milk. Imported here: package_size reads
+        # this module's unit tables.
+        from .package_size import apply_package_size
+        item = apply_package_size(item)
         existing = next((p for p in await self.get_products()
                          if p["name"].lower() == item.name.lower()), None)
+        size_note = None
+        if existing is not None and item.package_size and item.package_unit:
+            # Grocy holds one size per product, so another size of it goes in
+            # as a product of its own, named with its size: a 32 oz milk
+            # beside the 64 oz one, each counted in its own packages.
+            _, stock_qu, held = await self._held_size(int(existing["id"]))
+            if held and not _same_size(held, item.package_size, item.package_unit):
+                base = item.name
+                sized = f"{base} {size_label(item.package_size, item.package_unit)}"
+                item = item.model_copy(update={"name": sized})
+                # One made before liquids were read in fluid ounces is named
+                # "Whole milk 32 oz", and is still this size's product.
+                names = {sized.lower()}
+                if item.package_unit == "Fluid ounce":
+                    names.add(f"{base} {size_label(item.package_size, 'Ounce')}".lower())
+                existing = next((p for p in await self.get_products()
+                                 if p["name"].lower() in names), None)
+                if existing is not None:
+                    item = item.model_copy(update={"name": existing["name"]})
+                if existing is None:
+                    # Said once, when that size first gets its own product.
+                    size_note = (f"Grocy keeps {base} as {size_label(*held)} "
+                                 f"each, so this one went in as {sized}.")
         # "1 dozen" is 12 Pieces before anything else sees it, so a new
         # product is made in Pieces and never in a Dozen unit.
         item, typed = await self._count_out(existing, item)
@@ -2809,9 +2994,11 @@ class GrocyClient:
                 await self.ensure_product_barcode(product_id, item.barcode)
             except Exception:  # noqa: BLE001
                 pass
+        stored_note = await self._note_package_size(product_id, item)
         result = {"product_id": product_id, "name": item.name}
-        if note:
-            result["unit_note"] = note
+        notes = [n for n in (note, size_note, stored_note) if n]
+        if notes:
+            result["unit_note"] = " ".join(notes)
         return result
 
     async def get_shopping_lists(self) -> list[dict]:

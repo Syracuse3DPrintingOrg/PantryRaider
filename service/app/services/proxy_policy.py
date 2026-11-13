@@ -113,7 +113,8 @@ _GROCY_OBJECTS_READ = ("locations,product_groups,products,quantity_units,"
                        "quantity_unit_conversions,quantity_unit_conversions_resolved,"
                        "shopping_lists,shopping_list,product_barcodes,stock,stock_log")
 _GROCY_OBJECTS_CREATE = ("locations,product_groups,quantity_units,products,"
-                         "product_barcodes,shopping_lists,shopping_list")
+                         "product_barcodes,shopping_lists,shopping_list,"
+                         "quantity_unit_conversions")
 
 _GROCY_ALLOW = [
     ("GET", "api/stock"),

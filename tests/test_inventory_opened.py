@@ -136,8 +136,9 @@ def test_full_stock_reads_run_concurrently():
          patch.object(GrocyClient, "_cached_list", fake_cached):
         asyncio.run(GrocyClient().get_full_stock())
     assert sorted(calls) == ["/objects/locations", "/objects/product_groups",
+                             "/objects/quantity_unit_conversions",
                              "/objects/quantity_units", "/objects/stock", "/stock"]
-    assert inflight["max"] == 5   # sequential awaits would never exceed 1
+    assert inflight["max"] == 6   # sequential awaits would never exceed 1
 
 
 def test_full_stock_still_raises_the_grocy_error():
