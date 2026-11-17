@@ -7,7 +7,7 @@
 # through 3.x: from 1.0 on, a device that advertises no name reports None
 # instead of its address, and the reader already treats a missing name as
 # unnamed. 3.0.2 is the newest checked against it.
-bleak>=0.21,<4
+bleak>=3.1.0,<4
 httpx>=0.24,<1
 # config.py reads TOML with the standard library's tomllib, which arrived in
 # Python 3.11. On 3.10 (Ubuntu 22.04) the tomli backport stands in for it.
