@@ -24,6 +24,9 @@ from .routers import kiosk_launch
 from .routers import auth_oidc
 from .routers import security as security_router
 from .routers import screens as screens_router
+from fastapi.exception_handlers import http_exception_handler as _default_http_exception_handler
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.responses import PlainTextResponse
 from .services import screens as screens_svc
 from .routers import setup_code as setup_code_router
 
@@ -614,6 +617,46 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+
+
+def _screen_app_page(request: Request) -> bool:
+    """A page request from a tablet showing the whole interface."""
+    try:
+        session = request.scope.get("session") or {}
+        return (request.method == "GET" and session.get("role") == "screen"
+                and session.get("screen_app") is True
+                and "text/html" in request.headers.get("accept", ""))
+    except Exception:
+        return False
+
+
+def _screen_error_page(request: Request, status: int):
+    # A tablet has no address bar and no back button: a page that is missing
+    # or broke must still offer the way out and the way back to the start.
+    from .templating import templates
+    return templates.TemplateResponse(request, "screen_error.html",
+                                      {"request": request, "status": status},
+                                      status_code=status)
+
+
+@app.exception_handler(StarletteHTTPException)
+async def _http_error(request: Request, exc: StarletteHTTPException):
+    if exc.status_code == 404 and _screen_app_page(request):
+        try:
+            return _screen_error_page(request, 404)
+        except Exception:
+            pass
+    return await _default_http_exception_handler(request, exc)
+
+
+@app.exception_handler(Exception)
+async def _server_error(request: Request, exc: Exception):
+    if _screen_app_page(request):
+        try:
+            return _screen_error_page(request, 500)
+        except Exception:
+            pass
+    return PlainTextResponse("Internal Server Error", status_code=500)
 
 
 @app.exception_handler(SettingsLockedError)

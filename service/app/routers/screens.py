@@ -133,9 +133,14 @@ async def session_ticket(body: SessionIn, request: Request):
     if not path:
         return _refuse(400, "page is one of home, recipe, timers or app.")
     ticket = screens.mint_ticket(sid, app=page == "app")
+    out = {"ok": True, "url": f"/screen/open?ticket={ticket}&next={path}",
+           "expires_in": int(screens.TICKET_TTL)}
+    if page == "app":
+        # The whole interface draws its own Exit control on every page, so
+        # the app hosting it needs no close button of its own.
+        out["exit"] = "page"
     return JSONResponse(
-        {"ok": True, "url": f"/screen/open?ticket={ticket}&next={path}",
-         "expires_in": int(screens.TICKET_TTL)},
+        out,
         headers={"Cache-Control": "no-store"})
 
 

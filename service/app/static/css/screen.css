@@ -61,6 +61,7 @@ body.has-strip .sc-main { top: 122px; }
 .sc-empty { margin: 48px 0; text-align: center; font-size: 24px; color: #8b95a1; }
 
 .sc-reconnect { top: 0; }
+.sc-link-btn { line-height: 60px; }
 
 /* Timers page */
 .sc-timer {

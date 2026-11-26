@@ -37,9 +37,46 @@
     try { xhr.send(payload ? JSON.stringify(payload) : null); } catch (e) { if (done) done(null); }
   }
 
-  // --- leave after five quiet minutes on the start page -----------------------
   var path = window.location.pathname.replace(/\/+$/, '');
   var onStart = /\/ui\/start$/.test(path) || /\/ui$/.test(path);
+
+  // --- the way out -------------------------------------------------------------
+  // The page draws its own Exit control, so the app that hosts it needs no
+  // close button of its own and no strip of the screen has to be kept clear
+  // for one. On the start page it takes the top right corner; on every other
+  // page it sits at the right end of the bar across the top. Settings and
+  // Sign out mean nothing on a wall tablet, so their controls step aside.
+  var chrome = document.createElement('style');
+  chrome.textContent =
+    '.sa-exit{position:fixed;z-index:2045;right:calc(8px + var(--kiosk-inset-right,0px));' +
+    'top:calc(4px + var(--kiosk-inset-top,0px));min-width:64px;height:48px;padding:0 14px;border-radius:12px;' +
+    'border:1px solid var(--bs-border-color,#3a3f47);background:rgba(20,22,26,.72);' +
+    'background:color-mix(in srgb,var(--bs-body-bg,#14161a) 72%,transparent);' +
+    'color:var(--bs-body-color,#fff);font:600 17px/46px inherit;font-family:inherit;text-align:center;cursor:pointer}' +
+    '.sa-exit:active{background:var(--bs-primary,#F2006E);color:#fff}' +
+    '.sa-exit.start{top:calc(8px + var(--kiosk-inset-top,0px));height:56px;line-height:54px}' +
+    '.start-exit,.start-settings{display:none!important}' +
+    'nav.navbar a[href="ui/logout"],nav.navbar a[href="setup"],.float-nav a[href="setup"]{display:none!important}' +
+    'nav.navbar>.container-fluid,nav.navbar>.container{padding-right:84px!important}';
+  document.head.appendChild(chrome);
+  function addExit() {
+    var b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'sa-exit' + (onStart ? ' start' : '');
+    b.setAttribute('aria-label', 'Exit Pantry Raider');
+    b.textContent = 'Exit';
+    b.addEventListener('click', function () {
+      b.textContent = '\u2026';
+      send('POST', 'events/close', { screen: SCREEN }, function () {
+        setTimeout(function () { b.textContent = 'Exit'; }, 3000);
+      });
+    });
+    document.body.appendChild(b);
+  }
+  if (document.body) addExit();
+  else document.addEventListener('DOMContentLoaded', addExit);
+
+  // --- leave after five quiet minutes on the start page -----------------------
   var idleTimer = null;
   function leave() {
     send('POST', 'events/close', { screen: SCREEN }, null);

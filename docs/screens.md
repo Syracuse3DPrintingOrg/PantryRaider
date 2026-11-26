@@ -32,7 +32,7 @@ wall tablet is touched by anyone who walks past.
 Say "open Pantry Raider" to a voice device that has that screen, or use the
 button your kiosk app offers. It leaves by itself after five minutes on the
 start page with nobody touching it; on any other page it stays until you
-close it or say "close Pantry Raider". A finished timer still takes over the
+press **Exit** in the top right corner or say "close Pantry Raider". A finished timer still takes over the
 screen with **Dismiss** while it is open.
 
 While the whole interface is open, a running timer shows as a bar across

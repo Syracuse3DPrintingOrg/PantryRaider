@@ -282,14 +282,22 @@ def test_a_screen_can_switch_into_the_whole_interface(client):
     body = client.post("/api/screens/session", headers=headers,
                        json={"screen": "ks-show8", "page": "app"}).json()
     assert body["url"].endswith("&next=ui/start?kiosk=1")
+    # The pages draw their own Exit, so the kiosk app can drop its close button.
+    assert body["exit"] == "page"
     r = view.get(body["url"], follow_redirects=False)
     assert r.status_code == 303 and r.headers["location"] == "/ui/start?kiosk=1"
     page = view.get("/ui/start?kiosk=1")
     assert page.status_code == 200
-    # The page knows it is that screen (so it can leave by itself and show a
-    # finished timer), and keeps clear of the kiosk app's own close button.
+    # The page knows it is that screen (so it can leave by itself, show a
+    # finished timer and draw its own Exit), and gives up no strip of the
+    # screen to a close button.
     assert 'data-screen-id="ks-show8"' in page.text and "screen-app.js" in page.text
-    assert 'data-display-margin-top="58"' in page.text
+    assert 'data-display-margin-top="0"' in page.text
+    # A missing page still offers the way out and the way back.
+    missing = view.get("/ui/no-such-page", headers={"Accept": "text/html"})
+    assert missing.status_code == 404 and "screen-app.js" in missing.text
+    assert "Back to the start page" in missing.text
+    assert view.get("/ui/no-such-page").json() == {"detail": "Not Found"}
     assert view.get("/ui/inventory").status_code == 200
     assert view.get("/current-recipe").status_code == 200
     assert view.post("/events/close", json={"screen": "ks-show8"}).json()["ok"]
@@ -304,8 +312,10 @@ def test_a_screen_can_switch_into_the_whole_interface(client):
     # A ticket for a screen page does not open the interface, and an "app"
     # address on such a ticket lands on the screen's own home page.
     narrow = TestClient(app)
-    t = client.post("/api/screens/session", headers=headers,
-                    json={"screen": "ks-show8", "page": "recipe"}).json()["url"]
+    reply = client.post("/api/screens/session", headers=headers,
+                        json={"screen": "ks-show8", "page": "recipe"}).json()
+    assert "exit" not in reply
+    t = reply["url"]
     r = narrow.get(t.replace("next=screen/recipe", "next=ui/start?kiosk=1"),
                    follow_redirects=False)
     assert r.headers["location"] == "/screen/"

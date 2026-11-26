@@ -101,12 +101,9 @@ def active_theme(request: Request | None) -> str:
     return settings.ui_theme
 
 
-# Kiosk apps that draw their own close button over the top right corner of
-# the page they host. The whole interface is inset from the top for them, the
-# same safe-area inset a panel with a hidden rim uses, so nothing sits under
-# that button on any page.
-_CORNER_BUTTON_KINDS = ("kiosk_satellite",)
-_CORNER_BUTTON_INSET = 58
+# A tablet showing the whole interface gets no inset: the pages draw their own
+# Exit control (static/js/screen-app.js), and the ticket reply says so
+# ("exit": "page") so a kiosk app can leave its own close button off.
 
 
 def timer_bar_context() -> dict | None:
@@ -144,7 +141,7 @@ def screen_context(request: Request) -> dict:
             "timer_bar": {"color": (timer_bar_context() or {"color": "#FF0000"})["color"]},
             "ui_scale_factor": 1.0,
             "display_rotation": 0,
-            "display_margin_top": _CORNER_BUTTON_INSET if kind in _CORNER_BUTTON_KINDS else 0,
+            "display_margin_top": 0,
             "display_margin_right": 0,
             "display_margin_bottom": 0,
             "display_margin_left": 0,

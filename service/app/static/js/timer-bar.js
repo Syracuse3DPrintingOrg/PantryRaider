@@ -64,18 +64,32 @@
   // The bar takes the top strip of the screen, so the page moves down by the
   // same safe-area inset a panel with a hidden rim uses. A screen that already
   // keeps that strip clear (a kiosk app's own close button) needs no more.
+  var paddedBody = false;
   function reserve(on) {
     var st = html.style;
+    var body = document.body;
     if (on) {
       if (savedInset !== null) return;
       savedInset = st.getPropertyValue('--kiosk-inset-top') || '';
       var have = parseFloat(savedInset) || 0;
       var zoom = parseFloat(html.getAttribute('data-ui-scale') || '1') || 1;
-      if (have < HEIGHT / zoom) st.setProperty('--kiosk-inset-top', (HEIGHT / zoom).toFixed(2) + 'px');
+      var want = HEIGHT / zoom;
+      if (have >= want) return;
+      var before = parseFloat(window.getComputedStyle(body).paddingTop) || 0;
+      st.setProperty('--kiosk-inset-top', want.toFixed(2) + 'px');
+      // The bar across the top of a page moves with that inset; on some pages
+      // the content below it does not, and would sit under the bar. Where the
+      // content did not move, move it.
+      var after = parseFloat(window.getComputedStyle(body).paddingTop) || 0;
+      if (after - before < (want - have) - 1) {
+        body.style.paddingTop = (before + want - have) + 'px';
+        paddedBody = true;
+      }
     } else if (savedInset !== null) {
       if (savedInset) st.setProperty('--kiosk-inset-top', savedInset);
       else st.removeProperty('--kiosk-inset-top');
       savedInset = null;
+      if (paddedBody) { body.style.paddingTop = ''; paddedBody = false; }
     }
   }
 

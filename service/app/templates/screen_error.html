@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="{{ theme_mode }}"{% if screen_session %}
+      data-screen-id="{{ screen_session.id }}"{% endif %}>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <base href="{{ ingress_path }}/">
+  <title>{{ app_name }}</title>
+  <link rel="stylesheet" href="static/css/screen.css?v={{ app_version }}">
+</head>
+{# Shown to a tablet in the whole interface when a page is missing or broke.
+   screen-app.js adds the Exit control, as it does on every page. #}
+<body data-page="error">
+  <div class="sc-main sc-reconnect">
+    <div class="sc-empty">
+      <h1 class="sc-title">{% if status == 404 %}That page is not here{% else %}Something went wrong{% endif %}</h1>
+      <p>{% if status == 404 %}It may have moved.{% else %}Try again in a moment.{% endif %}</p>
+      <p><a class="sc-btn sc-link-btn" href="ui/start?kiosk=1">Back to the start page</a></p>
+    </div>
+  </div>
+  {% if screen_session and screen_session.app %}<script src="static/js/screen-app.js?v={{ app_version }}"></script>{% endif %}
+</body>
+</html>
