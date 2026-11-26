@@ -967,13 +967,17 @@ async def cook_page(request: Request):
 
 @router.get("/current-recipe", response_class=HTMLResponse)
 async def current_recipe_page(request: Request):
-    from ..services import recipe_source
+    from ..services import recipe_source, screens
     backend = recipe_source.active_backend()
     return templates.TemplateResponse(request, "current-recipe.html", {
         "request": request,
         "active": "current_recipe",
         "recipes_backend": backend,
         "mealie_url": settings.mealie_link_url() if backend == "mealie" else None,
+        # A tablet in Pantry Raider mode shows the recipe it is cooking (its
+        # own, else the kitchen's), the one its cook mode and voice follow.
+        "tablet": (bool(screens.app_session_screen(request.session))
+                   and not settings.is_satellite()),
     })
 
 

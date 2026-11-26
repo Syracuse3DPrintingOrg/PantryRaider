@@ -520,6 +520,19 @@ def redeem_ticket(token: str) -> tuple[str, bool] | None:
     return hit[0], hit[2]
 
 
+def app_session_screen(session) -> str:
+    """The screen a web view is signed in as when it shows the whole
+    interface ("Pantry Raider mode"), or "" for any other session. Such a
+    tablet cooks a recipe of its own (services/screen_recipes.py), and its
+    On the Line page shows that one. Reads the session only."""
+    try:
+        if session.get("role") != "screen" or session.get("screen_app") is not True:
+            return ""
+        return str(session.get("screen_id") or "")
+    except Exception:
+        return ""
+
+
 def note_page(screen_id: str, page: str) -> None:
     """A screen's own page says which page it is (with each poll), so a
     request can tell a screen in cook mode from one on the recipe."""

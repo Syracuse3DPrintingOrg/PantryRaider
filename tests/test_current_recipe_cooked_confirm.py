@@ -86,9 +86,15 @@ def test_confirmation_has_big_confirm_and_cancel_buttons():
 
 
 @pytest.mark.skipif(_NODE is None, reason="node is not available")
-def test_cooked_flow_in_node():
+@pytest.mark.parametrize("tablet,url", [
+    (False, "current-recipe/2/cooked"),
+    # A tablet in Pantry Raider mode marks the recipe it shows cooked: its own.
+    (True, "api/screens/recipe/cooked"),
+])
+def test_cooked_flow_in_node(tablet, url):
     """Tap Cooked, then Cancel: no request. Tap Cooked, then Use them up: one
-    POST to this slot's /cooked, and the page reloads as before."""
+    POST to this slot's /cooked (on a tablet, the tablet's own recipe), and
+    the page reloads as before."""
     functions = "\n".join(_extract(n) for n in ("askCooked", "cancelCooked", "confirmCooked"))
     script = """
 const els = {};
@@ -111,6 +117,7 @@ globalThis.prErrText = async () => 'x';
 globalThis.prReason = () => 'x';
 globalThis.loadCurrentRecipe = () => { reloads++; };
 var crFocus = 2;
+var crTablet = %s;
 %s
 (async () => {
   const box = el('cr-cooked-confirm');
@@ -124,13 +131,14 @@ var crFocus = 2;
   console.log(JSON.stringify({shownAfterTap, focusedAfterTap, afterCancel, requests, reloads,
     hiddenAfterConfirm: box.classList.contains('d-none')}));
 })();
-""" % (functions, _cooked_button_handler(), _cooked_button_handler())
+""" % ("true" if tablet else "false", functions, _cooked_button_handler(),
+       _cooked_button_handler())
     out = subprocess.run([_NODE, "-e", script], capture_output=True, text=True, timeout=60)
     assert out.returncode == 0, out.stderr
     res = json.loads(out.stdout)
     assert res["shownAfterTap"] is True
     assert res["focusedAfterTap"] == "cr-cooked-no", "Cancel takes focus, not the destructive button"
     assert res["afterCancel"] == {"requests": 0, "hidden": True}
-    assert res["requests"] == [["current-recipe/2/cooked", "POST"]]
+    assert res["requests"] == [[url, "POST"]]
     assert res["reloads"] == 1
     assert res["hiddenAfterConfirm"] is True

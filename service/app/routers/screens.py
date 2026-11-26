@@ -9,6 +9,8 @@
   GET    /api/screens/recipe         the recipe open on a screen, for questions
   POST   /api/screens/recipe/step    move the step that screen is on, and read it
   POST   /api/screens/recipe/timer   start one of that recipe's timers
+  POST   /api/screens/recipe/scale   change how many servings it makes
+  POST   /api/screens/recipe/clear   put it away without cooking it
   POST   /api/screens/recipe/cooked  mark it cooked (uses up the stock)
   GET    /screen/open                redeems that one-use address
   GET    /screen/, /screen/timers, /screen/recipe, /screen/cook   the pages themselves
@@ -380,7 +382,7 @@ async def _screen_for(request: Request, screen: str):
 
 @router.get("/recipe")
 async def screen_recipe_now(request: Request, screen: str = "", full: bool = False,
-                            own: bool = False):
+                            own: bool = False, extras: bool = False):
     """The recipe open on a screen, in a shape a language model can answer
     any question from: title, servings, ingredients as lines with scaled
     amounts, steps numbered from 1, the timers each step suggests (with
@@ -392,12 +394,35 @@ async def screen_recipe_now(request: Request, screen: str = "", full: bool = Fal
     "kitchen" (the kitchen's current one, which a screen's pages show when
     it has none of its own). ``own`` leaves the kitchen's out: an answer
     about one screen (Home Assistant asking what to do next there) is "none"
-    for a screen that never opened a recipe."""
+    for a screen that never opened a recipe.
+
+    ``extras`` (with ``full``) adds what On the Line shows beside the
+    recipe on a tablet: ``equipment`` and ``missing_appliances`` as
+    GET /current-recipe/equipment gives them, and the recipe's
+    ``cook_count``."""
     target, refusal = await _screen_for(request, screen)
     if refusal is not None:
         return refusal
-    return JSONResponse(await _describe(target, full, own),
-                        headers={"Cache-Control": "no-store"})
+    out = await _describe(target, full, own)
+    if extras and full and out.get("recipe"):
+        await run_in_threadpool(_add_extras, out)
+    return JSONResponse(out, headers={"Cache-Control": "no-store"})
+
+
+def _add_extras(out: dict) -> None:
+    """The equipment a recipe likely needs and how often it was cooked."""
+    from ..database import SessionLocal
+    from ..services import cook_counts, utensils
+    recipe = out["recipe"]
+    equipment = utensils.detect_equipment(recipe)
+    out["equipment"] = equipment
+    out["missing_appliances"] = utensils.missing_appliances(equipment,
+                                                            settings.kitchen_appliances)
+    db = SessionLocal()
+    try:
+        cook_counts.annotate(db, [recipe])
+    finally:
+        db.close()
 
 
 async def _recipe_of(target: dict | None, adopt: bool = False) -> tuple[dict | None, str]:
@@ -651,8 +676,63 @@ async def start_recipe_timer(body: RecipeTimerIn, request: Request):
                       f"{screen_recipes.spoken(sug['seconds'])}."}
 
 
+class RecipeScaleIn(BaseModel):
+    screen: str = ""
+    # Times the recipe's own servings: 2 makes twice as much.
+    factor: float
+
+
+@router.post("/recipe/scale")
+async def scale_recipe_on_screen(body: RecipeScaleIn, request: Request):
+    """Change how many servings the recipe open on a screen makes (Servings
+    on a tablet's On the Line page). A screen showing the kitchen's recipe
+    takes it as its own first, as a tap on a step does, so the kitchen's
+    servings stay as they are. With no screen named it is the kitchen's
+    recipe, as POST /current-recipe/scale scales it."""
+    target, refusal = await _screen_for(request, body.screen)
+    if refusal is not None:
+        return refusal
+    if target is None or target.get("kind") == "server":
+        recipe = await run_in_threadpool(current_recipe.scale_servings, body.factor)
+    else:
+        mine, _source = await _recipe_of(target, adopt=True)
+        recipe = (await run_in_threadpool(screen_recipes.scale, target["id"], body.factor)
+                  if mine else None)
+    if recipe is None:
+        return JSONResponse({"ok": False, "detail": "No active recipe"}, status_code=404)
+    return {"ok": True, "recipe": recipe}
+
+
 class RecipeCookedIn(BaseModel):
     screen: str = ""
+
+
+@router.post("/recipe/clear")
+async def clear_recipe_on_screen(body: RecipeCookedIn, request: Request):
+    """Put away the recipe open on a screen without cooking it (Clear on a
+    tablet's On the Line page): the screen's own, with the kitchen's current
+    recipe when that is the same dish, or the kitchen's when that is the
+    one the screen shows. Its timers keep running."""
+    target, refusal = await _screen_for(request, body.screen)
+    if refusal is not None:
+        return refusal
+    recipe, source = await run_in_threadpool(screen_recipes.recipe_for, target)
+    if not recipe:
+        return {"ok": True, "result": "none"}
+
+    def put_away() -> None:
+        if source == "screen":
+            screen_recipes.put_away(target["id"], recipe)
+            return
+        current_recipe.clear_recipe(current_recipe.PRIMARY_SLOT)
+        # Where anyone was up to goes with it, so it starts at step 1 again.
+        screen_recipes.forget_step(screen_recipes.SERVER_KEY)
+        if target is not None:
+            screen_recipes.forget_step(target["id"])
+
+    await run_in_threadpool(put_away)
+    return {"ok": True, "result": "cleared",
+            "recipe": {"title": recipe.get("title") or ""}}
 
 
 @router.post("/recipe/cooked")
@@ -660,7 +740,8 @@ async def recipe_cooked(body: RecipeCookedIn, request: Request,
                         db: Session = Depends(get_db)):
     """Mark the recipe open on a screen cooked: the same as Cooked on the
     recipe page (the matching stock is used up and a "save to leftovers?"
-    item is raised), then that screen's recipe is put away."""
+    item is raised), then that screen's recipe is put away, with the
+    kitchen's current recipe when that is the same dish."""
     if settings.is_satellite():
         return _refuse(409, _MAIN_ONLY)
     target, refusal = await _screen_for(request, body.screen)
@@ -677,7 +758,7 @@ async def recipe_cooked(body: RecipeCookedIn, request: Request,
         await run_in_threadpool(screen_recipes.forget_step, target["id"] if target else "")
     else:
         out = await cr._cook_recipe(
-            recipe, None, db, clear=lambda: screen_recipes.clear(target["id"]))
+            recipe, None, db, clear=lambda: screen_recipes.put_away(target["id"], recipe))
     n = len(out.get("consumed") or [])
     out["speech"] = (f"{recipe.get('title') or 'The recipe'} is cooked. "
                      f"{n} item{'' if n == 1 else 's'} used up.")

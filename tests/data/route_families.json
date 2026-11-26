@@ -480,6 +480,8 @@
  "GET /api/screens/recipe": "kitchen",
  "POST /api/screens/recipe/timer": "kitchen",
  "POST /api/screens/recipe/step": "kitchen",
+ "POST /api/screens/recipe/scale": "kitchen",
+ "POST /api/screens/recipe/clear": "kitchen",
  "POST /api/screens/recipe/cooked": "kitchen",
  "GET /screen/cook": "kitchen"
 }

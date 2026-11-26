@@ -7,7 +7,10 @@ tablet is cooking, and a tablet that never opened one says so rather than
 answering for another screen's. Its pages may still show the kitchen's
 current recipe (``source`` "kitchen" in what GET /api/screens/recipe
 returns); tapping a step or a timer there, or opening cook mode on it, makes
-that recipe the tablet's own. The main install's own display (id "server")
+that recipe the tablet's own, and so does picking a recipe to cook on a
+tablet showing the whole interface. When a tablet is done with its own
+recipe (cooked, or cleared) the kitchen's goes too if it is the same dish.
+The main install's own display (id "server")
 is the server's current recipe (services/current_recipe.py) and is not kept
 here. A Bandit keeps its own current recipe on the device; the copy here is
 what the server sent it, so a question asked about the Bandit's screen can be
@@ -37,6 +40,7 @@ language model's view of a recipe is tested without a server.
 from __future__ import annotations
 
 import json
+import math
 import threading
 import time
 from dataclasses import asdict
@@ -189,6 +193,46 @@ def clear(screen_id: str) -> bool:
         if gone:
             _save_locked()
     return gone
+
+
+def scale(screen_id, factor) -> dict | None:
+    """Make the recipe open on one screen ``factor`` times its own servings
+    (2 makes twice as much). The serialized recipe comes back, or None when
+    the screen has none. A factor that is not a positive number is ignored,
+    and the step the screen is on stays."""
+    key = _key(screen_id)
+    now = time.time()
+    with _lock, state_write_lock(_state_file()):
+        _load_locked()
+        row = _rows.get(key)
+        if not _fresh(row, now):
+            return None
+        recipe = current_recipe._from_stored(row["recipe"])
+        try:
+            f = float(factor)
+        except (TypeError, ValueError):
+            f = 0.0
+        if math.isfinite(f) and f > 0:
+            recipe.servings_scale = f
+        _rows[key] = {"recipe": asdict(recipe), "set": now}
+        _save_locked()
+    return current_recipe._serialize(recipe)
+
+
+def put_away(screen_id, recipe: dict | None) -> None:
+    """A screen is done with its own recipe (cooked, or cleared): it goes,
+    and so does the kitchen's current recipe when that is the same dish. A
+    tablet's own recipe is mostly the kitchen's, taken up at the first tap
+    or picked on that tablet, and the tablet would otherwise fall back to
+    the dish it just finished and offer to use its ingredients up again."""
+    clear(screen_id)
+    want = recipe_identity(recipe)
+    if want in ("", "title:"):
+        return
+    kitchen = current_recipe.get_active()
+    if kitchen and recipe_identity(kitchen) == want:
+        current_recipe.clear_recipe(current_recipe.PRIMARY_SLOT)
+        forget_step(SERVER_KEY)
 
 
 def recipe_for(screen: dict | None, own: bool = False) -> tuple[dict | None, str]:

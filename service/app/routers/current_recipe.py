@@ -137,6 +137,18 @@ class StartSuggestionIn(BaseModel):
 # --- Active recipe -------------------------------------------------------
 
 
+def _also_for_this_tablet(request: Request, recipe_dict: dict) -> None:
+    """A recipe picked to cook on a tablet in Pantry Raider mode becomes
+    that tablet's own as well (services/screen_recipes.py), so its On the
+    Line page, its cook mode and voice there all have the dish just picked.
+    The same dish picked again keeps the step the tablet is on."""
+    from ..services import screen_recipes, screens
+    sid = screens.app_session_screen(request.session)
+    if not sid or settings.is_satellite() or screens.owner_of(sid) is None:
+        return
+    screen_recipes.set_recipe(sid, recipe_dict, keep_step=True)
+
+
 @recipe_router.get("")
 def get_current_recipe():
     """Return the active recipe, or {"recipe": null} when none is loaded."""
@@ -144,9 +156,11 @@ def get_current_recipe():
 
 
 @recipe_router.post("")
-def set_current_recipe(payload: RecipeIn):
+def set_current_recipe(payload: RecipeIn, request: Request):
     """Replace the active recipe and return the normalized form."""
-    recipe = current_recipe.set_active(payload.model_dump())
+    data = payload.model_dump()
+    recipe = current_recipe.set_active(data)
+    _also_for_this_tablet(request, data)
     return {"recipe": recipe}
 
 
@@ -158,7 +172,8 @@ class FromMealieIn(BaseModel):
 
 
 @recipe_router.post("/from-mealie")
-async def set_current_from_mealie(payload: FromMealieIn, db: Session = Depends(get_db)):
+async def set_current_from_mealie(payload: FromMealieIn, request: Request,
+                                  db: Session = Depends(get_db)):
     """Load a saved recipe (by slug) as the active recipe (FoodAssistant-1g4l).
 
     Fetches the full recipe from the recipe library (the native store, or
@@ -190,6 +205,8 @@ async def set_current_from_mealie(payload: FromMealieIn, db: Session = Depends(g
     recipe = await run_in_threadpool(
         current_recipe.add_recipe if payload.as_course else current_recipe.set_active,
         normalized)
+    if not payload.as_course:
+        await run_in_threadpool(_also_for_this_tablet, request, normalized)
     return {"recipe": recipe}
 
 

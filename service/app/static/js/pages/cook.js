@@ -373,7 +373,7 @@ function actions(s, tier) {
     // it to Mealie (FoodAssistant-wqef).
     btns.push(`<button class="btn btn-sm btn-outline-primary" data-on-click="cookExternal(${idArg}, ${srcArg}, false, this)"
       title="Make this the Current Recipe (no need to save it first)"><i class="bi bi-fire me-1"></i>Cook</button>`);
-    btns.push(`<button class="btn btn-sm btn-outline-secondary" data-on-click="cookExternal(${idArg}, ${srcArg}, true, this)"
+    btns.push(`<button class="btn btn-sm btn-outline-secondary pr-tablet-hide" data-on-click="cookExternal(${idArg}, ${srcArg}, true, this)"
       title="Add as another concurrent recipe (appetizer, dessert...)"><i class="bi bi-plus-lg me-1"></i>Add course</button>`);
     // Plain Save is always offered so saving never forces a shopping-list edit;
     // in the shopping tier we add Save + list alongside it (FoodAssistant-j278).
@@ -387,7 +387,7 @@ function actions(s, tier) {
   } else {
     btns.push(`<button class="btn btn-sm btn-outline-primary" data-on-click="cookThis(${slugArg}, this)"
       title="Make this the Current Recipe"><i class="bi bi-fire me-1"></i>Cook</button>`);
-    btns.push(`<button class="btn btn-sm btn-outline-secondary" data-on-click="addCourse(${slugArg}, this)"
+    btns.push(`<button class="btn btn-sm btn-outline-secondary pr-tablet-hide" data-on-click="addCourse(${slugArg}, this)"
       title="Add as another concurrent recipe (appetizer, dessert...)"><i class="bi bi-plus-lg me-1"></i>Add course</button>`);
     btns.push(`<button class="btn btn-sm btn-outline-primary" data-on-click="openPlan(${PR.escAttrJs(String(s.id ?? ''))}, ${PR.escAttrJs(s.name)})"
       title="Add to meal plan"><i class="bi bi-calendar-plus me-1"></i>Plan</button>`);

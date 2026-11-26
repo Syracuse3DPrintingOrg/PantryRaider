@@ -1,7 +1,15 @@
 // On the Line page (templates/current-recipe.html).
+const CR_PAGE = JSON.parse(document.getElementById('current-recipe-data').textContent);
 // The public demo's Mealie is not reachable from a visitor's browser, so it
 // offers no Open Mealie links.
-const MEALIE_URL = document.documentElement.dataset.demo === '1' ? null : JSON.parse(document.getElementById('current-recipe-data').textContent).mealie_url;
+const MEALIE_URL = document.documentElement.dataset.demo === '1' ? null : CR_PAGE.mealie_url;
+// A tablet in Pantry Raider mode cooks a recipe of its own, the one its cook
+// mode and voice follow. The page shows that one (the kitchen's while the
+// tablet has none) and its buttons act on it as the tablet's own pages do:
+// the kitchen's recipe becomes the tablet's own at the first tap. Courses
+// stay with the kitchen. A browser and the kitchen display show the
+// kitchen's recipes, courses and all.
+let crTablet = CR_PAGE.tablet === true;
 let crRecipe = null;
 let crTimerPoll = null;
 
@@ -39,6 +47,7 @@ async function loadCurrentRecipe() {
   hide('cr-active');
   hide('cr-courses');
   try {
+    if (crTablet && await loadTabletRecipe()) return;
     const r = await fetch('current-recipe/all');
     if (!r.ok) throw new Error(r.statusText);
     crAll = (await r.json()).recipes || [];
@@ -65,16 +74,46 @@ async function loadCurrentRecipe() {
   }
 }
 
+// The recipe this tablet cooks, as its cook mode reads it, with the timers it
+// offers and the step it is on. False when the tablet is not known here (any
+// more): the page then shows the kitchen's recipes, as a browser does.
+async function loadTabletRecipe() {
+  const r = await fetch('api/screens/recipe?full=1&extras=1');
+  if (r.status === 403 || r.status === 404) { crTablet = false; return false; }
+  if (!r.ok) throw new Error(r.statusText);
+  const d = await r.json();
+  hide('cr-loading');
+  crFocus = 0;
+  if (!d.ok || !d.recipe) { crAll = []; crRecipe = null; show('cr-empty'); return true; }
+  crRecipe = Object.assign({}, d.recipe, { slot: 0 });
+  crAll = [crRecipe];
+  renderCourseStrip();
+  renderRecipe();
+  show('cr-active');
+  renderEquipment(d);
+  crSuggestions = d.suggestions || [];
+  fillTimerButtons();
+  crStep = d.step || null;
+  paintSteps();
+  startTimerPolling();
+  return true;
+}
+
 async function loadEquipment() {
-  const wrap = document.getElementById('cr-equipment-wrap');
-  const list = document.getElementById('cr-equipment');
-  const miss = document.getElementById('cr-equipment-missing');
-  wrap.classList.add('d-none');
+  document.getElementById('cr-equipment-wrap').classList.add('d-none');
   let data = { equipment: [], missing_appliances: [] };
   try {
     const r = await fetch('current-recipe/equipment?slot=' + crFocus);
     if (r.ok) data = await r.json();
   } catch (e) { return; }
+  renderEquipment(data);
+}
+
+function renderEquipment(data) {
+  const wrap = document.getElementById('cr-equipment-wrap');
+  const list = document.getElementById('cr-equipment');
+  const miss = document.getElementById('cr-equipment-missing');
+  wrap.classList.add('d-none');
   const eq = data.equipment || [];
   if (!eq.length) return;
   const missing = new Set(data.missing_appliances || []);
@@ -114,7 +153,13 @@ async function clearCurrentRecipe(btn) {
   if (!(await PR.confirmBox('Its timers keep running.', { title: 'Stop cooking ' + title + '?', ok: 'Stop cooking' }))) return;
   if (btn) btn.disabled = true;
   try {
-    await fetch('current-recipe/' + crFocus, { method: 'DELETE' });
+    if (crTablet) {
+      await fetch('api/screens/recipe/clear', {
+        method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}',
+      });
+    } else {
+      await fetch('current-recipe/' + crFocus, { method: 'DELETE' });
+    }
   } catch (e) { /* ignore: reload reflects the truth */ }
   if (btn) btn.disabled = false;
   loadCurrentRecipe();
@@ -137,9 +182,13 @@ async function confirmCooked(btn) {
   if (btn) btn.disabled = true;
   cancelCooked();
   try {
-    const r = await fetch('current-recipe/' + crFocus + '/cooked', { method: 'POST' });
+    // A tablet marks the recipe it shows cooked: its own, or the kitchen's.
+    const r = await fetch((crTablet ? 'api/screens/recipe' : 'current-recipe/' + crFocus) + '/cooked',
+      crTablet ? { method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}' }
+        : { method: 'POST' });
     if (!r.ok) throw new Error(await prErrText(r));
     const data = await r.json();
+    if (data.ok === false) throw new Error(data.speech || 'No recipe is open.');
     const n = (data.consumed || []).length;
     // The leftovers prompt now lives in the Pending page Action Items inbox.
     PR.notice('Consumed ' + n + ' item' + (n === 1 ? '' : 's') +
@@ -280,13 +329,19 @@ async function printRecipe(btn) {
 
 async function applyScale(factor) {
   try {
-    const r = await fetch('current-recipe/' + crFocus + '/scale', {
+    // A tablet scales its own copy, so the kitchen's servings stay as they are.
+    const r = await fetch(crTablet ? 'api/screens/recipe/scale' : 'current-recipe/' + crFocus + '/scale', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({factor}),
     });
     if (!r.ok) throw new Error(await prErrText(r));
-    crRecipe = (await r.json()).recipe;
+    // The answer is the recipe alone: keep what the load added beside it
+    // (its slot, how many times it was made).
+    crRecipe = Object.assign({}, crRecipe, (await r.json()).recipe);
     renderRecipe();
+    // The steps were drawn again: put back their timer buttons and the marker.
+    fillTimerButtons();
+    if (crFocus === 0) paintSteps();
   } catch (e) {
     PR.notice('Could not rescale: ' + e.message);
   }
@@ -380,8 +435,6 @@ function paintTimerButtons() {
 }
 
 async function loadTimerSuggestions() {
-  const wrap = document.getElementById('cr-quick-timers');
-  const box = document.getElementById('cr-timer-suggestions');
   try {
     const r = await fetch('current-recipe/timer-suggestions');
     if (!r.ok) throw new Error(r.statusText);
@@ -389,6 +442,15 @@ async function loadTimerSuggestions() {
   } catch (e) {
     crSuggestions = [];
   }
+  fillTimerButtons();
+  loadStep();
+}
+
+// A button for every timer the recipe offers, in the row up top and under
+// each step it belongs to.
+function fillTimerButtons() {
+  const wrap = document.getElementById('cr-quick-timers');
+  const box = document.getElementById('cr-timer-suggestions');
   document.getElementById('cr-quick-timers-label').textContent =
     crSuggestions.length === 1 ? 'Timer in this recipe' : 'Timers in this recipe';
   box.innerHTML = crSuggestions.map((s, i) => timerButtonHtml(i, true)).join('');
@@ -400,7 +462,6 @@ async function loadTimerSuggestions() {
     slot.classList.toggle('d-none', !mine.length);
   });
   paintTimerButtons();
-  loadStep();
 }
 
 async function startSuggested(i, btn) {
@@ -415,11 +476,22 @@ async function startSuggested(i, btn) {
   if (t) { PR.notice(`${s.label} is already running.`); return; }
   btn.disabled = true;
   try {
-    const r = await fetch('current-recipe/timers/start', {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({step_index: s.step_index, label: s.label, seconds: s.seconds}),
-    });
+    // A tablet starts the timer from its own recipe (adopt: the kitchen's it
+    // shows becomes its own, as a tap on a step does).
+    const r = crTablet
+      ? await fetch('api/screens/recipe/timer', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({step: s.step_index + 1, label: s.label, adopt: true}),
+      })
+      : await fetch('current-recipe/timers/start', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({step_index: s.step_index, label: s.label, seconds: s.seconds}),
+      });
     if (!r.ok) throw new Error(await prErrText(r));
+    if (crTablet) {
+      const d = await r.json();
+      if (d.ok === false) throw new Error(d.speech || 'That timer did not start.');
+    }
     crFinished.delete(suggestionKey(s));
     await refreshTimers();
   } catch (e) {

@@ -56,6 +56,8 @@
     '.sa-exit:active{background:var(--bs-primary,#F2006E);color:#fff}' +
     '.sa-exit.start{top:calc(8px + var(--kiosk-inset-top,0px));height:56px;line-height:54px}' +
     '.start-exit,.start-settings{display:none!important}' +
+    // A tablet cooks one recipe of its own; courses stay with the kitchen.
+    '.pr-tablet-hide{display:none!important}' +
     'nav.navbar a[href="ui/logout"],nav.navbar a[href="setup"],.float-nav a[href="setup"]{display:none!important}' +
     'nav.navbar>.container-fluid,nav.navbar>.container{padding-right:84px!important}';
   document.head.appendChild(chrome);
