@@ -69,6 +69,10 @@ _queues: dict[str, list[dict]] = {}
 _next_event = 1
 # Monotonic time of each screen's last poll (the heartbeat).
 _seen: dict[str, float] = {}
+# The page each screen said it was on with its last poll: (monotonic time,
+# page). Memory only; it is about what the tablet shows this minute.
+_pages: dict[str, tuple[float, str]] = {}
+PAGE_SECONDS = 90.0
 # sha256(ticket) -> (screen id, monotonic expiry, opens the whole interface)
 _tickets: dict[str, tuple[str, float, bool]] = {}
 
@@ -287,6 +291,7 @@ def forget(screen_id: str) -> bool:
             return False
         _queues.pop(sid, None)
         _seen.pop(sid, None)
+        _pages.pop(sid, None)
         _save_locked()
         return True
 
@@ -515,6 +520,23 @@ def redeem_ticket(token: str) -> tuple[str, bool] | None:
     return hit[0], hit[2]
 
 
+def note_page(screen_id: str, page: str) -> None:
+    """A screen's own page says which page it is (with each poll), so a
+    request can tell a screen in cook mode from one on the recipe."""
+    p = str(page or "").strip().lower()
+    if p in PAGES:
+        _pages[str(screen_id or "")] = (time.monotonic(), p)
+
+
+def page_of(screen_id: str) -> str:
+    """The page a screen is showing ("cook", "recipe", ...), or "" when it
+    has not said lately."""
+    hit = _pages.get(str(screen_id or ""))
+    if not hit or time.monotonic() - hit[0] > PAGE_SECONDS:
+        return ""
+    return hit[1]
+
+
 def reset() -> None:
     """Forget everything and drop the state file (tests)."""
     global _screens, _mtime, _next_event, _last_flush
@@ -524,6 +546,7 @@ def reset() -> None:
         _mtime = None
         _queues.clear()
         _seen.clear()
+        _pages.clear()
         _tickets.clear()
         _next_event = 1
         _last_flush = 0.0

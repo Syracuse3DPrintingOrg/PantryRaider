@@ -79,7 +79,9 @@ class ShowRecipeIn(BaseModel):
     # The answer to "which one?" after an ambiguous call for the same screen.
     choice: str = ""
     # "recipe" shows the whole recipe; "cook" opens cook mode at step 1
-    # ("let's cook ..."). Empty: whatever the question being answered asked for.
+    # ("let's cook ..."). Empty: whatever the question being answered asked
+    # for, else the recipe already in cook mode on that screen stays there,
+    # else the whole recipe.
     page: str = ""
 
 
@@ -114,13 +116,17 @@ async def forget(screen_id: str, request: Request):
 
 
 @router.get("/poll")
-async def poll(request: Request, screen: str = "", since: int = 0, wait: float = 0):
+async def poll(request: Request, screen: str = "", since: int = 0, wait: float = 0,
+               page: str = ""):
     sid = screen or str(request.session.get("screen_id") or "")
     known = await run_in_threadpool(screens.get, sid)
     if known is None or sid == screens.SERVER_ID:
         return _refuse(404, _NO_SCREEN)
     if not _may_touch(request, sid):
         return _refuse(403, _NOT_YOURS)
+    if page:
+        # Which page this screen is on now (cook mode or the recipe, ...).
+        screens.note_page(sid, page)
     if wait and wait > 0:
         out = await screens.wait_for_events(sid, since, timeout=min(float(wait), 30.0),
                                             is_gone=request.is_disconnected)
@@ -249,18 +255,40 @@ async def show_recipe(body: ShowRecipeIn, db: Session = Depends(get_db)):
                 "speech": f"I could not find a recipe called {query or choice or slug}."}
     screen_recipes.forget_candidates(key)
     # Cook mode when asked for, or when the question this answers was asked
-    # from "let's cook ...".
-    page = body.page.strip().lower() or asked_page
-    page = "cook" if page == "cook" else "recipe"
+    # from "let's cook ..."; the whole recipe when asked for. Neither said:
+    # the recipe already in cook mode on that screen stays there, at its
+    # step ("just lasagna" while the lasagna is being cooked); anything else
+    # opens the whole recipe.
+    asked = body.page.strip().lower() or asked_page
+    foreign = target is not None and target["kind"] not in ("server", "bandit")
+    # What that screen has open now: its own copy (a tablet, or what was sent
+    # to a Bandit), else the kitchen's current recipe (the main display).
+    mine = (await run_in_threadpool(screen_recipes.get_recipe, target["id"])
+            if target is not None and target["kind"] != "server"
+            else await run_in_threadpool(current_recipe.get_active))
+    same = bool(mine) and str(mine.get("id") or "") == slug
+    if not asked and foreign and same and screens.page_of(target["id"]) == "cook":
+        await run_in_threadpool(current_recipe.set_active,
+                                current_recipe.from_mealie_detail(detail, slug))
+        cur = await run_in_threadpool(screen_recipes.current_step, target["id"], mine)
+        title = mine.get("title") or title or slug
+        speech = f"{title} is already open{_where(target)}."
+        if cur is not None:
+            speech += f" You are on step {cur + 1}."
+        return {"ok": True, "result": "shown", "recipe": {"slug": slug, "title": title},
+                "screen": {"id": target["id"], "label": target["label"]}, "page": "cook",
+                "step": cur + 1 if cur is not None else None, "speech": speech}
+    page = "cook" if asked == "cook" else "recipe"
     normalized = current_recipe.from_mealie_detail(detail, slug)
     # The server's current recipe follows what was last asked for, as it
-    # always has; a named screen also keeps it as its own.
+    # always has; a named screen also keeps it as its own. The same recipe
+    # asked for again keeps the step the cook is on.
     recipe = await run_in_threadpool(current_recipe.set_active, normalized)
     title = recipe.get("title") or title or slug
     shown = None
     if target is not None and target["kind"] != "server":
-        await run_in_threadpool(screen_recipes.set_recipe, target["id"], normalized)
-    if target is None or target["kind"] == "server":
+        await run_in_threadpool(screen_recipes.set_recipe, target["id"], normalized, same)
+    if (target is None or target["kind"] == "server") and not same:
         # Where the cook was up to belonged to the recipe that was open.
         await run_in_threadpool(screen_recipes.forget_step, screens.SERVER_ID)
     first = None

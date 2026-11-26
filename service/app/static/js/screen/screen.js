@@ -591,7 +591,10 @@
   function pollEvents() {
     if (!SCREEN) return;
     var wait = eventCursor === 999999999 ? 0 : WAIT_S;
-    request('GET', 'api/screens/poll?screen=' + encodeURIComponent(SCREEN) + '&wait=' + wait +
+    // page: the server can tell cook mode from the recipe page (a recipe
+    // asked for again keeps cook mode at its step).
+    request('GET', 'api/screens/poll?screen=' + encodeURIComponent(SCREEN) +
+      '&page=' + encodeURIComponent(PAGE) + '&wait=' + wait +
       '&since=' + eventCursor, null, (WAIT_S + 10) * 1000, function (d, status) {
         if (d) {
           eventDelay = 200;

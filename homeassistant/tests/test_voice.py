@@ -225,7 +225,9 @@ async def test_services_answer_with_something_to_say(hass, install):
 
     out = await _call(hass, "show_recipe", {"query": "lasagna", "satellite": SAT})
     assert out["ok"] and out["speech"] == "Showing Lasagna on the Kitchen tablet."
-    assert install.calls[-1] == ("recipe", {"query": "lasagna", "screen": "ks-kitchen"})
+    # The service is "show me the ... recipe": the whole recipe, said so.
+    assert install.calls[-1] == ("recipe", {"query": "lasagna", "screen": "ks-kitchen",
+                                            "page": "recipe"})
     out = await _call(hass, "show_recipe", {"query": "pad thai"})
     assert not out["ok"] and out["result"] == "not_found"
 
@@ -368,9 +370,9 @@ async def test_an_llm_agent_is_given_the_tools_and_they_know_the_device(hass, in
         tool_name="pantry_raider__ShowRecipe", tool_args={"query": "lasagna"}))
     # A recipe tool hands the model the answer itself, not an intent response.
     assert "Lasagna" in out["speech"] and out["recipe"]["slug"] == "lasagna"
-    # The tool call carried only the device; its voice entity's screen was used.
-    assert install.calls[-1] == ("recipe", {"query": "lasagna", "screen": "ks-kitchen",
-                                            "page": "recipe"})
+    # The tool call carried only the device; its voice entity's screen was
+    # used. No cook given, so no page: the install decides.
+    assert install.calls[-1] == ("recipe", {"query": "lasagna", "screen": "ks-kitchen"})
     await api.async_call_tool(llm.ToolInput(
         tool_name="pantry_raider__StartTimer", tool_args={"minutes": 3, "name": "tea"}))
     assert install.calls[-1][1]["origin"] == SAT
@@ -555,3 +557,25 @@ async def test_recipe_services(hass, install):
     await _call(hass, "get_recipe", {"screen": "ks-other"})
     # Asked about one screen, only that screen's own recipe counts.
     assert install.calls[-1] == ("get_recipe", {"screen": "ks-other", "own": "1"})
+
+
+async def test_show_recipe_leaves_the_page_to_the_install_unless_asked(hass, install):
+    """ShowRecipe's cook is three ways: true is cook mode, false the whole
+    recipe, and left out the install decides, so "just lasagna" said while
+    lasagna is in cook mode keeps cook mode. The built-in sentence and the
+    show_recipe service always ask for the whole recipe."""
+    assert await async_setup_component(hass, "llm", {})
+    entry = await _setup(hass, _voice())
+    api = await _llm_api(hass, entry)
+    await _tool(api, "ShowRecipe", query="Just lasagna")
+    assert install.calls[-1] == ("recipe", {"query": "Just lasagna", "screen": "ks-kitchen"})
+    await _tool(api, "ShowRecipe", query="lasagna", cook=False)
+    assert install.calls[-1][1]["page"] == "recipe"
+    await _tool(api, "ShowRecipe", query="lasagna", cook=True)
+    assert install.calls[-1][1]["page"] == "cook"
+    tool = next(t for t in api.tools if t.name == "pantry_raider__ShowRecipe")
+    assert "leave cook out" in tool.description
+    assert await _say(hass, "show me the lasagna recipe") == "Showing Lasagna on the Kitchen tablet."
+    assert install.calls[-1][1]["page"] == "recipe"
+    await _call(hass, "show_recipe", {"query": "lasagna", "satellite": SAT})
+    assert install.calls[-1][1]["page"] == "recipe"

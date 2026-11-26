@@ -257,7 +257,8 @@ async def async_show_recipe(
     target = screen or route[SAT_SCREEN]
 
     async def run() -> dict[str, Any]:
-        out = await _client(hass).async_show_recipe(query, target)
+        # The whole recipe, always: this is "show me the ... recipe".
+        out = await _client(hass).async_show_recipe(query, target, page="recipe")
         if "speech" not in out:
             out["speech"] = str(out.get("error") or "I could not show that recipe.")
         return out

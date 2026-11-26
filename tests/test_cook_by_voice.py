@@ -665,3 +665,55 @@ def test_the_landscape_sizes_are_the_echo_shows():
     assert "min-width: 1000px" not in screen
     bar = (SERVICE / "app/static/js/timer-bar.js").read_text()
     assert re.search(r"HEIGHT = TABLET \? 38 : 28", bar)
+
+
+# --- the recipe being cooked, asked for again -----------------------------------
+
+def test_the_recipe_in_cook_mode_stays_there_when_asked_for_again(client):
+    """"Just lasagna" while the lasagna is in cook mode on that tablet: with
+    no page asked for, cook mode stays at its step. The whole recipe opens
+    only when asked for, or for any other recipe."""
+    view = _tablet(client, "ks-view", "Starview")
+    ha = _key("ha", "HA")
+
+    def show(**body):
+        return client.post("/api/screens/show-recipe", headers=ha,
+                           json={"screen": "ks-view", **body}).json()
+
+    def on_page(page):
+        assert client.get(f"/api/screens/poll?screen=ks-view&since=999999999&page={page}",
+                          headers=view).status_code == 200
+
+    assert show(query="best-ever key lime pie", page="cook")["step"] == 1
+    client.post("/api/screens/recipe/step", headers=ha, json={"screen": "ks-view", "step": 3})
+    on_page("cook")
+    since = screens.poll("ks-view", 999999999)["last_id"]
+
+    r = show(query="just the best-ever key lime pie")
+    assert r["ok"] and r["page"] == "cook" and r["step"] == 3
+    assert r["speech"] == ("Best-Ever Key Lime Pie is already open on the Starview. "
+                           "You are on step 3.")
+    assert screens.poll("ks-view", since)["events"] == []          # the screen stays put
+    mine = screen_recipes.get_recipe("ks-view")
+    assert screen_recipes.current_step("ks-view", mine) == 2
+
+    # Asked for the whole recipe: the overview, keeping the place.
+    r = show(query="best-ever key lime pie", page="recipe")
+    assert r["page"] == "recipe"
+    assert [e["path"] for e in screens.poll("ks-view", since)["events"]] == ["screen/recipe"]
+    assert screen_recipes.current_step("ks-view", screen_recipes.get_recipe("ks-view")) == 2
+    # On the overview, a page not asked for stays the overview.
+    on_page("recipe")
+    assert show(query="best-ever key lime pie")["page"] == "recipe"
+    # Another recipe, with cook mode up: the whole recipe, from the top.
+    on_page("cook")
+    r = show(query="lasagna")
+    assert r["page"] == "recipe" and r["recipe"]["title"] == "Lasagna"
+    assert screen_recipes.current_step("ks-view", screen_recipes.get_recipe("ks-view")) is None
+    # "Let's cook" still starts at step 1.
+    on_page("cook")
+    r = show(query="best-ever key lime pie", page="cook")
+    assert r["page"] == "cook" and r["step"] == 1
+    # A page the screen reported long ago does not count.
+    screens._pages["ks-view"] = (screens._pages["ks-view"][0] - 3600, "cook")
+    assert show(query="best-ever key lime pie")["page"] == "recipe"

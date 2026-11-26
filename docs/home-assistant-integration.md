@@ -221,9 +221,10 @@ chose: a Bandit, the main kitchen display, or a tablet set up as a
 - "Show me the lasagna recipe" finds Lasagna in your library and opens it on
   the screen. If two recipes fit about as well, you are asked which one.
 - "Let's cook a key lime pie" or "I want to make lasagna" opens the recipe in
-  cook mode on that device's screen and reads step 1. If you have two key
-  lime pies, you are asked which one: answer "the best-ever one" or "the
-  second one".
+  cook mode on that device's screen and reads step 1. Naming the dish you
+  are already cooking there keeps cook mode at the step you are on. If you
+  have two key lime pies, you are asked which one: answer "the best-ever
+  one" or "the second one".
 - While you cook, "what do I do first", "what's next", "next step",
   "previous step", "go back a step", "repeat the step", "read that again",
   "what's step 4" and "go to step 4" move the screen to that step and read it

@@ -44,7 +44,8 @@ _PROMPT = (
     "Pantry Raider holds this home's recipes and kitchen timers, and shows the "
     "recipe being cooked on the kitchen screen. "
     "When someone wants to cook or see a dish, call pantry_raider__ShowRecipe "
-    "with the dish as heard (cook true when they want to cook it now); never "
+    "with the dish as heard (cook true when they want to cook it now, false "
+    "when they ask to see the whole recipe, otherwise leave cook out); never "
     "recite a recipe from memory. If it answers "
     "with result ambiguous, read out the candidates, ask which one, and call "
     "it again with choice set to their answer (or slug set to the chosen "
@@ -78,10 +79,13 @@ class ShowRecipeTool(Tool):
         "several recipes fit, the answer has result 'ambiguous' and "
         "'candidates' (slug and title): ask which one, then call again with "
         "choice set to the answer as said ('the second one', 'the best-ever "
-        "one') or slug set to the chosen candidate's slug. Set cook true when "
-        "they want to cook it now ('let's cook ...', 'I want to make ...'): "
-        "the screen opens cook mode at step 1 and the answer reads step 1. "
-        "Leave it false to show the whole recipe ('show me the ... recipe')."
+        "one') or slug set to the chosen candidate's slug. Set cook true only "
+        "when they say they want to cook it now ('let's cook ...', 'I want to "
+        "make ...'): the screen opens cook mode at step 1 and the answer reads "
+        "step 1. Set cook false only when they ask to see the whole recipe "
+        "('show me the ... recipe'). Otherwise leave cook out: a recipe "
+        "already being cooked on that screen then stays in cook mode at its "
+        "step, and any other opens as the whole recipe."
     )
     parameters = vol.Schema({
         vol.Optional("query"): cv.string,
@@ -94,10 +98,14 @@ class ShowRecipeTool(Tool):
         self, hass: HomeAssistant, tool_input: ToolInput, llm_context: LLMContext
     ) -> JsonObjectType:
         args: dict[str, Any] = tool_input.tool_args
+        # cook: true is cook mode, false the whole recipe, and left out the
+        # install decides (a recipe already in cook mode on that screen stays
+        # there, at its step).
+        cook = args.get("cook")
         out = await async_cook(
             hass, str(args.get("query") or ""), str(args.get("choice") or ""),
             str(args.get("slug") or ""), satellite=_satellite(hass, llm_context),
-            page="cook" if args.get("cook") else "recipe")
+            page="" if cook is None else ("cook" if cook else "recipe"))
         return for_model(out)
 
 
