@@ -92,6 +92,13 @@ INTENT_START_TIMER = "PantryRaiderStartTimer"
 INTENT_CANCEL_TIMER = "PantryRaiderCancelTimer"
 INTENT_STOP_TIMER = "PantryRaiderStopTimer"
 INTENT_TIMER_STATUS = "PantryRaiderTimerStatus"
+VOICE_INTENTS = (
+    INTENT_SHOW_RECIPE,
+    INTENT_START_TIMER,
+    INTENT_CANCEL_TIMER,
+    INTENT_STOP_TIMER,
+    INTENT_TIMER_STATUS,
+)
 
 _TOO_OLD = "Pantry Raider needs an update before it can do that."
 _UNREACHABLE = "I could not reach Pantry Raider."
@@ -100,6 +107,9 @@ RECIPE_SENTENCES = [
     "(show|open|display|find|pull up|bring up) [me] [the|my|our|a] recipe for {query}",
     "(show|open|display|find|pull up|bring up) [me] [the|my|our|a] {query} recipe",
     "(show|open|display|find|pull up|bring up) [me] [the|my|our|a] {query} recipe on [the] screen",
+    "(show|open|display|find|pull up|bring up) [me] [the|my|our|a] {query} recipe (from|in|on) pantry raider",
+    "(show|open|display|find|pull up|bring up) [me] [the|my|our|a] recipe for {query} (from|in|on) pantry raider",
+    "[the|my|our] {query} recipe (from|in|on) pantry raider",
 ]
 CLOSE_SENTENCES = [
     "(close|hide|put away) [the] recipe",
@@ -434,10 +444,28 @@ async def _builtin(intent_obj: intent.Intent, name: str, slots: dict) -> intent.
         conversation_agent_id=intent_obj.conversation_agent_id)
 
 
+def _satellite(intent_obj: intent.Intent) -> str:
+    """The voice device a request came from. A sentence carries it; a tool
+    call from an AI model carries only the device, so its assist_satellite
+    entity is looked up."""
+    if intent_obj.satellite_id:
+        return intent_obj.satellite_id
+    if not intent_obj.device_id:
+        return ""
+    from homeassistant.helpers import entity_registry as er
+
+    for entry in er.async_entries_for_device(
+        er.async_get(intent_obj.hass), intent_obj.device_id
+    ):
+        if entry.domain == "assist_satellite":
+            return entry.entity_id
+    return ""
+
+
 def _to_pantry_raider(intent_obj: intent.Intent) -> bool:
     """Whether this device's timers run in Pantry Raider. A request with no
     device (a typed one, a script) does: it asked for Pantry Raider by name."""
-    sat = intent_obj.satellite_id
+    sat = _satellite(intent_obj)
     if not sat:
         return True
     return _routing(intent_obj.hass, sat)[SAT_TIMERS] == TIMERS_PANTRY_RAIDER
@@ -455,7 +483,7 @@ class ShowRecipeIntent(intent.IntentHandler):
     async def async_handle(self, intent_obj: intent.Intent) -> intent.IntentResponse:
         slots = self.async_validate_slots(intent_obj.slots)
         out = await async_show_recipe(
-            intent_obj.hass, slots["query"]["value"], satellite=intent_obj.satellite_id or "")
+            intent_obj.hass, slots["query"]["value"], satellite=_satellite(intent_obj))
         return _say(intent_obj, out)
 
 
@@ -481,7 +509,7 @@ class StartTimerIntent(intent.IntentHandler):
         out = await async_start_timer(
             intent_obj.hass,
             {k: parts[k] or 0 for k in ("hours", "minutes", "seconds")},
-            parts["name"] or "", satellite=intent_obj.satellite_id or "")
+            parts["name"] or "", satellite=_satellite(intent_obj))
         return _say(intent_obj, out)
 
 
@@ -502,7 +530,7 @@ class CancelTimerIntent(intent.IntentHandler):
                 intent_obj, "HassCancelAllTimers" if every else "HassCancelTimer",
                 {} if every else {"name": name})
         out = await async_cancel_timer(
-            intent_obj.hass, name, cancel_all=every, satellite=intent_obj.satellite_id or "")
+            intent_obj.hass, name, cancel_all=every, satellite=_satellite(intent_obj))
         return _say(intent_obj, out)
 
 
@@ -515,7 +543,7 @@ class StopTimerIntent(intent.IntentHandler):
 
     async def async_handle(self, intent_obj: intent.Intent) -> intent.IntentResponse:
         out = await async_dismiss_timer(
-            intent_obj.hass, satellite=intent_obj.satellite_id or "")
+            intent_obj.hass, satellite=_satellite(intent_obj))
         return _say(intent_obj, out)
 
 
@@ -530,7 +558,7 @@ class TimerStatusIntent(intent.IntentHandler):
         if not _to_pantry_raider(intent_obj):
             return await _builtin(intent_obj, "HassTimerStatus", {"name": name})
         out = await async_timer_status(
-            intent_obj.hass, name, satellite=intent_obj.satellite_id or "")
+            intent_obj.hass, name, satellite=_satellite(intent_obj))
         return _say(intent_obj, out)
 
 

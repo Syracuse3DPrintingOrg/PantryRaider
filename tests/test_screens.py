@@ -346,6 +346,19 @@ def test_one_clear_match(said, slug):
     assert out["result"] == "shown" and out["recipe"]["slug"] == slug
 
 
+def test_a_misheard_name_still_finds_the_recipe():
+    library = RECIPES + [{"slug": "klp", "name": "Best-Ever Key Lime Pie"},
+                         {"slug": "milanese", "name": "Chicken Milanese"}]
+    for said, slug in (("key line pie", "klp"), ("chicken milanesa", "milanese"),
+                       ("my key lime pie recipe from pantry raider", "klp")):
+        out = recipe_find.choose(said, library)
+        assert out["result"] == "shown" and out["recipe"]["slug"] == slug, said
+    # Close but not close enough to act on is offered, not dropped.
+    out = recipe_find.choose("line", library)
+    assert out == {"result": "ambiguous",
+                   "candidates": [{"slug": "klp", "title": "Best-Ever Key Lime Pie"}]}
+
+
 def test_several_fits_are_a_question_and_no_fit_is_not_found():
     out = recipe_find.choose("tacos", RECIPES)
     assert out["result"] == "ambiguous"

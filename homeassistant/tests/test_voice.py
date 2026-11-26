@@ -261,3 +261,39 @@ async def test_options_flow(hass, install):
     await hass.async_block_till_done()
     assert await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()
+
+
+async def test_an_llm_agent_is_given_the_tools_and_they_know_the_device(hass, install):
+    """Registering an intent is not enough for an AI model agent to see it:
+    the integration's llm platform has to offer it."""
+    from homeassistant.helpers import device_registry as dr, entity_registry as er, llm
+
+    assert await async_setup_component(hass, "llm", {})
+    entry = await _setup(hass, _voice())
+    device = dr.async_get(hass).async_get_or_create(
+        config_entry_id=entry.entry_id, identifiers={("test", "kitchen-sat")})
+    er.async_get(hass).async_get_or_create(
+        "assist_satellite", "test", "kitchen", suggested_object_id="kitchen",
+        device_id=device.id)
+    ctx = llm.LLMContext(platform="test", context=Context(), language="en",
+                         assistant="conversation", device_id=device.id)
+    api = await llm.async_get_api(hass, llm.LLM_API_ASSIST, ctx)
+    names = {t.name for t in api.tools}
+    assert {"pantry_raider__ShowRecipe", "pantry_raider__StartTimer",
+            "pantry_raider__StopTimer"} <= names
+    assert "pantry_raider__ShowRecipe" in api.api_prompt
+    out = await api.async_call_tool(llm.ToolInput(
+        tool_name="pantry_raider__ShowRecipe", tool_args={"query": "lasagna"}))
+    assert "Lasagna" in out["speech"]["plain"]["speech"]
+    # The tool call carried only the device; its voice entity's screen was used.
+    assert install.calls[-1] == ("recipe", {"query": "lasagna", "screen": "ks-kitchen"})
+    await api.async_call_tool(llm.ToolInput(
+        tool_name="pantry_raider__StartTimer", tool_args={"minutes": 3, "name": "tea"}))
+    assert install.calls[-1][1]["origin"] == SAT
+
+
+async def test_more_ways_to_ask_for_a_recipe(hass, install):
+    await _setup(hass, _voice())
+    for said in ("show me my lasagna recipe from pantry raider",
+                 "show me a lasagna recipe", "lasagna recipe from pantry raider"):
+        assert "Lasagna" in await _say(hass, said), said

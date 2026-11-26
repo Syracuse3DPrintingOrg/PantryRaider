@@ -16,9 +16,11 @@ _FILLER = frozenset({
     "a", "an", "the", "my", "our", "your", "that", "this", "some", "please",
     "recipe", "recipes", "for", "of", "show", "me", "us", "open", "pull", "up",
     "find", "display", "make", "cook", "let", "lets", "to", "how", "do", "i",
-    "we", "on", "screen", "put",
+    "we", "on", "screen", "put", "from", "in", "pantry", "raider",
 })
 MIN_SCORE = 0.62
+# Below a match but close enough to offer: "did you mean".
+SUGGEST_SCORE = 0.48
 # Two matches this close together are a question, not an answer.
 CLOSE = 0.08
 MAX_CANDIDATES = 5
@@ -65,17 +67,19 @@ def score(query, name) -> float:
         # fit: "lasagna" is nearer "Classic Lasagna" than a five-word title.
         return 0.84 + 0.12 * (len(qs) / len(ns))
     # Speech to text gets words slightly wrong: match word by word, loosely.
+    # ("key line pie" for key lime pie.) A short word has to be nearly right;
+    # a longer one may be a letter or two off.
     hits = 0.0
     for word in q:
         best = max((difflib.SequenceMatcher(None, word, other).ratio() for other in n),
                    default=0.0)
-        hits += best if best >= 0.8 else 0.0
+        hits += best if best >= (0.7 if len(word) >= 4 else 0.99) else 0.0
     by_word = hits / len(q)
     whole = difflib.SequenceMatcher(None, " ".join(q), " ".join(n)).ratio()
-    return round(min(0.83, max(by_word * 0.8, whole * 0.8)), 4)
+    return round(min(0.83, max(by_word * 0.82, whole * 0.8)), 4)
 
 
-def rank(query, recipes) -> list[dict]:
+def rank(query, recipes, floor: float = MIN_SCORE) -> list[dict]:
     """Recipes that fit, best first: [{"slug", "title", "score"}]."""
     out = []
     seen = set()
@@ -88,7 +92,7 @@ def rank(query, recipes) -> list[dict]:
             continue
         seen.add(slug)
         s = score(query, name)
-        if s >= MIN_SCORE:
+        if s >= floor:
             out.append({"slug": slug, "title": name, "score": s})
     out.sort(key=lambda r: (-r["score"], len(r["title"]), r["title"].lower()))
     return out
@@ -98,9 +102,15 @@ def choose(query, recipes) -> dict:
     """{"result": "shown", "recipe": {...}} for one clear match,
     {"result": "ambiguous", "candidates": [...]} when several fit about as
     well, or {"result": "not_found"}."""
-    ranked = rank(query, recipes)
+    near = rank(query, recipes, SUGGEST_SCORE)
+    ranked = [r for r in near if r["score"] >= MIN_SCORE]
     if not ranked:
-        return {"result": "not_found"}
+        if not near:
+            return {"result": "not_found"}
+        # Nothing fits well, but something is close: offer it rather than
+        # leave a misheard name at "not found".
+        return {"result": "ambiguous",
+                "candidates": [{"slug": r["slug"], "title": r["title"]} for r in near[:3]]}
     top = ranked[0]
     close = [r for r in ranked if top["score"] - r["score"] < CLOSE]
     exact = [r for r in ranked if r["score"] >= 1.0]

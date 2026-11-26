@@ -194,10 +194,13 @@ async def show_recipe(body: ShowRecipeIn, db: Session = Depends(get_db)):
                 return {"ok": False, "result": "not_found",
                         "speech": f"I could not find a recipe called {query}."}
             if found["result"] == "ambiguous":
-                names = recipe_find.join_titles(c["title"] for c in found["candidates"])
+                titles = [c["title"] for c in found["candidates"]]
+                if len(titles) == 1:
+                    speech = f"Did you mean {titles[0]}?"
+                else:
+                    speech = f"I found {recipe_find.join_titles(titles)}. Which one?"
                 return {"ok": False, "result": "ambiguous",
-                        "candidates": found["candidates"],
-                        "speech": f"I found {names}. Which one?"}
+                        "candidates": found["candidates"], "speech": speech}
             slug, title = found["recipe"]["slug"], found["recipe"]["title"]
         detail = await _recipe_detail(db, slug)
     except Exception:
