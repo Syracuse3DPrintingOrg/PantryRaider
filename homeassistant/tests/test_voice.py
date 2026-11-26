@@ -553,4 +553,5 @@ async def test_recipe_services(hass, install):
     out = await _call(hass, "start_recipe_timer", {"satellite": SAT})
     assert out["speech"] == "Bake crust timer started for 10 minutes."
     await _call(hass, "get_recipe", {"screen": "ks-other"})
-    assert install.calls[-1] == ("get_recipe", {"screen": "ks-other"})
+    # Asked about one screen, only that screen's own recipe counts.
+    assert install.calls[-1] == ("get_recipe", {"screen": "ks-other", "own": "1"})

@@ -444,7 +444,9 @@ async function markStep(n) {
   try {
     const r = await fetch('api/screens/recipe/step', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({step: crStep === n ? 'none' : n}),
+      // adopt: on a tablet showing the whole interface, the kitchen's recipe
+      // becomes that screen's own, so voice there follows the same steps.
+      body: JSON.stringify({step: crStep === n ? 'none' : n, adopt: true}),
     });
     if (!r.ok) throw new Error(await prErrText(r));
     crStep = (await r.json()).step || null;

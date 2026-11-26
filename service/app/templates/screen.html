@@ -18,12 +18,16 @@
   {# Cook mode draws its own top bar, with its own Exit. #}
   <div id="sc-cook"></div>
   {% else %}
-  <div class="sc-top{% if corner_clear %} sc-corner-clear{% endif %}">
+  {# Every page owns its way out: Exit at the top right puts this screen
+     back where it rests, so the app hosting the page draws no button of its
+     own over it. #}
+  <div class="sc-top">
     <a class="sc-tab{% if page == 'home' %} on{% endif %}" href="screen/">Home</a>
     <a class="sc-tab{% if page == 'timers' %} on{% endif %}" href="screen/timers">Timers</a>
     <a class="sc-tab{% if page == 'recipe' %} on{% endif %}" href="screen/recipe">Recipe</a>
     <span class="sc-clock" id="sc-clock"></span>
     {% if status_icons %}<span class="sc-status" id="sc-status-icons"></span>{% endif %}
+    {% if screen_id %}<button class="sc-btn sc-exit" id="sc-exit" type="button">Exit</button>{% endif %}
   </div>
 
   <div class="sc-strip" id="sc-strip" hidden></div>

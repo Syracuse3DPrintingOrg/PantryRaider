@@ -185,11 +185,17 @@ def parse_step_durations(step: str) -> list[tuple[str, int]]:
     seconds is an int (durations are whole seconds for a timer). Temperatures and
     quantities are ignored because they are not glued to a time unit.
     """
+    return [(label, seconds) for label, seconds, _at in _durations(step)]
+
+
+def _durations(step: str) -> list[tuple[str, int, int]]:
+    """parse_step_durations, with where each duration starts in the stripped
+    step text (for telling two timers with the same name apart)."""
     text = (step or "").strip()
     if not text:
         return []
 
-    suggestions: list[tuple[str, int]] = []
+    suggestions: list[tuple[str, int, int]] = []
 
     # Walk numeric "<value><unit>" chunks left to right, merging chunks that are
     # directly adjacent (only whitespace/"and" between them) into one duration so
@@ -211,7 +217,8 @@ def parse_step_durations(step: str) -> list[tuple[str, int]]:
             break
         seconds = int(round(total))
         if seconds > 0:
-            suggestions.append((_label_at(text, matches[i].start()), seconds))
+            suggestions.append((_label_at(text, matches[i].start()), seconds,
+                                matches[i].start()))
         i = j + 1
 
     # Worded durations only when no numeric chunk fired, to avoid double-counting
@@ -223,7 +230,7 @@ def parse_step_durations(step: str) -> list[tuple[str, int]]:
             factor = 0.5 if m.group("qty").lower().startswith("half") else 1.0
             seconds = int(round(base * factor))
             if seconds > 0:
-                suggestions.append((_label_at(text, m.start()), seconds))
+                suggestions.append((_label_at(text, m.start()), seconds, m.start()))
 
     return suggestions
 
@@ -238,11 +245,142 @@ def suggestions_for_recipe(active: dict | None) -> list[dict]:
     """
     if not active:
         return []
+    steps = [str(step).strip() for step in active.get("steps") or []]
     out: list[dict] = []
-    for idx, step in enumerate(active.get("steps") or []):
-        for label, seconds in parse_step_durations(str(step)):
+    where: list[int] = []
+    for idx, text in enumerate(steps):
+        for label, seconds, at in _durations(text):
             out.append({"label": label, "seconds": seconds, "step_index": idx})
+            where.append(at)
+    _tell_apart(out, where, steps, str(active.get("title") or ""))
     return out
+
+
+# --- Two timers with the same name in one recipe ------------------------------
+#
+# Key lime pie bakes its crust in step 2 and the filled pie in step 5, and
+# both steps just say "bake". Two timers both called "Bake" cannot be told
+# apart on a screen or by voice ("which timer: bake or bake?"), so a name
+# that repeats in one recipe takes one more word or two: from the step's own
+# heading ("Make Crust: ..."), from how it is done (covered or uncovered),
+# from the oven temperature, or, for the one left over, from the dish itself.
+# The names stay short: they are read aloud and answers are matched on them.
+
+# A short heading at the start of a step: "Make Crust: Combine ...".
+_HEADING_RE = re.compile(r"^\s*([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ'’&/ -]{0,40}?)\s*:\s+\S")
+# Heading words that say nothing about what is being timed.
+_HEADING_SKIP = frozenset({
+    "for", "the", "a", "an", "of", "and", "to", "with", "in", "on", "your", "make",
+    "prepare", "prep", "assemble", "finish", "start", "begin", "step", "then",
+})
+_TEMP_RE = re.compile(r"\b(\d{3})(?:\s*[°º]|\s*degrees?\b|\s*[FC]\b)", re.IGNORECASE)
+_UNCOVERED_RE = re.compile(
+    r"\buncover(?:ed)?\b|\b(?:remove|take off|lift off|discard)\b[^.;]*\b(?:foil|lid|cover)\b",
+    re.IGNORECASE)
+_COVERED_RE = re.compile(r"\bcover(?:ed)?\b|\bwith (?:the )?(?:foil|lid)\b|\blid on\b",
+                         re.IGNORECASE)
+
+
+def _clause_around(text: str, at: int) -> str:
+    """The instruction a duration at ``at`` belongs to, both sides of it."""
+    start = 0
+    for m in _CLAUSE_SPLIT.finditer(text, 0, at):
+        start = m.end()
+    m = _CLAUSE_SPLIT.search(text, at)
+    return text[start:m.start() if m else len(text)]
+
+
+def _heading_words(text: str) -> str:
+    """What a step's heading names: "Make Crust" -> "crust"; "" for none."""
+    m = _HEADING_RE.match(text)
+    if not m:
+        return ""
+    words = [w.lower() for w in re.findall(r"[A-Za-zÀ-ÿ'’-]+", m.group(1))]
+    if len(words) > 5:
+        return ""
+    kept = [w for w in words if w not in _HEADING_SKIP and not _action_word(w)]
+    return " ".join(kept[:2])
+
+
+def _manner(clause: str) -> str:
+    if _UNCOVERED_RE.search(clause):
+        return "uncovered"
+    if _COVERED_RE.search(clause):
+        return "covered"
+    return ""
+
+
+def _temperature(clause: str) -> str:
+    m = _TEMP_RE.search(clause)
+    return f"at {m.group(1)}" if m else ""
+
+
+def _dish_word(title: str) -> str:
+    """The dish a recipe makes, from its name: "Best-Ever Key Lime Pie" -> "pie"."""
+    words = re.findall(r"[A-Za-zÀ-ÿ]+", re.sub(r"\(.*?\)", " ", title or ""))
+    return words[-1].lower() if words and len(words[-1]) >= 3 else ""
+
+
+def _short(label: str, max_chars: int = 40) -> str:
+    if len(label) <= max_chars:
+        return label
+    return label[:max_chars].rsplit(" ", 1)[0].rstrip()
+
+
+def _tell_apart(found: list[dict], where: list[int], steps: list[str], title: str) -> None:
+    """Rename, in place, the timers whose name repeats within the recipe."""
+    groups: dict[str, list[int]] = {}
+    for i, s in enumerate(found):
+        groups.setdefault(s["label"].lower(), []).append(i)
+    for members in groups.values():
+        if len(members) < 2:
+            continue
+        have = set(found[members[0]]["label"].lower().split())
+
+        def adds(value: str) -> bool:
+            return bool(value) and not set(value.split()) <= have
+
+        options = []
+        for i in members:
+            text = steps[found[i]["step_index"]]
+            clause = _clause_around(text, where[i])
+            options.append([_heading_words(text), _manner(clause), _temperature(clause)])
+        chosen: list[str] = []
+        # One kind of detail that sets every one apart wins: all from their
+        # headings, all covered or uncovered, or all by temperature.
+        for k in range(3):
+            values = [o[k] for o in options]
+            if all(adds(v) for v in values) and len(set(values)) == len(values):
+                chosen = values
+                break
+        if not chosen:
+            used: set[str] = set()
+            chosen = [""] * len(members)
+            for n, opts in enumerate(options):
+                for value in opts:
+                    if adds(value) and value not in used:
+                        chosen[n] = value
+                        used.add(value)
+                        break
+            left = [n for n, value in enumerate(chosen) if not value]
+            dish = _dish_word(title)
+            # The crust got its own name; the one left over, with nothing of
+            # its own to go on, is the dish itself.
+            if (len(left) == 1 and len(left) < len(members) and adds(dish)
+                    and dish not in used and not any(adds(v) for v in options[left[0]])):
+                chosen[left[0]] = dish
+                left = []
+            for n in left:
+                chosen[n] = f"step {found[members[n]]['step_index'] + 1}"
+        for i, extra in zip(members, chosen):
+            found[i]["label"] = _short(f"{found[i]['label']} {extra}")
+    # Anything still repeated (a new name meeting an old one) gets its step.
+    seen: dict[str, int] = {}
+    for s in found:
+        seen[s["label"].lower()] = seen.get(s["label"].lower(), 0) + 1
+    for s in found:
+        if seen[s["label"].lower()] > 1:
+            s["label"] = _short(f"{s['label']} step {s['step_index'] + 1}", 48)
 
 
 # --- Picking one suggestion from what was said --------------------------------

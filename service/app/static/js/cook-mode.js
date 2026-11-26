@@ -26,6 +26,13 @@
     return e;
   }
   function clear(node) { while (node && node.firstChild) node.removeChild(node.firstChild); }
+  // How many lines of text an element shows now (0 while it is hidden).
+  function linesOf(node) {
+    var cs = window.getComputedStyle ? window.getComputedStyle(node) : null;
+    var lh = cs ? parseFloat(cs.lineHeight) : NaN;
+    if (!(lh > 0)) lh = (cs ? parseFloat(cs.fontSize) : 40) * 1.3;
+    return Math.round(node.offsetHeight / lh);
+  }
   function show(node, on) { if (node) { if (on) node.removeAttribute('hidden'); else node.setAttribute('hidden', ''); } }
 
   function request(method, url, payload, done) {
@@ -174,7 +181,9 @@
     function move(which) {
       if (moving) return;
       moving = true;
-      request('POST', 'api/screens/recipe/step', { screen: SCREEN, step: String(which) }, function (d) {
+      // adopt: cooking the kitchen's recipe here makes it this screen's own,
+      // so voice at this screen follows it too.
+      request('POST', 'api/screens/recipe/step', { screen: SCREEN, step: String(which), adopt: true }, function (d) {
         moving = false;
         if (d && typeof d.step === 'number') { cur = d.step - 1; finishedView = false; paint(); }
       });
@@ -241,7 +250,7 @@
       }
       if (t) return;   // already counting down: never a second one
       request('POST', 'api/screens/recipe/timer',
-        { screen: SCREEN, step: s.step_index + 1, label: s.label, origin: SCREEN }, function () {
+        { screen: SCREEN, step: s.step_index + 1, label: s.label, origin: SCREEN, adopt: true }, function () {
           delete finished[keyOf(s)];
           loadTimers();
         });
@@ -325,7 +334,9 @@
       for (var d = 0; d < n && n <= 30; d++) dots.appendChild(el('span', d < idx ? 'past' : (d === idx ? 'on' : '')));
       var stepText = n ? String(steps[idx]) : '';
       text.textContent = stepText;
-      text.className = 'cm-text' + (stepText.length > 200 ? ' cm-long' : '');
+      text.className = 'cm-text';
+      // Past six lines at the usual size, a step gets the smaller type.
+      if (stepText && linesOf(text) > 6) text.className = 'cm-text cm-long';
       clear(stepTimers);
       for (var i = 0; i < suggestions.length; i++) {
         if (suggestions[i].step_index === idx) stepTimers.appendChild(timerButton(suggestions[i]));

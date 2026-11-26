@@ -12,7 +12,9 @@ to that one screen. The other screens stay on whatever they were showing.
 ## What a screen shows
 
 A connected screen has four pages, built for touch and for older, slower
-tablets:
+tablets. Each has **Exit** in the top right corner, which puts the screen
+back where it rests, so your kiosk app never needs a close button of its own
+over the page:
 
 - **Home**: **Continue cooking** with the recipe and the step you are on,
   and your running timers.
@@ -37,11 +39,21 @@ tablets:
 
 ### The step you are on
 
-Each screen remembers the recipe it is showing and the step you are on, so
+Each screen remembers the recipe it is cooking and the step you are on, so
 two tablets can cook two different things. Touch and voice move the same
 marker: tap a step, press **Next**, or say "next step" to the voice device
 for that screen, and the screen follows. "Start the timer" means the timer
 of the step you are on.
+
+Voice answers only for that screen's own recipe. A tablet where nothing was
+opened says "No recipe is open on the Kitchen tablet. What are you cooking?"
+instead of reading out what another tablet is cooking. Its pages still show
+the kitchen's current recipe, and tapping a step or a timer there, or
+pressing **Start cooking**, makes it that tablet's own.
+
+When two steps time the same thing, their timers are named apart, from the
+step's heading or how it is done: "Bake crust" and "Bake pie", or "Bake
+lasagna covered" and "Bake lasagna uncovered".
 
 ### The whole of Pantry Raider on a tablet
 
@@ -67,6 +79,39 @@ after the last timer is done or dismissed.
 Timers are shared by your whole kitchen, so a timer started by voice, on a
 Bandit, or from the Timers page shows on every screen, and dismissing it on
 one screen dismisses it everywhere.
+
+### The wall tablet layout
+
+A tablet on the wall is read from across the kitchen and touched by whoever
+walks past, so it can show the whole interface in a layout made for that:
+bigger text and buttons, a short menu and fewer controls.
+
+- **Glance** shows Cook, Time & Temp, Shopping and Inventory as four big
+  tiles, with **More** for every other page. When a recipe is open on that
+  screen, a **Continue cooking** card names it and the step you are on, and
+  opens cook mode.
+- The top bar has the logo (back to Glance), the menu button and **Exit**.
+  The menu lists your pages and nothing else.
+- On a page with tabs, such as Inventory and Expiring, the tab already
+  names the page, so the page's own title is left out.
+- Each item in your inventory has two buttons with their names on them,
+  **Used it** (takes one out of stock) and **Edit**, and **More** for moving
+  it, marking one opened or using all of it.
+- Print, Refresh (the pages keep themselves up to date), Tune My Suggestions
+  and Open in Mealie are left out. A page that opens in a new tab would leave
+  the tablet with no way back.
+- Anything you type uses Pantry Raider's own on-screen keyboard, so it works
+  on an Echo Show, which has no keyboard of its own.
+
+Text and buttons are sized for each screen, so a wide tablet such as an Echo
+Show 8 shows them about as large on the glass as a narrow one such as a
+Lenovo ThinkSmart View.
+
+Each screen has its own **Wall tablet** switch in **Settings, Bandit
+Remotes, Screens**. It starts out on for a tablet running Kiosk Satellite
+and off for every other screen. The same list renames a screen or removes
+it. The layout only changes what is on the screen: a tablet can do the same
+things with it on or off, and Settings stay out of reach either way.
 
 ## Connect a screen
 
@@ -118,11 +163,11 @@ Everything is plain JSON over HTTP with the key in an `X-API-Key` header.
 | `GET /api/screens` | The list of screens. A screen key sees only its own |
 | `POST /api/screens/register` | `{"screen_id", "label", "kind", "width", "height"}`. The id is yours to choose, 1 to 40 of `a-z 0-9 - _`, and must stay the same for that tablet |
 | `GET /api/screens/poll?screen=<id>&since=<n>&wait=25` | Events for one screen. The request is held until one arrives. Ask first with `since=999999999` to read `last_id` without old events |
-| `POST /api/screens/session` | `{"screen", "page"}` returns a one-use address, good for a minute, that signs the screen's web view in and opens the page (`home`, `recipe`, `cook`, `timers`, or `app` for the whole interface). For `app` and `cook` the reply also has `"exit": "page"`: the page draws its own Exit, so the app needs no close button over it. A missing, used or expired ticket answers 401 with the header `X-PR-Screen: reconnect` and a page with no form; ask for a new ticket |
+| `POST /api/screens/session` | `{"screen", "page"}` returns a one-use address, good for a minute, that signs the screen's web view in and opens the page (`home`, `recipe`, `cook`, `timers`, or `app` for the whole interface). Every reply has `"exit": "page"`: each page draws its own **Exit** (top right) and moves to the next page by itself, so the app needs no close button over it. A missing, used or expired ticket answers 401 with the header `X-PR-Screen: reconnect` and a page with no form; ask for a new ticket |
 | `POST /api/screens/show-recipe` | `{"query", "screen", "page"}` finds a recipe by what was said, makes it that screen's recipe (and the kitchen's current one) and moves the screen to it. `page` is `recipe` (the whole recipe) or `cook` (cook mode at step 1, read out in `speech`). The reply has `result` (`shown`, `ambiguous` with `candidates`, or `not_found`) and a `speech` line. After `ambiguous`, send `choice` with the answer ("the second one", "the best-ever one") or `slug`; the answer keeps the page the question was asked for |
-| `GET /api/screens/recipe?screen=<id>` | The recipe open on that screen: `{"ok": true, "recipe": {"title"}, "title", "servings", "ingredients" (lines with scaled amounts), "steps" ([{"number", "text", "timers"}]), "step" (the step you are on, from 1, or null), "current", "timers", "speech"}`, or `{"ok": false, "result": "none", "speech"}` when nothing is open there. With no screen, the kitchen's current recipe. A screen key always names one of its own screens: with none it is refused (400), and another key's screen answers 403. The step, timer and cooked routes below work the same way |
-| `POST /api/screens/recipe/step` | `{"screen", "step"}` moves the step you are on: `first`, `next`, `back`, `repeat`, `last`, a number, or `none`. The reply is the recipe as above, with `current` and a `speech` line that reads the step. The screen follows at once |
-| `POST /api/screens/recipe/timer` | `{"screen", "step", "query", "origin", "show"}` starts one of the recipe's timers, picked by step number, by words ("the crust", "baking it"), or with neither, the timer of the step you are on. `result` is `started` or `running` (with `timer`), `ambiguous` (with `choices`, each `{"step", "label", "seconds", "speech"}`: ask, then call again with the step), `no_recipe` or `not_found`. A timer that is already counting down is never started twice. `show` moves the screen to its timers |
+| `GET /api/screens/recipe?screen=<id>` | The recipe open on that screen: `{"ok": true, "source", "recipe": {"title"}, "title", "servings", "ingredients" (lines with scaled amounts), "steps" ([{"number", "text", "timers"}]), "step" (the step you are on, from 1, or null), "current", "timers", "speech"}`, or `{"ok": false, "result": "none", "speech"}` when nothing is open there. `source` is `screen` for the screen's own recipe or `kitchen` for the kitchen's current one, which a screen's pages show when it has none of its own. Add `own=1` to leave the kitchen's out, for an answer about that screen alone. With no screen, the kitchen's current recipe. A screen key always names one of its own screens: with none it is refused (400), and another key's screen answers 403. The step, timer and cooked routes below work the same way |
+| `POST /api/screens/recipe/step` | `{"screen", "step"}` moves the step you are on: `first`, `next`, `back`, `repeat`, `last`, a number, or `none`. Only the screen's own recipe moves; a screen with none answers `"result": "none"`. The screen's own pages add `"adopt": true`, which first makes the kitchen's recipe they were showing that screen's own. The reply is the recipe as above, with `current` and a `speech` line that reads the step. The screen follows at once |
+| `POST /api/screens/recipe/timer` | `{"screen", "step", "query", "origin", "show"}` starts one of the screen's own recipe's timers (`adopt` as for the step), picked by step number, by words ("the crust", "baking it"), or with neither, the timer of the step you are on. `result` is `started` or `running` (with `timer`), `ambiguous` (with `choices`, each `{"step", "label", "seconds", "speech"}`: ask, then call again with the step), `no_recipe` or `not_found`. A timer that is already counting down is never started twice and never offered as a choice; when every timer that could be meant is running, the answer is `running` with `timers`. `show` moves the screen to its timers |
 | `POST /api/screens/recipe/cooked` | `{"screen"}` marks that screen's recipe cooked, the same as **Cooked** on the recipe page: it uses up the matching items in your pantry. Home Assistant's key cannot call it |
 | `POST /events/navigate`, `/events/notify`, `/events/camera-popup`, `/events/camera-detect`, `/events/confirm` | Each takes an optional `"screen"` to reach one screen. `navigate` also takes `"page"` in place of a path |
 | `POST /events/close` | `{"screen"}` puts a screen back where it rests: a tablet app drops the page, a kitchen display goes home |

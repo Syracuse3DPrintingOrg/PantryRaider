@@ -44,13 +44,14 @@ from . import (
     signins,
     identity,
     status_icons,
+    screens,
 )
 
 _SUBMODULES = (
     _common, deployment, page, appearance, cloud, remote_access, presets, save,
     connections, totp, display, system, updates, streamdeck, cameras,
     streamdeck_profiles, access_point, calibrate, grocy_locations,
-    recipe_databases, passkeys, signins, identity, status_icons,
+    recipe_databases, passkeys, signins, identity, status_icons, screens,
 )
 
 for _mod in _SUBMODULES:

@@ -314,7 +314,8 @@ def test_a_screen_can_switch_into_the_whole_interface(client):
     narrow = TestClient(app)
     reply = client.post("/api/screens/session", headers=headers,
                         json={"screen": "ks-show8", "page": "recipe"}).json()
-    assert "exit" not in reply
+    # Every page draws its own Exit, this one too.
+    assert reply["exit"] == "page"
     t = reply["url"]
     r = narrow.get(t.replace("next=screen/recipe", "next=ui/start?kiosk=1"),
                    follow_redirects=False)
@@ -324,6 +325,43 @@ def test_a_screen_can_switch_into_the_whole_interface(client):
     # Turning the key off ends it.
     credentials.revoke(rec["id"])
     assert view.get("/ui/inventory", follow_redirects=False).status_code in (303, 401)
+
+
+def test_every_screen_page_owns_its_exit(client):
+    """One page moves to another by itself (a voice request, Start cooking),
+    so a kiosk app's own close button is never right for long: every ticket
+    says the page draws its Exit, and every page does, top right, for its
+    own screen. No corner is kept clear for the app's button any more."""
+    _rec, headers = _tablet(client)
+    from fastapi.testclient import TestClient
+    from app.main import app
+    for page in ("home", "recipe", "timers", "cook", "app"):
+        body = client.post("/api/screens/session", headers=headers,
+                           json={"screen": "ks-show8", "page": page}).json()
+        assert body["ok"] and body["exit"] == "page", page
+    view = TestClient(app)
+    body = client.post("/api/screens/session", headers=headers,
+                       json={"screen": "ks-show8", "page": "home"}).json()
+    view.get(body["url"], follow_redirects=False)
+    for path in ("/screen/", "/screen/recipe", "/screen/timers"):
+        html = view.get(path).text
+        assert 'id="sc-exit"' in html, path
+        assert "sc-corner-clear" not in html, path
+    # Cook mode draws its own top bar and Exit.
+    assert 'id="sc-exit"' not in view.get("/screen/cook").text
+    # Exit closes this screen and no other.
+    assert view.post("/events/close", json={"screen": "ks-show8"}).json()["ok"]
+    js = (SERVICE / "app/static/js/screen/screen.js").read_text()
+    assert "$('sc-exit')" in js and "'events/close', { screen: SCREEN }" in js
+    css = (SERVICE / "app/static/css/screen.css").read_text()
+    assert "sc-corner-clear" not in css and ".sc-exit" in css
+    # A page signed in with no screen of its own (an admin's browser) has
+    # nothing to close.
+    admin = TestClient(app)
+    assert admin.post("/ui/login", data={"password": "hunter2"},
+                      follow_redirects=False).status_code in (302, 303)
+    page = admin.get("/screen/")
+    assert page.status_code == 200 and 'id="sc-exit"' not in page.text
 
 
 def test_a_screen_may_close_itself_and_no_other(client):

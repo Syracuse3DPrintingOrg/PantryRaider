@@ -3,10 +3,15 @@ last offered to it.
 
 Two kitchen tablets can cook different things, so a screen keeps its own
 recipe: asking "what do I do first" at one tablet answers for the recipe that
-tablet shows. The main install's own display (id "server") is the server's
-current recipe (services/current_recipe.py) and is not kept here. A Bandit
-keeps its own current recipe on the device; the copy here is what the server
-sent it, so a question asked about the Bandit's screen can be answered.
+tablet is cooking, and a tablet that never opened one says so rather than
+answering for another screen's. Its pages may still show the kitchen's
+current recipe (``source`` "kitchen" in what GET /api/screens/recipe
+returns); tapping a step or a timer there, or opening cook mode on it, makes
+that recipe the tablet's own. The main install's own display (id "server")
+is the server's current recipe (services/current_recipe.py) and is not kept
+here. A Bandit keeps its own current recipe on the device; the copy here is
+what the server sent it, so a question asked about the Bandit's screen can be
+answered.
 
 Each screen also has one current step, the step the cook is on. Tapping a
 step on the screen moves it, and so does voice ("next step", "go back",
@@ -144,20 +149,25 @@ def recipe_identity(recipe: dict | None) -> str:
     return str(recipe.get("id") or "") or "title:" + str(recipe.get("title") or "")
 
 
-def set_recipe(screen_id: str, recipe_dict: dict) -> dict:
+def set_recipe(screen_id: str, recipe_dict: dict, keep_step: bool = False) -> dict:
     """Make ``recipe_dict`` the recipe open on one screen; the serialized
     form (scaled amounts included) comes back. The screen has no current
-    step until one is chosen."""
+    step until one is chosen, unless ``keep_step`` and the step it was on
+    belongs to this same recipe (a tablet taking up the kitchen's recipe it
+    was already showing)."""
     normalized = current_recipe._normalize(recipe_dict)
+    serialized = current_recipe._serialize(normalized)
     now = time.time()
     key = _key(screen_id)
     with _lock, state_write_lock(_state_file()):
         _load_locked()
         _rows[key] = {"recipe": asdict(normalized), "set": now}
-        _steps.pop(key, None)
+        step = _steps.get(key)
+        if not (keep_step and step and step.get("of") == recipe_identity(serialized)):
+            _steps.pop(key, None)
         _prune_locked(now)
         _save_locked()
-    return current_recipe._serialize(normalized)
+    return serialized
 
 
 def get_recipe(screen_id: str) -> dict | None:
@@ -181,20 +191,22 @@ def clear(screen_id: str) -> bool:
     return gone
 
 
-def recipe_for(screen: dict | None) -> tuple[dict | None, str]:
+def recipe_for(screen: dict | None, own: bool = False) -> tuple[dict | None, str]:
     """(recipe, where it came from) for a screen as screens.get returns it,
     or None for "no screen named". Where is "screen" for the screen's own
-    recipe and "server" for the server's current one: the main display, no
-    screen named, or a tablet that has none of its own. A Bandit is not
-    given the server's: it keeps its own on the device."""
+    recipe and "kitchen" for the kitchen's current one: the main display, no
+    screen named, or a tablet that has none of its own, whose pages show the
+    kitchen's. With ``own`` (an answer about one screen: its steps, its
+    timers, what to do next) a tablet with none of its own has none. A Bandit
+    is never given the kitchen's: it keeps its own on the device."""
     if not screen or screen.get("kind") == "server":
-        return current_recipe.get_active(), "server"
-    own = get_recipe(screen["id"])
-    if own is not None:
-        return own, "screen"
-    if screen.get("kind") == "bandit":
+        return current_recipe.get_active(), "kitchen"
+    mine = get_recipe(screen["id"])
+    if mine is not None:
+        return mine, "screen"
+    if own or screen.get("kind") == "bandit":
         return None, "screen"
-    return current_recipe.get_active(), "server"
+    return current_recipe.get_active(), "kitchen"
 
 
 # --- The step each screen is on ----------------------------------------------
@@ -376,7 +388,7 @@ def timer_rows(suggestions, timers) -> list[dict]:
 
 
 def describe(recipe: dict | None, suggestions=None, timers=None, screen: dict | None = None,
-             source: str = "server", step_index: int | None = None) -> dict:
+             source: str = "kitchen", step_index: int | None = None) -> dict:
     """A recipe in the shape a language model answers from. Pure."""
     shown = {"id": screen["id"], "label": screen.get("label", "")} if screen else None
     if not recipe:

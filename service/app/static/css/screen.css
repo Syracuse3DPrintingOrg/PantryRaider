@@ -1,8 +1,10 @@
 /* The pages a tablet or wall screen shows (templates/screen.html).
    Written for old tablet browsers: flexbox with margins instead of gap, no
-   grid, no custom properties, no min()/clamp(). Sized for a 1280x800
-   landscape panel and a 490x790 portrait one, with touch targets a wet or
-   floury finger can hit. */
+   grid, no custom properties, no min()/clamp(). Sized on the two kitchen
+   tablets: an Echo Show 8 in landscape (963 x 594 CSS px at 1.33, the block
+   at the end) and a ThinkSmart View in portrait (492 x 788 at 1.625, the
+   max-width: 700px block), with touch targets a wet or floury finger can
+   hit. */
 html, body { margin: 0; padding: 0; height: 100%; }
 body {
   background: #14161a; color: #eef0f3;
@@ -26,17 +28,24 @@ h1, h2 { margin: 0; font-weight: 700; }
   border-radius: 10px; font-size: 20px; font-weight: 600; color: #aab2bd;
 }
 .sc-tab.on { background: #F2006E; color: #fff; }
-.sc-top.sc-corner-clear { padding-right: 76px; }
-.sc-clock { margin-left: auto; font-size: 24px; font-weight: 600; color: #cfd5dc; }
+.sc-clock { margin-left: auto; font-size: 24px; font-weight: 600; color: #cfd5dc; white-space: nowrap; }
+/* The page's own way out, at the right end of the bar (cook mode has the same). */
+.sc-exit {
+  -webkit-flex: 0 0 auto; flex: 0 0 auto; height: 48px; min-width: 96px; margin-left: 14px;
+  padding: 0 18px; font-size: 20px;
+}
 
-/* Running timers, on every page but the timers page itself. */
+/* Running timers, on every page but the timers page itself. The chips wrap
+   onto more lines rather than run off the edge (screen.js moves the page
+   down to match), and past two lines the strip scrolls. */
 .sc-strip {
-  display: -webkit-flex; display: flex; overflow-x: auto; white-space: nowrap;
-  padding: 8px 12px; background: #191c21; border-bottom: 1px solid #2c313a;
+  display: -webkit-flex; display: flex; -webkit-flex-wrap: wrap; flex-wrap: wrap;
+  max-height: 112px; overflow-y: auto;
+  padding: 8px 12px 0 12px; background: #191c21; border-bottom: 1px solid #2c313a;
 }
 .sc-chip {
-  display: inline-block; margin-right: 10px; padding: 8px 16px; border-radius: 999px;
-  background: #262b33; font-size: 20px; font-weight: 600;
+  display: inline-block; margin: 0 10px 8px 0; padding: 8px 16px; border-radius: 999px;
+  background: #262b33; font-size: 20px; font-weight: 600; white-space: nowrap;
 }
 .sc-chip b { font-variant-numeric: tabular-nums; margin-left: 8px; color: #fff; }
 .sc-chip.ringing { background: #c62828; color: #fff; }
@@ -208,6 +217,8 @@ body.has-stepnav .sc-main { bottom: 88px; }
   body { font-size: 18px; }
   .sc-tab { padding: 0 14px; font-size: 18px; margin-right: 4px; }
   .sc-clock { font-size: 20px; }
+  .sc-chip { padding: 6px 12px; font-size: 17px; margin-right: 8px; }
+  .sc-exit { height: 44px; min-width: 72px; margin-left: 8px; padding: 0 12px; font-size: 18px; }
   .sc-cols { display: block; }
   .sc-ingredients { margin-right: 0; margin-top: 18px; display: none; }
   .sc-cols.sc-ingredients-open .sc-ingredients { display: block; }
@@ -225,13 +236,19 @@ body.has-stepnav .sc-main { bottom: 88px; }
   .sc-ring-names { font-size: 44px; }
 }
 
-/* A wide landscape panel (an Echo Show, 1280 CSS px) shows a CSS pixel much
-   smaller than a portrait one does, so its targets get bigger numbers. */
-@media (min-width: 1000px) {
-  .sc-btn.sc-tbtn { min-height: 80px; font-size: 24px; padding: 10px 22px; }
-  .sc-tbtn-sub { font-size: 18px; }
-  .sc-steps li.on { font-size: 30px; }
-  .sc-stepnav { height: 104px; }
-  .sc-stepnav .sc-btn { height: 84px; font-size: 28px; }
-  body.has-stepnav .sc-main { bottom: 104px; }
+/* A landscape panel, sized on an Echo Show 8: 963 x 594 CSS px at 1.33. Its
+   CSS pixel is smaller on the glass than a ThinkSmart View's (about 0.18 mm
+   against 0.22 mm), so it gets about 1.2 times the portrait numbers, and
+   everything keeps to 594 px of height. */
+@media (min-width: 900px) and (orientation: landscape) {
+  .sc-btn.sc-tbtn { min-height: 72px; font-size: 22px; padding: 9px 20px; }
+  .sc-tbtn-sub { font-size: 16px; }
+  .sc-steps li { font-size: 26px; }
+  .sc-steps li.on { font-size: 28px; }
+  .sc-stepnav { height: 92px; }
+  .sc-stepnav .sc-btn { height: 74px; font-size: 25px; }
+  body.has-stepnav .sc-main { bottom: 92px; }
+  .sc-ring-kicker { font-size: 26px; }
+  .sc-ring-names { font-size: 52px; margin: 10px 16px 26px 16px; }
+  .sc-ring-note { font-size: 26px; margin: -10px 24px 24px 24px; }
 }

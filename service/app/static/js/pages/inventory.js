@@ -3,6 +3,9 @@
 // affordance renders at all, so the feature is invisible until enabled.
 const INVENTORY_DATA = JSON.parse(document.getElementById('inventory-data').textContent);
 const PRINTING_ENABLED = INVENTORY_DATA.printing_enabled;
+// A tablet in the wall tablet profile (static/css/wall.css): each row has two
+// actions with their names on them, Used it and Edit, and More for the rest.
+const WALL = document.documentElement.getAttribute('data-profile') === 'wall';
 
 // Panels (built-in + custom + "other"), injected from the server-side registry.
 const PANELS = INVENTORY_DATA.panels;
@@ -110,9 +113,8 @@ function renderPanel(panelId, countId, items, bucket) {
   el.innerHTML = items.map(item => {
     const loc = item.location_id || null;
     // The row's own Grocy location, unless the panel name already says it.
-    const showLoc = item.location_name
-      && item.location_name.trim().toLowerCase() !== (BUCKET_LABELS[bucket] || '').trim().toLowerCase();
-    const where = showLoc ? item.location_name : '';
+    const where = rowPlace(item, bucket);
+    const showLoc = !!where;
     // A row of one best-by date hands that date to every button, and the
     // buttons' names and tooltips say it ("Use one Milk, best by Oct 25").
     // Mid-sentence the date closes with a comma ("Mark Milk, best by Oct 25,
@@ -136,7 +138,7 @@ function renderPanel(panelId, countId, items, bucket) {
       <span class="item-qty"${bbd && item.product_amount != null ? ` title="${amountText(item.product_amount)} in all"` : ''}>${item.amount % 1 === 0 ? item.amount : item.amount.toFixed(1)}${item.unit ? ' ' + PR.esc(unitLabel(item)) : ''}</span>
       ${item.amount_opened > 0 ? `<span class="expiry-badge badge-opened" title="${item.amount_opened % 1 === 0 ? item.amount_opened : item.amount_opened.toFixed(1)} of these ${PR.esc(item.name)} already open">Opened</span>` : ''}
       ${expiryBadge(item)}
-      <div class="item-actions">
+      ${WALL ? wallRowActions(item, loc, bbdArg, named, where) : `<div class="item-actions">
       <button class="btn btn-outline-secondary btn-icon" title="Edit category / expiry"
               aria-label="Edit ${PR.esc(named)}"
               data-on-click="openEditModal(${item.product_id}, ${loc}, ${bbdArg})">
@@ -169,10 +171,71 @@ function renderPanel(panelId, countId, items, bucket) {
               data-on-click="printLabel(${item.product_id}, ${PR.escAttrJs(item.name)}, ${loc}, ${bbdArg})">
         <i class="bi bi-printer"></i>
       </button>` : ''}
-      </div>
+      </div>`}
     </div>
   `;
   }).join('');
+}
+
+// Where a row's stock sits, when the panel's name does not already say it.
+function rowPlace(item, bucket) {
+  const name = item.location_name;
+  return name && name.trim().toLowerCase() !== (BUCKET_LABELS[bucket] || '').trim().toLowerCase()
+    ? name : '';
+}
+
+// A wall tablet's row actions. Used it takes one out of stock (on a row of
+// one, that is all of it), Edit opens the same window as the pencil, and More
+// opens a window with the rest. Print is not offered there.
+function wallRowActions(item, loc, bbdArg, named, where) {
+  const name = PR.escAttrJs(item.name);
+  const used = item.amount > 0
+    ? `useOne(${item.product_id}, ${name}, ${loc}, ${bbdArg})`
+    : `consume(${item.product_id}, ${item.amount}, ${name}, ${loc}, ${PR.escAttrJs(where)}, ${bbdArg})`;
+  return `<div class="item-actions wall-actions">
+      <button class="btn btn-outline-primary wall-act" aria-label="Used it: ${PR.esc(named)}"
+              data-on-click="${used}"><i class="bi bi-check2-circle" aria-hidden="true"></i>Used it</button>
+      <button class="btn btn-outline-secondary wall-act" aria-label="Edit ${PR.esc(named)}"
+              data-on-click="openEditModal(${item.product_id}, ${loc}, ${bbdArg})"><i class="bi bi-pencil" aria-hidden="true"></i>Edit</button>
+      <button class="btn btn-outline-secondary wall-act" aria-label="More for ${PR.esc(named)}" aria-haspopup="dialog"
+              data-on-click="openRowMore(${item.product_id}, ${loc}, ${bbdArg})"><i class="bi bi-three-dots" aria-hidden="true"></i>More</button>
+    </div>`;
+}
+
+// More on a wall tablet's row: the row's other actions in one window, each a
+// big button with its name on it. The window closes before the action runs,
+// so the Move window or the question before Used all of it opens cleanly.
+function openRowMore(productId, locationId, bestBy) {
+  const item = itemsByRow.get(rowId(productId, locationId, bestBy));
+  const modalEl = document.getElementById('rowMoreModal');
+  if (!item || !modalEl) return;
+  const row = document.getElementById(rowId(productId, locationId, bestBy));
+  const where = rowPlace(item, row ? row.dataset.bucket : '');
+  document.getElementById('rowMoreName').textContent =
+    bestBy ? `${item.name}, ${bestByWords(bestBy)}` : item.name;
+  const box = document.getElementById('rowMoreActions');
+  box.textContent = '';
+  const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+  const add = (icon, text, run) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'btn btn-outline-secondary d-flex align-items-center gap-2';
+    b.innerHTML = `<i class="bi ${icon}" aria-hidden="true"></i>`;
+    b.appendChild(document.createTextNode(text));
+    b.addEventListener('click', () => {
+      modalEl.addEventListener('hidden.bs.modal', () => run(), { once: true });
+      modal.hide();
+    });
+    box.appendChild(b);
+  };
+  add('bi-arrow-left-right', 'Move to another place', () =>
+    openMoveModal(productId, item.name, locationId, bestBy, item.amount, unitLabel(item)));
+  if (item.amount > 0) {
+    add('bi-box2', 'Mark one opened', () => markOpened(productId, item.name, locationId, bestBy));
+    add('bi-check2-all', 'Used all of it', () =>
+      consume(productId, item.amount, item.name, locationId, where, bestBy));
+  }
+  modal.show();
 }
 
 // A product kept in two Grocy locations has one row per location, so a row is
@@ -857,6 +920,27 @@ document.addEventListener('click', function (ev) {
   const moveBtn = ev.target.closest('[data-move-to]');
   if (moveBtn) moveFromModal(moveBtn.dataset.moveTo);
 });
+
+// A wall tablet has no Refresh button (wall.css hides it), so the list brings
+// itself up to date: when the page comes back into view, and when someone
+// touches it again after it sat untouched for two minutes. A touch on a
+// button or a field is left to do what it does (every action reloads the
+// list itself), so a reload never lands between a finger and its button.
+// Nothing runs on a timer.
+if (WALL) {
+  const IDLE_MS = 2 * 60 * 1000;
+  let lastTouch = Date.now();
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) loadDashboard(); });
+  window.addEventListener('pageshow', ev => { if (ev.persisted) loadDashboard(); });
+  document.addEventListener('pointerdown', ev => {
+    const now = Date.now();
+    const idle = now - lastTouch > IDLE_MS;
+    lastTouch = now;
+    const onControl = ev.target.closest && ev.target.closest(
+      'button, a, input, select, textarea, label, [data-toggle-panel], .modal');
+    if (idle && !onControl) loadDashboard();
+  }, true);
+}
 
 // Initial load
 restoreCollapsed();

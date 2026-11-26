@@ -1502,18 +1502,25 @@ async def start_page(request: Request):
     # provisioning change. Only a kiosk-flagged visit is redirected (a phone
     # or desktop browser still gets Glance), and a pane inside the split
     # carries in_split=1 so the Glance pane can never bounce back here in a
-    # redirect loop.
+    # redirect loop. The split view belongs to this install's own panel, so a
+    # tablet signed in as a screen is never sent there.
     if (settings.kiosk_split_enabled
             and request.query_params.get("kiosk")
-            and not request.query_params.get("in_split")):
+            and not request.query_params.get("in_split")
+            and request.session.get("role") != "screen"):
         return ingress_redirect(request, "/ui/split?kiosk=1")
     from ..services import start_page as sp
     from ..navigation import glance_pages
+    from ..templating import wall_profile
+    # A wall tablet with its profile on always gets Glance, trimmed to the
+    # pages it is used for: this page is its home, whatever the Start Page
+    # settings for this install's own display say.
+    wall = wall_profile(request)
     # Glance (the default) is a preset of the same layout engine Custom uses
     # (FoodAssistant-7598): the top-level nav pages seed the grid, sized to fit
     # them, and both modes render through the one .start-grid template path.
     # The glance flag only gates the notification-pills row now.
-    glance = (getattr(settings, "start_page_mode", "glance") or "glance") != "custom"
+    glance = wall or (getattr(settings, "start_page_mode", "glance") or "glance") != "custom"
     catalog = await sp.fetch_deck_catalog()
     if glance:
         layout = sp.glance_layout(glance_pages(), catalog=catalog)
@@ -1530,13 +1537,15 @@ async def start_page(request: Request):
     cols, rows = sp.GRID_SHAPES[keys]
     ctx = {
         "request": request,
-        "enabled": settings.start_page_enabled,
+        "enabled": settings.start_page_enabled or wall,
         "glance": glance,
         "keys": keys, "cols": cols, "rows": rows, "layout": layout,
         # The live weather/forecast faces show the temperature unit symbol; use
         # the same saved units the deck and the weather page use.
         "weather_units": (settings.streamdeck_weather_units or "f").lower(),
     }
+    if wall:
+        ctx["wall_lead"], ctx["wall_rest"] = sp.wall_tiles(layout)
     return templates.TemplateResponse(request, "start.html", ctx)
 
 

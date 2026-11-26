@@ -3,7 +3,7 @@
 
 {% block content %}
 <div class="mt-3 mb-3 d-flex align-items-center justify-content-between flex-wrap gap-2">
-  <h4 class="mb-0"><i class="bi bi-camera-video me-2"></i>Camera</h4>
+  <h4 class="mb-0 pr-page-title"><i class="bi bi-camera-video me-2"></i>Camera</h4>
   {% if cameras and cameras|length > 1 %}
   <div class="btn-group btn-group-sm" role="group" id="cameraSwitcher">
     {% for cam in cameras %}

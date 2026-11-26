@@ -6,7 +6,7 @@
 {% set metric = unit_system == 'metric' %}
 {% macro temp(f, c) %}{% if metric %}{{ c }}&deg;C / {{ f }}&deg;F{% else %}{{ f }}&deg;F / {{ c }}&deg;C{% endif %}{% endmacro %}
 <div class="mt-3 mb-3">
-  <h1 class="h4"><i class="bi bi-book me-2"></i>Kitchen Guide</h1>
+  <h1 class="h4 pr-page-title"><i class="bi bi-book me-2"></i>Kitchen Guide</h1>
   <p class="text-secondary mb-0">Quick reference for safe cooking, doneness, substitutions, and technique.</p>
 </div>
 

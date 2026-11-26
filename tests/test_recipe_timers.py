@@ -224,6 +224,69 @@ def test_suggestions_for_recipe_walks_steps_in_order():
     ]
 
 
+# Two steps that time the same thing are told apart, so a screen and a voice
+# assistant never offer "bake or bake". Steps written the way a recipe card
+# writes them: a short heading, then the instructions.
+CARD_PIE_STEPS = [
+    "Preheat: Set the oven to 375°F.",
+    "Make Crust: Mix the crumbs and butter, press them into the pan and bake for 10 minutes.",
+    "Lower Temp: Turn the oven down to 350°F.",
+    "Make Filling: Whisk the condensed milk, yogurt and lime juice.",
+    "Bake: Pour the filling into the crust. Bake for 15 minutes.",
+    "Chill: Cool for 30 minutes, then refrigerate for 3 hours.",
+]
+
+
+def _labels(title, steps):
+    return [(s["label"], s["step_index"] + 1)
+            for s in recipe_timers.suggestions_for_recipe({"title": title, "steps": steps})]
+
+
+def test_a_repeated_name_takes_the_step_heading_then_the_dish():
+    assert _labels("Best-Ever Key Lime Pie", CARD_PIE_STEPS) == [
+        ("Bake crust", 2), ("Bake pie", 5), ("Cool", 6), ("Refrigerate", 6)]
+
+
+@pytest.mark.parametrize("steps,labels", [
+    # The oven temperature is all that differs.
+    (["Bake lasagna at 325° for 40 minutes.", "Bake lasagna at 400° for 20 minutes."],
+     ["Bake lasagna at 325", "Bake lasagna at 400"]),
+    # Covered, then uncovered.
+    (["Cover with foil and bake the lasagna for 25 minutes.",
+      "Remove the foil and bake the lasagna for 20 minutes."],
+     ["Bake lasagna covered", "Bake lasagna uncovered"]),
+    (["Bake covered for 30 minutes, then uncover and bake for 15 minutes."],
+     ["Bake covered", "Bake uncovered"]),
+    # Nothing to go on: the step says which.
+    (["Simmer for 10 minutes.", "Add the noodles.", "Simmer for 20 minutes."],
+     ["Simmer step 1", "Simmer step 3"]),
+    # Names that do not repeat are left alone.
+    (["Boil for 30 seconds.", "Reduce the cream for 40 minutes.", "Rest for 20 minutes."],
+     ["Boil", "Reduce cream", "Rest"]),
+])
+def test_repeated_names_are_told_apart(steps, labels):
+    assert [label for label, _step in _labels("Lasagna", steps)] == labels
+
+
+def test_told_apart_names_stay_short_and_unique():
+    steps = ["Make Crust: Bake for 10 minutes.", "Make Crust: Bake for 5 minutes."]
+    got = _labels("Key Lime Pie", steps)
+    assert got == [("Bake crust", 1), ("Bake step 2", 2)]
+    many = ["Bake for %d minutes." % n for n in range(5, 50, 5)]
+    names = [label for label, _ in _labels("A Very Long Recipe Name For A Casserole", many)]
+    assert len(set(n.lower() for n in names)) == len(names)
+    assert all(len(n) <= 48 and len(n.split()) <= 5 for n in names)
+
+
+def test_a_repeated_name_is_found_by_its_new_words():
+    sug = recipe_timers.suggestions_for_recipe({"title": "Best-Ever Key Lime Pie",
+                                                 "steps": CARD_PIE_STEPS})
+    crust = recipe_timers.choose_suggestion(sug, CARD_PIE_STEPS, query="the crust")
+    assert crust["result"] == "match" and crust["suggestion"]["label"] == "Bake crust"
+    pie = recipe_timers.choose_suggestion(sug, CARD_PIE_STEPS, query="baking the pie")
+    assert pie["result"] == "match" and pie["suggestion"]["label"] == "Bake pie"
+
+
 def test_suggestions_for_recipe_empty_when_no_active():
     assert recipe_timers.suggestions_for_recipe(None) == []
     assert recipe_timers.suggestions_for_recipe(current_recipe.get_active()) == []

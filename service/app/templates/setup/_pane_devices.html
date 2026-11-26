@@ -138,6 +138,23 @@
             {% endcall %}
           {% endcall %}
 
+          {# Screens: the tablets and wall panels that signed up with a screen
+             key. Each can be renamed or removed, and each has its own Wall
+             tablet switch (bigger type, a short menu and fewer buttons when it
+             shows the whole interface). Filled by static/js/setup/screens.js
+             from GET setup/screens when the pane opens. #}
+          {% call panel('Screens', 'Tablets and wall panels that show your recipes and timers.') %}
+            {% call srow('Connected screens', 'Each connects with its own screen key from Security.',
+                         'Wall tablet gives a screen bigger text, a short menu and fewer buttons while it shows the whole of Pantry Raider. It starts out on for a tablet running Kiosk Satellite and off for any other screen. Removing a screen takes it off this list until its app starts again; to keep it off, turn its key off in Settings, Security.') %}
+              <div id="screens-list">
+                <span class="text-secondary small"><span class="spinner-border spinner-border-sm me-2"></span>Loading...</span>
+              </div>
+              <button class="btn btn-outline-secondary btn-sm mt-2" data-on-click="loadScreens()" title="Refresh">
+                <i class="bi bi-arrow-clockwise me-1"></i>Refresh
+              </button>
+            {% endcall %}
+          {% endcall %}
+
           {# Pairing requests (FoodAssistant-4box): a new satellite on the LAN
              can ask this server for its own API key; the request shows here
              (and as a toast) with the code the device is displaying, so the

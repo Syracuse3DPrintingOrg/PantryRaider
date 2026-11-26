@@ -144,12 +144,11 @@ async def session_ticket(body: SessionIn, request: Request):
     if not path:
         return _refuse(400, "page is one of home, recipe, cook, timers or app.")
     ticket = screens.mint_ticket(sid, app=page == "app")
+    # Every page draws its own Exit (the /screen pages, cook mode and the
+    # whole interface), and one page moves to another by itself, so the app
+    # hosting them never draws a close button of its own.
     out = {"ok": True, "url": f"/screen/open?ticket={ticket}&next={path}",
-           "expires_in": int(screens.TICKET_TTL)}
-    if page in ("app", "cook"):
-        # The whole interface and cook mode draw their own Exit control, so
-        # the app hosting them needs no close button of its own.
-        out["exit"] = "page"
+           "expires_in": int(screens.TICKET_TTL), "exit": "page"}
     return JSONResponse(
         out,
         headers={"Cache-Control": "no-store"})
@@ -352,22 +351,46 @@ async def _screen_for(request: Request, screen: str):
 
 
 @router.get("/recipe")
-async def screen_recipe_now(request: Request, screen: str = "", full: bool = False):
+async def screen_recipe_now(request: Request, screen: str = "", full: bool = False,
+                            own: bool = False):
     """The recipe open on a screen, in a shape a language model can answer
     any question from: title, servings, ingredients as lines with scaled
     amounts, steps numbered from 1, the timers each step suggests (with
     whether one is already running) and the step the cook is on (``step``,
     from 1, or null). ``full`` adds the recipe as stored and the raw timer
-    suggestions, for the screen's own page."""
+    suggestions, for the screen's own page.
+
+    ``source`` says whose recipe it is: "screen" (that screen's own) or
+    "kitchen" (the kitchen's current one, which a screen's pages show when
+    it has none of its own). ``own`` leaves the kitchen's out: an answer
+    about one screen (Home Assistant asking what to do next there) is "none"
+    for a screen that never opened a recipe."""
     target, refusal = await _screen_for(request, screen)
     if refusal is not None:
         return refusal
-    return JSONResponse(await _describe(target, full),
+    return JSONResponse(await _describe(target, full, own),
                         headers={"Cache-Control": "no-store"})
 
 
-async def _describe(target: dict | None, full: bool = False) -> dict:
-    recipe, source = await run_in_threadpool(screen_recipes.recipe_for, target)
+async def _recipe_of(target: dict | None, adopt: bool = False) -> tuple[dict | None, str]:
+    """The recipe a step or timer request acts on: that screen's own (the
+    kitchen's when no screen is named). ``adopt`` is the screen's own page
+    asking: a page that was showing the kitchen's recipe makes it the
+    screen's own first, so its steps and timers, and voice at that screen,
+    follow the recipe being cooked there."""
+    recipe, source = await run_in_threadpool(screen_recipes.recipe_for, target, True)
+    if (recipe is None and adopt and target is not None
+            and target.get("kind") not in ("server", "bandit")):
+        kitchen = await run_in_threadpool(current_recipe.get_active)
+        if kitchen:
+            recipe = await run_in_threadpool(screen_recipes.set_recipe, target["id"],
+                                             kitchen, True)
+            source = "screen"
+    return recipe, source
+
+
+async def _describe(target: dict | None, full: bool = False, own: bool = False) -> dict:
+    recipe, source = await run_in_threadpool(screen_recipes.recipe_for, target, own)
     suggestions = recipe_timers.suggestions_for_recipe(recipe)
     try:
         running = await _timer_list() if suggestions else []
@@ -389,6 +412,9 @@ class RecipeStepIn(BaseModel):
     # first, next, back, repeat, last, a number from 1, or "none" to clear.
     step: str | int = "next"
     full: bool = False
+    # The screen's own page, which may be showing the kitchen's recipe:
+    # that recipe becomes the screen's own (see _recipe_of).
+    adopt: bool = False
 
 
 @router.post("/recipe/step")
@@ -396,16 +422,18 @@ async def move_recipe_step(body: RecipeStepIn, request: Request):
     """Move the step a screen is on (a tap on the step, or "next step" said
     out loud) and read it: the answer is the recipe as GET /recipe gives it,
     with ``current`` (the step now current) and a ``speech`` line that reads
-    it. The screen is told, so its page follows."""
+    it. The screen is told, so its page follows. Only the screen's own
+    recipe moves: one that never opened a recipe answers that none is open
+    there, rather than reading another screen's."""
     target, refusal = await _screen_for(request, body.screen)
     if refusal is not None:
         return refusal
-    out = await _describe(target, body.full)
+    recipe, _src = await _recipe_of(target, body.adopt)
+    out = await _describe(target, body.full, own=True)
     if not out.get("ok"):
         return out
     key = target["id"] if target else ""
     word = str(body.step).strip().lower()
-    recipe, _src = await run_in_threadpool(screen_recipes.recipe_for, target)
     if word in ("none", "clear", "off"):
         await run_in_threadpool(screen_recipes.set_step, key, recipe, None)
         out.update(step=None, result="cleared", speech="Done.")
@@ -434,6 +462,9 @@ class RecipeTimerIn(BaseModel):
     origin: str = ""
     # Move the screen to its timers page once started. Off: the recipe stays up.
     show: bool = False
+    # The screen's own page, which may be showing the kitchen's recipe:
+    # that recipe becomes the screen's own (see _recipe_of).
+    adopt: bool = False
 
 
 def _choice(row: dict) -> dict:
@@ -449,10 +480,24 @@ def _timer_choices_speech(choices: list[dict]) -> str:
                               else ", ".join(said[:-1]) + " or " + said[-1]) + "?"
 
 
-def _ambiguous(title: str, rows: list[dict], speech: str = "") -> dict:
+def _ambiguous(title: str, rows: list[dict], lead: str = "") -> dict:
     choices = [_choice(r) for r in rows]
     return {"ok": False, "result": "ambiguous", "recipe": {"title": title},
-            "choices": choices, "speech": speech or _timer_choices_speech(choices)}
+            "choices": choices, "speech": lead + _timer_choices_speech(choices)}
+
+
+def _all_running(title: str, rows: list[dict], running: list[dict]) -> dict:
+    """Every timer that could be meant is already counting down."""
+    on = [t for t in (recipe_timers.running_timer_for(r, running) for r in rows) if t]
+    out = {"ok": True, "result": "running", "recipe": {"title": title}, "timers": on}
+    if len(rows) == 1 and on:
+        left = screen_recipes.spoken(on[0].get("remaining_seconds") or 0)
+        out.update(timer=on[0], step=rows[0]["step"],
+                   speech=f"The {rows[0]['label'].lower()} timer is already running, "
+                          f"with {left} left.")
+    else:
+        out["speech"] = "Those timers are already running."
+    return out
 
 
 @router.post("/recipe/timer")
@@ -465,11 +510,13 @@ async def start_recipe_timer(body: RecipeTimerIn, request: Request):
     started or running (with "timer"), ambiguous (with "choices", each
     {"step", "label", "seconds", "speech"}: ask, then call again with the
     step), no_recipe or not_found. A timer already counting down for that
-    step is never started twice."""
+    step is never started twice, and is never offered as a choice: when
+    every timer that could be meant is running, the answer is "running"
+    (with "timers"). Only the screen's own recipe is used."""
     target, refusal = await _screen_for(request, body.screen)
     if refusal is not None:
         return refusal
-    recipe, _source = await run_in_threadpool(screen_recipes.recipe_for, target)
+    recipe, _source = await _recipe_of(target, body.adopt)
     if not recipe:
         return {"ok": False, "result": "no_recipe",
                 "speech": f"No recipe is open{_where(target)}. What are you cooking?"}
@@ -485,6 +532,26 @@ async def start_recipe_timer(body: RecipeTimerIn, request: Request):
                 "speech": f"{title} has no step with a time in it."}
     every = [recipe_timers.choice_row(x) for x in suggestions]
     query, label = body.query.strip(), body.label.strip()
+    running: list[dict] | None = None
+
+    async def now_running() -> list[dict]:
+        nonlocal running
+        if running is None:
+            try:
+                running = await _timer_list()
+            except Exception:
+                running = []
+        return running
+
+    async def ask(rows: list[dict], lead: str = "") -> dict:
+        # The timers already counting down are left out. A question with only
+        # one left is still a question: the caller decides whether to ask.
+        on = await now_running()
+        idle = [r for r in rows if recipe_timers.running_timer_for(r, on) is None]
+        if not idle:
+            return _all_running(title, rows, on)
+        return _ambiguous(title, idle, lead)
+
     if body.step is None and not query and not label:
         # "Start the timer": the current step's, when it has exactly one.
         # Otherwise the person is asked which (the caller asks on the device
@@ -494,30 +561,26 @@ async def start_recipe_timer(body: RecipeTimerIn, request: Request):
         if cur is not None:
             picked = recipe_timers.choose_suggestion(suggestions, steps, cur + 1)
             if picked["result"] == "not_found":
-                return _ambiguous(title, every, f"Step {cur + 1} has no timer. "
-                                  + _timer_choices_speech(every))
+                return await ask(every, f"Step {cur + 1} has no timer. ")
         elif len(suggestions) == 1:
             picked = {"result": "match", "suggestion": suggestions[0]}
         else:
-            return _ambiguous(title, every)
+            return await ask(every)
     else:
         picked = recipe_timers.choose_suggestion(suggestions, steps, body.step, query, label)
         if picked["result"] == "ambiguous" and query:
             # Of several that fit the words, the one not already counting
             # down is meant ("start the timer for baking it" once the crust
             # is in).
-            try:
-                now_running = await _timer_list()
-            except Exception:
-                now_running = []
+            on = await now_running()
             idle = [x for x in suggestions
                     if any(c["step"] == x["step_index"] + 1 and c["label"] == x["label"]
                            and c["seconds"] == x["seconds"] for c in picked["choices"])
-                    and recipe_timers.running_timer_for(x, now_running) is None]
+                    and recipe_timers.running_timer_for(x, on) is None]
             if len(idle) == 1:
                 picked = {"result": "match", "suggestion": idle[0]}
     if picked["result"] == "ambiguous":
-        return _ambiguous(title, picked["choices"])
+        return await ask(picked["choices"])
     if picked["result"] == "not_found":
         reason = picked.get("reason")
         if reason == "no_timer_in_step":
@@ -530,10 +593,7 @@ async def start_recipe_timer(body: RecipeTimerIn, request: Request):
                 "choices": [_choice(r) for r in every[:6]], "speech": speech}
     sug = picked["suggestion"]
     step_no = sug["step_index"] + 1
-    try:
-        already = recipe_timers.running_timer_for(sug, await _timer_list())
-    except Exception:
-        already = None
+    already = recipe_timers.running_timer_for(sug, await now_running())
     if already is not None:
         left = screen_recipes.spoken(already.get("remaining_seconds") or 0)
         return {"ok": True, "result": "running", "timer": already, "step": step_no,
@@ -582,7 +642,7 @@ async def recipe_cooked(body: RecipeCookedIn, request: Request,
     if not recipe:
         return {"ok": False, "result": "no_recipe", "speech": "No recipe is open."}
     cr = _cr_router()
-    if source == "server":
+    if source == "kitchen":
         out = await cr._cook_recipe(recipe, current_recipe.PRIMARY_SLOT, db)
         # The kitchen's recipe is put away, and with it where this screen
         # was up to in it.
@@ -638,12 +698,10 @@ async def open_screen(request: Request, ticket: str = "", next: str = ""):
 
 def _page(request: Request, page: str, screen: str = "") -> HTMLResponse:
     sid = str(request.session.get("screen_id") or "") or screen.strip()
-    known = screens.get(sid) if sid else None
+    # Each page draws its own Exit for its screen (top right), so no corner
+    # is kept clear for a kiosk app's close button.
     return templates.TemplateResponse(request, "screen.html", {
         "request": request, "page": page, "screen_id": sid,
-        # Some kiosk apps draw their own close button over the top right
-        # corner of the page; the header keeps that corner clear for them.
-        "corner_clear": bool(known and known["kind"] == "kiosk_satellite"),
     })
 
 

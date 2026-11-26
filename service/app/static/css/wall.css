@@ -1,0 +1,445 @@
+/*
+ * The wall tablet profile.
+ *
+ * Loaded only for a tablet that shows the whole interface with its "Wall
+ * tablet" switch on (Settings, Bandit Remotes, Screens); the page then has
+ * data-profile="wall" on <html>. Everything here moves, resizes or hides
+ * something on the page. Nothing changes what the tablet may do: that is
+ * decided on the server, as for any screen.
+ *
+ * Sizes follow the screen's short side. Both tablets this was built on are
+ * about 189 pixels per inch with a short side of 800 device pixels, but their
+ * web views count CSS pixels differently (the Echo Show 8 lays out about 960
+ * by 600, the ThinkSmart View about 490 by 790), so the same CSS size comes
+ * out smaller on the Echo. The root font size grows with vmin instead, which
+ * lands the same size on the glass on both, and every rem below follows it:
+ * 1rem is 16px on the ThinkSmart and about 20px on the Echo. The review's
+ * sizes for the ThinkSmart are the floor: section headings 22px, inventory
+ * secondary text 18px.
+ *
+ * Nothing here needs a browser newer than Chromium 118 (the Echo's web view):
+ * :has() is 105, color-mix() 111, container units 105, clamp() 79.
+ */
+
+html[data-profile="wall"] {
+  font-size: clamp(16px, 3.3vmin, 26px);
+  --wall-bar: max(56px, 3rem); /* the top bar: the logo, the menu button, Exit */
+  --wall-target: 3.25rem;      /* the smallest button on a page */
+  --wall-heading: 1.375rem;    /* section headings: 22px on the ThinkSmart */
+  --wall-meta: 1.25rem;        /* one-line summaries under a title: 20px */
+  --wall-text: 1.25rem;        /* list rows: item names, shopping items */
+  --wall-small: 1.125rem;      /* places, dates, amounts: 18px */
+  --wall-gap: clamp(8px, 1.6vmin, 14px);
+}
+
+/* --- The top bar: the logo (home), the menu button and Exit -------------- */
+
+html[data-profile="wall"] body {
+  padding-top: calc(var(--wall-bar) + var(--kiosk-inset-top, 0px)) !important;
+}
+html[data-profile="wall"] .navbar.fixed-top {
+  min-height: var(--wall-bar);
+  padding-top: 0;
+  padding-bottom: 0;
+  /* A position:fixed bar ignores the body padding, so the timer bar's
+     inset moves it down as well. */
+  top: var(--kiosk-inset-top, 0px) !important;
+}
+html[data-profile="wall"] nav.navbar > .container-fluid {
+  flex-wrap: nowrap;
+  min-height: var(--wall-bar);
+  /* Room for Exit (static/js/screen-app.js), whose word grows with the
+     text here. */
+  padding-right: max(84px, calc(1.9rem + 44px)) !important;
+}
+html[data-profile="wall"] .navbar-brand {
+  margin-right: auto;
+  font-size: 1.2rem;
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+}
+html[data-profile="wall"] .navbar-brand .brand-logo { height: 2rem; }
+/* No row of page links and no utility buttons: the menu lists the pages,
+   and Settings, Sign out, the phone code and kiosk mode mean nothing on a
+   wall tablet. The pages stay one tap away in the menu and on Glance. */
+html[data-profile="wall"] .navbar .nav-primary,
+html[data-profile="wall"] .navbar .pr-nav-utility,
+html[data-profile="wall"] .navbar .hamburger-nav .dropdown-divider,
+html[data-profile="wall"] .navbar .hamburger-nav .nav-item:has(> a[target="_blank"]) {
+  display: none !important;
+}
+html[data-profile="wall"] .navbar-toggler {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 3.5rem;
+  min-height: 48px;
+  margin-left: 8px;
+  padding: 0 12px;
+  border-radius: 12px;
+}
+html[data-profile="wall"] .navbar-toggler-icon { width: 1.6em; height: 1.6em; }
+/* The open menu: a panel under the bar at every width, never a row. */
+html[data-profile="wall"] .navbar-collapse {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 1031;
+  width: 22rem;
+  max-width: 100vw;
+  max-height: calc(100vh - var(--wall-bar) - var(--kiosk-inset-top, 0px));
+  overflow-y: auto;
+  padding: 8px;
+  background: var(--bs-tertiary-bg, #2b3035);
+  border: 1px solid var(--bs-border-color, rgba(255, 255, 255, 0.15));
+  border-top: 0;
+  border-radius: 0 0 0 14px;
+  box-shadow: 0 0.6rem 1.4rem rgba(0, 0, 0, 0.5);
+}
+html[data-profile="wall"] .navbar .hamburger-nav {
+  display: flex !important;
+  flex-direction: column;
+  margin-bottom: 0 !important;
+}
+html[data-profile="wall"] .navbar .hamburger-nav .nav-link {
+  display: flex;
+  align-items: center;
+  min-height: var(--wall-target);
+  padding: 0 14px;
+  border-radius: 10px;
+  font-size: var(--wall-meta);
+}
+html[data-profile="wall"] .navbar .hamburger-nav .nav-link .bi { font-size: 1.15em; margin-right: 0.7rem !important; }
+html[data-profile="wall"] .navbar .hamburger-nav .nav-link.active {
+  background: color-mix(in srgb, var(--bs-primary, #F2006E) 18%, transparent);
+}
+/* A wide screen is short, so the pages sit in two columns there. */
+@media (orientation: landscape) {
+  html[data-profile="wall"] .navbar-collapse { width: 36rem; }
+  html[data-profile="wall"] .navbar .hamburger-nav {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 4px;
+  }
+}
+
+/* --- The sub-page tabs -------------------------------------------------- */
+
+html[data-profile="wall"] .subpill-bar { padding: 4px 12px; }
+html[data-profile="wall"] .subpill-inner { gap: 8px; }
+html[data-profile="wall"] .subpill-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: max(48px, 2.75rem);
+  padding: 0 16px;
+  border-radius: 10px;
+  font-size: var(--wall-small);
+}
+
+/* A tab that is on already names the page, so the page's own title row
+   gives its height back. The title stays for screen readers. */
+html[data-profile="wall"] body:has(.subpill-btn.active) .pr-page-title {
+  position: absolute !important;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* --- What a wall tablet has no use for ----------------------------------- */
+/* Refresh: these pages bring themselves up to date. Print: there is rarely a
+   printer at the wall. A button that opens another site in a new tab (Open
+   in Mealie, View source) leaves the kiosk with no way back. */
+html[data-profile="wall"] .pr-wall-hide,
+html[data-profile="wall"] #pageContent [title="Refresh"],
+html[data-profile="wall"] :is(button, a):has(> .bi-printer),
+html[data-profile="wall"] a.btn[target="_blank"],
+html[data-profile="wall"] #cr-open-mealie {
+  display: none !important;
+}
+
+/* --- Type sizes on every page ------------------------------------------- */
+
+html[data-profile="wall"] #pageContent h5:not(.modal-title),
+html[data-profile="wall"] #pageContent h6:not(.modal-title),
+html[data-profile="wall"] #pageContent .timer-start-head {
+  font-size: var(--wall-heading);
+}
+html[data-profile="wall"] #cook-meta,
+html[data-profile="wall"] #cr-source,
+html[data-profile="wall"] #pageContent > p.text-secondary.small {
+  font-size: var(--wall-meta) !important;
+}
+html[data-profile="wall"] #pageContent .list-group-item { font-size: var(--wall-text); }
+html[data-profile="wall"] #pageContent .list-group-item .form-check {
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
+  padding-left: 0;
+}
+html[data-profile="wall"] #pageContent .list-group-item .form-check .form-check-input {
+  flex: 0 0 auto;
+  float: none;
+  width: 1.5em;
+  height: 1.5em;
+  margin: 0;
+}
+/* A button that sets a bigger size of its own keeps it (the recipe's timer
+   buttons on On the Line). */
+html[data-profile="wall"] #pageContent .btn:not(.btn-close):not(.cr-tbtn),
+html[data-profile="wall"] .modal .btn:not(.btn-close) { min-height: 3rem; }
+/* Windows grow with the text, so a small one (Edit, Move) is not a narrow
+   column with its Save button pushed off the screen. */
+html[data-profile="wall"] .modal { --bs-modal-width: min(30rem, 94vw); }
+html[data-profile="wall"] .modal-sm { --bs-modal-width: min(24rem, 94vw); }
+/* A link styled as a button keeps its label in the middle of the taller
+   button, as a real button does. */
+html[data-profile="wall"] #pageContent a.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+html[data-profile="wall"] #pageContent .form-control,
+html[data-profile="wall"] #pageContent .form-select {
+  min-height: 3rem;
+  font-size: var(--wall-small) !important;
+}
+
+/* --- Inventory ---------------------------------------------------------- */
+
+/* One scroll for the whole page: a list inside its own scroll box traps a
+   finger's flick. */
+html[data-profile="wall"] .panel-body { max-height: none !important; overflow: visible !important; }
+/* A wide screen is short, so the search box and the category share a line. */
+@media (orientation: landscape) and (min-width: 700px) {
+  html[data-profile="wall"] #pageContent #inventory-filters > [class*="col-"] { flex: 0 0 auto; }
+  html[data-profile="wall"] #pageContent #inventory-filters > .col-md-7 { width: 62%; max-width: 62%; }
+  html[data-profile="wall"] #pageContent #inventory-filters > .col-md-5 { width: 38%; max-width: 38%; }
+}
+html[data-profile="wall"] .panel-header {
+  min-height: var(--wall-target);
+  font-size: var(--wall-heading);
+}
+html[data-profile="wall"] .panel-count { font-size: var(--wall-small); }
+html[data-profile="wall"] .item-row {
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  padding: 10px 14px;
+}
+html[data-profile="wall"] .item-name { flex: 1 1 14rem; }
+html[data-profile="wall"] .item-name-text { font-size: var(--wall-text); }
+html[data-profile="wall"] .item-location,
+html[data-profile="wall"] .item-dates,
+html[data-profile="wall"] .item-qty,
+html[data-profile="wall"] .expiry-badge {
+  font-size: var(--wall-small);
+}
+html[data-profile="wall"] .expiry-badge { padding: 0.15em 0.6em; }
+/* At most two named actions on a row, and More for the rest. */
+html[data-profile="wall"] .wall-actions {
+  display: flex;
+  gap: 8px;
+  margin-left: 0;
+}
+html[data-profile="wall"] .wall-act {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45em;
+  min-height: var(--wall-target);
+  padding: 0 1rem;
+  border-radius: 12px;
+  font-size: var(--wall-small);
+  font-weight: 600;
+  white-space: nowrap;
+}
+html[data-profile="wall"] .wall-act .bi { font-size: 1.1em; }
+/* A narrow screen gives the actions their own line, three equal buttons. */
+@media (max-width: 720px) {
+  html[data-profile="wall"] .wall-actions { flex: 1 0 100%; }
+  html[data-profile="wall"] .wall-act { flex: 1 1 0; padding: 0 0.5rem; }
+}
+html[data-profile="wall"] #rowMoreActions .btn {
+  min-height: var(--wall-target);
+  font-size: var(--wall-text);
+  text-align: left;
+}
+
+/* --- Glance (templates/start.html) -------------------------------------- */
+
+/* The drift behind the tiles is held still, as on an appliance panel: a
+   tablet's processor would otherwise redraw the blurred backdrop all day. */
+html[data-profile="wall"] .glance-landing::before { animation: none; }
+html[data-profile="wall"] .glance-landing {
+  justify-content: flex-start;
+  gap: var(--wall-gap);
+  padding-left: calc(var(--wall-gap) + var(--kiosk-inset-left, 0px));
+  padding-right: calc(var(--wall-gap) + var(--kiosk-inset-right, 0px));
+}
+/* One line, about 48px tall, kept clear of Exit in the top right corner. */
+html[data-profile="wall"] .wall-hero {
+  flex: 0 0 auto;
+  flex-direction: row;
+  text-align: left;
+  height: clamp(48px, 8vmin, 64px);
+  padding: 0 max(84px, calc(1.9rem + 44px)) 0 4px;
+  gap: 0.6rem;
+  justify-content: flex-start;
+  min-width: 0;
+}
+html[data-profile="wall"] .wall-hero-mark {
+  height: 85%;
+  width: auto;
+  flex: 0 0 auto;
+}
+html[data-profile="wall"] .wall-hero-hello {
+  margin: 0;
+  flex: 0 0 auto;
+  font-size: clamp(13px, 2.6vmin, 20px);
+  white-space: nowrap;
+}
+html[data-profile="wall"] .wall-hero-title {
+  margin: 0;
+  min-width: 0;
+  font-size: clamp(22px, 4.6vmin, 38px);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* What this screen is cooking. */
+html[data-profile="wall"] .wall-continue {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 0.8em;
+  min-height: clamp(64px, 12vmin, 96px);
+  padding: 0 1.2em;
+  border-radius: 18px;
+  border: 1px solid color-mix(in srgb, var(--pr-accent) 70%, transparent);
+  background: color-mix(in srgb, var(--pr-accent) 16%, var(--pr-card));
+  box-shadow: 0 6px 22px color-mix(in srgb, var(--pr-accent) 22%, transparent);
+  color: var(--pr-fg);
+  text-decoration: none;
+  font-size: clamp(20px, 4.4vmin, 34px);
+  font-weight: 600;
+}
+html[data-profile="wall"] .wall-continue[hidden] { display: none !important; }
+html[data-profile="wall"] .wall-continue:active { transform: scale(0.99); }
+html[data-profile="wall"] .wall-continue-ico { color: var(--pr-accent-soft); font-size: 1.2em; }
+/* One line on a wide screen. The recipe's name is the part that shortens,
+   so the step always shows. */
+html[data-profile="wall"] .wall-continue-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 0.35em;
+  white-space: nowrap;
+}
+html[data-profile="wall"] .wall-continue-kicker { flex: 0 0 auto; }
+html[data-profile="wall"] .wall-continue-what { display: flex; min-width: 0; font-weight: 700; }
+html[data-profile="wall"] .wall-continue-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+html[data-profile="wall"] .wall-continue-step { flex: 0 0 auto; }
+/* A narrow screen puts what is cooking on a line of its own. */
+@media (max-width: 560px) {
+  html[data-profile="wall"] .wall-continue-text {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0;
+  }
+  html[data-profile="wall"] .wall-continue-kicker {
+    font-size: 0.7em;
+    color: var(--pr-muted);
+  }
+  html[data-profile="wall"] .wall-continue-what { max-width: 100%; }
+}
+html[data-profile="wall"] .wall-continue-go { color: var(--pr-muted); }
+/* Cook, Time & Temp, Shopping and Inventory fill what is left of the
+   screen: four across on a wide screen, two by two on a tall one. */
+html[data-profile="wall"] .glance-cards.wall-lead,
+html[data-profile="wall"] .glance-cards.wall-rest {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--wall-gap);
+  max-width: none;
+  margin: 0;
+}
+html[data-profile="wall"] .glance-cards.wall-lead {
+  flex: 1 0 auto;
+  min-height: clamp(150px, 34vmin, 320px);
+  grid-auto-rows: 1fr;
+}
+html[data-profile="wall"] .glance-cards.wall-rest {
+  flex: 0 0 auto;
+  grid-auto-rows: clamp(140px, 28vmin, 240px);
+}
+html[data-profile="wall"] .glance-cards.wall-rest[hidden] { display: none !important; }
+html[data-profile="wall"] :is(.wall-lead, .wall-rest) .glance-card {
+  flex: none;
+  min-width: 0;
+  min-height: 0;
+  padding: 0.75rem 0.6rem;
+}
+@media (orientation: portrait) {
+  html[data-profile="wall"] .glance-cards.wall-lead,
+  html[data-profile="wall"] .glance-cards.wall-rest {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  html[data-profile="wall"] .glance-cards.wall-lead { min-height: clamp(260px, 62vmin, 560px); }
+}
+/* More: the other pages, shown below it on a tap. */
+html[data-profile="wall"] .wall-more {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 0.7em;
+  width: 100%;
+  min-height: clamp(56px, 10vmin, 80px);
+  padding: 0 1.2em;
+  border-radius: 18px;
+  border: 1px solid color-mix(in srgb, var(--pr-ink) 12%, transparent);
+  background: var(--pr-card);
+  color: var(--pr-fg);
+  font: inherit;
+  font-size: clamp(20px, 4.1vmin, 33px);
+  text-align: left;
+  cursor: pointer;
+}
+@supports (backdrop-filter: blur(1px)) {
+  html[data-profile="wall"] .wall-more { background: color-mix(in srgb, var(--pr-ink) 5.5%, transparent); }
+}
+html[data-profile="wall"] .wall-more:active { transform: scale(0.99); }
+html[data-profile="wall"] .wall-more-ico { color: var(--pr-accent-soft); font-size: 1.1em; }
+html[data-profile="wall"] .wall-more-label { font-weight: 700; flex: 0 0 auto; }
+html[data-profile="wall"] .wall-more-list {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--pr-muted);
+  font-size: 0.8em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+html[data-profile="wall"] .wall-more[aria-expanded="true"] .wall-more-list { visibility: hidden; }
+/* The counts along the bottom, big enough for a fingertip, on one line. */
+html[data-profile="wall"] .glance-pills { padding-top: 0; padding-bottom: 4px; gap: 8px; flex-wrap: nowrap; }
+html[data-profile="wall"] .glance-pill { min-height: 48px; padding: 0.4rem 1.2rem; }
+html[data-profile="wall"] .glance-pill .pill-label,
+html[data-profile="wall"] .glance-pill .pill-count { font-size: clamp(15px, 3vmin, 22px); }
+@media (max-width: 560px) {
+  html[data-profile="wall"] .glance-pills { gap: 6px; }
+  html[data-profile="wall"] .glance-pill { padding: 0.35rem 0.75rem; gap: 0.4rem; }
+}

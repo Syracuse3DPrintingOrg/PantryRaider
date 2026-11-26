@@ -3,12 +3,12 @@
 
 {% block content %}
 <div class="mt-3 mb-3 d-flex align-items-center justify-content-between flex-wrap gap-2">
-  <h4 class="mb-0"><i class="bi bi-cloud-sun me-2"></i>Weather{% if weather_location %} <span class="text-secondary fs-6">{{ weather_location }}</span>{% endif %}</h4>
+  <h4 class="mb-0 pr-page-title"><i class="bi bi-cloud-sun me-2"></i>Weather{% if weather_location %} <span class="text-secondary fs-6">{{ weather_location }}</span>{% endif %}</h4>
   <div class="d-flex gap-2">
     <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-toggle="collapse" data-bs-target="#wxSettings" title="Location and units">
       <i class="bi bi-gear"></i>
     </button>
-    <button type="button" class="btn btn-outline-info btn-sm" data-on-click="reloadWeather()">
+    <button type="button" class="btn btn-outline-info btn-sm pr-wall-hide" data-on-click="reloadWeather()">
       <i class="bi bi-arrow-clockwise me-1"></i>Refresh
     </button>
   </div>

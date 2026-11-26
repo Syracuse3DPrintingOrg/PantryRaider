@@ -47,12 +47,18 @@ def client(monkeypatch, tmp_path):
     monkeypatch.setattr(settings, "data_dir", str(tmp_path), raising=False)
     from fastapi.testclient import TestClient
     from app.main import app
+    from app.services import ha_events
+    # The events ring lives in memory, and a fresh data folder has no file to
+    # replace it from: events another test file posted on this worker would
+    # count as this device's alerts.
+    ha_events.reset()
     try:
         # client_host defaults to "testclient", NOT loopback, so the loopback
         # admin trust never masks the role checks under test.
         with TestClient(app) as c:
             yield c
     finally:
+        ha_events.reset()
         os.chdir(cwd)
 
 

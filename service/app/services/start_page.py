@@ -325,6 +325,25 @@ def glance_layout(nav_pages: list[dict] | None, keys: int | None = None,
     return out
 
 
+# The wall tablet profile's Glance (templating.wall_profile): the four pages a
+# tablet on the wall is mostly used for lead, in this order, and every other
+# page waits behind a More tile.
+WALL_TILES = ("cook", "timetemp", "shopping", "inventory")
+
+
+def wall_tiles(layout: list[dict] | None) -> tuple[list[dict], list[dict]]:
+    """(the leading tiles, the rest) of a Glance layout for the wall tablet
+    profile. Blanks go, and so does a page outside the app (a custom tab that
+    links to another site): a wall tablet has no way back from one."""
+    from .url_safety import is_external
+    tiles = [k for k in (layout or []) if isinstance(k, dict) and k.get("kind") == "builtin"
+             and k.get("href") and not is_external(str(k["href"]))]
+    by_key = {k.get("key"): k for k in tiles}
+    lead = [by_key[key] for key in WALL_TILES if key in by_key]
+    rest = [k for k in tiles if k.get("key") not in WALL_TILES]
+    return lead, rest
+
+
 def glance_seed_tokens(nav_pages: list[dict] | None, keys: int | None = None,
                        catalog: list | None = None) -> list[str]:
     """The Glance arrangement as stored-layout tokens, to seed the Custom editor.

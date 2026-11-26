@@ -200,7 +200,10 @@ def test_each_screen_keeps_its_recipe_and_step(store):
     # A tablet with no recipe of its own falls back to the kitchen's; a
     # Bandit does not (it keeps its own on the device).
     current_recipe.set_active({"title": "Kitchen", "steps": ["x"]})
-    assert screen_recipes.recipe_for({"id": "ks-c", "kind": "kiosk_satellite"})[1] == "server"
+    assert screen_recipes.recipe_for({"id": "ks-c", "kind": "kiosk_satellite"})[1] == "kitchen"
+    # Asked about that screen alone, it has none.
+    assert screen_recipes.recipe_for({"id": "ks-c", "kind": "kiosk_satellite"}, own=True) == (
+        None, "screen")
     assert screen_recipes.recipe_for({"id": "bandit7", "kind": "bandit"}) == (None, "screen")
     assert screen_recipes.recipe_for(None)[0]["title"] == "Kitchen"
 
@@ -266,11 +269,14 @@ def test_lets_cook_two_turns_then_steps_and_timers(client):
     assert r["choices"] == [
         {"step": 5, "label": "Cool", "seconds": 1800, "speech": "Cool, 30 minutes"},
         {"step": 5, "label": "Chill", "seconds": 10800, "speech": "Chill, 3 hours"}]
-    # The current step with no timer: every timer, to choose from.
+    # The current step with no timer: the timers not already running, to
+    # choose from (the crust and the pie are in the oven).
     client.post("/api/screens/recipe/step", headers=ha, json={"screen": "ks-echo", "step": 3})
     r = client.post("/api/screens/recipe/timer", headers=ha, json={"screen": "ks-echo"}).json()
-    assert r["result"] == "ambiguous" and len(r["choices"]) == 4
-    assert r["speech"].startswith("Step 3 has no timer. Which timer:")
+    assert r["result"] == "ambiguous"
+    assert [c["label"] for c in r["choices"]] == ["Cool", "Chill"]
+    assert r["speech"] == ("Step 3 has no timer. Which timer: cool for 30 minutes in step 5 "
+                           "or chill for 3 hours in step 5?")
     r = client.post("/api/screens/recipe/timer", headers=ha,
                     json={"screen": "ks-echo", "query": "frying"}).json()
     assert r["result"] == "not_found"
@@ -460,7 +466,7 @@ def test_a_damaged_screen_recipes_file_reads_as_nothing(store, blob):
     (store / "screen_recipes.json").write_text(blob)
     assert screen_recipes.get_recipe("ks-a") is None
     assert screen_recipes.current_step("ks-a", PIE) is None
-    assert screen_recipes.recipe_for({"id": "ks-a", "kind": "kiosk_satellite"})[1] == "server"
+    assert screen_recipes.recipe_for({"id": "ks-a", "kind": "kiosk_satellite"})[1] == "kitchen"
     # The next change writes a good file over it.
     screen_recipes.set_recipe("ks-a", PIE)
     screen_recipes._writer.wait_idle()
@@ -519,3 +525,143 @@ def test_a_bandit_keeps_the_screen_recipe_routes_closed_without_a_password():
     assert main._gate_applies("/api/screens/recipe/timer", "POST", alone) is False
     server = access.AccessSnapshot(is_satellite=False, upstream_linked=True)
     assert main._gate_applies("/api/screens/recipe/timer", "POST", server) is False
+
+
+# --- a screen answers only for its own recipe -----------------------------------
+
+def test_a_screen_answers_only_for_its_own_recipe(client):
+    """The Starview is cooking lasagna; the Echo Show never opened a recipe.
+    Asked what to do first, the Echo Show says nothing is open there instead
+    of reading the Starview's. Its pages still show the kitchen's recipe and
+    say whose it is, and a tap there makes it the Echo Show's own."""
+    echo = _tablet(client)
+    _tablet(client, "ks-view", "Starview")
+    ha = _key("ha", "HA")
+    r = client.post("/api/screens/show-recipe", headers=ha,
+                    json={"query": "lasagna", "screen": "ks-view", "page": "cook"}).json()
+    assert r["result"] == "shown" and r["recipe"]["title"] == "Lasagna"
+    assert current_recipe.get_active()["title"] == "Lasagna"   # the kitchen's, too
+
+    nothing = "No recipe is open on the Echo Show. What are you cooking?"
+    r = client.post("/api/screens/recipe/step", headers=ha,
+                    json={"screen": "ks-echo", "step": "first"}).json()
+    assert r["ok"] is False and r["result"] == "none" and r["speech"] == nothing
+    r = client.get("/api/screens/recipe?screen=ks-echo&own=1", headers=ha).json()
+    assert r["result"] == "none" and r["speech"] == nothing
+    r = client.post("/api/screens/recipe/timer", headers=ha, json={"screen": "ks-echo"}).json()
+    assert r["result"] == "no_recipe" and r["speech"] == nothing
+    assert timers.list_timers() == []
+    # The Starview answers for its own.
+    r = client.get("/api/screens/recipe?screen=ks-view&own=1", headers=ha).json()
+    assert r["ok"] and r["source"] == "screen" and r["step"] == 1
+    # The Echo Show's pages still show the kitchen's recipe, and say so.
+    r = client.get("/api/screens/recipe?screen=ks-echo&full=1", headers=echo).json()
+    assert r["ok"] and r["source"] == "kitchen" and r["recipe"]["title"] == "Lasagna"
+    assert r["step"] is None
+    # A request that names no screen is about the kitchen's recipe, as before.
+    r = client.get("/api/screens/recipe", headers=ha).json()
+    assert r["ok"] and r["source"] == "kitchen" and r["title"] == "Lasagna"
+    r = client.post("/api/screens/recipe/step", headers=ha, json={"step": "first"}).json()
+    assert r["ok"] and r["step"] == 1
+    # A tap on the Echo Show's own page (adopt) makes the recipe it shows its own,
+    # so voice there now answers for it.
+    r = client.post("/api/screens/recipe/step", headers=echo,
+                    json={"screen": "ks-echo", "step": "first", "adopt": True}).json()
+    assert r["ok"] and r["step"] == 1 and r["source"] == "screen"
+    r = client.post("/api/screens/recipe/step", headers=ha,
+                    json={"screen": "ks-echo", "step": "next"}).json()
+    assert r["ok"] and r["result"] == "last_step"          # lasagna has one step
+    assert screen_recipes.get_recipe("ks-echo")["title"] == "Lasagna"
+    # The timer route takes up the shown recipe the same way.
+    _tablet(client, "ks-den", "Den tablet")
+    den = client.post("/api/screens/recipe/timer", headers=_key("screen", "den"),
+                      json={"screen": "ks-den", "adopt": True})
+    assert den.status_code == 403                            # not that key's screen
+    third = _tablet(client, "ks-hall", "Hall tablet")
+    r = client.post("/api/screens/recipe/timer", headers=third,
+                    json={"screen": "ks-hall", "adopt": True}).json()
+    assert r["result"] == "started" and r["timer"]["label"] == "Bake"
+    assert screen_recipes.get_recipe("ks-hall")["title"] == "Lasagna"
+
+
+# --- choosing a timer -------------------------------------------------------------
+
+def test_timer_choices_leave_out_the_ones_running(client):
+    ha = _key("ha", "HA")
+    _tablet(client)
+    screen_recipes.set_recipe("ks-echo", PIE)
+    screen_recipes.set_step("ks-echo", screen_recipes.get_recipe("ks-echo"), 2)  # step 3
+
+    def start(**body):
+        return client.post("/api/screens/recipe/timer", headers=ha,
+                           json={"screen": "ks-echo", **body}).json()
+
+    assert start(step=2)["result"] == "started"              # Bake crust
+    assert start(query="cool")["result"] == "started"        # Cool, step 5
+    # Step 3 has no timer: the two not running are offered.
+    r = start()
+    assert r["result"] == "ambiguous" and [c["label"] for c in r["choices"]] == ["Bake", "Chill"]
+    assert r["speech"].startswith("Step 3 has no timer. Which timer: bake for 15 minutes")
+    # Step 5's two timers, one running: still a question, with one choice.
+    r = start(step=5)
+    assert r["result"] == "ambiguous" and [c["label"] for c in r["choices"]] == ["Chill"]
+    assert start(step=4)["result"] == "started"
+    r = start()
+    assert r["result"] == "ambiguous" and [c["label"] for c in r["choices"]] == ["Chill"]
+    assert start(step=5, query="chill")["result"] == "started"
+    # Every one running: nothing to ask.
+    r = start()
+    assert r["ok"] and r["result"] == "running" and r["speech"] == "Those timers are already running."
+    assert {t["label"] for t in r["timers"]} == {"Bake crust", "Bake", "Cool", "Chill"}
+    r = start(step=5)
+    assert r["result"] == "running" and r["speech"] == "Those timers are already running."
+    assert len(timers.list_timers()) == 4
+
+
+# --- filler in what was said ------------------------------------------------------
+
+@pytest.mark.parametrize("said", ["just lasagna", "Just lasagna", "only the lasagna please",
+                                  "actually, lasagna", "the lasagna one", "lasagna, thanks",
+                                  "um, just the one lasagna"])
+def test_filler_around_a_name_is_not_part_of_it(said):
+    assert recipe_find.choose(said, LIBRARY) == {
+        "result": "shown", "recipe": {"slug": "lasagna", "title": "Lasagna"}}
+
+
+def test_just_lasagna_from_a_model_opens_it(client):
+    ha = _key("ha", "HA")
+    r = client.post("/api/screens/show-recipe", headers=ha,
+                    json={"query": "Just lasagna", "page": "cook"}).json()
+    assert r["result"] == "shown" and r["recipe"]["title"] == "Lasagna"
+
+
+def test_removing_a_screen_in_settings_puts_its_recipe_away(client):
+    _tablet(client)
+    screen_recipes.set_recipe("ks-echo", PIE)
+    from fastapi.testclient import TestClient
+    from app.main import app
+    admin = TestClient(app)
+    assert admin.post("/ui/login", data={"password": "hunter2"},
+                      follow_redirects=False).status_code in (302, 303)
+    assert admin.delete("/setup/screens/ks-echo").json()["ok"]
+    assert screen_recipes.get_recipe("ks-echo") is None
+
+
+def test_the_landscape_sizes_are_the_echo_shows():
+    """Measured on the kitchen tablets: an Echo Show 8 lays out 963 x 594 CSS
+    px (at 1.33), a ThinkSmart View 492 x 788 (at 1.625). The landscape
+    layout starts at 900 px so the Echo gets it, with its own numbers."""
+    import re
+    css = (SERVICE / "app/static/css/cook-mode.css").read_text()
+    wide = css[css.index("@media (min-width: 900px)"):]
+    for rule in (".cm-text { font-size: 33px; }", ".cm-text.cm-long { font-size: 27px; }",
+                 "min-height: 72px", ".cm-back { width: 165px; height: 83px;",
+                 ".cm-running .cm-run-left { font-size: 42px; }"):
+        assert rule in wide, rule
+    js = (SERVICE / "app/static/js/cook-mode.js").read_text()
+    assert "linesOf(text) > 6" in js and "length > 200" not in js
+    screen = (SERVICE / "app/static/css/screen.css").read_text()
+    assert "@media (min-width: 900px) and (orientation: landscape)" in screen
+    assert "min-width: 1000px" not in screen
+    bar = (SERVICE / "app/static/js/timer-bar.js").read_text()
+    assert re.search(r"HEIGHT = TABLET \? 38 : 28", bar)

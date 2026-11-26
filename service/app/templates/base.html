@@ -8,7 +8,8 @@
       data-display-margin-bottom="{{ display_margin_bottom | default(0) }}"
       data-display-margin-left="{{ display_margin_left | default(0) }}"
       data-is-pi="{{ '1' if is_pi else '0' }}"{% if screen_session %}
-      data-screen-id="{{ screen_session.id }}"{% endif %}
+      data-screen-id="{{ screen_session.id }}"{% endif %}{% if wall_profile %}
+      data-profile="wall"{% endif %}
       data-quiet-mode="{{ 'true' if quiet_mode else 'false' }}"
       data-clock-format="{{ clock_format | default('auto') }}"{% if demo_mode %}
       data-demo="1"{% endif %}>
@@ -220,6 +221,10 @@
   {# The shared page styles. Formerly a 16 KB inline block here; see
      static/css/base.css for why it moved. The dynamic rules above stay. #}
   <link rel="stylesheet" href="static/css/base.css?v={{ app_version }}">
+  {% if wall_profile %}{# The wall tablet profile (Settings, Bandit Remotes, Screens): bigger
+     type, a short menu and fewer buttons, for a tablet on the wall. #}
+  <link rel="stylesheet" href="static/css/wall.css?v={{ app_version }}">
+  {% endif %}
 </head>
 <body>
   {# Keyboard users jump past the navigation straight to the page. Hidden until
@@ -236,9 +241,11 @@
   {# Open-install notice and grace-period banner, pinned above the navbar.
      Renders nothing once the install has a password, or in demo mode. #}
   {% with access_banner_fixed = true %}{% include "_access_banner.html" %}{% endwith %}
-  <nav class="navbar navbar-expand-lg bg-body-tertiary border-bottom fixed-top" aria-label="Main">
+  {# A wall tablet never gets the wide bar: the logo, the menu button and its
+     own Exit are all it has, at every width. #}
+  <nav class="navbar{% if not wall_profile %} navbar-expand-lg{% endif %} bg-body-tertiary border-bottom fixed-top" aria-label="Main">
     <div class="container-fluid">
-      <a class="navbar-brand d-flex align-items-center" href="ui/"><img src="static/icons/logo-mark.png" alt="" class="brand-logo me-2">{{ app_name }}</a>
+      <a class="navbar-brand d-flex align-items-center" href="{{ 'ui/start' if wall_profile else 'ui/' }}"><img src="static/icons/logo-mark.png" alt="" class="brand-logo me-2">{{ app_name }}</a>
       {# Two-level navigation (FoodAssistant-gg33). The top row shows only
          TOP-LEVEL pages as flat links; a page's sub-pages appear in the
          in-header sub-pill row below the navbar. A heading top-level (no page of
@@ -271,7 +278,7 @@
            top-level links to its first child. Hidden on desktop (d-lg-none),
            where the collapse expands inline and the top row already shows these.
            Utility controls follow below. #}
-        <ul class="navbar-nav w-100 mb-2 hamburger-nav d-lg-none">
+        <ul class="navbar-nav w-100 mb-2 hamburger-nav{% if not wall_profile %} d-lg-none{% endif %}">
           {% for tab in nav_tree() if tab.key not in ['about', 'defaults'] and not tab.blocked %}
           {%- set h_href = tab.href if tab.href else (tab.children[0].href if tab.children else '#') %}
           {%- set h_active = (active == tab.key) or (tab.children | selectattr('key', 'equalto', active) | list) %}
@@ -283,7 +290,7 @@
           {% endfor %}
           <li><hr class="dropdown-divider"></li>
         </ul>
-        <ul class="navbar-nav ms-auto">
+        <ul class="navbar-nav ms-auto pr-nav-utility">
           {# Utility controls. Icon-only in the desktop bar to stay compact; in
              the collapsed hamburger menu each carries a text label (d-lg-none)
              so it is not a row of bare icons (FoodAssistant-2e0f, Dan). #}
@@ -403,7 +410,7 @@
   <nav id="floatNav" class="float-nav d-none" aria-label="Quick navigation"
        data-position="{{ floating_nav_position }}"
        data-autohide-streamdeck="{{ '1' if floating_nav_autohide_streamdeck else '0' }}"
-       data-nav-hidden="{{ '1' if hide_nav_chrome else '0' }}"
+       data-nav-hidden="{{ '1' if hide_nav_chrome or wall_profile else '0' }}"
        data-has-streamdeck="{{ '1' if has_streamdeck else '0' }}">
     {# Top-level pages only (float_nav_pages). The bar is icon-only with no room
        for labels, so a flat list of every page would be a wall of unlabelled
@@ -425,7 +432,7 @@
        (auto keeps them off at large/xlarge scale), and when it is set the
        script exits without polling anything. -->
   <aside id="timerChips" class="timer-chips d-none" aria-label="Running timers"
-       data-chips-hidden="{{ '1' if hide_timer_chips else '0' }}"></aside>
+       data-chips-hidden="{{ '1' if hide_timer_chips or wall_profile else '0' }}"></aside>
 
   <!-- QR deep-link modal: at body level so backdrop and focus work on all browsers -->
   <div class="modal fade" id="qrModal" tabindex="-1" aria-labelledby="qrModalLabel" aria-hidden="true">
@@ -491,5 +498,6 @@
      start page by itself after five quiet minutes, and shows a finished timer. #}
   <script src="static/js/screen-app.js?v={{ app_version }}"></script>
   {% endif %}
+  {% if wall_profile %}<script src="static/js/wall.js?v={{ app_version }}"></script>{% endif %}
 </body>
 </html>

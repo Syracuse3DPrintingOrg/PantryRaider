@@ -132,6 +132,24 @@ def status_icons_context() -> dict | None:
         return None
 
 
+def wall_profile(request: Request | None) -> bool:
+    """Whether this request comes from a tablet showing the whole interface
+    with the wall tablet profile on (Settings, Bandit Remotes, Screens). The
+    profile only moves and trims things on the page; what the session may do
+    is decided in services/access.py as for any screen. Never raises."""
+    try:
+        session = request.session if request is not None else {}
+        if session.get("role") != "screen" or session.get("screen_app") is not True:
+            return False
+        sid = str(session.get("screen_id") or "")
+        if not sid:
+            return False
+        from .services import screens
+        return screens.wall_profile(sid)
+    except Exception:
+        return False
+
+
 def screen_context(request: Request) -> dict:
     """For a tablet or wall screen's own sign-in: which screen it is, and the
     display values for that tablet. The scale, rotation and margins in
@@ -143,14 +161,19 @@ def screen_context(request: Request) -> dict:
         session = request.session
         if session.get("role") != "screen" or not session.get("screen_id"):
             return {"screen_session": None, "timer_bar": timer_bar_context(),
-                    "status_icons": status_icons_context()}
+                    "status_icons": status_icons_context(), "wall_profile": False}
         from .services import screens
         sid = str(session.get("screen_id"))
         known = screens.get(sid) or {}
         kind = str(known.get("kind") or "")
+        wall = wall_profile(request)
         return {
+            # wall: the wall tablet profile (html data-profile="wall",
+            # static/css/wall.css and static/js/wall.js).
+            "wall_profile": wall,
             "screen_session": {"id": sid, "kind": kind,
-                               "app": session.get("screen_app") is True},
+                               "app": session.get("screen_app") is True,
+                               "wall": wall},
             # A tablet has no key pad of its own, whatever this install has.
             "timer_bar": {"color": (timer_bar_context() or {"color": "#FF0000"})["color"]},
             "status_icons": status_icons_context(),
@@ -162,7 +185,8 @@ def screen_context(request: Request) -> dict:
             "display_margin_left": 0,
         }
     except Exception:
-        return {"screen_session": None, "timer_bar": None, "status_icons": None}
+        return {"screen_session": None, "timer_bar": None, "status_icons": None,
+                "wall_profile": False}
 
 
 def theme_context(request: Request) -> dict:

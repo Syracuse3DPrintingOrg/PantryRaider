@@ -28,8 +28,11 @@
 (function () {
   var me = document.currentScript;
   var href = me && me.getAttribute('data-kiosk-css');
+  // A tablet in the wall tablet profile is a touch kiosk even when its
+  // browser keeps no storage to remember that in.
+  var wall = document.documentElement.getAttribute('data-profile') === 'wall';
   try {
-    if (href && localStorage.getItem('kioskMode') === 'true') {
+    if (href && (wall || localStorage.getItem('kioskMode') === 'true')) {
       var link = document.createElement('link');
       link.rel = 'stylesheet';
       link.href = href;

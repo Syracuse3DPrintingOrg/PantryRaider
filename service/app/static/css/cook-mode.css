@@ -2,9 +2,12 @@
    kitchen tablet read from across the room. Old-browser CSS: flexbox with
    margins instead of gap, no grid, no custom properties.
 
-   A wide landscape panel (an Echo Show, 1280 CSS px at 1x) shows a CSS
-   pixel much smaller than a portrait one (a ThinkSmart View, about 490 CSS
-   px at 1.63x), so the wide layout uses bigger numbers. */
+   Two layouts, sized on the two kitchen tablets themselves. Portrait (below
+   900 px wide): a ThinkSmart View, 492 x 788 CSS px at 1.625. Landscape
+   (900 px and wider): an Echo Show 8, 963 x 594 CSS px at 1.33, whose CSS
+   pixel is smaller on the glass (about 0.18 mm against 0.22 mm), so it gets
+   its own numbers at the end of this file and everything fits in 594 px of
+   height. The rules before the media blocks are the shared defaults. */
 .cm {
   position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 2000;
   display: -webkit-flex; display: flex; -webkit-flex-direction: column; flex-direction: column;
@@ -34,11 +37,13 @@
 .cm-where { display: none; }
 .cm-exit { height: 48px; min-width: 96px; }
 
+/* The running timers on a narrow screen: chips that wrap onto a second line
+   (and scroll past two) rather than run off the edge under Exit. */
 .cm-runrow {
-  -webkit-flex: 0 0 auto; flex: 0 0 auto; white-space: nowrap; overflow-x: auto;
-  padding: 8px 12px; background: #191c21; border-bottom: 1px solid #2c313a;
+  -webkit-flex: 0 0 auto; flex: 0 0 auto; white-space: normal; max-height: 106px; overflow-y: auto;
+  padding: 8px 12px 2px 12px; background: #191c21; border-bottom: 1px solid #2c313a;
 }
-.cm-runrow .cm-run { display: inline-block; margin-right: 10px; padding: 6px 14px; border-radius: 999px; background: #262b33; }
+.cm-runrow .cm-run { display: inline-block; margin: 0 8px 6px 0; padding: 6px 12px; border-radius: 999px; background: #262b33; white-space: nowrap; }
 .cm-runrow .cm-run-name { font-size: 18px; font-weight: 600; margin-right: 8px; }
 .cm-runrow .cm-run-left { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .cm-run.ringing { background: #c62828; }
@@ -123,6 +128,8 @@
   .cm-top { -webkit-flex-basis: 56px; flex-basis: 56px; height: 56px; padding-left: 14px; }
   .cm-title { font-size: 20px; }
   .cm-where { font-size: 17px; margin: 0 10px; }
+  .cm-runrow .cm-run-name { font-size: 16px; margin-right: 6px; }
+  .cm-runrow .cm-run-left { font-size: 19px; }
   .cm-exit { height: 44px; min-width: 80px; font-size: 18px; }
   .cm-body { display: block; overflow-y: auto; -webkit-overflow-scrolling: touch; }
   .cm-main { padding: 18px 16px; overflow: visible; }
@@ -147,8 +154,47 @@
   .cm-ing { font-size: 22px; }
 }
 
-/* Wide: the right column has the running timers and the step number is
-   above the step, so the narrow layout's timer row and top-bar count go. */
+/* Landscape, sized for an Echo Show 8 (963 x 594 CSS px): the right column
+   has the running timers and what comes next, the step number sits above the
+   step, and Ingredients joins Back and Next in the bar, so the column never
+   has to scroll the next step out of sight. */
 @media (min-width: 900px) {
   .cm-runrow, .cm-where { display: none !important; }
+  .cm-btn { height: 46px; padding: 0 18px; font-size: 18px; border-radius: 12px; }
+  .cm-label { font-size: 14px; margin-bottom: 6px; }
+  .cm-top { -webkit-flex-basis: 50px; flex-basis: 50px; height: 50px; padding: 0 10px 0 16px; }
+  .cm-title { font-size: 19px; }
+  .cm-exit { height: 40px; min-width: 80px; font-size: 18px; }
+  .cm-main { padding: 16px 22px; }
+  .cm-side { padding: 14px 16px; overflow: hidden; }
+  .cm-kicker { font-size: 18px; margin-bottom: 8px; }
+  .cm-text { font-size: 33px; }
+  .cm-text.cm-long { font-size: 27px; }
+  .cm-timers { margin-top: 16px; }
+  .cm-btn.cm-tbtn { min-height: 72px; margin: 0 10px 10px 0; padding: 9px 20px; font-size: 23px; border-width: 2px; }
+  .cm-tbtn-sub { font-size: 15px; margin-top: 3px; }
+  /* Many timers scroll in their own list; the next step keeps its place. */
+  .cm-running { -webkit-flex: 0 1 auto; flex: 0 1 auto; min-height: 0; overflow-y: auto; margin-bottom: 10px; }
+  .cm-running .cm-run { padding: 4px 10px; margin-bottom: 6px; border-left-width: 5px; }
+  .cm-running .cm-run-name { font-size: 17px; }
+  .cm-running .cm-run-left { font-size: 42px; }
+  .cm-nextup { -webkit-flex: 1 1 0; flex: 1 1 0; min-height: 56px; overflow: hidden; }
+  /* Whole lines only, three at most, under the timer bar too. */
+  .cm-nextup-text {
+    font-size: 18px; overflow: hidden;
+    display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3;
+  }
+  .cm-ing-btn { display: none; }
+  .cm-bar { -webkit-flex-basis: 98px; flex-basis: 98px; height: 98px; padding: 8px 10px; }
+  .cm-back { width: 165px; height: 83px; font-size: 23px; margin-right: 10px; }
+  .cm-next { height: 83px; font-size: 26px; }
+  .cm-ing-bar { display: inline-block; width: 170px; height: 83px; margin-left: 10px; font-size: 20px; padding: 0 10px; }
+  .cm-done, .cm-empty { padding: 28px 24px; }
+  .cm-done-title { font-size: 36px; margin-bottom: 12px; }
+  .cm-done-text { font-size: 20px; max-width: 680px; margin-bottom: 20px; }
+  .cm-done-acts .cm-btn { height: 72px; min-width: 196px; margin: 0 8px 10px 8px; font-size: 23px; }
+  .cm-empty { font-size: 21px; }
+  .cm-sheet-box { width: 600px; padding: 16px 18px; }
+  .cm-sheet-title { font-size: 23px; }
+  .cm-ing { font-size: 20px; padding: 9px 4px; }
 }

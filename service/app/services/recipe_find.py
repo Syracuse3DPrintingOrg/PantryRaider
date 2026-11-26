@@ -19,6 +19,9 @@ _FILLER = frozenset({
     "we", "on", "screen", "put", "from", "in", "pantry", "raider",
     # "Let's cook ...", "I want to make ..."
     "s", "want", "would", "like", "going", "gonna", "start", "making", "cooking",
+    # "Just lasagna", "only the soup please", "actually, the chili one"
+    "just", "only", "actually", "really", "one", "ones", "instead", "um", "uh",
+    "thanks", "thank", "you",
 })
 MIN_SCORE = 0.62
 # Below a match but close enough to offer: "did you mean".

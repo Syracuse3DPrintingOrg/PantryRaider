@@ -42,6 +42,10 @@
   try {
     kiosk = localStorage.getItem('kioskMode') === 'true';
   } catch (e) { /* no storage: never a kiosk */ }
+  // A tablet in the wall tablet profile types with this keyboard whatever its
+  // browser has stored: an Echo Show has no keyboard of its own, and a kiosk
+  // app's web view may keep no storage at all.
+  if (document.documentElement.getAttribute('data-profile') === 'wall') kiosk = true;
   if (!kiosk) return;
 
   // Per-device setting: on by default in kiosk mode; the config div (rendered

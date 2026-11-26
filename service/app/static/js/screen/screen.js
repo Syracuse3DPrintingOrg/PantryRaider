@@ -198,6 +198,7 @@
         }
         show(strip, timers.length > 0);
         bodyClass('has-strip', timers.length > 0);
+        fitStrip();
       }
       // "Bake crust is done." and, for a recipe step's timer, what is next.
       var names = [], notes = [];
@@ -218,6 +219,14 @@
     paintTimerButtons();
   }
   var ringingNow = [];
+  // The strip wraps onto more lines as timers are added, so the page starts
+  // just below it, however tall it is.
+  function fitStrip() {
+    var strip = $('sc-strip'), main = $('sc-main');
+    if (!strip || !main) return;
+    main.style.top = strip.hasAttribute('hidden') ? '' : (strip.offsetTop + strip.offsetHeight) + 'px';
+  }
+  window.addEventListener('resize', fitStrip);
   function tickTimers() {
     var changed = false, i, t, nodes, j;
     for (i = 0; i < timers.length; i++) {
@@ -268,6 +277,15 @@
     ingBtn.textContent = open ? 'Hide ingredients' : 'Show ingredients';
     var box = $('sc-ingredients-col');
     if (open && box && box.scrollIntoView) box.scrollIntoView(true);
+  });
+  // This page's own Exit: the screen goes back where it rests (its app drops
+  // the page; a plain browser goes home).
+  var exitBtn = $('sc-exit');
+  if (exitBtn) exitBtn.addEventListener('click', function () {
+    exitBtn.disabled = true;
+    request('POST', 'events/close', { screen: SCREEN }, 10000, function () {
+      setTimeout(function () { exitBtn.disabled = false; }, 3000);
+    });
   });
   var ringBtn = $('sc-ring-dismiss');
   if (ringBtn) ringBtn.addEventListener('click', function () { act('POST', 'timers/dismiss', {}); });
@@ -363,8 +381,9 @@
     var t = timerFor(s);
     if (t && isRinging(t)) { act('POST', 'timers/' + t.id + '/dismiss'); return; }
     if (t) { toast({ message: s.label + ' is already running, ' + clockLeft(remaining(t)) + ' left.' }); return; }
+    // adopt: a recipe this page shows from the kitchen becomes this screen's own.
     request('POST', 'api/screens/recipe/timer',
-      { screen: SCREEN, step: s.step_index + 1, label: s.label, origin: SCREEN }, 10000,
+      { screen: SCREEN, step: s.step_index + 1, label: s.label, origin: SCREEN, adopt: true }, 10000,
       function (d) {
         if (!d) { toast({ level: 'error', message: 'That timer did not start. Try again.' }); return; }
         if (d.result !== 'started' && d.result !== 'running' && d.speech) toast({ message: d.speech });
@@ -419,7 +438,7 @@
     }
   }
   function moveStep(which) {
-    request('POST', 'api/screens/recipe/step', { screen: SCREEN, step: String(which) }, 10000,
+    request('POST', 'api/screens/recipe/step', { screen: SCREEN, step: String(which), adopt: true }, 10000,
       function (d) {
         if (!d) { toast({ level: 'error', message: 'Could not reach Pantry Raider. Try again.' }); return; }
         if (d.ok === false && d.speech) { toast({ message: d.speech }); return; }

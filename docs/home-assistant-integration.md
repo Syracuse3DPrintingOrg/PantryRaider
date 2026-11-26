@@ -229,6 +229,8 @@ chose: a Bandit, the main kitchen display, or a tablet set up as a
   "what's step 4" and "go to step 4" move the screen to that step and read it
   out. Nothing answers a bare "next", "back" or "stop", so music and your
   timers keep those.
+  A device answers for its own screen's recipe only: if nothing was opened
+  there, it asks what you are cooking.
 - With an assistant that uses an AI model you can also ask "how much butter
   does it take" or "what temperature", and it answers from the recipe on
   your screen. "Start the timer for baking it" starts that step's timer,

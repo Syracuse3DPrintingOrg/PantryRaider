@@ -109,6 +109,8 @@ def _load_locked() -> None:
                     "created": str(raw.get("created", "")),
                     "last_seen": str(raw.get("last_seen", "")) or None,
                 }
+                if isinstance(raw.get("wall"), bool):
+                    rows[sid]["wall"] = raw["wall"]
     except (OSError, ValueError, TypeError, AttributeError):
         return
     _mtime = mtime
@@ -301,6 +303,47 @@ def forget_owned_by(owner: str) -> int:
         if gone:
             _save_locked()
         return len(gone)
+
+
+# --- The wall tablet profile -------------------------------------------------
+# A tablet on a wall shows the whole interface with bigger type, fewer menu
+# entries and fewer buttons (static/css/wall.css). It is kept per screen, as
+# "wall" on the screen's row once someone chooses in Settings; until then a
+# kiosk app's screen has it on and every other kind has it off.
+
+WALL_DEFAULT_KINDS = frozenset({"kiosk_satellite"})
+
+
+def wall_default(kind) -> bool:
+    """Whether a screen of this kind gets the profile before anyone chooses."""
+    return str(kind or "") in WALL_DEFAULT_KINDS
+
+
+def wall_profile(screen_id) -> bool:
+    """Whether this foreign screen shows the wall tablet profile."""
+    with _lock:
+        _load_locked()
+        row = _screens.get(str(screen_id or ""))
+        if row is None:
+            return False
+        chosen = row.get("wall")
+        return chosen if isinstance(chosen, bool) else wall_default(row.get("kind"))
+
+
+def set_wall_profile(screen_id, on) -> bool:
+    """Turn the profile on or off for one foreign screen; None goes back to
+    the default for its kind. False when there is no such screen."""
+    with _lock, state_write_lock(_state_file()):
+        _load_locked()
+        row = _screens.get(str(screen_id or ""))
+        if row is None:
+            return False
+        if on is None:
+            row.pop("wall", None)
+        else:
+            row["wall"] = bool(on)
+        _save_locked()
+        return True
 
 
 # --- Events for one screen ---------------------------------------------------

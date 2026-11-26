@@ -225,8 +225,11 @@ class PantryRaiderClient:
         )
 
     async def async_screen_recipe(self, screen: str = "") -> dict[str, Any]:
-        """The recipe open on a screen, for questions (GET /api/screens/recipe)."""
-        params = {"screen": screen} if screen else None
+        """The recipe open on a screen, for questions (GET /api/screens/recipe).
+        ``own`` asks for that screen's own recipe only: a screen that never
+        opened one answers that none is open there, rather than with the
+        kitchen's (which its pages may still show)."""
+        params = {"screen": screen, "own": "1"} if screen else None
         return await self.async_call(
             "GET", "/api/screens/recipe", params=params, ok_statuses=(200, 403, 404)
         )

@@ -9,7 +9,8 @@
       data-display-rotation="{{ display_rotation | default(0) }}"
       data-rotation-mode="{{ 'compositor' if is_pi else 'css' }}"
       data-is-pi="{{ '1' if is_pi else '0' }}"{% if screen_session %}
-      data-screen-id="{{ screen_session.id }}"{% endif %}
+      data-screen-id="{{ screen_session.id }}"{% endif %}{% if wall_profile %}
+      data-profile="wall"{% endif %}
       data-display-margin-top="{{ display_margin_top | default(0) }}"
       data-display-margin-right="{{ display_margin_right | default(0) }}"
       data-display-margin-bottom="{{ display_margin_bottom | default(0) }}"
@@ -424,6 +425,10 @@
       .glance-mark { height: clamp(60px, 10vh, 96px); }
     }
   </style>
+  {% if wall_profile %}{# The wall tablet profile (Settings, Bandit Remotes, Screens): one line
+     of hero, what is cooking, and the four pages a wall tablet is for. #}
+  <link rel="stylesheet" href="static/css/wall.css?v={{ app_version }}">
+  {% endif %}
 </head>
 <body>
   {# Open-install notice and grace-period banner, in normal flow at the top so
@@ -464,6 +469,23 @@
       'timetemp':  'Timers and probes, live',
       'homehub':   'Weather and your cameras',
     } %}
+    {% if wall_profile %}
+    {# A wall tablet: the greeting and the name on one short line, so the
+       tiles get the screen. #}
+    <div class="glance-hero wall-hero">
+      <img src="static/icons/logo-mark.png" alt="" class="wall-hero-mark">
+      <span class="glance-eyebrow wall-hero-hello" id="glance-greeting">Welcome back</span>
+      <h1 class="wall-hero-title"><span class="glance-accent">Pantry Raider</span></h1>
+    </div>
+    {# What this screen is cooking, filled in by static/js/wall.js. It stays
+       hidden when nothing is open. #}
+    <a class="wall-continue" id="wall-continue" href="ui/current-recipe?cook=1" hidden>
+      <i class="bi bi-fire wall-continue-ico" aria-hidden="true"></i>
+      <span class="wall-continue-text"><span class="wall-continue-kicker">Continue cooking:</span>
+        <span class="wall-continue-what"><span class="wall-continue-title" id="wall-continue-title"></span><span class="wall-continue-step" id="wall-continue-step"></span></span></span>
+      <i class="bi bi-chevron-right wall-continue-go" aria-hidden="true"></i>
+    </a>
+    {% else %}
     <div class="glance-hero">
       <img src="static/icons/logo-mark.png" alt="" class="glance-mark">
       <div class="glance-hello">
@@ -472,6 +494,7 @@
         <p class="glance-tag">Your kitchen, at a glance. Where to?</p>
       </div>
     </div>
+    {% endif %}
     {# Neon tiles (Dan's smart-home-OS mock): every page is a tall glass tile
        with a large glowing line icon in the brand's pink/purple neon family,
        the label, a muted hint, and a LIVE status line (fed below by the same
@@ -486,6 +509,37 @@
                      'color-mix(in srgb, var(--pr-accent) 60%, var(--pr-accent-2))',
                      'color-mix(in srgb, var(--pr-accent-2) 60%, var(--pr-accent))'] * 2 %}
     {% endif %}
+    {% if wall_profile %}
+    {# The wall tablet profile: Cook, Time & Temp, Shopping and Inventory, then
+       More, which shows every other page below it (static/js/wall.js). #}
+    <div class="glance-cards wall-lead">
+      {% for k in wall_lead %}
+      <a class="glance-card" href="{{ k.href }}" style="--neon: {{ _neons[loop.index0 % 8] }}" data-tile="{{ k.key }}">
+        <span class="glance-card-ico"><i class="bi {{ k.icon }}"></i></span>
+        <span class="glance-card-label">{{ k.label }}</span>
+        <span class="glance-card-blurb">{{ _blurbs.get(k.key, '') }}</span>
+        <span class="glance-card-live" data-live-slot hidden></span>
+      </a>
+      {% endfor %}
+    </div>
+    {% if wall_rest %}
+    <button type="button" class="wall-more" id="wall-more" aria-expanded="false" aria-controls="wall-rest">
+      <i class="bi bi-three-dots wall-more-ico" aria-hidden="true"></i>
+      <span class="wall-more-label" data-label-more="More" data-label-fewer="Fewer">More</span>
+      <span class="wall-more-list">{{ wall_rest | map(attribute='label') | join(', ') }}</span>
+    </button>
+    <div class="glance-cards wall-rest" id="wall-rest" hidden>
+      {% for k in wall_rest %}
+      <a class="glance-card" href="{{ k.href }}" style="--neon: {{ _neons[(loop.index0 + 4) % 8] }}" data-tile="{{ k.key }}">
+        <span class="glance-card-ico"><i class="bi {{ k.icon }}"></i></span>
+        <span class="glance-card-label">{{ k.label }}</span>
+        <span class="glance-card-blurb">{{ _blurbs.get(k.key, '') }}</span>
+        <span class="glance-card-live" data-live-slot hidden></span>
+      </a>
+      {% endfor %}
+    </div>
+    {% endif %}
+    {% else %}
     <div class="glance-cards">
       {% for k in layout if k.kind == 'builtin' %}
       <a class="glance-card" href="{{ k.href }}" style="--neon: {{ _neons[loop.index0 % 8] }}" data-tile="{{ k.key }}">
@@ -496,6 +550,7 @@
       </a>
       {% endfor %}
     </div>
+    {% endif %}
     {# Notification pills: live counts that navigate to the relevant page. #}
     <div class="glance-pills">
       <a class="glance-pill" href="ui/pending" data-pill data-endpoint="action-items/count" title="Review inbox">
@@ -594,5 +649,6 @@
      start page by itself after five quiet minutes, and shows a finished timer. #}
   <script src="static/js/screen-app.js?v={{ app_version }}"></script>
   {% endif %}
+  {% if wall_profile %}<script src="static/js/wall.js?v={{ app_version }}"></script>{% endif %}
 </body>
 </html>

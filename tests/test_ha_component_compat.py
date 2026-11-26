@@ -100,11 +100,16 @@ def ha_client(tmp_path, monkeypatch):
     monkeypatch.setattr(deck_config, "apush_to_deck", no_push, raising=False)
     monkeypatch.setattr("app.services.egress.is_safe_public_url", lambda url, **kw: True)
     monkeypatch.setattr("app.services.egress.guarded_async_client", lambda **kw: _FakeProbe())
+    from app.services import ha_events
     pairing.reset()
+    ha_events.reset()
     expiring_router._count_items_cache.invalidate()
     with TestClient(app, client=HA_PEER) as c:
         yield c
+    # The recorded calls post events; they stay in the in-memory ring after
+    # this test's data folder is gone, so clear them for whatever runs next.
     pairing.reset()
+    ha_events.reset()
     expiring_router._count_items_cache.invalidate()
 
 

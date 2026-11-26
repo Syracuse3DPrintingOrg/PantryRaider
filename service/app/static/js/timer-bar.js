@@ -23,7 +23,12 @@
   if (!kiosk && !html.getAttribute('data-screen-id')) return;
 
   var COLOR = cfg.getAttribute('data-color') || '#FF0000';
-  var HEIGHT = 28;
+  // A tablet signed in as a screen is read from across the kitchen (an Echo
+  // Show 8 lays out 963 x 594 CSS px, each one small on the glass), so its
+  // bar and text are larger than on this install's own display.
+  var TABLET = !!html.getAttribute('data-screen-id');
+  var HEIGHT = TABLET ? 38 : 28;
+  var TEXT_PX = TABLET ? 20 : 15;
   var POLL_MS = 5000;
   var timers = [];
   var skew = 0;
@@ -45,7 +50,7 @@
     'background:linear-gradient(90deg,color-mix(in srgb,' + ACCENT + ' 55%,#000) 0%,' + ACCENT + ' 100%);' +
     'box-shadow:0 0 18px ' + ACCENT + ';transition:width 1s linear}' +
     '.tb-text{position:absolute;top:0;left:0;right:0;line-height:' + HEIGHT + 'px;text-align:center;' +
-    'color:#fff;font-size:15px;font-weight:700;letter-spacing:.02em;white-space:nowrap;overflow:hidden;' +
+    'color:#fff;font-size:' + TEXT_PX + 'px;font-weight:700;letter-spacing:.02em;white-space:nowrap;overflow:hidden;' +
     'text-overflow:ellipsis;text-shadow:0 1px 3px rgba(0,0,0,.75);padding:0 64px}' +
     '.tb.done .tb-fill{width:100%!important;border-radius:0;background:' + COLOR + ';box-shadow:none;' +
     '-webkit-animation:tb-flash .7s infinite alternate;animation:tb-flash .7s infinite alternate}' +
