@@ -206,16 +206,51 @@ class PantryRaiderClient:
         return [s for s in body.get("screens") or [] if isinstance(s, dict)]
 
     async def async_show_recipe(
-        self, query: str = "", screen: str = "", slug: str = ""
+        self, query: str = "", screen: str = "", slug: str = "", choice: str = "",
+        page: str = "",
     ) -> dict[str, Any]:
         """Find a recipe by what was said and show it (POST
         /api/screens/show-recipe). The reply carries ``result`` and a
-        ``speech`` line; a screen that does not exist comes back as ok False."""
+        ``speech`` line; a screen that does not exist comes back as ok False.
+        ``choice`` answers the "which one?" an earlier call asked."""
         payload: dict[str, Any] = {"query": query, "screen": screen}
         if slug:
             payload["slug"] = slug
+        if choice:
+            payload["choice"] = choice
+        if page:
+            payload["page"] = page
         return await self.async_call(
             "POST", "/api/screens/show-recipe", payload, ok_statuses=(200, 400, 404, 409)
+        )
+
+    async def async_screen_recipe(self, screen: str = "") -> dict[str, Any]:
+        """The recipe open on a screen, for questions (GET /api/screens/recipe)."""
+        params = {"screen": screen} if screen else None
+        return await self.async_call(
+            "GET", "/api/screens/recipe", params=params, ok_statuses=(200, 403, 404)
+        )
+
+    async def async_recipe_step(self, step: Any, screen: str = "") -> dict[str, Any]:
+        """Move the step a screen is on and read it (POST /api/screens/recipe/step)."""
+        return await self.async_call(
+            "POST", "/api/screens/recipe/step", {"screen": screen, "step": str(step)},
+            ok_statuses=(200, 403, 404),
+        )
+
+    async def async_start_recipe_timer(
+        self, screen: str = "", step: int | None = None, query: str = "",
+        origin: str = "", show: bool = False,
+    ) -> dict[str, Any]:
+        """Start one of the timers the recipe on a screen suggests (POST
+        /api/screens/recipe/timer)."""
+        payload: dict[str, Any] = {"screen": screen, "query": query, "origin": origin,
+                                   "show": bool(show)}
+        if step is not None:
+            payload["step"] = int(step)
+        return await self.async_call(
+            "POST", "/api/screens/recipe/timer", payload,
+            ok_statuses=(200, 400, 403, 404, 502),
         )
 
     async def async_timers(self) -> list[dict[str, Any]]:

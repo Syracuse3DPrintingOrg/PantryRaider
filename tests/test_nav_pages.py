@@ -25,7 +25,7 @@ NOT_NAV_TARGETS = {"ui/login", "ui/pin", "ui/getting-ready", "setup/calibrate/to
                    # The pages a tablet or wall screen shows. Such a screen is
                    # sent there by page name (services/screens.page_path); a
                    # kitchen display has its own recipe and timer pages.
-                   "screen/", "screen/recipe", "screen/timers"}
+                   "screen/", "screen/recipe", "screen/timers", "screen/cook"}
 
 
 def _html_get_routes() -> set[str]:

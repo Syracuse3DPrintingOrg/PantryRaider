@@ -65,6 +65,98 @@ _LABEL_STOP = {
     "of", "on", "in", "degrees", "degree",
 }
 
+# Cooking actions a timer can belong to, in their plain (imperative) form. The
+# label names the one nearest before the duration, so "Heat the oven and boil
+# the noodles for 8 minutes" is "Boil noodles", not "Heat oven".
+_ACTIONS = frozenset({
+    "bake", "blanch", "blend", "boil", "braise", "brine", "broil", "brown", "char",
+    "chill", "cook", "cool", "cure", "deep-fry", "defrost", "dehydrate", "fry",
+    "grill", "heat", "infuse", "knead", "marinate", "melt", "microwave", "mix",
+    "parboil", "poach", "preheat", "process", "proof", "prove", "pulse",
+    "reduce", "refrigerate", "reheat", "rest", "rise", "roast", "saute", "scald",
+    "sear", "set", "simmer", "sit", "smoke", "soak", "stand", "steam", "steep",
+    "stew", "stir", "stir-fry", "toast", "beat", "whip", "whisk", "freeze",
+    "thaw", "caramelize", "caramelise", "sweat", "soften", "bloom", "drain",
+    "dry", "warm", "air-fry", "pressure-cook", "slow-cook", "ferment",
+    "sauté", "griddle", "barbecue", "bbq", "flip", "turn", "cover",
+})
+# Words that end the object of an action: "Boil the noodles until tender".
+_OBJECT_END = frozenset({
+    "for", "until", "at", "to", "about", "approximately", "or", "and", "then",
+    "over", "under", "with", "without", "in", "on", "into", "onto", "while",
+    "before", "after", "uncovered", "covered", "per", "each", "a", "side",
+    "minutes", "minute", "hours", "hour", "seconds", "second", "more", "another",
+    "longer", "if", "when", "so", "till", "from", "by", "as", "of", "is", "are",
+})
+# Where one instruction ends and the next begins inside a step.
+_CLAUSE_SPLIT = re.compile(r"[.;:!?]\s+|[.;:!?]$|,\s*then\b|\bthen\b|,\s*and\b|\(|\)", re.I)
+_WORD_RE = re.compile(r"[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ'-]*|,")
+_LET = frozenset({"let", "allow", "leave"})
+
+
+def _action_word(word: str) -> str | None:
+    """The plain form of a cooking action, or None. "Bake" and "sauté" are
+    actions; "baking" is not (a participle is a detail, "cook, stirring")."""
+    w = word.lower().strip("'")
+    if w in _ACTIONS:
+        return "saute" if w == "sauté" else w
+    return None
+
+
+def _clause_head(text: str, at: int) -> str:
+    """The words of the instruction a duration at ``at`` belongs to, from
+    where that instruction starts up to the duration."""
+    start = 0
+    for m in _CLAUSE_SPLIT.finditer(text, 0, at):
+        start = m.end()
+    return text[start:at]
+
+
+def _label_at(text: str, at: int, max_object: int = 2, max_chars: int = 40) -> str:
+    """Name the action a duration at ``at`` belongs to: the cooking verb
+    nearest before it in the same instruction, plus a word or two of what it
+    is done to ("Boil noodles", "Bake", "Let dough rise"). Without a known
+    verb it is the instruction's first word and its object, then "Timer"."""
+    # Numbers never match a word, so a temperature ahead of the duration
+    # ("Heat the oven to 375 F and boil ...") does not end the search early.
+    words = _WORD_RE.findall(_clause_head(text, at))
+    verb_at = None
+    for i in range(len(words) - 1, -1, -1):
+        if _action_word(words[i]):
+            verb_at = i
+            break
+    if verb_at is None:
+        verb_at = next((i for i, w in enumerate(words)
+                        if w != "," and w.lower() not in _LABEL_STOP
+                        and w.lower() not in _UNIT_SECONDS), None)
+        if verb_at is None:
+            return "Timer"
+    start = verb_at
+    # "Let the dough rise": the leading "let" belongs to the action.
+    for k in range(max(0, verb_at - 4), verb_at):
+        if words[k].lower() in _LET and "," not in words[k:verb_at]:
+            start = k
+            break
+    kept = [(_action_word(words[start]) or words[start].lower())]
+    kept += [w.lower() for w in words[start + 1:verb_at + 1]
+             if w != "," and w.lower() not in _LABEL_STOP]
+    taken = 0
+    for w in words[verb_at + 1:]:
+        lw = w.lower()
+        if (taken >= max_object or lw == "," or lw in _OBJECT_END or lw in _UNIT_SECONDS
+                or lw.endswith("ly") or lw.endswith("ing")
+                or lw in ("it", "them", "everything", "all")):
+            break
+        if lw in _LABEL_STOP or lw == "mixture":
+            continue
+        kept.append(lw)
+        taken += 1
+    label = " ".join(kept).strip()
+    label = label[:1].upper() + label[1:]
+    if len(label) > max_chars:
+        label = label[:max_chars].rsplit(" ", 1)[0].rstrip()
+    return label or "Timer"
+
 
 def _range_upper(value: str) -> float:
     """Return the chosen number from a value token. For a range ("10-12",
@@ -75,32 +167,11 @@ def _range_upper(value: str) -> float:
 
 
 def _label_from_step(step: str, max_words: int = 4, max_chars: int = 40) -> str:
-    """Derive a short human label from a step: the leading verb plus object,
-    skipping filler words, truncated to a few words / a char cap. Falls back to
-    "Timer" when the step has no usable words."""
-    # The action phrase lives before the first number; everything after is
-    # durations, temps, or quantities. Cut there so "degrees"/units never leak.
-    head = re.split(r"\d", step, maxsplit=1)[0]
-    words = re.findall(r"[A-Za-z']+", head)
-    kept: list[str] = []
-    for w in words:
-        lw = w.lower()
-        # Stop at a time-unit word: "Simmer the sauce" beats "...for minutes".
-        if lw in _UNIT_SECONDS:
-            break
-        # Skip filler ("for", "the", "an"...) anywhere; it never earns a slot.
-        if lw in _LABEL_STOP:
-            continue
-        kept.append(w)
-        if len(kept) >= max_words:
-            break
-    label = " ".join(kept).strip()
-    if not label:
-        return "Timer"
-    label = label[0].upper() + label[1:]
-    if len(label) > max_chars:
-        label = label[:max_chars].rstrip()
-    return label
+    """The label for a step's first duration (or the whole step when it has
+    none). Kept for callers that label a step rather than one duration."""
+    text = step or ""
+    m = _CHUNK_RE.search(text) or _WORDED_RE.search(text)
+    return _label_at(text, m.start() if m else len(text), max_chars=max_chars)
 
 
 def parse_step_durations(step: str) -> list[tuple[str, int]]:
@@ -118,7 +189,6 @@ def parse_step_durations(step: str) -> list[tuple[str, int]]:
     if not text:
         return []
 
-    label = _label_from_step(text)
     suggestions: list[tuple[str, int]] = []
 
     # Walk numeric "<value><unit>" chunks left to right, merging chunks that are
@@ -141,7 +211,7 @@ def parse_step_durations(step: str) -> list[tuple[str, int]]:
             break
         seconds = int(round(total))
         if seconds > 0:
-            suggestions.append((label, seconds))
+            suggestions.append((_label_at(text, matches[i].start()), seconds))
         i = j + 1
 
     # Worded durations only when no numeric chunk fired, to avoid double-counting
@@ -153,7 +223,7 @@ def parse_step_durations(step: str) -> list[tuple[str, int]]:
             factor = 0.5 if m.group("qty").lower().startswith("half") else 1.0
             seconds = int(round(base * factor))
             if seconds > 0:
-                suggestions.append((label, seconds))
+                suggestions.append((_label_at(text, m.start()), seconds))
 
     return suggestions
 
@@ -173,3 +243,110 @@ def suggestions_for_recipe(active: dict | None) -> list[dict]:
         for label, seconds in parse_step_durations(str(step)):
             out.append({"label": label, "seconds": seconds, "step_index": idx})
     return out
+
+
+# --- Picking one suggestion from what was said --------------------------------
+
+# Words around a timer request that do not say which timer.
+_ASK_FILLER = frozenset({
+    "the", "a", "an", "my", "our", "this", "that", "it", "its", "them", "timer",
+    "timers", "for", "start", "set", "begin", "run", "please", "now", "one", "step",
+    "to", "of", "on", "in", "and", "i", "we", "want", "need", "let", "lets", "let's",
+    "go", "do", "can", "you", "time", "clock", "countdown",
+})
+
+
+def _stem(word: str) -> str:
+    """A rough stem so "baking", "baked" and "bake" meet: ing/ed/es/s and a
+    trailing e come off, and a doubled last letter is undone ("chopping")."""
+    w = word.lower().strip("'")
+    for suffix in ("ing", "ed", "es", "s"):
+        if len(w) > len(suffix) + 2 and w.endswith(suffix):
+            w = w[: -len(suffix)]
+            break
+    if len(w) > 3 and w[-1] == w[-2] and w[-1] not in "aeiouls":
+        w = w[:-1]
+    if len(w) > 3 and w.endswith("e"):
+        w = w[:-1]
+    return w
+
+
+def _ask_words(text) -> list[str]:
+    words = re.findall(r"[a-zà-ÿ']+", str(text or "").lower())
+    return [_stem(w) for w in words if w not in _ASK_FILLER]
+
+
+def _hits(asked: list[str], words: list[str]) -> int:
+    have = set(words)
+    return sum(1 for w in asked if w in have
+               or any(len(w) >= 4 and len(o) >= 4 and (o.startswith(w) or w.startswith(o))
+                      for o in have))
+
+
+def choice_row(s: dict) -> dict:
+    """A suggestion as one of several to choose from (steps from 1)."""
+    return {"label": s["label"], "seconds": s["seconds"], "step": s["step_index"] + 1}
+
+
+def choose_suggestion(suggestions, steps, step: int | None = None, query: str = "",
+                      label: str = "") -> dict:
+    """Pick the one suggested timer a request means. ``step`` counts from 1;
+    ``query`` is the words that were said ("baking it", "the crust");
+    ``label`` names a button's own timer exactly.
+
+    {"result": "match", "suggestion": s} for one, {"result": "ambiguous",
+    "choices": [...]} for several, {"result": "not_found", "reason": ...}
+    where reason is no_timers, no_timer_in_step or no_match. Pure."""
+    rows = [s for s in (suggestions or []) if isinstance(s, dict)]
+    if not rows:
+        return {"result": "not_found", "reason": "no_timers"}
+    if step is not None:
+        rows = [s for s in rows if s.get("step_index") == int(step) - 1]
+        if not rows:
+            return {"result": "not_found", "reason": "no_timer_in_step", "step": int(step)}
+    if label:
+        exact = [s for s in rows if str(s.get("label", "")).lower() == str(label).lower()]
+        if exact:
+            rows = exact
+    asked = _ask_words(query)
+    if asked:
+        scored = []
+        for s in rows:
+            on_label = _hits(asked, _ask_words(s.get("label")))
+            idx = s.get("step_index", -1)
+            text = steps[idx] if isinstance(steps, list) and 0 <= idx < len(steps) else ""
+            on_step = _hits(asked, _ask_words(text))
+            scored.append((on_label * 2 + on_step, s))
+        best = max(sc[0] for sc in scored)
+        if best > 0:
+            rows = [sc[1] for sc in scored if sc[0] == best]
+        elif step is None:
+            return {"result": "not_found", "reason": "no_match"}
+    if len(rows) == 1:
+        return {"result": "match", "suggestion": rows[0]}
+    return {"result": "ambiguous", "choices": [choice_row(s) for s in rows[:6]]}
+
+
+def running_timer_for(suggestion: dict, timers) -> dict | None:
+    """The timer already counting down for this suggestion (same name, same
+    length), or None. A finished one does not count: it can be started again."""
+    want = str(suggestion.get("label", "")).strip().lower()
+    for t in timers or []:
+        if not isinstance(t, dict) or t.get("expired") or t.get("state") == "ringing":
+            continue
+        if (str(t.get("label", "")).strip().lower() == want
+                and abs(float(t.get("total_seconds") or 0)
+                        - float(suggestion.get("seconds") or 0)) < 1):
+            return t
+    return None
+
+
+def next_note(steps, step_index: int, max_chars: int = 120) -> str:
+    """What the "Time is up" screen says after a step's timer: the step that
+    follows ("Next: Lower the oven to 350 F."), or "" after the last."""
+    if not isinstance(steps, list) or not 0 <= step_index + 1 < len(steps):
+        return ""
+    text = " ".join(str(steps[step_index + 1]).split())
+    if len(text) > max_chars:
+        text = text[:max_chars].rsplit(" ", 1)[0].rstrip(",;:") + "..."
+    return f"Next: {text}" if text else ""

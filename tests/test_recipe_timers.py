@@ -133,12 +133,75 @@ def test_label_skips_leading_filler_and_truncates():
     label, _ = recipe_timers.parse_step_durations(
         "Simmer the tomato sauce gently for 20 minutes"
     )[0]
-    assert label == "Simmer tomato sauce gently"   # filler dropped, capped
+    # Filler dropped; the action and a word or two of its object, no adverb.
+    assert label == "Simmer tomato sauce"
 
 
 def test_label_falls_back_when_no_words():
     out = recipe_timers.parse_step_durations("20 minutes")
     assert out == [("Timer", 1200)]
+
+
+@pytest.mark.parametrize("step,labels", [
+    # The action the duration belongs to, not the first verb of the step.
+    ("Heat the oven to 375 F and boil the noodles for 8 minutes.", ["Boil noodles"]),
+    ("Cover with foil and bake for 45 minutes.", ["Bake"]),
+    ("Brown the beef, then stir in the marinara and simmer for 10 minutes.", ["Simmer"]),
+    ("Uncover, add the parmesan and bake for 10 minutes. Rest for 15 minutes.",
+     ["Bake", "Rest"]),
+    ("Saute 5 minutes, then simmer 20 minutes", ["Saute", "Simmer"]),
+    ("Press the crumbs into a dish and bake the crust for 10 minutes.", ["Bake crust"]),
+    ("Cool for 30 minutes, then chill for 3 hours before slicing.", ["Cool", "Chill"]),
+    ("Cook, stirring, for 5 minutes", ["Cook"]),
+    ("Let stand 10 minutes", ["Let stand"]),
+    ("Whisk eggs with sugar until pale, about 3 minutes", ["Whisk eggs"]),
+    ("Pan fry the cod for 4 minutes a side.", ["Fry cod"]),
+    ("Place in the fridge for 4 hours", ["Place"]),
+    ("Sauté the onions for 5 minutes", ["Saute onions"]),
+])
+def test_labels_name_the_action_the_time_belongs_to(step, labels):
+    assert [l for l, _ in recipe_timers.parse_step_durations(step)] == labels
+
+
+# --- picking one suggestion from what was said ----------------------------
+
+PIE_STEPS = ["Heat the oven to 350 F.",
+             "Press the crumbs into a dish and bake the crust for 10 minutes.",
+             "Whisk the filling.",
+             "Pour the filling in and bake for 15 minutes.",
+             "Cool for 30 minutes, then chill for 3 hours."]
+
+
+def _pie():
+    return recipe_timers.suggestions_for_recipe({"steps": PIE_STEPS})
+
+
+def test_choose_by_step_words_and_label():
+    s = _pie()
+    pick = recipe_timers.choose_suggestion
+    assert pick(s, PIE_STEPS, step=2)["suggestion"]["label"] == "Bake crust"
+    assert pick(s, PIE_STEPS, query="the crust")["suggestion"]["label"] == "Bake crust"
+    assert pick(s, PIE_STEPS, query="chilling it")["suggestion"]["label"] == "Chill"
+    assert pick(s, PIE_STEPS, step=5, label="Cool")["suggestion"]["seconds"] == 1800
+    both = pick(s, PIE_STEPS, query="baking it")
+    assert both["result"] == "ambiguous"
+    assert both["choices"] == [{"label": "Bake crust", "seconds": 600, "step": 2},
+                               {"label": "Bake", "seconds": 900, "step": 4}]
+    assert pick(s, PIE_STEPS, step=5)["result"] == "ambiguous"
+    assert pick(s, PIE_STEPS, step=3) == {"result": "not_found", "reason": "no_timer_in_step",
+                                          "step": 3}
+    assert pick(s, PIE_STEPS, query="frying")["reason"] == "no_match"
+    assert pick([], [], query="bake")["reason"] == "no_timers"
+    assert pick(s, PIE_STEPS)["result"] == "ambiguous"
+
+
+def test_a_running_timer_is_found_by_name_and_length():
+    s = {"label": "Bake", "seconds": 900, "step_index": 3}
+    running = {"label": "bake", "total_seconds": 900.0, "expired": False, "state": "running"}
+    assert recipe_timers.running_timer_for(s, [running]) is running
+    assert recipe_timers.running_timer_for(s, [{**running, "total_seconds": 600}]) is None
+    assert recipe_timers.running_timer_for(s, [{**running, "expired": True,
+                                                "state": "ringing"}]) is None
 
 
 # --- end-to-end over an active recipe ------------------------------------

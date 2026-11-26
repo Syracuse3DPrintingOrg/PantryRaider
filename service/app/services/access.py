@@ -983,18 +983,24 @@ def _timer_routes(m: str, p: str) -> bool:
 _SCREEN_ROUTES = frozenset({
     ("GET", "/api/screens"), ("POST", "/api/screens/register"),
     ("GET", "/api/screens/poll"), ("POST", "/api/screens/session"),
+    ("GET", "/api/screens/recipe"), ("POST", "/api/screens/recipe/timer"),
+    ("POST", "/api/screens/recipe/step"),
     ("POST", "/events/close"),
     ("GET", "/current-recipe"), ("GET", "/current-recipe/all"),
     ("GET", "/current-recipe/timer-suggestions"),
     ("POST", "/current-recipe/timers/start"),
     ("GET", "/screen"), ("GET", "/screen/"), ("GET", "/screen/timers"),
-    ("GET", "/screen/recipe"),
+    ("GET", "/screen/recipe"), ("GET", "/screen/cook"),
+    # Cook mode's "Mark as cooked", the same Cooked a person can press.
+    ("POST", "/api/screens/recipe/cooked"),
     ("GET", "/status-icons"),
 })
 # What Home Assistant's own key may do with screens.
 _HA_SCREEN_ROUTES = frozenset({
     ("GET", "/api/screens"), ("POST", "/api/screens/session"),
     ("POST", "/api/screens/show-recipe"),
+    ("GET", "/api/screens/recipe"), ("POST", "/api/screens/recipe/timer"),
+    ("POST", "/api/screens/recipe/step"),
 })
 
 
@@ -1038,7 +1044,9 @@ def allows_raw(scope, method, path, *, kiosk_is_admin) -> bool:
             return True
         if m == "GET" and fam == "kitchen":
             return True
-        if m == "POST" and (p in _HA_REST_POSTS or p == "/api/screens/show-recipe"):
+        if m == "POST" and (p in _HA_REST_POSTS or p in ("/api/screens/show-recipe",
+                                                         "/api/screens/recipe/timer",
+                                                         "/api/screens/recipe/step")):
             return True
         if m == "DELETE" and p == "/timers":
             return True

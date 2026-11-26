@@ -448,3 +448,34 @@ body { padding-top: 60px; }
   .form-switch .form-check-input { margin-left: -2.9em; }
   .form-check-label { padding: 0.6rem 0; }
 }
+
+/* On the Line: a timer the recipe suggests. It says what it starts, and
+   turns into its own countdown once tapped. Brand pink, big enough for a
+   wet finger on a kitchen screen. */
+.cr-tbtn {
+  min-height: 64px; padding: 0.4rem 1rem; text-align: left; line-height: 1.2;
+  border: 2px solid #F2006E; color: inherit; background: transparent; font-weight: 600;
+}
+.cr-tbtn:hover, .cr-tbtn:focus-visible { border-color: #F2006E; background: rgba(242, 0, 110, 0.15); color: inherit; }
+.cr-tbtn .cr-tbtn-sub { display: block; font-size: 0.85rem; font-weight: 500; opacity: 0.8; }
+.cr-tbtn.is-running { background: #F2006E; color: #fff; font-variant-numeric: tabular-nums; }
+.cr-tbtn.is-ringing { background: #c62828; border-color: #c62828; color: #fff; }
+.cr-tbtn.is-done { border-color: #2ea043; }
+@media (min-width: 1000px) and (pointer: coarse) { .cr-tbtn { min-height: 80px; font-size: 1.2rem; } }
+.cr-steps > li { padding: 0.35rem 0.5rem; border-radius: 0.5rem; border: 2px solid transparent; }
+.cr-steps.can-mark > li { cursor: pointer; }
+.cr-steps > li.is-done { opacity: 0.55; }
+.cr-steps > li.is-on { border-color: #F2006E; background: rgba(242, 0, 110, 0.08); font-size: 1.15em; }
+.cr-steps .cr-step-timers { margin-top: 0.4rem; display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.cr-start-cooking { min-height: 64px; padding: 0.5rem 1.6rem; font-size: 1.3rem; font-weight: 700;
+  background: #F2006E; border-color: #F2006E; color: #fff; }
+.cr-start-cooking:hover, .cr-start-cooking:focus-visible { background: #c4005a; border-color: #c4005a; color: #fff; }
+#cr-cook[hidden] { display: none !important; }
+body.cr-cooking { overflow: hidden; }
+/* Cook mode keeps clear of the timer bar and of a panel's hidden rim, and a
+   tablet's Exit for the whole interface steps aside for cook mode's own. */
+body.cr-cooking #cr-cook {
+  top: var(--kiosk-inset-top, 0px); left: var(--kiosk-inset-left, 0px);
+  right: var(--kiosk-inset-right, 0px); bottom: var(--kiosk-inset-bottom, 0px);
+}
+body.cr-cooking .sa-exit { display: none !important; }

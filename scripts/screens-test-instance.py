@@ -52,6 +52,20 @@ RECIPES = [
     {"name": "Banana Bread", "servings": 10,
      "ingredients": ["3 ripe bananas", "2 cups flour", "1 cup sugar", "1 egg", "1/2 cup butter"],
      "steps": ["Mash the bananas and mix everything.", "Bake at 350 F for 60 minutes."]},
+    {"name": "Best-Ever Key Lime Pie", "servings": 8,
+     "ingredients": ["1 1/2 cups graham cracker crumbs", "6 tbsp melted butter",
+                     "14 oz sweetened condensed milk", "4 egg yolks", "1/2 cup key lime juice"],
+     "steps": ["Heat the oven to 350 F.",
+               "Press the crumbs and butter into a pie dish and bake the crust for 10 minutes.",
+               "Whisk the condensed milk, yolks and lime juice until smooth.",
+               "Pour the filling into the crust and bake for 15 minutes.",
+               "Cool for 30 minutes, then chill for 3 hours before slicing."]},
+    {"name": "Key Lime Pie Bars", "servings": 16,
+     "ingredients": ["2 cups graham cracker crumbs", "1/2 cup butter", "2 cans condensed milk",
+                     "3/4 cup key lime juice"],
+     "steps": ["Press the crust into a lined pan and bake for 12 minutes.",
+               "Stir the filling together, pour it over and bake for 20 minutes.",
+               "Chill for 2 hours, then cut into bars."]},
 ]
 
 

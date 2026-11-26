@@ -220,6 +220,19 @@ chose: a Bandit, the main kitchen display, or a tablet set up as a
 
 - "Show me the lasagna recipe" finds Lasagna in your library and opens it on
   the screen. If two recipes fit about as well, you are asked which one.
+- "Let's cook a key lime pie" or "I want to make lasagna" opens the recipe in
+  cook mode on that device's screen and reads step 1. If you have two key
+  lime pies, you are asked which one: answer "the best-ever one" or "the
+  second one".
+- While you cook, "what do I do first", "what's next", "next step",
+  "previous step", "go back a step", "repeat the step", "read that again",
+  "what's step 4" and "go to step 4" move the screen to that step and read it
+  out. Nothing answers a bare "next", "back" or "stop", so music and your
+  timers keep those.
+- With an assistant that uses an AI model you can also ask "how much butter
+  does it take" or "what temperature", and it answers from the recipe on
+  your screen. "Start the timer for baking it" starts that step's timer,
+  named after what it times ("Bake crust").
 - "Close the recipe" puts the screen back.
 - "Set a 10 minute pasta timer", "how long is left on the pasta timer",
   "cancel the pasta timer" and "stop the timer" run timers in Pantry Raider,
@@ -256,8 +269,18 @@ ask for recipes, and moves no screen.
 Assistant, as before.
 
 An assistant that uses an AI model can reach the same actions when speech to
-text misses a sentence: the recipe action is offered to it whenever recipe
-requests are on, and the timer actions whenever timer requests are on.
+text misses a sentence. Whenever recipe requests are on it is given three
+recipe tools: one that opens a recipe (and lists the candidates when several
+fit, so it can ask which one), one that reads the recipe on that device's
+screen (ingredients, numbered steps, timers and the step you are on) and
+moves between steps, and one that starts a timer a step calls for. The
+recipe timer tool is there even with timer requests off, since it only
+starts timers the recipe names. The plain timer actions are offered whenever
+timer requests are on.
+
+"Start the timer" is not one of the integration's sentences, so it never
+competes with a timer automation of your own. Have that automation call
+`pantry_raider.start_recipe_timer` for a timer request with no length in it.
 
 ### Services
 
@@ -268,11 +291,15 @@ recipes) are applied for you.
 | Service | Fields | Returns |
 |---|---|---|
 | `pantry_raider.show_recipe` | `query`, `screen`, `satellite` | `result` (`shown`, `ambiguous`, `not_found`), `recipe`, `candidates`, `speech` |
+| `pantry_raider.cook` | `query`, or `choice` (the answer to "which one?") or `slug`; `page` (`cook`, the default, or `recipe`); `screen`, `satellite` | `result`, `recipe`, `candidates`, `step`, `speech` (reads step 1 in cook mode) |
+| `pantry_raider.get_recipe` | `screen`, `satellite` | `title`, `servings`, `ingredients`, `steps`, `step` (the step you are on), `timers`, `speech` |
+| `pantry_raider.recipe_step` | `step` (`first`, `next`, `back`, `repeat`, `last` or a number), `screen`, `satellite` | the recipe as above, `current`, and `speech` reading the step |
+| `pantry_raider.start_recipe_timer` | `query` (words that name it, optional), `step` (from 1, optional), `screen`, `satellite`, `show` | `result` (`started`, `running`, `ambiguous`, `no_recipe`, `not_found`), `recipe` (`title`), `timer`, `choices` (each `step`, `label`, `seconds`, `speech`), `speech` |
 | `pantry_raider.start_timer` | `duration` (seconds, or words such as "10 minutes"), `name`, `screen`, `satellite` | `timer`, `speech` |
 | `pantry_raider.cancel_timer` | `name` or `timer_id`, `all`, `satellite` | `cancelled`, `speech` |
 | `pantry_raider.dismiss_timer` | `timer_id`, or `all` for every finished timer; `satellite` | `dismissed`, `speech` |
 | `pantry_raider.timer_status` | `name`, `satellite` | `timers`, `speech` |
-| `pantry_raider.show_page` | `page` (`home`, `recipe`, `timers`, `close`), `screen`, `satellite` | `speech` |
+| `pantry_raider.show_page` | `page` (`app`, `home`, `recipe`, `cook`, `timers`, `close`), `screen`, `satellite` | `speech` |
 | `pantry_raider.get_routing` | `satellite` | `timers` (`home_assistant` or `pantry_raider`), `recipes`, `screen`, `screen_label` |
 
 An automation that already answers timer sentences can ask
@@ -292,6 +319,20 @@ An automation that already answers timer sentences can ask
         satellite: "{{ trigger.satellite_id }}"
       response_variable: timer
     - set_conversation_response: "{{ timer.speech }}"
+```
+
+A timer request with no length ("start the timer", "start the timer for
+baking it") can go to the recipe instead. With no `query` and no `step` it
+is the timer of the step you are on; when that step has none, or two, the
+answer is `ambiguous` with `choices` to ask about, and the next call passes
+the chosen `step`:
+
+```yaml
+- action: pantry_raider.start_recipe_timer
+  data:
+    satellite: "{{ trigger.satellite_id }}"
+  response_variable: timer
+- set_conversation_response: "{{ timer.speech }}"
 ```
 
 Every timer change also fires a `pantry_raider_timer` event with `type`

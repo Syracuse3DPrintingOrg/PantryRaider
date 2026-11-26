@@ -53,8 +53,10 @@ async function loadCurrentRecipe() {
     loadEquipment();
     // Timers come from the primary (slot 0); show them only when it is focused.
     if (crFocus === 0) { await loadTimerSuggestions(); startTimerPolling(); }
-    else { document.getElementById('cr-timer-suggestions').innerHTML =
-      '<span class="small text-secondary">Open the primary recipe for its timers.</span>'; }
+    else {
+      crSuggestions = [];
+      document.getElementById('cr-quick-timers').classList.add('d-none');
+    }
   } catch (e) {
     hide('cr-loading');
     show('cr-empty');
@@ -197,8 +199,13 @@ function renderRecipe() {
     </li>`;
   }).join('') || '<li class="list-group-item bg-transparent px-0 text-secondary">No ingredients listed.</li>';
 
+  // Each step has a slot for its own timer buttons, filled once the
+  // suggestions are in. On the primary recipe a tap marks the step you are on.
   const steps = document.getElementById('cr-steps');
-  steps.innerHTML = (r.steps || []).map(s => `<li class="mb-2">${PR.esc(s)}</li>`).join('')
+  const mark = crFocus === 0;
+  steps.classList.toggle('can-mark', mark);
+  document.getElementById('cr-step-hint').classList.toggle('d-none', !mark || !(r.steps || []).length);
+  steps.innerHTML = (r.steps || []).map((s, i) => `<li class="mb-2" data-step="${i + 1}"${mark ? ` data-on-click="markStep(${i + 1})"` : ''}>${PR.esc(s)}<div class="cr-step-timers d-none" data-step-timers="${i}"></div></li>`).join('')
     || '<li class="text-secondary">No steps listed.</li>';
 
   const notes = document.getElementById('cr-notes');
@@ -303,42 +310,147 @@ document.getElementById('cr-servings')?.addEventListener('change', function() {
   applyScale(servingsToFactor(target));
 });
 
+let crSuggestions = [];
+let crStep = null;          // the step the kitchen is on, from 1, or null
+const crFinished = new Set();
+
+function suggestionKey(s) { return String(s.label).toLowerCase() + '|' + Math.round(s.seconds); }
+
+function fmtLength(secs) {
+  const h = Math.floor(secs / 3600), m = Math.round((secs % 3600) / 60);
+  if (h && m) return `${h} hr ${m} min`;
+  if (h) return `${h} hr`;
+  return m ? `${m} min` : `${Math.round(secs)} sec`;
+}
+
+// The timer a suggestion started: same name and length, as the server
+// matches it. A running one wins over a finished one.
+function timerForSuggestion(s) {
+  const want = suggestionKey(s);
+  const now = Date.now() / 1000;
+  let ringing = null;
+  for (const t of runningTimers) {
+    if (String(t.label).toLowerCase() + '|' + Math.round(t.total_seconds) !== want) continue;
+    if (t.deadline_epoch - now > 0) return t;
+    ringing = t;
+  }
+  return ringing;
+}
+
+function timerButtonHtml(i, withStep) {
+  return `<button class="btn cr-tbtn" data-tbtn="${i}" data-with-step="${withStep ? 1 : 0}"
+    data-on-click="event.stopPropagation(); startSuggested(${i}, this)"></button>`;
+}
+
+// Paint every timer button from the timer list: idle ones say what they
+// start, a running one is its own countdown, a finished one says so.
+function paintTimerButtons() {
+  const now = Date.now() / 1000;
+  document.querySelectorAll('[data-tbtn]').forEach(btn => {
+    const s = crSuggestions[Number(btn.dataset.tbtn)];
+    if (!s) return;
+    const t = timerForSuggestion(s);
+    const key = suggestionKey(s);
+    let state = 'idle', main = `\u25B6 Start ${fmtLength(s.seconds)} \u00B7 ${s.label}`, sub = '';
+    if (t && t.deadline_epoch - now <= 0) {
+      state = 'ringing'; main = `${s.label} \u00B7 Done`; sub = 'Time is up. Tap to stop the alarm';
+      crFinished.add(key);
+    } else if (t) {
+      state = 'running'; main = `${s.label} \u00B7 ${fmtClock(t.deadline_epoch - now)} left`; sub = 'Running';
+    } else if (crFinished.has(key)) {
+      state = 'done'; sub = 'Done. Tap to start it again';
+    } else if (btn.dataset.withStep === '1') {
+      sub = `Step ${s.step_index + 1}`;
+    }
+    btn.className = 'btn cr-tbtn' + (state === 'idle' ? '' : ' is-' + state);
+    const html = PR.esc(main) + (sub ? `<span class="cr-tbtn-sub">${PR.esc(sub)}</span>` : '');
+    if (btn.innerHTML !== html) btn.innerHTML = html;
+    btn.setAttribute('aria-label', state === 'idle' || state === 'done'
+      ? `Start a ${fmtLength(s.seconds)} timer: ${s.label}` : main);
+  });
+}
+
 async function loadTimerSuggestions() {
+  const wrap = document.getElementById('cr-quick-timers');
   const box = document.getElementById('cr-timer-suggestions');
   try {
     const r = await fetch('current-recipe/timer-suggestions');
     if (!r.ok) throw new Error(r.statusText);
-    const sug = (await r.json()).suggestions || [];
-    if (!sug.length) {
-      box.innerHTML = '<span class="small text-secondary">No timer suggestions for this recipe.</span>';
-      return;
-    }
-    box.innerHTML = '<div class="d-flex flex-wrap gap-2">' + sug.map(s => `
-      <button class="btn btn-sm btn-outline-warning" data-on-click="startSuggested(${s.step_index}, this)"
-              title="Start a ${fmtClock(s.seconds)} timer">
-        <i class="bi bi-play-fill me-1"></i>${PR.esc(s.label)} (${fmtClock(s.seconds)})
-      </button>`).join('') + '</div>';
+    crSuggestions = (await r.json()).suggestions || [];
   } catch (e) {
-    box.innerHTML = `<span class="small text-danger">Could not load timer suggestions: ${PR.esc(e.message)}</span>`;
+    crSuggestions = [];
   }
+  document.getElementById('cr-quick-timers-label').textContent =
+    crSuggestions.length === 1 ? 'Timer in this recipe' : 'Timers in this recipe';
+  box.innerHTML = crSuggestions.map((s, i) => timerButtonHtml(i, true)).join('');
+  wrap.classList.toggle('d-none', !crSuggestions.length);
+  document.querySelectorAll('[data-step-timers]').forEach(slot => {
+    const idx = Number(slot.dataset.stepTimers);
+    const mine = crSuggestions.map((s, i) => [s, i]).filter(([s]) => s.step_index === idx);
+    slot.innerHTML = mine.map(([, i]) => timerButtonHtml(i, false)).join('');
+    slot.classList.toggle('d-none', !mine.length);
+  });
+  paintTimerButtons();
+  loadStep();
 }
 
-async function startSuggested(stepIndex, btn) {
-  const orig = btn.innerHTML;
+async function startSuggested(i, btn) {
+  const s = crSuggestions[i];
+  if (!s) return;
+  const t = timerForSuggestion(s);
+  if (t && t.deadline_epoch - Date.now() / 1000 <= 0) {
+    try { await fetch('timers/' + t.id + '/dismiss', { method: 'POST' }); } catch (_) {}
+    await refreshTimers();
+    return;
+  }
+  if (t) { PR.notice(`${s.label} is already running.`); return; }
   btn.disabled = true;
-  btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
   try {
     const r = await fetch('current-recipe/timers/start', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({step_index: stepIndex}),
+      body: JSON.stringify({step_index: s.step_index, label: s.label, seconds: s.seconds}),
     });
     if (!r.ok) throw new Error(await prErrText(r));
+    crFinished.delete(suggestionKey(s));
     await refreshTimers();
   } catch (e) {
     PR.notice('Could not start timer: ' + e.message);
   } finally {
     btn.disabled = false;
-    btn.innerHTML = orig;
+  }
+}
+
+// The step the kitchen is on lives on the server, so a tap here and "next
+// step" said to a voice assistant move the same marker.
+function paintSteps() {
+  document.querySelectorAll('#cr-steps > li[data-step]').forEach(li => {
+    const n = Number(li.dataset.step);
+    li.classList.toggle('is-on', crStep === n);
+    li.classList.toggle('is-done', crStep !== null && n < crStep);
+  });
+}
+
+async function loadStep() {
+  if (crFocus !== 0) return;
+  try {
+    const r = await fetch('api/screens/recipe');
+    if (!r.ok) return;
+    const d = await r.json();
+    if (d.ok && d.title === (crRecipe && crRecipe.title)) { crStep = d.step || null; paintSteps(); }
+  } catch (_) { /* keep what is shown */ }
+}
+
+async function markStep(n) {
+  try {
+    const r = await fetch('api/screens/recipe/step', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({step: crStep === n ? 'none' : n}),
+    });
+    if (!r.ok) throw new Error(await prErrText(r));
+    crStep = (await r.json()).step || null;
+    paintSteps();
+  } catch (e) {
+    PR.notice('Could not mark the step. ' + prReason(e));
   }
 }
 
@@ -362,6 +474,7 @@ async function refreshTimers(signal) {
     runningTimers = [];
   }
   renderTimers();
+  paintTimerButtons();
 }
 
 function renderTimers() {
@@ -402,6 +515,7 @@ function tickTimers() {
       el.textContent = fmtClock(remaining);
     }
   });
+  paintTimerButtons();
 }
 
 function startTimerPolling() {
@@ -416,10 +530,34 @@ function startTimerPolling() {
     ticks++;
     if (ticks % 10 === 0) {
       resync();
+      loadStep();
     } else {
       tickTimers();
     }
   }, 1000);
 }
 
+// Cook mode over this page. ?cook=1 opens it (a voice request sends the
+// kitchen display here when someone says "let's cook ...").
+let crCook = null;
+function openCookMode() {
+  const root = document.getElementById('cr-cook');
+  root.removeAttribute('hidden');
+  document.body.classList.add('cr-cooking');
+  if (!crCook) {
+    crCook = PRCook.mount(root, { screen: '', ownTimers: true, exit: closeCookMode });
+  } else {
+    crCook.refresh();
+  }
+}
+function closeCookMode() {
+  document.getElementById('cr-cook').setAttribute('hidden', '');
+  document.body.classList.remove('cr-cooking');
+  if (new URLSearchParams(location.search).has('cook')) {
+    history.replaceState(null, '', location.pathname);
+  }
+  loadCurrentRecipe();
+}
+
 loadCurrentRecipe();
+if (new URLSearchParams(location.search).get('cook') === '1') openCookMode();

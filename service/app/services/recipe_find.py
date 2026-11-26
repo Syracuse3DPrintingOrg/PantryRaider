@@ -17,6 +17,8 @@ _FILLER = frozenset({
     "recipe", "recipes", "for", "of", "show", "me", "us", "open", "pull", "up",
     "find", "display", "make", "cook", "let", "lets", "to", "how", "do", "i",
     "we", "on", "screen", "put", "from", "in", "pantry", "raider",
+    # "Let's cook ...", "I want to make ..."
+    "s", "want", "would", "like", "going", "gonna", "start", "making", "cooking",
 })
 MIN_SCORE = 0.62
 # Below a match but close enough to offer: "did you mean".
@@ -119,6 +121,79 @@ def choose(query, recipes) -> dict:
     return {"result": "ambiguous",
             "candidates": [{"slug": r["slug"], "title": r["title"]}
                            for r in close[:MAX_CANDIDATES]]}
+
+
+# --- An answer to "which one?" -------------------------------------------------
+
+_ORDINALS = {
+    "first": 0, "1st": 0, "one": 0, "1": 0,
+    "second": 1, "2nd": 1, "two": 1, "2": 1,
+    "third": 2, "3rd": 2, "three": 2, "3": 2,
+    "fourth": 3, "4th": 3, "four": 3, "4": 3,
+    "fifth": 4, "5th": 4, "five": 4, "5": 4,
+    "last": -1, "final": -1,
+}
+# Words in an answer that do not tell the candidates apart.
+_ANSWER_FILLER = _FILLER | frozenset({
+    "one", "ones", "number", "option", "choice", "pick", "go", "with", "want",
+    "mean", "meant", "said", "it", "is", "that", "s", "yes", "yeah", "please",
+    "like", "would", "try", "use", "cooking", "making", "called", "named", "about",
+    "other", "kind", "version", "just", "only", "go", "lets", "let",
+})
+
+
+def _answer_words(text) -> list[str]:
+    return [_stem(w) for w in _plain(text).split() if w not in _ANSWER_FILLER]
+
+
+def resolve_choice(answer, candidates) -> dict | None:
+    """Which of the candidates last offered an answer means: an ordinal ("the
+    second one", "number two", "the last one") or words only one of them has
+    ("the best-ever one", "the soup"). {"slug", "title"} or None when the
+    answer does not pick exactly one, so the caller searches again. Pure."""
+    rows = [c for c in (candidates or []) if isinstance(c, dict) and c.get("slug")]
+    if not rows:
+        return None
+    words = _plain(answer).split()
+    if not words:
+        return None
+    # An ordinal said on its own ("the second one", "number 2", "two").
+    rest = [w for w in words if w not in ("the", "number", "option", "one", "choice",
+                                         "recipe", "please", "pick", "i", "want", "go",
+                                         "with", "s", "that", "let", "lets", "do")]
+    if len(rest) == 1 and rest[0] in _ORDINALS:
+        idx = _ORDINALS[rest[0]]
+        if -len(rows) <= idx < len(rows):
+            hit = rows[idx]
+            return {"slug": hit["slug"], "title": hit["title"]}
+        return None
+    asked = _answer_words(answer)
+    if not asked:
+        return None
+
+    def hits(c: dict) -> float:
+        names = tokens(c.get("title"), drop_filler=False)
+        total = 0.0
+        for w in asked:
+            best = max((difflib.SequenceMatcher(None, w, n).ratio() for n in names),
+                       default=0.0)
+            total += 1.0 if best >= (0.8 if len(w) >= 4 else 0.99) else 0.0
+        return total
+
+    scored = [(hits(c), c) for c in rows]
+    top = max(s for s, _ in scored)
+    if top <= 0:
+        return None
+    best = [c for s, c in scored if s == top]
+    if len(best) > 1:
+        # "Key lime pie" between "Key Lime Pie" and "Best-Ever Key Lime Pie":
+        # the one whose name is exactly what was said.
+        exact = [c for c in best if set(tokens(c.get("title"), drop_filler=False))
+                 == set(asked)]
+        best = exact
+    if len(best) != 1:
+        return None
+    return {"slug": best[0]["slug"], "title": best[0]["title"]}
 
 
 def join_titles(titles) -> str:

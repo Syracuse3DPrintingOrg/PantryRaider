@@ -1,0 +1,154 @@
+/* Cook mode (static/js/cook-mode.js): one step at a time, large, for a
+   kitchen tablet read from across the room. Old-browser CSS: flexbox with
+   margins instead of gap, no grid, no custom properties.
+
+   A wide landscape panel (an Echo Show, 1280 CSS px at 1x) shows a CSS
+   pixel much smaller than a portrait one (a ThinkSmart View, about 490 CSS
+   px at 1.63x), so the wide layout uses bigger numbers. */
+.cm {
+  position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 2000;
+  display: -webkit-flex; display: flex; -webkit-flex-direction: column; flex-direction: column;
+  background: #14161a; color: #eef0f3; overflow: hidden;
+  font-family: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent;
+}
+.cm [hidden] { display: none !important; }
+.cm-btn {
+  display: inline-block; height: 60px; padding: 0 22px; margin: 0; border: 0; border-radius: 14px;
+  background: #2f3640; color: #fff; font-size: 22px; font-weight: 600; font-family: inherit;
+  box-sizing: border-box; cursor: pointer;
+}
+.cm-btn:active { background: #46505e; }
+.cm-btn[disabled] { opacity: .35; }
+.cm-primary { background: #F2006E; }
+.cm-primary:active { background: #c4005a; }
+.cm-label { font-size: 18px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #F2006E; margin: 0 0 8px 0; }
+
+.cm-top {
+  display: -webkit-flex; display: flex; -webkit-align-items: center; align-items: center;
+  -webkit-flex: 0 0 64px; flex: 0 0 64px; height: 64px; padding: 0 12px 0 20px;
+  background: #1c1f25; border-bottom: 1px solid #2c313a; box-sizing: border-box;
+}
+.cm-title { -webkit-flex: 1 1 0; flex: 1 1 0; min-width: 0; font-size: 24px; font-weight: 700;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cm-where { display: none; }
+.cm-exit { height: 48px; min-width: 96px; }
+
+.cm-runrow {
+  -webkit-flex: 0 0 auto; flex: 0 0 auto; white-space: nowrap; overflow-x: auto;
+  padding: 8px 12px; background: #191c21; border-bottom: 1px solid #2c313a;
+}
+.cm-runrow .cm-run { display: inline-block; margin-right: 10px; padding: 6px 14px; border-radius: 999px; background: #262b33; }
+.cm-runrow .cm-run-name { font-size: 18px; font-weight: 600; margin-right: 8px; }
+.cm-runrow .cm-run-left { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.cm-run.ringing { background: #c62828; }
+
+.cm-body {
+  -webkit-flex: 1 1 0; flex: 1 1 0; min-height: 0;
+  display: -webkit-flex; display: flex;
+}
+.cm-main { -webkit-flex: 0 0 62%; flex: 0 0 62%; padding: 24px 28px; box-sizing: border-box; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+.cm-side {
+  -webkit-flex: 1 1 0; flex: 1 1 0; min-width: 0; padding: 24px; box-sizing: border-box;
+  border-left: 1px solid #2c313a; overflow-y: auto;
+  display: -webkit-flex; display: flex; -webkit-flex-direction: column; flex-direction: column;
+}
+.cm-kicker { font-size: 24px; font-weight: 700; color: #F2006E; margin-bottom: 12px; }
+.cm-dots { display: none; margin-bottom: 14px; }
+.cm-dots span { display: inline-block; width: 12px; height: 12px; border-radius: 6px; margin: 0 6px 6px 0; background: #3a404a; }
+.cm-dots span.past { background: #7a3456; }
+.cm-dots span.on { background: #F2006E; }
+.cm-text { font-size: 44px; line-height: 1.3; font-weight: 500; }
+.cm-text.cm-long { font-size: 36px; }
+.cm-timers { margin-top: 24px; }
+.cm-btn.cm-tbtn {
+  height: auto; min-height: 96px; margin: 0 14px 14px 0; padding: 12px 26px; text-align: left;
+  line-height: 1.2; font-size: 30px; background: #1a1c21; border: 3px solid #F2006E; vertical-align: top;
+}
+.cm-btn.cm-tbtn:active { background: #4a1530; }
+.cm-tbtn-main { display: block; font-weight: 700; font-variant-numeric: tabular-nums; }
+.cm-tbtn-sub { display: block; margin-top: 4px; font-size: 20px; color: #f7b3d2; }
+.cm-btn.cm-tbtn-running { background: #F2006E; }
+.cm-btn.cm-tbtn-running .cm-tbtn-sub { color: #ffe3ef; }
+.cm-btn.cm-tbtn-ringing { background: #c62828; border-color: #fff; }
+.cm-btn.cm-tbtn-ringing .cm-tbtn-sub { color: #fff; }
+.cm-btn.cm-tbtn-done { border-color: #2ea043; }
+.cm-btn.cm-tbtn-done .cm-tbtn-sub { color: #9be0a8; }
+
+.cm-running { margin-bottom: 18px; }
+.cm-running .cm-run {
+  display: -webkit-flex; display: flex; -webkit-align-items: baseline; align-items: baseline;
+  padding: 10px 14px; margin-bottom: 10px; border-radius: 12px; background: #1f232a; border-left: 6px solid #F2006E;
+}
+.cm-running .cm-run.ringing { background: #b71c1c; border-left-color: #fff; }
+.cm-running .cm-run-name { -webkit-flex: 1 1 0; flex: 1 1 0; min-width: 0; font-size: 22px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cm-running .cm-run-left { font-size: 56px; font-weight: 700; line-height: 1.05; font-variant-numeric: tabular-nums; margin-left: 10px; }
+.cm-nextup { -webkit-flex: 1 1 auto; flex: 1 1 auto; opacity: .6; }
+.cm-nextup-text { font-size: 24px; line-height: 1.35; }
+.cm-ing-btn { height: 72px; width: 100%; margin-top: 16px; font-size: 24px; }
+
+.cm-bar {
+  -webkit-flex: 0 0 130px; flex: 0 0 130px; height: 130px; padding: 10px 14px; box-sizing: border-box;
+  display: -webkit-flex; display: flex; -webkit-align-items: center; align-items: center;
+  background: #1c1f25; border-top: 1px solid #2c313a;
+}
+.cm-back { width: 220px; height: 110px; font-size: 30px; margin-right: 14px; }
+.cm-next { -webkit-flex: 1 1 0; flex: 1 1 0; height: 110px; font-size: 34px; background: #F2006E; }
+.cm-next:active { background: #c4005a; }
+.cm-ing-bar { display: none; }
+
+.cm-done, .cm-empty { -webkit-flex: 1 1 0; flex: 1 1 0; padding: 48px 32px; text-align: center; overflow-y: auto; }
+.cm-done-title { font-size: 48px; font-weight: 700; margin-bottom: 16px; }
+.cm-done-text { font-size: 26px; color: #cfd5dc; margin: 0 auto 28px auto; max-width: 900px; line-height: 1.4; }
+.cm-done-acts .cm-btn { height: 96px; min-width: 260px; margin: 0 10px 14px 10px; font-size: 30px; }
+.cm-empty { font-size: 28px; color: #8b95a1; }
+
+.cm-sheet {
+  position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 2010; background: rgba(0, 0, 0, .6);
+  display: -webkit-flex; display: flex; -webkit-align-items: center; align-items: center;
+  -webkit-justify-content: center; justify-content: center;
+}
+.cm-sheet-box {
+  width: 760px; max-width: 94%; max-height: 86%; overflow-y: auto; background: #1f232a;
+  border-radius: 18px; padding: 20px 24px; box-sizing: border-box;
+}
+.cm-sheet-head { display: -webkit-flex; display: flex; -webkit-align-items: center; align-items: center; margin-bottom: 12px; }
+.cm-sheet-title { -webkit-flex: 1 1 0; flex: 1 1 0; font-size: 30px; font-weight: 700; }
+.cm-sheet-list .cm-label { margin-top: 12px; }
+.cm-ing { font-size: 26px; padding: 12px 4px; border-bottom: 1px solid #2c313a; }
+.cm-ing-here { font-weight: 700; }
+
+/* Portrait and narrow panels. */
+@media (max-width: 899px) {
+  .cm-top { -webkit-flex-basis: 56px; flex-basis: 56px; height: 56px; padding-left: 14px; }
+  .cm-title { font-size: 20px; }
+  .cm-where { font-size: 17px; margin: 0 10px; }
+  .cm-exit { height: 44px; min-width: 80px; font-size: 18px; }
+  .cm-body { display: block; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+  .cm-main { padding: 18px 16px; overflow: visible; }
+  .cm-side { display: none; }
+  .cm-kicker { font-size: 20px; margin-bottom: 8px; }
+  .cm-dots { display: block; }
+  .cm-text { font-size: 32px; }
+  .cm-text.cm-long { font-size: 28px; }
+  .cm-timers { margin-top: 18px; }
+  .cm-btn.cm-tbtn { display: block; width: 100%; min-height: 64px; margin: 0 0 12px 0; padding: 8px 16px; font-size: 22px; }
+  .cm-tbtn-sub { font-size: 16px; }
+  .cm-bar { -webkit-flex-basis: 88px; flex-basis: 88px; height: 88px; padding: 8px 10px; }
+  .cm-back { width: 28%; height: 70px; font-size: 22px; margin-right: 8px; }
+  .cm-next { height: 70px; font-size: 24px; }
+  .cm-ing-bar { display: inline-block; width: 30%; height: 70px; margin-left: 8px; font-size: 20px; padding: 0 8px; }
+  .cm-done-title { font-size: 34px; }
+  .cm-done-text { font-size: 22px; }
+  .cm-done-acts .cm-btn { display: block; width: 100%; min-width: 0; height: 76px; margin: 0 0 12px 0; font-size: 24px; }
+  /* The ingredients come up from the bottom, as a sheet. */
+  .cm-sheet { -webkit-align-items: flex-end; align-items: flex-end; }
+  .cm-sheet-box { width: 100%; max-width: 100%; max-height: 80%; border-radius: 18px 18px 0 0; }
+  .cm-ing { font-size: 22px; }
+}
+
+/* Wide: the right column has the running timers and the step number is
+   above the step, so the narrow layout's timer row and top-bar count go. */
+@media (min-width: 900px) {
+  .cm-runrow, .cm-where { display: none !important; }
+}

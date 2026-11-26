@@ -101,6 +101,84 @@ show_recipe:
         entity:
           domain: assist_satellite
 
+cook:
+  fields:
+    query:
+      example: key lime pie
+      selector:
+        text:
+    page:
+      default: cook
+      selector:
+        select:
+          options:
+            - cook
+            - recipe
+    choice:
+      example: the second one
+      selector:
+        text:
+    slug:
+      selector:
+        text:
+    screen:
+      selector:
+        text:
+    satellite:
+      selector:
+        entity:
+          domain: assist_satellite
+
+get_recipe:
+  fields:
+    screen:
+      selector:
+        text:
+    satellite:
+      selector:
+        entity:
+          domain: assist_satellite
+
+recipe_step:
+  fields:
+    step:
+      required: true
+      example: next
+      selector:
+        text:
+    screen:
+      selector:
+        text:
+    satellite:
+      selector:
+        entity:
+          domain: assist_satellite
+
+start_recipe_timer:
+  fields:
+    step:
+      example: 4
+      selector:
+        number:
+          min: 1
+          max: 99
+          mode: box
+    query:
+      example: the crust
+      selector:
+        text:
+    screen:
+      selector:
+        text:
+    satellite:
+      selector:
+        entity:
+          domain: assist_satellite
+    show:
+      default: false
+      selector:
+        boolean:
+
 start_timer:
   fields:
     duration:
@@ -173,6 +251,7 @@ show_page:
             - app
             - home
             - recipe
+            - cook
             - timers
             - close
     screen:

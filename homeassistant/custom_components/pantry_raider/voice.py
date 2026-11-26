@@ -2,10 +2,11 @@
 
 Four pieces, all thin wrappers over voice_helpers.py and the app's routes:
 
-- Services (pantry_raider.show_recipe, start_timer, cancel_timer,
-  dismiss_timer, timer_status, show_page, get_routing), each answering with
-  data that includes a ``speech`` line, so an automation's own sentences can
-  call them and say the answer.
+- Services (pantry_raider.show_recipe, cook, get_recipe, recipe_step,
+  start_recipe_timer, start_timer, cancel_timer, dismiss_timer,
+  timer_status, show_page, get_routing), each answering with data that
+  includes a ``speech`` line, so an automation's own sentences can call them
+  and say the answer.
 - Intents with the same actions, which is how an LLM conversation agent
   reaches them when speech to text misses a sentence.
 - Sentences for the built-in agent: recipes on by default, timers only when
@@ -62,6 +63,8 @@ from .voice_helpers import (
     split_timer_request,
     spoken_duration,
     status_speech,
+    step_move,
+    step_number,
     timer_label,
     voice_options,
 )
@@ -77,8 +80,16 @@ SERVICE_DISMISS_TIMER = "dismiss_timer"
 SERVICE_TIMER_STATUS = "timer_status"
 SERVICE_SHOW_PAGE = "show_page"
 SERVICE_GET_ROUTING = "get_routing"
+SERVICE_COOK = "cook"
+SERVICE_GET_RECIPE = "get_recipe"
+SERVICE_RECIPE_STEP = "recipe_step"
+SERVICE_START_RECIPE_TIMER = "start_recipe_timer"
 VOICE_SERVICES = (
     SERVICE_SHOW_RECIPE,
+    SERVICE_COOK,
+    SERVICE_GET_RECIPE,
+    SERVICE_RECIPE_STEP,
+    SERVICE_START_RECIPE_TIMER,
     SERVICE_START_TIMER,
     SERVICE_CANCEL_TIMER,
     SERVICE_DISMISS_TIMER,
@@ -123,7 +134,7 @@ APP_SENTENCES = [
     "(show|open|start|launch|bring up|pull up) pantry raider on [the] screen",
     "(switch|go) to pantry raider [mode]",
 ]
-PAGES = ("app", "home", "recipe", "timers", "close")
+PAGES = ("app", "home", "recipe", "cook", "timers", "close")
 START_TIMER_SENTENCES = [
     "(set|start|create) [a|an] timer for {request}",
     "(set|start|create) [a|an] {request} timer",
@@ -141,6 +152,45 @@ CANCEL_SENTENCES = [
     "(cancel|delete|remove) [the|my] {name} timer",
 ]
 CANCEL_ALL_SENTENCES = ["(cancel|delete|remove) all [the|my|of the|of my] timers"]
+# Cooking from the recipe that is open. Narrow on purpose: anything said
+# another way goes to the conversation agent's model, which has the tools.
+COOK_SENTENCES = [
+    "(let's|lets|let us) (cook|make|bake) [a|an|the|some|my|our] {query}",
+    "i (want|would like|'d like) to (cook|make|bake) [a|an|the|some|my|our] {query}",
+    "i'd like to (cook|make|bake) [a|an|the|some|my|our] {query}",
+]
+# The answer to "which one?".
+CHOICE_SENTENCES = [
+    "the {choice} one",
+    "(number|option) {choice}",
+]
+FIRST_STEP_SENTENCES = [
+    "what do i do first",
+    "what('s| is) the first step",
+    "(how|where) do i (start|begin)",
+]
+NEXT_STEP_SENTENCES = [
+    "what('s| is) next",
+    "[what('s| is) the] next step",
+    "what do i do next",
+    "(ok|okay|done) what('s| is) next",
+]
+BACK_STEP_SENTENCES = [
+    "(go back|back up) [a|one] step",
+    "[what was the] previous step",
+]
+REPEAT_STEP_SENTENCES = [
+    "(repeat|read) [the|that] step [again]",
+    "read that again",
+    "repeat that step",
+    "what step am i on",
+    "what('s| is) this step",
+]
+STEP_N_SENTENCES = [
+    "what('s| is) step {n}",
+    "(read|show) [me] step {n}",
+    "go to step {n}",
+]
 STOP_SENTENCES = [
     "(stop|dismiss|silence|turn off) [the|my] (timer|timers|alarm)",
     "(stop|dismiss|silence|turn off) [the|my] {name} timer",
@@ -213,6 +263,94 @@ async def async_show_recipe(
         return out
 
     return await _guard(run())
+
+
+def _recipe_target(hass: HomeAssistant, screen: str, satellite: str) -> tuple[str, str | None]:
+    """(screen id, refusal speech) for a recipe request: the screen asked
+    for, else the voice device's own. "" means the kitchen's current recipe."""
+    route = _routing(hass, satellite)
+    if satellite and not route[SAT_RECIPES]:
+        return "", "Recipes are turned off for this device."
+    return screen or route[SAT_SCREEN], None
+
+
+def _answer(out: dict[str, Any], fallback: str) -> dict[str, Any]:
+    """An install's reply with a line to say, whatever it was."""
+    if "speech" not in out:
+        if "detail" in out and "error" not in out:
+            return {"ok": False, "result": "too_old", "speech": _TOO_OLD}
+        out["speech"] = str(out.get("error") or fallback)
+    return out
+
+
+async def async_cook(
+    hass: HomeAssistant, query: str = "", choice: str = "", slug: str = "",
+    screen: str = "", satellite: str = "", page: str = "cook",
+) -> dict[str, Any]:
+    """Open a recipe in cook mode (page "cook", step 1 read out) or as the
+    whole recipe (page "recipe"). When several fit, the answer has their
+    ``candidates`` and asks which one; call again with ``choice`` set to the
+    answer ("the second one", "the soup") or ``slug`` set to the one chosen.
+    An answer to the question keeps the page the question was asked for."""
+    target, refused = _recipe_target(hass, screen, satellite)
+    if refused:
+        return {"ok": False, "result": "off", "speech": refused}
+    if not (query or choice or slug):
+        return {"ok": False, "result": "no_query", "speech": "What would you like to cook?"}
+
+    async def run() -> dict[str, Any]:
+        out = await _client(hass).async_show_recipe(
+            query, target, slug=slug, choice=choice,
+            page="" if (choice and not query and not slug) else page)
+        return _answer(out, "I could not open that recipe.")
+
+    return await _guard(run())
+
+
+async def async_get_recipe(
+    hass: HomeAssistant, screen: str = "", satellite: str = "", step: str = "",
+) -> dict[str, Any]:
+    """The recipe open where the voice device is: title, servings,
+    ingredients, numbered steps, timers and the step the cook is on. With
+    ``step`` (first, next, back, repeat, last or a number) the current step
+    moves there first and the answer reads it."""
+    target, refused = _recipe_target(hass, screen, satellite)
+    if refused:
+        return {"ok": False, "result": "off", "speech": refused}
+    move = step_move(step) if step else ""
+    if step and not move:
+        return {"ok": False, "result": "bad_step",
+                "speech": "Say first, next, back, repeat, last or a step number."}
+
+    async def run() -> dict[str, Any]:
+        client = _client(hass)
+        if move:
+            out = await client.async_recipe_step(move, target)
+        else:
+            out = await client.async_screen_recipe(target)
+        return _answer(out, "I could not read the recipe.")
+
+    return await _guard(run())
+
+
+async def async_start_recipe_timer(
+    hass: HomeAssistant, step: int | None = None, query: str = "", screen: str = "",
+    satellite: str = "", show: bool = False,
+) -> dict[str, Any]:
+    """Start one of the timers the open recipe suggests: by step number, by
+    words ("the crust", "baking it"), or with neither, the current step's."""
+    target, refused = _recipe_target(hass, screen, satellite)
+    if refused:
+        return {"ok": False, "result": "off", "speech": refused}
+
+    async def run() -> dict[str, Any]:
+        out = await _client(hass).async_start_recipe_timer(
+            target, step, query, origin=satellite, show=show)
+        return _answer(out, "I could not start that timer.")
+
+    out = await _guard(run())
+    await _refresh(hass)
+    return out
 
 
 async def async_start_timer(
@@ -383,6 +521,36 @@ def async_register_services(hass: HomeAssistant) -> None:
         vol.Optional("satellite", default=""): cv.string,
     }), lambda d: async_show_recipe(hass, d["query"], d["screen"], d["satellite"]))
 
+    register(SERVICE_COOK, _schema({
+        vol.Optional("query", default=""): cv.string,
+        vol.Optional("choice", default=""): cv.string,
+        vol.Optional("slug", default=""): cv.string,
+        vol.Optional("screen", default=""): cv.string,
+        vol.Optional("satellite", default=""): cv.string,
+        vol.Optional("page", default="cook"): vol.In(("cook", "recipe")),
+    }), lambda d: async_cook(hass, d["query"], d["choice"], d["slug"], d["screen"],
+                             d["satellite"], d["page"]))
+
+    register(SERVICE_GET_RECIPE, _schema({
+        vol.Optional("screen", default=""): cv.string,
+        vol.Optional("satellite", default=""): cv.string,
+    }), lambda d: async_get_recipe(hass, d["screen"], d["satellite"]))
+
+    register(SERVICE_RECIPE_STEP, _schema({
+        vol.Required("step"): vol.Any(vol.Coerce(int), cv.string),
+        vol.Optional("screen", default=""): cv.string,
+        vol.Optional("satellite", default=""): cv.string,
+    }), lambda d: async_get_recipe(hass, d["screen"], d["satellite"], str(d["step"])))
+
+    register(SERVICE_START_RECIPE_TIMER, _schema({
+        vol.Optional("step"): vol.Coerce(int),
+        vol.Optional("query", default=""): cv.string,
+        vol.Optional("screen", default=""): cv.string,
+        vol.Optional("satellite", default=""): cv.string,
+        vol.Optional("show", default=False): cv.boolean,
+    }), lambda d: async_start_recipe_timer(hass, d.get("step"), d["query"], d["screen"],
+                                           d["satellite"], d["show"]))
+
     register(SERVICE_START_TIMER, _schema({
         vol.Required("duration"): vol.Any(vol.Coerce(int), cv.string, dict),
         vol.Optional("name", default=""): cv.string,
@@ -457,15 +625,19 @@ def _satellite(intent_obj: intent.Intent) -> str:
     """The voice device a request came from. A sentence carries it; a tool
     call from an AI model carries only the device, so its assist_satellite
     entity is looked up."""
-    if intent_obj.satellite_id:
-        return intent_obj.satellite_id
-    if not intent_obj.device_id:
+    return satellite_for(intent_obj.hass, intent_obj.satellite_id, intent_obj.device_id)
+
+
+def satellite_for(hass: HomeAssistant, satellite_id: str | None, device_id: str | None) -> str:
+    """The assist_satellite entity for a request: given, or found from the
+    device it came from (all an AI model's tool call carries)."""
+    if satellite_id:
+        return satellite_id
+    if not device_id:
         return ""
     from homeassistant.helpers import entity_registry as er
 
-    for entry in er.async_entries_for_device(
-        er.async_get(intent_obj.hass), intent_obj.device_id
-    ):
+    for entry in er.async_entries_for_device(er.async_get(hass), device_id):
         if entry.domain == "assist_satellite":
             return entry.entity_id
     return ""
@@ -501,8 +673,9 @@ class ShowPageIntent(intent.IntentHandler):
     description = (
         "Show Pantry Raider on the kitchen screen, or close it. Use page "
         "'app' to open Pantry Raider (the whole kitchen app), 'timers' for "
-        "the timers, 'recipe' for the recipe being cooked, and 'close' to "
-        "close Pantry Raider or put the screen back."
+        "the timers, 'recipe' for the recipe being cooked, 'cook' for cook "
+        "mode (that recipe one large step at a time), and 'close' to close "
+        "Pantry Raider or put the screen back."
     )
     slot_schema = {vol.Required("page"): vol.In(PAGES)}
 
@@ -681,8 +854,8 @@ def async_register_voice(hass: HomeAssistant, entry) -> None:
 
     if options[OPT_RECIPE_SENTENCES]:
         async def recipe(user_input: Any, result: Any) -> str:
-            out = await async_show_recipe(
-                hass, _said(result, "query"), satellite=_satellite_of(user_input))
+            out = await async_cook(hass, _said(result, "query"),
+                                   satellite=_satellite_of(user_input), page="recipe")
             return out["speech"]
 
         async def close(user_input: Any, result: Any) -> str:
@@ -696,6 +869,38 @@ def async_register_voice(hass: HomeAssistant, entry) -> None:
         listen(RECIPE_SENTENCES, recipe)
         listen(CLOSE_SENTENCES, close)
         listen(APP_SENTENCES, whole_app)
+
+        async def cook(user_input: Any, result: Any) -> str:
+            out = await async_cook(hass, _said(result, "query"),
+                                   satellite=_satellite_of(user_input))
+            return out["speech"]
+
+        async def choose(user_input: Any, result: Any) -> str:
+            said = str(getattr(user_input, "text", "") or _said(result, "choice"))
+            out = await async_cook(hass, choice=said, satellite=_satellite_of(user_input))
+            # (The page is the one the question was asked for.)
+            return out["speech"]
+
+        def stepper(move: str):
+            async def run(user_input: Any, result: Any) -> str:
+                which = move
+                if move == "n":
+                    n = step_number(_said(result, "n"))
+                    if not n:
+                        return "Which step?"
+                    which = str(n)
+                out = await async_get_recipe(hass, satellite=_satellite_of(user_input),
+                                             step=which)
+                return out["speech"]
+            return run
+
+        listen(COOK_SENTENCES, cook)
+        listen(CHOICE_SENTENCES, choose)
+        listen(FIRST_STEP_SENTENCES, stepper("first"))
+        listen(NEXT_STEP_SENTENCES, stepper("next"))
+        listen(BACK_STEP_SENTENCES, stepper("back"))
+        listen(REPEAT_STEP_SENTENCES, stepper("repeat"))
+        listen(STEP_N_SENTENCES, stepper("n"))
 
     if not options[OPT_TIMER_SENTENCES]:
         return

@@ -104,13 +104,27 @@
     'font-family:-apple-system,"Segoe UI",Roboto,Arial,sans-serif}' +
     '.sa-ring-k{font-size:30px;text-transform:uppercase;letter-spacing:2px}' +
     '.sa-ring-n{font-size:52px;font-weight:700;line-height:1.15;margin:12px 16px 32px 16px}' +
-    '.sa-ring button{height:96px;min-width:280px;border:0;border-radius:12px;background:#fff;' +
-    'color:#b71c1c;font-size:34px;font-weight:600}';
+    '.sa-ring-note{font-size:30px;line-height:1.3;margin:-16px 24px 32px 24px;opacity:.95}' +
+    '.sa-ring button{height:96px;min-width:240px;margin:0 8px;border:0;border-radius:12px;background:#fff;' +
+    'color:#b71c1c;font-size:34px;font-weight:600}' +
+    '.sa-ring button.sa-more{background:transparent;color:#fff;border:3px solid #fff}';
   document.head.appendChild(style);
 
+  // What the takeover says: "Bake crust is done." and, for a timer a recipe
+  // step started, what comes next.
+  function ringText(rows) {
+    var names = [], i;
+    for (i = 0; i < rows.length; i++) names.push(rows[i].label);
+    var last = names.pop();
+    var who = names.length ? names.join(', ') + ' and ' + last : last;
+    return who + (rows.length > 1 ? ' are done.' : ' is done.');
+  }
+
   var box = null;
-  function showRinging(names) {
-    if (!names.length) {
+  var ringing = [];
+  function showRinging(rows) {
+    ringing = rows;
+    if (!rows.length) {
       if (box && box.parentNode) box.parentNode.removeChild(box);
       box = null;
       return;
@@ -121,22 +135,44 @@
       var inner = document.createElement('div');
       var k = document.createElement('div'); k.className = 'sa-ring-k'; k.textContent = 'Time is up';
       var n = document.createElement('div'); n.className = 'sa-ring-n';
+      var note = document.createElement('div'); note.className = 'sa-ring-note';
       var b = document.createElement('button'); b.textContent = 'Dismiss';
       b.addEventListener('click', function () {
         send('POST', 'timers/dismiss', {}, function () { showRinging([]); });
       });
-      inner.appendChild(k); inner.appendChild(n); inner.appendChild(b);
+      // +1 min: the same timer again for one more minute.
+      var more = document.createElement('button'); more.className = 'sa-more';
+      more.textContent = '+1 min';
+      more.addEventListener('click', function () {
+        var rows = ringing.slice(0);
+        showRinging([]);
+        for (var i = 0; i < rows.length; i++) {
+          (function (t) {
+            send('POST', 'timers/' + t.id + '/dismiss', {}, function () {
+              send('POST', 'timers', { label: t.label, seconds: 60, origin: t.origin || SCREEN,
+                note: t.note || '' }, null);
+            });
+          })(rows[i]);
+        }
+      });
+      inner.appendChild(k); inner.appendChild(n); inner.appendChild(note);
+      inner.appendChild(b); inner.appendChild(more);
       box.appendChild(inner);
       document.body.appendChild(box);
     }
-    box.querySelector('.sa-ring-n').textContent = names.join(', ');
+    box.querySelector('.sa-ring-n').textContent = ringText(rows);
+    var notes = [];
+    for (var j = 0; j < rows.length; j++) if (rows[j].note) notes.push(rows[j].note);
+    var noteBox = box.querySelector('.sa-ring-note');
+    noteBox.textContent = notes.join(' ');
+    noteBox.style.display = notes.length ? '' : 'none';
   }
   function take(timers) {
-    var names = [];
+    var rows = [];
     for (var i = 0; i < (timers || []).length; i++) {
-      if (timers[i].expired) names.push(timers[i].label);
+      if (timers[i].expired) rows.push(timers[i]);
     }
-    showRinging(names);
+    showRinging(rows);
   }
 
   var cursor = 999999999;

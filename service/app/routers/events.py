@@ -217,7 +217,7 @@ async def _navigate_screen(payload: NavigatePayload):
     if page:
         if page not in screens.PAGES:
             return JSONResponse(status_code=400, content={
-                "ok": False, "error": "page is one of home, recipe, timers or app."})
+                "ok": False, "error": "page is one of home, recipe, cook, timers or app."})
         sent = await run_in_threadpool(lambda: screens.send_navigate(sid, page=page))
         path = ""
     else:

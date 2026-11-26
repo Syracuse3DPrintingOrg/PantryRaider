@@ -153,6 +153,94 @@
         }
       }
     },
+    "cook": {
+      "name": "Cook a recipe",
+      "description": "Open a recipe to cook, found by what was said: cook mode at step 1 on a screen, read out. When several fit, the answer lists them and asks which one; call again with the answer as the choice.",
+      "fields": {
+        "query": {
+          "name": "Recipe",
+          "description": "What was asked for, such as key lime pie."
+        },
+        "page": {
+          "name": "Page",
+          "description": "cook opens cook mode at step 1 and reads it out; recipe shows the whole recipe."
+        },
+        "choice": {
+          "name": "Choice",
+          "description": "The answer to \"which one?\", such as the second one or the best-ever one."
+        },
+        "slug": {
+          "name": "Recipe id",
+          "description": "The slug of one of the recipes offered, to open it directly."
+        },
+        "screen": {
+          "name": "Screen",
+          "description": "The id of the screen whose recipe this is. Leave empty to use the screen chosen for the voice device, or the kitchen's current recipe when it has none."
+        },
+        "satellite": {
+          "name": "Voice device",
+          "description": "The assist_satellite entity that heard the request. Its own choices (screen, recipes) are applied."
+        }
+      }
+    },
+    "get_recipe": {
+      "name": "Get the recipe being cooked",
+      "description": "The recipe open on a screen: title, servings, ingredients with amounts, numbered steps, their timers, and the step the cook is on. Returns a line to say aloud too.",
+      "fields": {
+        "screen": {
+          "name": "Screen",
+          "description": "The id of the screen whose recipe this is. Leave empty to use the screen chosen for the voice device, or the kitchen's current recipe when it has none."
+        },
+        "satellite": {
+          "name": "Voice device",
+          "description": "The assist_satellite entity that heard the request. Its own choices (screen, recipes) are applied."
+        }
+      }
+    },
+    "recipe_step": {
+      "name": "Move to a recipe step",
+      "description": "Move the step the cook is on (the screen follows) and read it out: first, next, back, repeat, last, or a step number.",
+      "fields": {
+        "step": {
+          "name": "Step",
+          "description": "first, next, back, repeat, last, or a step number."
+        },
+        "screen": {
+          "name": "Screen",
+          "description": "The id of the screen whose recipe this is. Leave empty to use the screen chosen for the voice device, or the kitchen's current recipe when it has none."
+        },
+        "satellite": {
+          "name": "Voice device",
+          "description": "The assist_satellite entity that heard the request. Its own choices (screen, recipes) are applied."
+        }
+      }
+    },
+    "start_recipe_timer": {
+      "name": "Start a recipe timer",
+      "description": "Start a timer the open recipe calls for, named after its step's action. Pick it by step number or by words; with neither, the current step's timer starts. Several that fit come back as choices to ask about.",
+      "fields": {
+        "step": {
+          "name": "Step",
+          "description": "The step number, from 1."
+        },
+        "query": {
+          "name": "Which timer",
+          "description": "Words that name it, such as the crust or baking it."
+        },
+        "screen": {
+          "name": "Screen",
+          "description": "The id of the screen whose recipe this is. Leave empty to use the screen chosen for the voice device, or the kitchen's current recipe when it has none."
+        },
+        "satellite": {
+          "name": "Voice device",
+          "description": "The assist_satellite entity that heard the request. Its own choices (screen, recipes) are applied."
+        },
+        "show": {
+          "name": "Show the timers",
+          "description": "Move the screen to its timers once the timer starts. Off keeps the recipe up."
+        }
+      }
+    },
     "start_timer": {
       "name": "Start a timer",
       "description": "Start a timer in Pantry Raider. It shows on every Pantry Raider screen.",
@@ -235,7 +323,7 @@
       "fields": {
         "page": {
           "name": "Page",
-          "description": "app (the whole interface, starting at the start page), home, recipe, timers or close."
+          "description": "app (the whole interface, starting at the start page), home, recipe, cook (cook mode: the recipe one large step at a time), timers or close."
         },
         "screen": {
           "name": "Screen",

@@ -43,12 +43,13 @@ ID_RE = re.compile(r"^[a-z0-9_-]{1,40}$")
 # Pages a caller can name without knowing a screen's own addresses.
 # "app" is the whole interface, starting at the start page: what a kitchen
 # display always shows, and what a tablet switches into on request.
-PAGES = ("home", "recipe", "timers", "app")
+# "cook" is cook mode: the recipe one step at a time, large.
+PAGES = ("home", "recipe", "timers", "app", "cook")
 APP_PATH = "ui/start?kiosk=1"
 _KIOSK_PATHS = {"home": "ui/", "recipe": "ui/current-recipe", "timers": "ui/timers",
-                "app": "ui/start"}
+                "app": "ui/start", "cook": "ui/current-recipe?cook=1"}
 _FOREIGN_PATHS = {"home": "screen/", "recipe": "screen/recipe", "timers": "screen/timers",
-                  "app": APP_PATH}
+                  "app": APP_PATH, "cook": "screen/cook"}
 
 MAX_SCREENS = 64
 ONLINE_SECONDS = 90.0

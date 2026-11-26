@@ -59,6 +59,9 @@ class _Timer:
     origin: str = ""
     # True once the "finished" event has gone out, so it goes out once.
     rang: bool = False
+    # What to do once it rings, for a timer a recipe step started ("Next:
+    # whisk the filling"), shown on the "Time is up" screen. Optional.
+    note: str = ""
 
 
 _lock = threading.Lock()
@@ -75,6 +78,7 @@ _next_event = 1
 # Called with each event after it is recorded, outside the lock.
 _listeners: list = []
 ORIGIN_MAX = 64
+NOTE_MAX = 160
 # mtime of the state file our in-memory view corresponds to (None = never seen).
 _mtime: int | None = None
 # A timer change made inside a request is written from a thread, so a slow
@@ -114,6 +118,7 @@ def _load_locked() -> None:
                 created_epoch=float(raw.get("created_epoch", 0)),
                 origin=str(raw.get("origin", "") or "")[:ORIGIN_MAX],
                 rang=bool(raw.get("rang", False)),
+                note=str(raw.get("note", "") or "")[:NOTE_MAX],
             )
             if not all(math.isfinite(v) for v in
                        (t.total_seconds, t.deadline_epoch, t.created_epoch)):
@@ -138,7 +143,7 @@ def _save_locked() -> None:
             "timers": [
                 {"id": t.id, "label": t.label, "total_seconds": t.total_seconds,
                  "deadline_epoch": t.deadline_epoch, "created_epoch": t.created_epoch,
-                 "origin": t.origin, "rang": t.rang}
+                 "origin": t.origin, "rang": t.rang, "note": t.note}
                 for t in sorted(_timers.values(), key=lambda t: t.id)
             ],
         }
@@ -203,6 +208,7 @@ def _serialize(t: _Timer, now_epoch: float | None = None) -> dict:
         # A finished timer rings until someone dismisses it.
         "state": "ringing" if expired else "running",
         "origin": t.origin,
+        "note": t.note,
         # Absolute deadline (wall clock) so other machines can agree on remaining.
         "deadline_epoch": t.deadline_epoch,
         "created_epoch": t.created_epoch,
@@ -289,7 +295,7 @@ def next_deadline() -> float | None:
     return min(ends) if ends else None
 
 
-def create_timer(label: str, seconds: float, origin: str = "") -> dict:
+def create_timer(label: str, seconds: float, origin: str = "", note: str = "") -> dict:
     """Create and start a timer counting down `seconds` from now. Raises
     ValueError on a non-positive or unparseable duration. ``origin`` names
     who set it (a screen id, a Home Assistant satellite)."""
@@ -308,6 +314,7 @@ def create_timer(label: str, seconds: float, origin: str = "") -> dict:
             deadline_epoch=now_epoch + total,
             created_epoch=now_epoch,
             origin=str(origin or "").strip()[:ORIGIN_MAX],
+            note=" ".join(str(note or "").split())[:NOTE_MAX],
         )
         _timers[timer.id] = timer
         _save_locked()

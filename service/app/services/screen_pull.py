@@ -39,6 +39,17 @@ def apply_event(event: dict) -> bool:
             current_recipe.set_active(recipe)
             return True
         return False
+    if kind == "step":
+        # Voice moved the step this screen is on (the server keeps it too).
+        # Cook mode on this device follows the local marker.
+        from . import screen_recipes
+        try:
+            n = int(event.get("step"))
+        except (TypeError, ValueError):
+            n = 0
+        screen_recipes.set_step(screen_recipes.SERVER_KEY, current_recipe.get_active(),
+                                n - 1 if n >= 1 else None)
+        return True
     if kind in _SHOWN:
         ha_events.add_for_display(event)
         return True

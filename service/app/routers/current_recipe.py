@@ -72,7 +72,7 @@ async def _forward(request: Request, path: str) -> Response:
     return await upstream.forward(_fwd_client, request, f"{_upstream()}{path}")
 
 
-async def _create_timer_upstream(label: str, seconds: float) -> Response:
+async def _create_timer_upstream(label: str, seconds: float, note: str = "") -> Response:
     """Create a timer on the main server from an already-resolved label and
     duration. The recipe-suggestion start needs this seam: the suggestion is
     matched against THIS device's active recipe (recipe state is local to each
@@ -80,7 +80,8 @@ async def _create_timer_upstream(label: str, seconds: float) -> Response:
     the resolved values to the shared POST /timers endpoint."""
     _timers_cache.invalidate()
     return await upstream.send(_fwd_client, "POST", f"{_upstream()}/timers",
-                               json={"label": label, "seconds": seconds})
+                               json={"label": label, "seconds": seconds,
+                                     **({"note": note} if note else {})})
 
 
 class IngredientIn(BaseModel):
@@ -111,6 +112,8 @@ class TimerIn(BaseModel):
     # that should jump to its timers. Both optional.
     origin: str = ""
     screen: str = ""
+    # What to do once it rings, shown on the "Time is up" screen.
+    note: str = ""
 
 
 class DismissIn(BaseModel):
@@ -246,7 +249,7 @@ async def _consume_active_recipe(recipe: dict) -> list[str]:
     return consumed
 
 
-async def _cook_recipe(recipe: dict, slot: int, db: Session) -> dict:
+async def _cook_recipe(recipe: dict, slot: int | None, db: Session, clear=None) -> dict:
     """Shared cook flow for a recipe (primary or a course): consume matched
     inventory, raise a 'save to leftovers?' action item, and clear that slot."""
     title = recipe.get("title") or "the recipe"
@@ -267,7 +270,15 @@ async def _cook_recipe(recipe: dict, slot: int, db: Session) -> dict:
             dedupe_key=None, level="success",
             payload={"title": title, "servings": servings, "days": _LEFTOVER_DEFAULT_DAYS},
         )
-        current_recipe.clear_recipe(slot)
+        if clear is not None:
+            clear()           # a screen's own recipe, not one of the courses
+        else:
+            current_recipe.clear_recipe(slot)
+            if slot == current_recipe.PRIMARY_SLOT:
+                # Where the cook was up to goes with the recipe, so cooking
+                # it again starts at step 1.
+                from ..services import screen_recipes
+                screen_recipes.forget_step(screen_recipes.SERVER_KEY)
         return item
 
     item = await run_in_threadpool(_record)
@@ -393,7 +404,8 @@ async def start_suggested_timer(payload: StartSuggestionIn = Body(...)):
     On a satellite the suggestion is still resolved here, against this device's
     own active recipe (recipe state is per-device), but the resulting timer is
     created on the main server, where all timers live."""
-    suggestions = recipe_timers.suggestions_for_recipe(current_recipe.get_active())
+    active = current_recipe.get_active()
+    suggestions = recipe_timers.suggestions_for_recipe(active)
 
     match = None
     for s in suggestions:
@@ -409,10 +421,12 @@ async def start_suggested_timer(payload: StartSuggestionIn = Body(...)):
         return JSONResponse({"detail": "No matching suggestion"}, status_code=404)
 
     label = payload.label or (match or {}).get("label") or ""
+    note = recipe_timers.next_note((active or {}).get("steps"), match["step_index"]) \
+        if match else ""
     if _upstream():
-        return await _create_timer_upstream(label, float(seconds))
+        return await _create_timer_upstream(label, float(seconds), note)
     try:
-        timer = timers.create_timer(label, seconds)
+        timer = timers.create_timer(label, seconds, note=note)
     except ValueError as exc:
         return JSONResponse({"detail": str(exc)}, status_code=400)
     return {"timer": timer}
@@ -444,7 +458,8 @@ async def post_timer(request: Request, payload: TimerIn = Body(...)):
     if _upstream():
         return await _forward(request, "/timers")
     try:
-        timer = timers.create_timer(payload.label, payload.seconds, payload.origin)
+        timer = timers.create_timer(payload.label, payload.seconds, payload.origin,
+                                    payload.note)
     except ValueError as exc:
         return JSONResponse({"detail": str(exc)}, status_code=400)
     out = {"timer": timer}

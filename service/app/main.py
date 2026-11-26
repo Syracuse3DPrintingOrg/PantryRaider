@@ -863,6 +863,10 @@ def _gate_applies(path: str, method: str, snap) -> bool:
         return True
     if any(path == p or path.startswith(p + "/") for p in _UPSTREAM_FORWARD_PREFIXES):
         return bool(snap.upstream_linked)
+    # A screen's recipe routes answer here but read and start the timers on
+    # the main server, so they close with the timers.
+    if path == "/api/screens/recipe" or path.startswith("/api/screens/recipe/"):
+        return bool(snap.upstream_linked)
     # Recipe, gadget and print forwards act on the main server: closed when
     # the server itself has a password (an open server loses nothing here).
     if snap.server_has_password is True and _satellite_recipe_upstream(path):

@@ -90,12 +90,24 @@ body.has-strip .sc-main { top: 122px; }
 }
 .sc-card-kicker { display: block; font-size: 16px; color: #8b95a1; text-transform: uppercase; letter-spacing: 1px; }
 .sc-card-title { display: block; font-size: 30px; font-weight: 700; }
+.sc-card-sub { display: block; font-size: 22px; color: #f7b3d2; margin-top: 4px; }
+.sc-home { padding-top: 8px; }
+.sc-start-cooking { display: inline-block; height: 72px; line-height: 72px; font-size: 26px; margin: 0 0 16px 0; padding: 0 28px; }
+.sc-ring-note { font-size: 30px; line-height: 1.3; margin: -16px 24px 28px 24px; }
+.sc-btn-ghost { background: transparent; color: #fff; border: 3px solid #fff; margin-left: 12px; }
+.sc-btn-ghost:active { background: rgba(255,255,255,.2); }
+.sc-ingredients-open .sc-ingredients { display: block; }
 #sc-home-timers { max-width: 900px; margin: 0 auto; text-align: left; }
 
 /* Recipe page */
 .sc-title { font-size: 34px; line-height: 1.15; }
 .sc-meta { color: #aab2bd; font-size: 20px; margin: 4px 0 14px 0; }
-.sc-cols { display: -webkit-flex; display: flex; -webkit-align-items: flex-start; align-items: flex-start; }
+/* Steps come first in the markup (a portrait screen shows them first); a
+   wide screen turns the row round so ingredients sit on the left. */
+.sc-cols {
+  display: -webkit-flex; display: flex; -webkit-align-items: flex-start; align-items: flex-start;
+  -webkit-flex-direction: row-reverse; flex-direction: row-reverse;
+}
 .sc-col h2 {
   font-size: 16px; text-transform: uppercase; letter-spacing: 1px; color: #F2006E; margin-bottom: 8px;
 }
@@ -122,16 +134,52 @@ body.has-strip .sc-main { top: 122px; }
   position: absolute; left: 14px; top: 14px; width: 36px; height: 36px; line-height: 36px;
   border-radius: 18px; background: #2f3640; text-align: center; font-size: 20px; font-weight: 700;
 }
-.sc-steps li.on { border-color: #F2006E; background: #252a33; }
+.sc-steps li.on { border-color: #F2006E; background: #2a2230; font-size: 28px; }
 .sc-steps li.on:before { background: #F2006E; }
 .sc-steps li.done { color: #6b7480; }
 .sc-step-timers { margin-top: 10px; }
-.sc-step-timers .sc-btn { height: 52px; margin: 0 10px 6px 0; background: #3a2030; }
+.sc-step-timers .sc-btn { margin: 0 10px 6px 0; }
+
+/* A timer the recipe suggests: says what it starts, then becomes its own
+   countdown once tapped. */
+.sc-btn.sc-tbtn {
+  height: auto; min-height: 64px; padding: 8px 18px; text-align: left; line-height: 1.2;
+  background: #1a1c21; border: 3px solid #F2006E; color: #fff; vertical-align: top;
+}
+.sc-btn.sc-tbtn:active { background: #4a1530; }
+.sc-tbtn-main { display: block; font-weight: 700; font-variant-numeric: tabular-nums; }
+.sc-tbtn-sub { display: block; margin-top: 2px; font-size: 16px; font-weight: 600; color: #f7b3d2; }
+.sc-btn.sc-tbtn-running { background: #F2006E; }
+.sc-btn.sc-tbtn-running .sc-tbtn-sub { color: #ffe3ef; }
+.sc-btn.sc-tbtn-ringing { background: #c62828; border-color: #fff; }
+.sc-btn.sc-tbtn-ringing .sc-tbtn-sub { color: #fff; }
+.sc-btn.sc-tbtn-done { border-color: #2ea043; }
+.sc-btn.sc-tbtn-done .sc-tbtn-sub { color: #9be0a8; }
+.sc-quick-timers { margin: 0 0 16px 0; }
+.sc-quick-timers .sc-quick-label { color: #aab2bd; font-size: 18px; margin-bottom: 8px; }
+.sc-tbtn-row .sc-btn { margin: 0 10px 10px 0; }
+.sc-btn-quiet { height: 48px; min-width: 0; margin-left: 12px; background: #262b33; font-size: 18px; }
+.sc-narrow-only { display: none; }
+
+/* Back and Next for the step the cook is on. Voice moves the same marker. */
+.sc-stepnav {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; height: 88px;
+  display: -webkit-flex; display: flex; -webkit-align-items: center; align-items: center;
+  padding: 0 12px; background: #1c1f25; border-top: 1px solid #2c313a; box-sizing: border-box;
+}
+.sc-stepnav .sc-btn { height: 68px; font-size: 24px; }
+#sc-step-back { width: 30%; max-width: 260px; }
+#sc-step-next { -webkit-flex: 1 1 0; flex: 1 1 0; }
+.sc-btn-primary { background: #F2006E; }
+.sc-btn-primary:active { background: #c4005a; }
+.sc-btn[disabled] { opacity: .4; }
+.sc-stepnav-where { padding: 0 16px; font-size: 20px; font-weight: 600; color: #cfd5dc; white-space: nowrap; }
+body.has-stepnav .sc-main { bottom: 88px; }
 .sc-notes { margin-top: 14px; color: #aab2bd; font-size: 20px; white-space: pre-wrap; }
 
 /* A finished timer takes over the screen until it is dismissed. */
 .sc-ring {
-  position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 50;
+  position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 2100;
   background: #b71c1c; display: -webkit-flex; display: flex;
   -webkit-align-items: center; align-items: center; -webkit-justify-content: center; justify-content: center;
   text-align: center; -webkit-animation: sc-pulse 1s infinite alternate; animation: sc-pulse 1s infinite alternate;
@@ -141,7 +189,7 @@ body.has-strip .sc-main { top: 122px; }
 @-webkit-keyframes sc-pulse { from { background: #b71c1c; } to { background: #e53935; } }
 @keyframes sc-pulse { from { background: #b71c1c; } to { background: #e53935; } }
 
-.sc-toasts { position: fixed; top: 72px; right: 12px; z-index: 40; max-width: 80%; }
+.sc-toasts { position: fixed; top: 72px; right: 12px; z-index: 2050; max-width: 80%; }
 .sc-toast {
   background: #262b33; border-left: 6px solid #14b8c4; border-radius: 10px;
   padding: 12px 16px; margin-bottom: 10px; font-size: 20px; box-shadow: 0 6px 16px rgba(0,0,0,.5);
@@ -161,7 +209,13 @@ body.has-strip .sc-main { top: 122px; }
   .sc-tab { padding: 0 14px; font-size: 18px; margin-right: 4px; }
   .sc-clock { font-size: 20px; }
   .sc-cols { display: block; }
-  .sc-ingredients { margin-right: 0; margin-bottom: 18px; }
+  .sc-ingredients { margin-right: 0; margin-top: 18px; display: none; }
+  .sc-cols.sc-ingredients-open .sc-ingredients { display: block; }
+  .sc-btn-ghost { margin: 12px 0 0 0; }
+  .sc-narrow-only { display: inline-block; }
+  .sc-stepnav-where { padding: 0 8px; font-size: 17px; }
+  .sc-step-timers .sc-btn.sc-tbtn { display: block; width: 100%; margin-right: 0; box-sizing: border-box; }
+  .sc-tbtn-row .sc-btn.sc-tbtn { padding: 6px 12px; font-size: 18px; }
   .sc-title { font-size: 28px; }
   .sc-steps li { font-size: 22px; }
   .sc-timer-left { font-size: 56px; }
@@ -169,4 +223,15 @@ body.has-strip .sc-main { top: 122px; }
   .sc-timer-acts .sc-btn { margin: 4px 10px 4px 0; }
   .sc-bigclock { font-size: 88px; }
   .sc-ring-names { font-size: 44px; }
+}
+
+/* A wide landscape panel (an Echo Show, 1280 CSS px) shows a CSS pixel much
+   smaller than a portrait one does, so its targets get bigger numbers. */
+@media (min-width: 1000px) {
+  .sc-btn.sc-tbtn { min-height: 80px; font-size: 24px; padding: 10px 22px; }
+  .sc-tbtn-sub { font-size: 18px; }
+  .sc-steps li.on { font-size: 30px; }
+  .sc-stepnav { height: 104px; }
+  .sc-stepnav .sc-btn { height: 84px; font-size: 28px; }
+  body.has-stepnav .sc-main { bottom: 104px; }
 }

@@ -11,16 +11,37 @@ to that one screen. The other screens stay on whatever they were showing.
 
 ## What a screen shows
 
-A connected screen has three pages, built for touch and for older, slower
+A connected screen has four pages, built for touch and for older, slower
 tablets:
 
-- **Home**: the time, your running timers, and the recipe being cooked.
+- **Home**: **Continue cooking** with the recipe and the step you are on,
+  and your running timers.
 - **Timers**: every timer with its time left, **+1 min** and **Cancel**,
   and buttons to start a quick timer. When a timer runs out the whole screen
-  turns red with a large **Dismiss** button.
-- **Recipe**: ingredients and steps in large type. Tap an ingredient to
-  cross it off, tap a step to mark where you are, and tap the timer button
-  under a step to start that step's timer.
+  turns red and says which one is done and, for a recipe step's timer, what
+  to do next, with **Dismiss** and **+1 min**.
+- **Recipe**: the whole recipe in large type. A row at the top has a button
+  for every timer the recipe calls for ("Start 10 min · Bake crust"), and
+  each step has its own. Once tapped, a button shows that timer counting
+  down, so a second tap never starts a second timer. Tap a step to mark it
+  as the one you are on; **Back** and **Next** along the bottom move the
+  marker. On a narrow portrait screen the steps come first and the
+  ingredients wait behind **Show ingredients**.
+- **Cook mode** (**Start cooking** on the recipe): one step at a time, in
+  type big enough to read across the kitchen, with that step's timers,
+  your running timers, what comes next, and an **Ingredients** button that
+  starts with the ones this step uses. **Back**, **Next** or a swipe moves
+  between steps. After the last step, **Mark as cooked** uses up the
+  matching items in your pantry, the same as **Cooked** on the recipe page.
+  **Exit** at the top puts the screen back.
+
+### The step you are on
+
+Each screen remembers the recipe it is showing and the step you are on, so
+two tablets can cook two different things. Touch and voice move the same
+marker: tap a step, press **Next**, or say "next step" to the voice device
+for that screen, and the screen follows. "Start the timer" means the timer
+of the step you are on.
 
 ### The whole of Pantry Raider on a tablet
 
@@ -97,8 +118,12 @@ Everything is plain JSON over HTTP with the key in an `X-API-Key` header.
 | `GET /api/screens` | The list of screens. A screen key sees only its own |
 | `POST /api/screens/register` | `{"screen_id", "label", "kind", "width", "height"}`. The id is yours to choose, 1 to 40 of `a-z 0-9 - _`, and must stay the same for that tablet |
 | `GET /api/screens/poll?screen=<id>&since=<n>&wait=25` | Events for one screen. The request is held until one arrives. Ask first with `since=999999999` to read `last_id` without old events |
-| `POST /api/screens/session` | `{"screen", "page"}` returns a one-use address, good for a minute, that signs the screen's web view in and opens the page (`home`, `recipe`, `timers`, or `app` for the whole interface). A missing, used or expired ticket answers 401 with the header `X-PR-Screen: reconnect` and a page with no form; ask for a new ticket |
-| `POST /api/screens/show-recipe` | `{"query", "screen"}` finds a recipe by what was said, makes it the current recipe and moves that screen to it. The reply has `result` (`shown`, `ambiguous` or `not_found`) and a `speech` line to say aloud |
+| `POST /api/screens/session` | `{"screen", "page"}` returns a one-use address, good for a minute, that signs the screen's web view in and opens the page (`home`, `recipe`, `cook`, `timers`, or `app` for the whole interface). For `app` and `cook` the reply also has `"exit": "page"`: the page draws its own Exit, so the app needs no close button over it. A missing, used or expired ticket answers 401 with the header `X-PR-Screen: reconnect` and a page with no form; ask for a new ticket |
+| `POST /api/screens/show-recipe` | `{"query", "screen", "page"}` finds a recipe by what was said, makes it that screen's recipe (and the kitchen's current one) and moves the screen to it. `page` is `recipe` (the whole recipe) or `cook` (cook mode at step 1, read out in `speech`). The reply has `result` (`shown`, `ambiguous` with `candidates`, or `not_found`) and a `speech` line. After `ambiguous`, send `choice` with the answer ("the second one", "the best-ever one") or `slug`; the answer keeps the page the question was asked for |
+| `GET /api/screens/recipe?screen=<id>` | The recipe open on that screen: `{"ok": true, "recipe": {"title"}, "title", "servings", "ingredients" (lines with scaled amounts), "steps" ([{"number", "text", "timers"}]), "step" (the step you are on, from 1, or null), "current", "timers", "speech"}`, or `{"ok": false, "result": "none", "speech"}` when nothing is open there. With no screen, the kitchen's current recipe. A screen key always names one of its own screens: with none it is refused (400), and another key's screen answers 403. The step, timer and cooked routes below work the same way |
+| `POST /api/screens/recipe/step` | `{"screen", "step"}` moves the step you are on: `first`, `next`, `back`, `repeat`, `last`, a number, or `none`. The reply is the recipe as above, with `current` and a `speech` line that reads the step. The screen follows at once |
+| `POST /api/screens/recipe/timer` | `{"screen", "step", "query", "origin", "show"}` starts one of the recipe's timers, picked by step number, by words ("the crust", "baking it"), or with neither, the timer of the step you are on. `result` is `started` or `running` (with `timer`), `ambiguous` (with `choices`, each `{"step", "label", "seconds", "speech"}`: ask, then call again with the step), `no_recipe` or `not_found`. A timer that is already counting down is never started twice. `show` moves the screen to its timers |
+| `POST /api/screens/recipe/cooked` | `{"screen"}` marks that screen's recipe cooked, the same as **Cooked** on the recipe page: it uses up the matching items in your pantry. Home Assistant's key cannot call it |
 | `POST /events/navigate`, `/events/notify`, `/events/camera-popup`, `/events/camera-detect`, `/events/confirm` | Each takes an optional `"screen"` to reach one screen. `navigate` also takes `"page"` in place of a path |
 | `POST /events/close` | `{"screen"}` puts a screen back where it rests: a tablet app drops the page, a kitchen display goes home |
 | `POST /timers` | `{"label", "seconds", "origin", "screen"}`. `origin` records who set the timer; `screen` moves that screen to its timers |

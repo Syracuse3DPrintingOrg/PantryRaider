@@ -49,8 +49,22 @@ def test_cooked_button_only_opens_the_confirmation():
     assert "fetch(" not in ask and "/cooked" not in ask, ask
 
 
+COOK_MODE = PAGE.parents[1] / "static" / "js" / "cook-mode.js"
+
+
+def test_cook_mode_asks_before_it_uses_up_stock():
+    """Cook mode's Mark as cooked asks the same question, and only its
+    "Use them up" button sends the request."""
+    js = COOK_MODE.read_text()
+    assert js.count("cooked();") == 1
+    yes = js.index("'Use them up'")
+    assert js.index("cooked();") - yes < 200
+    assert "This uses up the matching items in your pantry." in js
+
+
 def test_only_the_confirm_path_posts_cooked():
-    src = _src()
+    # Cook mode, drawn over this page, has its own confirmation (above).
+    src = _src().replace(COOK_MODE.read_text(), "")
     # The request to /cooked appears exactly once, inside confirmCooked.
     assert src.count("/cooked'") == 1, "the cooked request should live in one place"
     assert "/cooked'" in _extract("confirmCooked")

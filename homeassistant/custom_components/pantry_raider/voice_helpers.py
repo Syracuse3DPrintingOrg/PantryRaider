@@ -256,6 +256,69 @@ def status_speech(timers: Any) -> str:
     return ". ".join(said) + "."
 
 
+_ORDINAL_WORDS = {
+    "first": 1, "second": 2, "third": 3, "fourth": 4, "fifth": 5, "sixth": 6,
+    "seventh": 7, "eighth": 8, "ninth": 9, "tenth": 10, "eleventh": 11, "twelfth": 12,
+}
+STEP_MOVES = ("first", "next", "back", "repeat", "last")
+_STEP_ALIASES = {
+    "start": "first", "beginning": "first", "begin": "first", "1st": "first",
+    "previous": "back", "prev": "back", "before": "back", "go back": "back",
+    "again": "repeat", "current": "repeat", "this": "repeat", "same": "repeat",
+    "this one": "repeat", "that": "repeat", "final": "last", "following": "next",
+}
+
+
+def step_number(text: Any) -> int | None:
+    """A step number from what was said: "4", "four", "step four", "the
+    fourth", "twenty one". None when there is no number."""
+    words = [w for w in _words(text) if w not in ("step", "the", "number", "to", "go", "on")]
+    if not words:
+        return None
+    if len(words) == 1 and words[0] in _ORDINAL_WORDS:
+        return _ORDINAL_WORDS[words[0]]
+    if len(words) == 1 and re.fullmatch(r"\d+", words[0]):
+        n = int(words[0])
+        return n if n > 0 else None
+    total = 0
+    for w in words:
+        if w in _NUMBER_WORDS and w not in ("a", "an", "zero"):
+            total += _NUMBER_WORDS[w]
+        else:
+            return None
+    return total or None
+
+
+def step_move(text: Any) -> str:
+    """What a step request means for the step pointer: first, next, back,
+    repeat, last, a number as text ("4"), or "" when it is none of those."""
+    raw = " ".join(_words(text))
+    if raw in STEP_MOVES:
+        return raw
+    if raw in _STEP_ALIASES:
+        return _STEP_ALIASES[raw]
+    n = step_number(raw)
+    return str(n) if n else ""
+
+
+def for_model(answer: Any) -> dict[str, Any]:
+    """The parts of a recipe answer a language model needs, without the
+    bookkeeping (raw suggestions, ids) that only costs it tokens."""
+    if not isinstance(answer, dict):
+        return {}
+    keep = ("ok", "result", "speech", "title", "servings", "ingredients", "steps",
+            "step", "step_count", "current", "timers", "notes", "candidates",
+            "choices", "recipe", "timer", "reason")
+    out = {k: answer[k] for k in keep if k in answer}
+    if isinstance(answer.get("screen"), dict):
+        out["screen"] = answer["screen"].get("label") or answer["screen"].get("id")
+    if isinstance(out.get("timer"), dict):
+        t = out["timer"]
+        out["timer"] = {k: t[k] for k in ("label", "total_seconds", "remaining_seconds",
+                                          "state") if k in t}
+    return out
+
+
 def should_ring(event: Any, options: Any) -> str:
     """The assist_satellite entity to ring for a "finished" timer event, or
     "" when this event is not one to ring for."""

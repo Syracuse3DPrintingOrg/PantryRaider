@@ -473,5 +473,10 @@
  "POST /timers/{timer_id}/dismiss": "kitchen",
  "POST /events/close": "events",
  "GET /status-icons": "kitchen",
- "GET /setup/status-icons/entities": "admin"
+ "GET /setup/status-icons/entities": "admin",
+ "GET /api/screens/recipe": "kitchen",
+ "POST /api/screens/recipe/timer": "kitchen",
+ "POST /api/screens/recipe/step": "kitchen",
+ "POST /api/screens/recipe/cooked": "kitchen",
+ "GET /screen/cook": "kitchen"
 }

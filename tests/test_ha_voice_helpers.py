@@ -113,7 +113,7 @@ def test_every_voice_service_is_described():
     import re
     src = (COMPONENT / "voice.py").read_text()
     names = set(re.findall(r'^SERVICE_[A-Z_]+ = "([a-z_]+)"', src, flags=re.M))
-    assert len(names) == 7
+    assert len(names) == 11
     strings = json.loads((COMPONENT / "strings.json").read_text())
     english = json.loads((COMPONENT / "translations/en.json").read_text())
     yaml_text = (COMPONENT / "services.yaml").read_text()
@@ -121,3 +121,27 @@ def test_every_voice_service_is_described():
         assert name in strings["services"] and name in english["services"], name
         assert re.search(rf"^{name}:$", yaml_text, flags=re.M), name
     assert strings == english
+
+
+def test_step_words():
+    assert vh.step_number("four") == 4
+    assert vh.step_number("step 12") == 12
+    assert vh.step_number("the fourth") == 4
+    assert vh.step_number("twenty one") == 21
+    assert vh.step_number("pasta") is None
+    assert vh.step_move("next") == "next"
+    assert vh.step_move("go back") == "back"
+    assert vh.step_move("again") == "repeat"
+    assert vh.step_move("3") == "3"
+    assert vh.step_move("sideways") == ""
+
+
+def test_a_model_gets_the_recipe_without_the_bookkeeping():
+    out = vh.for_model({"ok": True, "title": "Pie", "steps": [{"number": 1, "text": "Mix."}],
+                        "suggestions": [{"label": "x"}], "screen": {"id": "ks", "label": "Echo"},
+                        "timer": {"id": 3, "label": "Bake", "deadline_epoch": 1,
+                                  "state": "running"},
+                        "speech": "Pie is open."})
+    assert out == {"ok": True, "title": "Pie", "steps": [{"number": 1, "text": "Mix."}],
+                   "screen": "Echo", "timer": {"label": "Bake", "state": "running"},
+                   "speech": "Pie is open."}
