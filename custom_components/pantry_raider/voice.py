@@ -622,8 +622,9 @@ async def _builtin(intent_obj: intent.Intent, name: str, slots: dict) -> intent.
 
 
 def _satellite(intent_obj: intent.Intent) -> str:
-    """The voice device a request came from. A sentence carries it; a tool
-    call from an AI model carries only the device, so its assist_satellite
+    """The voice device a request came from. A voice satellite's request
+    carries it; a tool call from an AI model, or a request through the
+    websocket pipeline, carries only the device, so its assist_satellite
     entity is looked up."""
     return satellite_for(intent_obj.hass, intent_obj.satellite_id, intent_obj.device_id)
 
@@ -789,8 +790,14 @@ async def _speech_of(response: intent.IntentResponse) -> str:
     return str((speech.get("plain") or {}).get("speech") or "")
 
 
-def _satellite_of(user_input: Any) -> str:
-    return str(getattr(user_input, "satellite_id", None) or "")
+def _satellite_of(hass: HomeAssistant, user_input: Any) -> str:
+    """The voice device a sentence came from. A voice satellite names its
+    assist_satellite entity; a request through the websocket pipeline
+    (assist_pipeline/run, which takes a device and refuses a satellite id)
+    names only the device, so that device's entity is looked up, as for an
+    AI model's tool call."""
+    return satellite_for(hass, getattr(user_input, "satellite_id", None),
+                         getattr(user_input, "device_id", None))
 
 
 async def _ha_timer(hass: HomeAssistant, user_input: Any, name: str, slots: dict) -> str:
@@ -855,15 +862,15 @@ def async_register_voice(hass: HomeAssistant, entry) -> None:
     if options[OPT_RECIPE_SENTENCES]:
         async def recipe(user_input: Any, result: Any) -> str:
             out = await async_cook(hass, _said(result, "query"),
-                                   satellite=_satellite_of(user_input), page="recipe")
+                                   satellite=_satellite_of(hass, user_input), page="recipe")
             return out["speech"]
 
         async def close(user_input: Any, result: Any) -> str:
-            out = await async_show_page(hass, "close", satellite=_satellite_of(user_input))
+            out = await async_show_page(hass, "close", satellite=_satellite_of(hass, user_input))
             return "Closed." if out["ok"] else out["speech"]
 
         async def whole_app(user_input: Any, result: Any) -> str:
-            out = await async_show_page(hass, "app", satellite=_satellite_of(user_input))
+            out = await async_show_page(hass, "app", satellite=_satellite_of(hass, user_input))
             return "Opening Pantry Raider." if out["ok"] else out["speech"]
 
         listen(RECIPE_SENTENCES, recipe)
@@ -872,12 +879,12 @@ def async_register_voice(hass: HomeAssistant, entry) -> None:
 
         async def cook(user_input: Any, result: Any) -> str:
             out = await async_cook(hass, _said(result, "query"),
-                                   satellite=_satellite_of(user_input))
+                                   satellite=_satellite_of(hass, user_input))
             return out["speech"]
 
         async def choose(user_input: Any, result: Any) -> str:
             said = str(getattr(user_input, "text", "") or _said(result, "choice"))
-            out = await async_cook(hass, choice=said, satellite=_satellite_of(user_input))
+            out = await async_cook(hass, choice=said, satellite=_satellite_of(hass, user_input))
             # (The page is the one the question was asked for.)
             return out["speech"]
 
@@ -889,7 +896,7 @@ def async_register_voice(hass: HomeAssistant, entry) -> None:
                     if not n:
                         return "Which step?"
                     which = str(n)
-                out = await async_get_recipe(hass, satellite=_satellite_of(user_input),
+                out = await async_get_recipe(hass, satellite=_satellite_of(hass, user_input),
                                              step=which)
                 return out["speech"]
             return run
@@ -906,7 +913,7 @@ def async_register_voice(hass: HomeAssistant, entry) -> None:
         return
 
     def mine(user_input: Any) -> bool:
-        sat = _satellite_of(user_input)
+        sat = _satellite_of(hass, user_input)
         return not sat or _routing(hass, sat)[SAT_TIMERS] == TIMERS_PANTRY_RAIDER
 
     async def start(user_input: Any, result: Any) -> str:
@@ -916,31 +923,32 @@ def async_register_voice(hass: HomeAssistant, entry) -> None:
             h, rest = divmod(seconds, 3600)
             return await _ha_timer(hass, user_input, "HassStartTimer", {
                 "hours": h, "minutes": rest // 60, "seconds": rest % 60, "name": name})
-        out = await async_start_timer(hass, seconds, name, satellite=_satellite_of(user_input))
+        out = await async_start_timer(hass, seconds, name,
+                                      satellite=_satellite_of(hass, user_input))
         return out["speech"]
 
     async def status(user_input: Any, result: Any) -> str:
         name = _said(result, "name")
         if not mine(user_input):
             return await _ha_timer(hass, user_input, "HassTimerStatus", {"name": name})
-        return (await async_timer_status(hass, name, _satellite_of(user_input)))["speech"]
+        return (await async_timer_status(hass, name, _satellite_of(hass, user_input)))["speech"]
 
     async def cancel(user_input: Any, result: Any) -> str:
         name = _said(result, "name")
         if not mine(user_input):
             return await _ha_timer(hass, user_input, "HassCancelTimer", {"name": name})
-        out = await async_cancel_timer(hass, name, satellite=_satellite_of(user_input))
+        out = await async_cancel_timer(hass, name, satellite=_satellite_of(hass, user_input))
         return out["speech"]
 
     async def cancel_all(user_input: Any, result: Any) -> str:
         if not mine(user_input):
             return await _ha_timer(hass, user_input, "HassCancelAllTimers", {})
         out = await async_cancel_timer(hass, cancel_all=True,
-                                       satellite=_satellite_of(user_input))
+                                       satellite=_satellite_of(hass, user_input))
         return out["speech"]
 
     async def stop(user_input: Any, result: Any) -> str:
-        out = await async_dismiss_timer(hass, satellite=_satellite_of(user_input))
+        out = await async_dismiss_timer(hass, satellite=_satellite_of(hass, user_input))
         return out["speech"]
 
     listen(START_TIMER_SENTENCES, start)

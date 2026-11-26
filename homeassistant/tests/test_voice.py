@@ -376,6 +376,49 @@ async def test_an_llm_agent_is_given_the_tools_and_they_know_the_device(hass, in
     assert install.calls[-1][1]["origin"] == SAT
 
 
+async def test_a_sentence_that_names_only_the_device_uses_its_screen(hass, install):
+    """Home Assistant's websocket pipeline (assist_pipeline/run) takes a
+    device_id and refuses a satellite_id, so a sentence can arrive naming
+    only the device. Its assist_satellite entity, and the screen chosen for
+    that entity, are used, the same as for a voice satellite."""
+    from homeassistant.helpers import device_registry as dr, entity_registry as er
+
+    entry = await _setup(hass, _voice())
+    devices = dr.async_get(hass)
+    device = devices.async_get_or_create(
+        config_entry_id=entry.entry_id, identifiers={("test", "kitchen-sat")})
+    er.async_get(hass).async_get_or_create(
+        "assist_satellite", "test", "kitchen", suggested_object_id="kitchen",
+        device_id=device.id)
+
+    async def say(text, device_id=device.id):
+        result = await conversation.async_converse(
+            hass, text, None, Context(), device_id=device_id, satellite_id=None,
+            agent_id=conversation.HOME_ASSISTANT_AGENT)
+        return result.response.speech["plain"]["speech"]
+
+    assert await say("let's cook a key lime pie") == (
+        "I found Best-Ever Key Lime Pie and Key Lime Pie Bars. Which one?")
+    assert install.calls[-1] == ("recipe", {"query": "key lime pie", "screen": "ks-kitchen",
+                                            "page": "cook"})
+    assert await say("the best-ever one") == (
+        "Showing Best-Ever Key Lime Pie on the Kitchen tablet.")
+    assert install.calls[-1][1]["screen"] == "ks-kitchen"
+    assert await say("what's next") == "Step 1 of 3: Heat the oven to 350 F."
+    assert install.calls[-1] == ("step", {"screen": "ks-kitchen", "step": "next"})
+    assert await say("show me the lasagna recipe") == "Showing Lasagna on the Kitchen tablet."
+    assert install.calls[-1][1]["screen"] == "ks-kitchen"
+    # A timer set this way follows that entity's choices and rings on it.
+    assert await say("set a 10 minute pasta timer") == "Pasta timer set for 10 minutes."
+    assert install.calls[-1] == ("start", {"label": "Pasta", "seconds": 600, "origin": SAT,
+                                           "screen": "ks-kitchen"})
+    # A device with no voice entity of its own asks about the kitchen's recipe.
+    speaker = devices.async_get_or_create(
+        config_entry_id=entry.entry_id, identifiers={("test", "den-speaker")})
+    assert await say("what's next", speaker.id) == "Step 2 of 3: Bake the crust for 10 minutes."
+    assert install.calls[-1] == ("step", {"screen": "", "step": "next"})
+
+
 async def test_more_ways_to_ask_for_a_recipe(hass, install):
     await _setup(hass, _voice())
     for said in ("show me my lasagna recipe from pantry raider",
