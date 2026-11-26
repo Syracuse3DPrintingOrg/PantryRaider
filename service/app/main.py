@@ -1196,7 +1196,10 @@ def _resolve_principal(request: Request, origin: str, snap, path: str) -> access
             bad = False
             _record_legacy(request, path)
     session = request.session
-    if (session.get("authed") and session.get("role") != "kiosk"
+    # A screen's sign-in is not a person's: it lasts as long as the key that
+    # registered the screen (checked below), so a password or two-factor
+    # change, which ends every person's sign-in, leaves it alone.
+    if (session.get("authed") and session.get("role") not in ("kiosk", "screen")
             and not auth_state.session_is_current(session)):
         # Opened before a password or two-factor change, or before the owner
         # signed out everywhere: no longer a sign-in.
@@ -1371,7 +1374,7 @@ _PAGE_STEPS = {"setup_code_page": ("setup_code", "setup"),
 
 def _respond(request: Request, d):
     if d.action == "redirect_login":
-        return ingress_redirect(request, "/ui/login")
+        return ingress_redirect(request, d.target or "/ui/login")
     if d.action == "redirect_home":
         return ingress_redirect(request, d.target or "/ui/")
     if d.action in _PAGE_STEPS and _wants_html(request):

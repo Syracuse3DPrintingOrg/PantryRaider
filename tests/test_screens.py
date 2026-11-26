@@ -227,14 +227,20 @@ def test_a_screen_key_reaches_only_its_own_screens(client):
     assert {"server", "bandit7", "ks-show8"} <= ids
 
 
-def test_a_ticket_signs_the_web_view_in_as_that_screen(client):
+def test_a_ticket_signs_the_web_view_in_as_that_screen(client, monkeypatch):
     rec, headers = _tablet(client)
     from fastapi.testclient import TestClient
     from app.main import app
     view = TestClient(app)
     # No sign-in: a page asks for one, and the data is refused.
+    # A wall tablet is never shown a password form: it is told to reconnect.
     r = view.get("/screen/timers", follow_redirects=False)
-    assert r.status_code == 303 and r.headers["location"].endswith("/ui/login")
+    assert r.status_code == 303 and r.headers["location"].endswith("/screen/open")
+    r = view.get("/screen/open", follow_redirects=False)
+    assert r.status_code == 401 and r.headers["x-pr-screen"] == "reconnect"
+    assert "needs to reconnect" in r.text and "<form" not in r.text
+    r = view.get("/screen/open?ticket=made-up&next=screen/recipe", follow_redirects=False)
+    assert r.status_code == 401 and r.headers["x-pr-screen"] == "reconnect"
     r = client.post("/api/screens/session", headers=headers,
                     json={"screen": "ks-show8", "page": "timers"})
     body = r.json()
@@ -248,9 +254,16 @@ def test_a_ticket_signs_the_web_view_in_as_that_screen(client):
     assert view.get("/api/screens/poll").json()["screen"]["id"] == "ks-show8"
     assert view.get("/setup", follow_redirects=False).status_code in (303, 403)
     assert view.get("/inventory/stock").status_code == 403
+    # A password change signs every person out, but not a screen: its
+    # sign-in lasts as long as its key. (A kitchen whose password had ever
+    # changed used to turn every screen away at this point.)
+    from app.services import auth_state
+    monkeypatch.setattr(auth_state, "session_gen", lambda: 7)
+    assert view.get("/timers").status_code == 200
+    assert view.get("/screen/recipe").status_code == 200
     # The ticket is spent, and turning the key off ends the sign-in.
     other = TestClient(app)
-    other.get(body["url"], follow_redirects=False)
+    assert other.get(body["url"], follow_redirects=False).status_code == 401
     assert other.get("/timers").status_code == 401
     credentials.revoke(rec["id"])
     assert view.get("/timers").status_code == 401

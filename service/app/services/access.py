@@ -1282,7 +1282,11 @@ def decide(p: Principal, method, path, family, snap: AccessSnapshot, *,
         notes = ["relaunch"]
         if origin in ("lan_direct", "plain_loopback"):
             notes.append("keyless")
-        if str(path or "").startswith("/ui") or _under(str(path or ""), "/screen"):
+        if _under(str(path or ""), "/screen"):
+            # A wall tablet has nobody to type a password: send it to the
+            # page that says it needs to reconnect, which its app can detect.
+            return Decision("redirect_login", 303, notes=tuple(notes), target="/screen/open")
+        if str(path or "").startswith("/ui"):
             return Decision("redirect_login", 303, notes=tuple(notes), target="/ui/login")
         return _refuse(401, "Unauthorized", "", *notes)
     if allows(p, m, path, snap):

@@ -203,8 +203,16 @@ class PantryRaiderRuntimeData:
         # First refresh for each new bandit. A failure here is fine: the
         # coordinator stays registered and its entities show unavailable until
         # the bandit answers, then recover on their own.
-        for device_id in new_ids:
-            await self.satellite_coordinators[device_id].async_request_refresh()
+        # All at once: a Bandit that is switched off costs one timeout for the
+        # lot, not one each, so setup is not held up by every absent Bandit.
+        if new_ids:
+            await asyncio.gather(
+                *(
+                    self.satellite_coordinators[device_id].async_request_refresh()
+                    for device_id in new_ids
+                ),
+                return_exceptions=True,
+            )
         return new_ids
 
 
@@ -312,12 +320,8 @@ async def async_unload_entry(
         hass.services.async_remove(DOMAIN, SERVICE_CAMERA_POPUP)
         hass.services.async_remove(DOMAIN, SERVICE_CAMERA_DETECT)
         hass.services.async_remove(DOMAIN, SERVICE_PROBE_ALERT)
-        try:
-            from . import voice
-
-            voice.async_remove_services(hass)
-        except Exception:  # noqa: BLE001
-            pass
+        # The voice services stay registered: an options change reloads the
+        # entry, and a timer asked for in that moment should still be answered.
     return ok
 
 

@@ -229,8 +229,9 @@ async def show_recipe(body: ShowRecipeIn, db: Session = Depends(get_db)):
 @pages.get("/open")
 async def open_screen(request: Request, ticket: str = "", next: str = ""):
     """Sign this web view in as the screen the ticket was made for, then go to
-    the page. A bad or used ticket just lands on the page without a sign-in,
-    which on an install with a password shows the sign-in page."""
+    the page. A bad, used or expired ticket gets a page that says the screen
+    needs to reconnect (401, header X-PR-Screen: reconnect), never a password
+    form: a wall tablet has nobody to type one."""
     target = next if next in ("screen/", "screen/recipe", "screen/timers") else "screen/"
     sid = screens.redeem_ticket(ticket)
     owner = screens.owner_of(sid) if sid else None
@@ -242,8 +243,18 @@ async def open_screen(request: Request, ticket: str = "", next: str = ""):
         request.session["screen_owner"] = owner
         from ..services import sessions
         sessions.new_id(request.session)
-    from ..ingress import ingress_redirect
-    return ingress_redirect(request, "/" + target)
+        from ..ingress import ingress_redirect
+        return ingress_redirect(request, "/" + target)
+    if not ticket and (not settings.auth_password
+                       or access.principal(request).kind != "anonymous"):
+        # Nothing to redeem and no sign-in needed (or one already held).
+        from ..ingress import ingress_redirect
+        return ingress_redirect(request, "/" + target)
+    # A missing, used or expired ticket. There is no form here on purpose: the
+    # screen's app asks for a new ticket when it sees this answer.
+    return templates.TemplateResponse(
+        request, "screen_reconnect.html", {"request": request}, status_code=401,
+        headers={"X-PR-Screen": "reconnect", "Cache-Control": "no-store"})
 
 
 def _page(request: Request, page: str, screen: str = "") -> HTMLResponse:

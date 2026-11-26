@@ -60,6 +60,8 @@ body.has-strip .sc-main { top: 122px; }
 .sc-btn-big:active { background: #ffd9d9; }
 .sc-empty { margin: 48px 0; text-align: center; font-size: 24px; color: #8b95a1; }
 
+.sc-reconnect { top: 0; }
+
 /* Timers page */
 .sc-timer {
   display: -webkit-flex; display: flex; -webkit-align-items: center; align-items: center;

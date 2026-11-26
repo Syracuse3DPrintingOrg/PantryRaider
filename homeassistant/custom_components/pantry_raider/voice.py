@@ -135,9 +135,12 @@ def _entry(hass: HomeAssistant):
     """The loaded Pantry Raider entry voice acts on (the first one)."""
     from homeassistant.config_entries import ConfigEntryState
 
-    for entry in hass.config_entries.async_entries(DOMAIN):
-        if entry.state is ConfigEntryState.LOADED:
-            return entry
+    # An entry that is part way through loading (a reload after an options
+    # change, still looking up its Bandits) can already answer.
+    for wanted in (ConfigEntryState.LOADED, ConfigEntryState.SETUP_IN_PROGRESS):
+        for entry in hass.config_entries.async_entries(DOMAIN):
+            if entry.state is wanted and getattr(entry, "runtime_data", None) is not None:
+                return entry
     return None
 
 

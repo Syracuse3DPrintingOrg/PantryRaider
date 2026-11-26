@@ -76,7 +76,7 @@ Everything is plain JSON over HTTP with the key in an `X-API-Key` header.
 | `GET /api/screens` | The list of screens. A screen key sees only its own |
 | `POST /api/screens/register` | `{"screen_id", "label", "kind", "width", "height"}`. The id is yours to choose, 1 to 40 of `a-z 0-9 - _`, and must stay the same for that tablet |
 | `GET /api/screens/poll?screen=<id>&since=<n>&wait=25` | Events for one screen. The request is held until one arrives. Ask first with `since=999999999` to read `last_id` without old events |
-| `POST /api/screens/session` | `{"screen", "page"}` returns a one-use address, good for a minute, that signs the screen's web view in and opens the page (`home`, `recipe` or `timers`) |
+| `POST /api/screens/session` | `{"screen", "page"}` returns a one-use address, good for a minute, that signs the screen's web view in and opens the page (`home`, `recipe` or `timers`). A missing, used or expired ticket answers 401 with the header `X-PR-Screen: reconnect` and a page with no form; ask for a new ticket |
 | `POST /api/screens/show-recipe` | `{"query", "screen"}` finds a recipe by what was said, makes it the current recipe and moves that screen to it. The reply has `result` (`shown`, `ambiguous` or `not_found`) and a `speech` line to say aloud |
 | `POST /events/navigate`, `/events/notify`, `/events/camera-popup`, `/events/camera-detect`, `/events/confirm` | Each takes an optional `"screen"` to reach one screen. `navigate` also takes `"page"` in place of a path |
 | `POST /events/close` | `{"screen"}` puts a screen back where it rests: a tablet app drops the page, a kitchen display goes home |
