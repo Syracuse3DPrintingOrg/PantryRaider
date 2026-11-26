@@ -27,6 +27,7 @@ from .routers import screens as screens_router
 from fastapi.exception_handlers import http_exception_handler as _default_http_exception_handler
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import PlainTextResponse
+from .routers import status_icons as status_icons_router
 from .services import screens as screens_svc
 from .routers import setup_code as setup_code_router
 
@@ -994,7 +995,7 @@ def _satellite_recipe_upstream(path: str) -> str | None:
 # upstream request. GET-only, exact-path keyed (these paths take no params that
 # change the answer per client).
 from .services.ttl_cache import TTLCache  # noqa: E402
-_FWD_CACHE_PATHS = {"/gadgets/state": TTLCache(2.0)}
+_FWD_CACHE_PATHS = {"/gadgets/state": TTLCache(2.0), "/status-icons": TTLCache(3.0)}
 
 
 async def satellite_upstream_get(path: str) -> dict | None:
@@ -1809,6 +1810,7 @@ app.include_router(setup_code_router.router)
 app.include_router(security_router.router)
 app.include_router(screens_router.router)
 app.include_router(screens_router.pages)
+app.include_router(status_icons_router.router)
 
 
 @app.get("/")

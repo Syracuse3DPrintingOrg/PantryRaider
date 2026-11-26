@@ -105,6 +105,7 @@ OLD_SAVEABLE = {
     "use_kitchen_history", "viewer_password",
     "vision_provider", "wake_on_motion", "wake_on_presence",
     "weather_api_base",
+    "status_icons", "status_icons_enabled", "status_icons_position",
 }
 
 OLD_SATELLITE_PULL_FIELDS = {
@@ -117,6 +118,7 @@ OLD_SATELLITE_PULL_FIELDS = {
     "grocy_base_url", "grocy_public_url", "ha_camera_popup_seconds",
     "ha_events_enabled", "kitchen_appliances", "label_layout_json",
     "inventory_rows_per_best_by",
+    "status_icons", "status_icons_enabled", "status_icons_position",
     "label_show_logo", "llm_expiry_enabled", "mealie_base_url",
     "mealie_connected", "mealie_public_url", "ollama_base_url", "ollama_model",
     "openai_api_key", "openai_model", "perishable_days", "recipe_source",
@@ -138,6 +140,7 @@ OLD_SATELLITE_READONLY_FIELDS = {
     "grocy_api_key", "grocy_base_url", "grocy_public_url",
     "ha_camera_popup_seconds", "ha_events_enabled", "kitchen_appliances",
     "inventory_rows_per_best_by",
+    "status_icons", "status_icons_enabled", "status_icons_position",
     "label_layout_json", "label_show_logo", "llm_expiry_enabled",
     "mealie_api_key", "mealie_base_url", "mealie_connected",
     "mealie_public_url", "ollama_base_url", "ollama_model", "openai_api_key",
@@ -369,6 +372,10 @@ ADDED_TO_SETUP_PAYLOAD = {
     'use_kitchen_history': ('bool', True),
     # One row per best-by date on the Inventory page, on by default.
     'inventory_rows_per_best_by': ('bool', True),
+    # Status icons on kitchen displays (FoodAssistant-vsh2c).
+    'status_icons_enabled': ('bool', False),
+    'status_icons': ('list', []),
+    'status_icons_position': ('str', 'top_right'),
 }
 # The pre-setup Forager browser marker is a session-binding value.
 ADDED_SECRETS = {"cloud_link_session", "local_passkeys", "oidc_client_secret", "oidc_subject"}

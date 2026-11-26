@@ -16,7 +16,7 @@ from . import durable as _durable
 
 # Single source of truth for the app version (shown in the UI, used by the
 # update checker, and reported by FastAPI). Bump on each tagged release.
-APP_VERSION = "0.21.163"
+APP_VERSION = "0.21.164"
 
 # Single source of truth for the product's display name. The internal runtime
 # identifiers (systemd units, install paths, the foodassistant_streamdeck
@@ -1826,6 +1826,18 @@ class Settings(BaseSettings):
     # pushes the events to each instance itself).
     ha_events_enabled: bool = setting(False, form=True, pull=True)
     ha_camera_popup_seconds: int = setting(20, form=True, pull=True)
+
+    # Status icons on kitchen displays: small see-through icons in a top
+    # corner while a thermometer reports or a Home Assistant entity is in a
+    # chosen state (the fridge door open, the oven on). status_icons is the
+    # list of items, each {id, name, icon, source, entity_id, match, state,
+    # above, device_id}, cleaned by services/status_icons.normalize_items.
+    # Shared across the kitchen: a satellite pulls all three and shows the
+    # main server's answer, since the server holds the Home Assistant
+    # connection and the thermometer readings. Off and empty by default.
+    status_icons_enabled: bool = setting(False, form=True, pull=True)
+    status_icons: list = setting([], form=True, pull=True)
+    status_icons_position: str = setting("top_right", form=True, pull=True)
 
     # Quiet mode (FoodAssistant-soj1): silence the audible timer chime so alerts
     # are visual only (the timer window still highlights a finished timer).

@@ -119,6 +119,19 @@ def timer_bar_context() -> dict | None:
         return {"color": "#FF0000"}
 
 
+def status_icons_context() -> dict | None:
+    """The status icons for a kitchen display: where they sit, or None when
+    the feature is off. Which icons show is asked for by the page itself
+    (static/js/status-icons.js polls /status-icons). Never raises."""
+    try:
+        if not settings.status_icons_enabled:
+            return None
+        from .services import status_icons
+        return {"position": status_icons.normalize_position(settings.status_icons_position)}
+    except Exception:
+        return None
+
+
 def screen_context(request: Request) -> dict:
     """For a tablet or wall screen's own sign-in: which screen it is, and the
     display values for that tablet. The scale, rotation and margins in
@@ -129,7 +142,8 @@ def screen_context(request: Request) -> dict:
     try:
         session = request.session
         if session.get("role") != "screen" or not session.get("screen_id"):
-            return {"screen_session": None, "timer_bar": timer_bar_context()}
+            return {"screen_session": None, "timer_bar": timer_bar_context(),
+                    "status_icons": status_icons_context()}
         from .services import screens
         sid = str(session.get("screen_id"))
         known = screens.get(sid) or {}
@@ -139,6 +153,7 @@ def screen_context(request: Request) -> dict:
                                "app": session.get("screen_app") is True},
             # A tablet has no key pad of its own, whatever this install has.
             "timer_bar": {"color": (timer_bar_context() or {"color": "#FF0000"})["color"]},
+            "status_icons": status_icons_context(),
             "ui_scale_factor": 1.0,
             "display_rotation": 0,
             "display_margin_top": 0,
@@ -147,7 +162,7 @@ def screen_context(request: Request) -> dict:
             "display_margin_left": 0,
         }
     except Exception:
-        return {"screen_session": None, "timer_bar": None}
+        return {"screen_session": None, "timer_bar": None, "status_icons": None}
 
 
 def theme_context(request: Request) -> dict:

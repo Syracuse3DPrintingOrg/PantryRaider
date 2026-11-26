@@ -50,6 +50,7 @@ nav:
   - Bandit Cubs (companion displays): bandit-cub.md
   - Home Assistant integration: home-assistant-integration.md
   - Screens (tablets and wall panels): screens.md
+  - Status icons on kitchen screens: status-icons.md
   - ESP devices (sensors and buttons): esp-devices.md
   - Printing labels and documents: printing.md
   - Device resources: device-resources.md

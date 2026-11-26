@@ -415,6 +415,22 @@ async def save_setup(request: Request, payload: SetupPayload):
             data["stemma_devices"] = cleaned
         else:
             data.pop("stemma_devices", None)
+    # Status icons: every item cleaned (a known icon and source, a well-formed
+    # entity id, a number for an "above" match), broken ones dropped. Not a
+    # list keeps the stored items; an empty list clears them.
+    if any(k in data for k in ("status_icons", "status_icons_position",
+                               "status_icons_enabled")):
+        from ...services import status_icons as _status_icons
+        if "status_icons" in data:
+            cleaned_icons = _status_icons.normalize_items(data["status_icons"])
+            if cleaned_icons is None:
+                data.pop("status_icons", None)
+            else:
+                data["status_icons"] = cleaned_icons
+        if "status_icons_position" in data:
+            data["status_icons_position"] = _status_icons.normalize_position(
+                data["status_icons_position"])
+        _status_icons.invalidate()
     # Custom nav tabs (FoodAssistant-9gdz): normalize to {id,label,icon,url,
     # parent} and drop invalid entries so a malformed POST never persists. An
     # absent field leaves the stored tabs alone; an empty list clears them.

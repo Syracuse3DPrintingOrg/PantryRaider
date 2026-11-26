@@ -179,4 +179,50 @@
               <p class="text-secondary small mb-0">The <code>camera</code> name must match one configured on the Cameras page. Notifications take <code>message</code>, optional <code>title</code>, and <code>level</code> (info/success/warning/error). <code>detection_type</code> is <code>person</code>, <code>vehicle</code>, <code>animal</code>, or <code>visitor</code> (a doorbell button press); a Reolink camera can also decide this itself without any Home Assistant automation, using the same per-camera checkboxes.</p>
             </details>
           {% endcall %}
+
+          {# Status icons (FoodAssistant-vsh2c). The item editor is drawn by
+             static/js/setup/status-icons.js from the JSON block below. #}
+          {% call panel('Status icons on kitchen screens',
+                        'Small icons in the top corner of every kitchen screen while something is on: the fridge door open, a thermometer reporting, the oven heating.') %}
+            {% call srow('Show status icons', 'On every kitchen screen and tablet.') %}
+              {{ toggle('status_icons_enabled', checked=s.status_icons_enabled, disabled=features.satellite, label='Show status icons on kitchen screens') }}
+            {% endcall %}
+            {% call srow('Where', 'Which top corner they sit in.') %}
+              <select class="form-select form-select-sm" id="status_icons_position" style="max-width:220px" {% if features.satellite %}disabled{% endif %}>
+                <option value="top_right"{% if s.status_icons_position != 'top_left' %} selected{% endif %}>Top right</option>
+                <option value="top_left"{% if s.status_icons_position == 'top_left' %} selected{% endif %}>Top left</option>
+              </select>
+            {% endcall %}
+            <div id="status-icons-list" class="mt-2"></div>
+            <p class="text-secondary small mt-2 mb-2" id="status-icons-empty" hidden>No status icons yet. Add one below.</p>
+            {% if features.satellite %}
+            <div class="form-text"><i class="bi bi-hdd-network me-1"></i>Status icons are set up on the main server and show here automatically. Change them there.</div>
+            {% else %}
+            <div class="d-flex gap-2 flex-wrap mt-2">
+              <button type="button" class="btn btn-outline-secondary btn-sm" data-on-click="statusIconsAdd('fridge')">
+                <i class="bi bi-plus-lg me-1"></i>Fridge door
+              </button>
+              <button type="button" class="btn btn-outline-secondary btn-sm" data-on-click="statusIconsAdd('thermometer')">
+                <i class="bi bi-plus-lg me-1"></i>Thermometer
+              </button>
+              <button type="button" class="btn btn-outline-secondary btn-sm" data-on-click="statusIconsAdd('appliance')">
+                <i class="bi bi-plus-lg me-1"></i>Appliance or other device
+              </button>
+            </div>
+            <p class="text-secondary small mt-2 mb-2">Pantry Raider only reads the Home Assistant devices you pick here, and your Bandit Remotes show the same icons as this server.</p>
+            <div class="d-flex gap-2 flex-wrap">
+              <button type="button" class="btn btn-outline-info btn-sm" data-on-click="statusIconsSave(this)">
+                <i class="bi bi-check-lg me-1"></i>Save status icons
+              </button>
+            </div>
+            <div class="test-result mt-2" id="status-icons-result"></div>
+            {% endif %}
+            <datalist id="status-icons-entities"></datalist>
+            <script type="application/json" id="status-icons-data">{{ {
+              'items': s.status_icons or [],
+              'satellite': true if features.satellite else false,
+              'thermometers': (s.gadget_devices or []) | selectattr('id', 'defined') | map(attribute='id') | list,
+              'thermometer_names': (s.gadget_devices or []) | selectattr('id', 'defined') | map(attribute='name', default='') | list,
+            } | tojson }}</script>
+          {% endcall %}
         </div>

@@ -978,7 +978,8 @@ def _timer_routes(m: str, p: str) -> bool:
 
 # What a screen key may do, beyond the timers: sign up, pull its own events,
 # ask for its sign-in ticket, read the recipe being cooked and start one of
-# its step timers. Which screen it may touch is checked in routers/screens.py.
+# its step timers, and read the status icons the kitchen shows. Which screen
+# it may touch is checked in routers/screens.py.
 _SCREEN_ROUTES = frozenset({
     ("GET", "/api/screens"), ("POST", "/api/screens/register"),
     ("GET", "/api/screens/poll"), ("POST", "/api/screens/session"),
@@ -988,6 +989,7 @@ _SCREEN_ROUTES = frozenset({
     ("POST", "/current-recipe/timers/start"),
     ("GET", "/screen"), ("GET", "/screen/"), ("GET", "/screen/timers"),
     ("GET", "/screen/recipe"),
+    ("GET", "/status-icons"),
 })
 # What Home Assistant's own key may do with screens.
 _HA_SCREEN_ROUTES = frozenset({

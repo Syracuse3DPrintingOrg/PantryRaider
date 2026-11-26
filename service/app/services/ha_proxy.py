@@ -6,7 +6,8 @@ holding a Home Assistant token themselves. The hop carries exactly three
 shapes, and only for what the owner has set up:
 
 - GET api/states/<entity>: the state of an entity some key, camera,
-  thermometer or hygrometer uses (ha_allowlist.readable_entities).
+  thermometer, hygrometer or status icon uses
+  (ha_allowlist.readable_entities).
 - GET api/camera_proxy/<camera entity>: a picture from a configured camera
   (ha_allowlist.camera_entities).
 - POST api/services/<domain>/<service> with a body whose only key is

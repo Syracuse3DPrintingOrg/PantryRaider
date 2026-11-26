@@ -137,7 +137,7 @@ PINNED = {
             'debug_logging', 'device_hostname', 'enrich_model', 'enrich_model_sel',
             'enrich_provider', 'expiring_soon_days', 'floating_nav_autohide_streamdeck', 'floating_nav_position',
             'gemini_api_key', 'gemini_model', 'gemini_model_sel', 'grocy_api_key',
-            'grocy_base_url', 'grocy_public_url', 'ha_camera_popup_seconds', 'ha_events_device',
+            'grocy_base_url', 'grocy_public_url', 'ha_camera_popup_seconds', 'status_icons_enabled', 'status_icons_position', 'ha_events_device',
             'ha_events_enabled', 'mealie_api_key', 'mealie_base_url', 'mealie_public_url',
             'nav_visibility', 'neokey_rest_color', 'neokey_timer_color',
             'ollama_base_url', 'ollama_model', 'ollama_model_sel',
@@ -407,7 +407,7 @@ PINNED = {
             'display_type', 'enrich_model', 'enrich_model_sel', 'enrich_provider',
             'expiring_soon_days', 'floating_nav_autohide_streamdeck', 'floating_nav_position', 'full-restore-source',
             'gemini_api_key', 'gemini_model', 'gemini_model_sel', 'grocy_api_key',
-            'grocy_base_url', 'grocy_public_url', 'ha_camera_popup_seconds', 'ha_events_device',
+            'grocy_base_url', 'grocy_public_url', 'ha_camera_popup_seconds', 'status_icons_enabled', 'status_icons_position', 'ha_events_device',
             'ha_events_enabled', 'has_streamdeck',
             # Added after the pin: the hardware-preset selector on the Screen &
             # Sleep pane (FoodAssistant-kl5n)
@@ -667,7 +667,7 @@ PINNED = {
             'enrich_model', 'enrich_model_sel', 'enrich_provider', 'expiring_soon_days',
             'floating_nav_autohide_streamdeck', 'floating_nav_position', 'full-restore-source', 'gemini_api_key',
             'gemini_model', 'gemini_model_sel', 'grocy_api_key', 'grocy_base_url',
-            'grocy_public_url', 'ha_camera_popup_seconds', 'ha_events_device', 'ha_events_enabled',
+            'grocy_public_url', 'ha_camera_popup_seconds', 'status_icons_enabled', 'status_icons_position', 'ha_events_device', 'ha_events_enabled',
             'has_streamdeck',
             # Added after the pin: the hardware-preset selector on the Screen &
             # Sleep pane (FoodAssistant-kl5n)

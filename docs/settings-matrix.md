@@ -449,6 +449,18 @@ way to create new ones.
 | `ha_events_enabled` | | Editable | Editable | Inherited (read-only) |
 | `ha_camera_popup_seconds` | | Editable | Editable | Inherited (read-only) |
 
+## Status icons on kitchen displays
+
+The icons are shared across the kitchen. A Pi Remote pulls the list from its
+main server and shows the server's answer, because the server holds the Home
+Assistant connection and the thermometer readings.
+
+| Setting | Secret | Server | Pi Hosted | Pi Remote |
+| --- | --- | --- | --- | --- |
+| `status_icons_enabled` | | Editable | Editable | Inherited (read-only) |
+| `status_icons` | | Editable | Editable | Inherited (read-only) |
+| `status_icons_position` | | Editable | Editable | Inherited (read-only) |
+
 ## Home Assistant account and key policy (internal)
 
 These are written by Pantry Raider itself, are not shown as settings, and are

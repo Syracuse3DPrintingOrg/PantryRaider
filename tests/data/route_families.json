@@ -471,5 +471,7 @@
  "POST /api/screens/show-recipe": "kitchen",
  "POST /timers/dismiss": "kitchen",
  "POST /timers/{timer_id}/dismiss": "kitchen",
- "POST /events/close": "events"
+ "POST /events/close": "events",
+ "GET /status-icons": "kitchen",
+ "GET /setup/status-icons/entities": "admin"
 }

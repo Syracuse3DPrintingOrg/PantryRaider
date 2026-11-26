@@ -176,12 +176,26 @@ def sensor_entities(settings) -> set:
     return out
 
 
+def status_entities(settings) -> set:
+    """The entities the status icons watch (the fridge door, the oven). Only
+    the owner sets these, in Settings, Home Assistant, so they are read like
+    a key's own entity."""
+    try:
+        from . import status_icons
+        found = status_icons.entities(settings)
+    except Exception:  # noqa: BLE001 - no status icons is the safe answer
+        return set()
+    return {ent for ent in (_valid_id(e) for e in found) if ent}
+
+
 def readable_entities(settings, profiles) -> set:
     """Entities whose state the app may read: the ones its keys call, the
-    camera entities, and the thermometer and hygrometer sensors."""
+    camera entities, the thermometer and hygrometer sensors, and the
+    entities the status icons watch."""
     out = {entity for entity, _svc in configured_calls(settings, profiles)}
     out |= camera_entities(settings)
     out |= sensor_entities(settings)
+    out |= status_entities(settings)
     return out
 
 
@@ -192,7 +206,8 @@ def reading_needs_sensor_check(entity: str, settings, profiles) -> bool:
     if entity not in sensor_entities(settings):
         return False
     keyed = {e for e, _svc in configured_calls(settings, profiles)}
-    return entity not in keyed and entity not in camera_entities(settings)
+    return (entity not in keyed and entity not in camera_entities(settings)
+            and entity not in status_entities(settings))
 
 
 def slot_review(slots) -> list:

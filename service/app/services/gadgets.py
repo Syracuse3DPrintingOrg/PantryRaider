@@ -1677,6 +1677,36 @@ def active_alarms(now: float | None = None) -> list[dict]:
     return out
 
 
+def live_thermometers(now: float | None = None) -> list[dict]:
+    """The configured thermometers heard from within STALE_SECONDS, for the
+    status icons: [{id, name, temp_c}], temp_c being the first probe's reading
+    (None when it reported none). Reads the shared state only, so it is cheap
+    enough for a display poll. Empty while the feature is off."""
+    from ..config import settings
+    if not settings.gadgets_enabled:
+        return []
+    now = time.time() if now is None else now
+    configured = configured_devices()
+    with _lock:
+        _load_locked()
+        live = {k: dict(v) for k, v in (_state.get("devices") or {}).items()
+                if isinstance(v, dict)}
+    out = []
+    for dev in configured:
+        dev_id = _norm_id(dev.get("id"))
+        entry = live.get(dev_id) or {}
+        ts = entry.get("ts")
+        if not isinstance(ts, (int, float)) or now - ts > STALE_SECONDS:
+            continue
+        temp = None
+        for probe in entry.get("probes") or []:
+            if isinstance(probe, dict) and isinstance(probe.get("temp_c"), (int, float)):
+                temp = float(probe["temp_c"])
+                break
+        out.append({"id": dev_id, "name": str(dev.get("name") or ""), "temp_c": temp})
+    return out
+
+
 def reset() -> None:
     """Clear all state and drop the state file (used by tests)."""
     global _state, _mtime, _last_sync

@@ -481,6 +481,12 @@
   <div id="timer-bar-config" data-color="{{ timer_bar.color }}" hidden></div>
   <script src="static/js/timer-bar.js?v={{ app_version }}"></script>
   {% endif %}
+  {% if status_icons %}{# Status icons for a kitchen display: the fridge door open, a
+     thermometer reporting (static/js/status-icons.js decides whether this
+     browser is a kitchen display). #}
+  <div id="status-icons-config" data-position="{{ status_icons.position }}" hidden></div>
+  <script src="static/js/status-icons.js?v={{ app_version }}"></script>
+  {% endif %}
   {% if screen_session and screen_session.app %}{# A tablet in "Pantry Raider mode": leaves the
      start page by itself after five quiet minutes, and shows a finished timer. #}
   <script src="static/js/screen-app.js?v={{ app_version }}"></script>

@@ -18,6 +18,7 @@
     <a class="sc-tab{% if page == 'timers' %} on{% endif %}" href="screen/timers">Timers</a>
     <a class="sc-tab{% if page == 'recipe' %} on{% endif %}" href="screen/recipe">Recipe</a>
     <span class="sc-clock" id="sc-clock"></span>
+    {% if status_icons %}<span class="sc-status" id="sc-status-icons"></span>{% endif %}
   </div>
 
   <div class="sc-strip" id="sc-strip" hidden></div>
@@ -76,5 +77,9 @@
   <div class="sc-offline" id="sc-offline" hidden>Reconnecting to Pantry Raider.</div>
 
   <script src="static/js/screen/screen.js?v={{ app_version }}"></script>
+  {% if status_icons %}
+  <div id="status-icons-config" data-position="top_right" hidden></div>
+  <script src="static/js/status-icons.js?v={{ app_version }}"></script>
+  {% endif %}
 </body>
 </html>
