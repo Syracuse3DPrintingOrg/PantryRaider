@@ -1225,7 +1225,8 @@ def _resolve_principal(request: Request, origin: str, snap, path: str) -> access
             rec = credentials.get(owner) if owner else None
             if (rec and rec.get("status") != "revoked" and rec.get("scope") == "screen"
                     and screens_svc.owner_of(session.get("screen_id")) == owner):
-                return access.Principal("session", "screen", owner, client, caps, origin)
+                scope = "screen_app" if session.get("screen_app") is True else "screen"
+                return access.Principal("session", scope, owner, client, caps, origin)
         else:
             return access.Principal("session", "admin", None, client, caps, origin)
     if origin == "plain_loopback" and snap.legacy_trust_active:

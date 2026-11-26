@@ -92,8 +92,10 @@ INTENT_START_TIMER = "PantryRaiderStartTimer"
 INTENT_CANCEL_TIMER = "PantryRaiderCancelTimer"
 INTENT_STOP_TIMER = "PantryRaiderStopTimer"
 INTENT_TIMER_STATUS = "PantryRaiderTimerStatus"
+INTENT_SHOW_PAGE = "PantryRaiderShowPage"
 VOICE_INTENTS = (
     INTENT_SHOW_RECIPE,
+    INTENT_SHOW_PAGE,
     INTENT_START_TIMER,
     INTENT_CANCEL_TIMER,
     INTENT_STOP_TIMER,
@@ -114,7 +116,14 @@ RECIPE_SENTENCES = [
 CLOSE_SENTENCES = [
     "(close|hide|put away) [the] recipe",
     "(close|hide) [the] (kitchen|pantry raider) screen",
+    "(close|hide|exit|leave) pantry raider",
 ]
+APP_SENTENCES = [
+    "(show|open|start|launch|bring up|pull up) pantry raider",
+    "(show|open|start|launch|bring up|pull up) pantry raider on [the] screen",
+    "(switch|go) to pantry raider [mode]",
+]
+PAGES = ("app", "home", "recipe", "timers", "close")
 START_TIMER_SENTENCES = [
     "(set|start|create) [a|an] timer for {request}",
     "(set|start|create) [a|an] {request} timer",
@@ -402,7 +411,7 @@ def async_register_services(hass: HomeAssistant) -> None:
     }), lambda d: async_timer_status(hass, d["name"], d["satellite"]))
 
     register(SERVICE_SHOW_PAGE, _schema({
-        vol.Required("page"): vol.In(("home", "recipe", "timers", "close")),
+        vol.Required("page"): vol.In(PAGES),
         vol.Optional("screen", default=""): cv.string,
         vol.Optional("satellite", default=""): cv.string,
     }), lambda d: async_show_page(hass, d["page"], d["screen"], d["satellite"]))
@@ -484,6 +493,23 @@ class ShowRecipeIntent(intent.IntentHandler):
         slots = self.async_validate_slots(intent_obj.slots)
         out = await async_show_recipe(
             intent_obj.hass, slots["query"]["value"], satellite=_satellite(intent_obj))
+        return _say(intent_obj, out)
+
+
+class ShowPageIntent(intent.IntentHandler):
+    intent_type = INTENT_SHOW_PAGE
+    description = (
+        "Show Pantry Raider on the kitchen screen, or close it. Use page "
+        "'app' to open Pantry Raider (the whole kitchen app), 'timers' for "
+        "the timers, 'recipe' for the recipe being cooked, and 'close' to "
+        "close Pantry Raider or put the screen back."
+    )
+    slot_schema = {vol.Required("page"): vol.In(PAGES)}
+
+    async def async_handle(self, intent_obj: intent.Intent) -> intent.IntentResponse:
+        slots = self.async_validate_slots(intent_obj.slots)
+        out = await async_show_page(
+            intent_obj.hass, slots["page"]["value"], satellite=_satellite(intent_obj))
         return _say(intent_obj, out)
 
 
@@ -618,7 +644,7 @@ def async_register_voice(hass: HomeAssistant, entry) -> None:
 
     handlers: list[intent.IntentHandler] = []
     if options[OPT_RECIPE_SENTENCES]:
-        handlers.append(ShowRecipeIntent())
+        handlers += [ShowRecipeIntent(), ShowPageIntent()]
     if options[OPT_TIMER_SENTENCES]:
         handlers += [StartTimerIntent(), CancelTimerIntent(), StopTimerIntent(),
                      TimerStatusIntent()]
@@ -663,8 +689,13 @@ def async_register_voice(hass: HomeAssistant, entry) -> None:
             out = await async_show_page(hass, "close", satellite=_satellite_of(user_input))
             return "Closed." if out["ok"] else out["speech"]
 
+        async def whole_app(user_input: Any, result: Any) -> str:
+            out = await async_show_page(hass, "app", satellite=_satellite_of(user_input))
+            return "Opening Pantry Raider." if out["ok"] else out["speech"]
+
         listen(RECIPE_SENTENCES, recipe)
         listen(CLOSE_SENTENCES, close)
+        listen(APP_SENTENCES, whole_app)
 
     if not options[OPT_TIMER_SENTENCES]:
         return

@@ -231,11 +231,11 @@
     },
     "show_page": {
       "name": "Show a page",
-      "description": "Move one screen to a Pantry Raider page, or close what it was showing.",
+      "description": "Move one screen to a Pantry Raider page, open the whole Pantry Raider interface on it, or close what it was showing.",
       "fields": {
         "page": {
           "name": "Page",
-          "description": "home, recipe, timers or close."
+          "description": "app (the whole interface, starting at the start page), home, recipe, timers or close."
         },
         "screen": {
           "name": "Screen",

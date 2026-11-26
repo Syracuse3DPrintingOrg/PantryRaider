@@ -98,8 +98,29 @@
     return (h ? h + ':' : '') + mm + ':' + ss;
   }
 
+  // A timers page that was opened for a timer puts itself away when the last
+  // one is done or dismissed: ten quiet seconds with an empty list, and the
+  // screen is told to close. A page opened with nothing running stays, and a
+  // timer started during those seconds cancels the close.
+  var hadTimer = false;
+  var closeTimer = null;
+  function watchForEmpty() {
+    if (PAGE !== 'timers' || !SCREEN) return;
+    if (timers.length) {
+      hadTimer = true;
+      if (closeTimer) { clearTimeout(closeTimer); closeTimer = null; }
+    } else if (hadTimer && !closeTimer) {
+      closeTimer = setTimeout(function () {
+        closeTimer = null;
+        hadTimer = false;
+        request('POST', 'events/close', { screen: SCREEN }, 10000, null);
+      }, 10000);
+    }
+  }
+
   function takeTimers(list) {
     timers = list || [];
+    watchForEmpty();
     for (var i = 0; i < timers.length; i++) {
       var t = timers[i];
       if (t.running && typeof t.remaining_seconds === 'number') {

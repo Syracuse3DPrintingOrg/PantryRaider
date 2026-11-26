@@ -30,7 +30,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from ..config import settings
-from ..services import camera_detect, ha_events
+from ..services import access, camera_detect, ha_events
 from ..services.cameras import resolve_ha_entity
 # The one URL policy lives in services/url_safety; re-exported so existing
 # imports of routers.events.safe_nav_path keep working.
@@ -217,7 +217,7 @@ async def _navigate_screen(payload: NavigatePayload):
     if page:
         if page not in screens.PAGES:
             return JSONResponse(status_code=400, content={
-                "ok": False, "error": "page is one of home, recipe or timers."})
+                "ok": False, "error": "page is one of home, recipe, timers or app."})
         sent = await run_in_threadpool(lambda: screens.send_navigate(sid, page=page))
         path = ""
     else:
@@ -237,7 +237,7 @@ class ClosePayload(BaseModel):
 
 
 @router.post("/close")
-async def close(payload: ClosePayload):
+async def close(payload: ClosePayload, request: Request):
     """Put one screen back where it was before it was sent a recipe or a
     timer ("close the recipe"). A tablet app drops the Pantry Raider page and
     shows its own dashboard again; a kitchen display goes to its home page."""
@@ -247,6 +247,12 @@ async def close(payload: ClosePayload):
     if not sid:
         return JSONResponse(status_code=400, content={
             "ok": False, "error": "Say which screen to close."})
+    # A screen may put itself away (its timers are done, nobody is using it),
+    # never another screen.
+    p = access.principal(request)
+    if p.scope in ("screen", "screen_app") and screens.owner_of(sid) != p.credential_id:
+        return JSONResponse(status_code=403, content={
+            "ok": False, "error": "That screen belongs to another key."})
     sent = await run_in_threadpool(screens.send_close, sid)
     if sent is None:
         return JSONResponse(status_code=404, content={"ok": False, "error": _NO_SCREEN})

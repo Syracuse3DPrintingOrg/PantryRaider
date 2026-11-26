@@ -7,7 +7,8 @@
       data-display-margin-right="{{ display_margin_right | default(0) }}"
       data-display-margin-bottom="{{ display_margin_bottom | default(0) }}"
       data-display-margin-left="{{ display_margin_left | default(0) }}"
-      data-is-pi="{{ '1' if is_pi else '0' }}"
+      data-is-pi="{{ '1' if is_pi else '0' }}"{% if screen_session %}
+      data-screen-id="{{ screen_session.id }}"{% endif %}
       data-quiet-mode="{{ 'true' if quiet_mode else 'false' }}"
       data-clock-format="{{ clock_format | default('auto') }}"{% if demo_mode %}
       data-demo="1"{% endif %}>
@@ -475,5 +476,14 @@
   <script src="static/js/barcode-capture.js?v={{ app_version }}"></script>
   {% endif %}
   {% block scripts %}{% endblock %}
+  {% if timer_bar %}{# Timer status bar for a kitchen display with no key pad
+     (static/js/timer-bar.js decides whether this browser is such a display). #}
+  <div id="timer-bar-config" data-color="{{ timer_bar.color }}" hidden></div>
+  <script src="static/js/timer-bar.js?v={{ app_version }}"></script>
+  {% endif %}
+  {% if screen_session and screen_session.app %}{# A tablet in "Pantry Raider mode": leaves the
+     start page by itself after five quiet minutes, and shows a finished timer. #}
+  <script src="static/js/screen-app.js?v={{ app_version }}"></script>
+  {% endif %}
 </body>
 </html>

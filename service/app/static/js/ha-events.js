@@ -49,6 +49,9 @@
   // Pi only the attached panel can latch).
   var isDisplay = false;
   try { isDisplay = localStorage.getItem('kioskMode') === 'true'; } catch (e) { }
+  // A tablet signed in as a screen of its own is in kiosk mode too, but it is
+  // not this install's display: what is sent to it comes through its own app.
+  if (document.documentElement.getAttribute('data-screen-id')) isDisplay = false;
   var DISPLAY_Q = isDisplay ? '&display=1' : '';
   var WAIT_S = 25;             // how long the server holds an otherwise-idle poll
   var IDLE_MS = 50;            // tiny gap before re-holding, so a request is ~always open

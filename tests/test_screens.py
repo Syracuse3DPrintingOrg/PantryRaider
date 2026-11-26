@@ -168,8 +168,9 @@ def test_a_cursor_ahead_of_the_server_is_answered_at_once(store):
 def test_tickets_work_once(store):
     screens.register("c_1", "a", "A")
     ticket = screens.mint_ticket("a")
-    assert screens.redeem_ticket(ticket) == "a"
+    assert screens.redeem_ticket(ticket) == ("a", False)
     assert screens.redeem_ticket(ticket) is None
+    assert screens.redeem_ticket(screens.mint_ticket("a", app=True)) == ("a", True)
     assert screens.redeem_ticket("made-up") is None
 
 
@@ -190,6 +191,7 @@ def test_tickets_work_once(store):
     ("GET", "/ui/", False), ("POST", "/setup/save", False), ("GET", "/setup", False),
     ("POST", "/events/navigate", False), ("GET", "/api/credentials", False),
     ("GET", "/ha/state", False), ("POST", "/pending/scan", False),
+    ("POST", "/events/close", True),
 ])
 def test_screen_scope(method, path, ok):
     assert access.allows_raw("screen", method, path, kiosk_is_admin=False) is ok
@@ -269,9 +271,106 @@ def test_a_ticket_signs_the_web_view_in_as_that_screen(client, monkeypatch):
     assert view.get("/timers").status_code == 401
 
 
+def test_a_screen_can_switch_into_the_whole_interface(client):
+    """Asked for with page "app", the ticket opens the whole interface as a
+    household member sees it: every kitchen page, no Settings. A ticket for
+    one of the screen's own pages stays as narrow as before."""
+    rec, headers = _tablet(client)
+    from fastapi.testclient import TestClient
+    from app.main import app
+    view = TestClient(app)
+    body = client.post("/api/screens/session", headers=headers,
+                       json={"screen": "ks-show8", "page": "app"}).json()
+    assert body["url"].endswith("&next=ui/start?kiosk=1")
+    r = view.get(body["url"], follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"] == "/ui/start?kiosk=1"
+    page = view.get("/ui/start?kiosk=1")
+    assert page.status_code == 200
+    # The page knows it is that screen (so it can leave by itself and show a
+    # finished timer), and keeps clear of the kiosk app's own close button.
+    assert 'data-screen-id="ks-show8"' in page.text and "screen-app.js" in page.text
+    assert 'data-display-margin-top="58"' in page.text
+    assert view.get("/ui/inventory").status_code == 200
+    assert view.get("/current-recipe").status_code == 200
+    assert view.post("/events/close", json={"screen": "ks-show8"}).json()["ok"]
+    # No Settings: the page goes back to the start page, and a save is refused.
+    r = view.get("/setup", follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"].endswith("/ui/start?kiosk=1")
+    assert view.post("/setup/save", json={}).status_code == 403
+    assert view.get("/api/credentials").status_code == 403
+    assert view.post("/ha/connect", json={}).status_code == 403
+    # The key itself is no wider than before.
+    assert client.get("/inventory/stock", headers=headers).status_code == 403
+    # A ticket for a screen page does not open the interface, and an "app"
+    # address on such a ticket lands on the screen's own home page.
+    narrow = TestClient(app)
+    t = client.post("/api/screens/session", headers=headers,
+                    json={"screen": "ks-show8", "page": "recipe"}).json()["url"]
+    r = narrow.get(t.replace("next=screen/recipe", "next=ui/start?kiosk=1"),
+                   follow_redirects=False)
+    assert r.headers["location"] == "/screen/"
+    assert narrow.get("/ui/inventory", follow_redirects=False).status_code == 403
+    assert "screen-app.js" not in narrow.get("/screen/").text
+    # Turning the key off ends it.
+    credentials.revoke(rec["id"])
+    assert view.get("/ui/inventory", follow_redirects=False).status_code in (303, 401)
+
+
+def test_a_screen_may_close_itself_and_no_other(client):
+    _rec, mine = _tablet(client, "ks-show8", "Echo Show")
+    _rec2, _theirs = _tablet(client, "ks-view", "ThinkSmart")
+    assert client.post("/events/close", headers=mine, json={"screen": "ks-show8"}).json()["ok"]
+    assert client.post("/events/close", headers=mine,
+                       json={"screen": "ks-view"}).status_code == 403
+    assert client.post("/events/close", headers=mine,
+                       json={"screen": "bandit7"}).status_code == 403
+
+
+def test_the_timer_bar_is_for_displays_without_a_key_pad(client, monkeypatch):
+    from app import templating
+    from app.services import stemma
+    monkeypatch.setattr(stemma, "configured_devices", lambda: [])
+    assert templating.timer_bar_context() == {"color": "#FF0000"}
+    page = client.get("/ui/login")  # any page render works without a key pad
+    monkeypatch.setattr(stemma, "configured_devices",
+                        lambda: [{"id": "i2c:1:0x30", "kind": "neokey"}])
+    assert templating.timer_bar_context() is None
+    assert page.status_code == 200
+    # A tablet gets the bar whatever the install itself has plugged in.
+    _rec, headers = _tablet(client)
+    from fastapi.testclient import TestClient
+    from app.main import app
+    view = TestClient(app)
+    url = client.post("/api/screens/session", headers=headers,
+                      json={"screen": "ks-show8", "page": "app"}).json()["url"]
+    view.get(url, follow_redirects=False)
+    text = view.get("/ui/start?kiosk=1").text
+    assert 'id="timer-bar-config"' in text and "timer-bar.js" in text
+
+
+def test_what_the_whole_interface_session_may_do():
+    for method, path, ok in (
+        ("GET", "/ui/start", True), ("GET", "/inventory/stock", True),
+        ("POST", "/pending/scan", True), ("POST", "/timers", True),
+        ("POST", "/events/close", True), ("POST", "/current-recipe/from-mealie", True),
+        ("GET", "/setup", False), ("POST", "/setup/save", False),
+        ("POST", "/admin/restore", False), ("GET", "/api/credentials", False),
+        ("POST", "/ha/connect", False), ("DELETE", "/api/screens/x", False),
+        ("POST", "/api/pairing/approve", False),
+    ):
+        assert access.allows_raw("screen_app", method, path, kiosk_is_admin=True) is ok, path
+
+
+def test_a_tablet_in_kiosk_mode_is_not_this_installs_display():
+    js = (SERVICE / "app/static/js/ha-events.js").read_text()
+    assert "data-screen-id" in js and "isDisplay = false" in js
+
+
 def test_screen_pages_use_no_inline_script_and_old_browser_safe_code():
     import re
-    js = (SERVICE / "app/static/js/screen/screen.js").read_text()
+    js = ((SERVICE / "app/static/js/screen/screen.js").read_text()
+          + (SERVICE / "app/static/js/screen-app.js").read_text()
+          + (SERVICE / "app/static/js/timer-bar.js").read_text())
     js = re.sub(r"/\*.*?\*/", "", js, flags=re.S)
     js = re.sub(r"^\s*//.*$", "", js, flags=re.M)
     for modern in ("=>", "`", "?.", "const ", "let ", "fetch(", "async ", "..."):

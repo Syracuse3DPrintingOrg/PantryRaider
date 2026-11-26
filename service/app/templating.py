@@ -101,6 +101,58 @@ def active_theme(request: Request | None) -> str:
     return settings.ui_theme
 
 
+# Kiosk apps that draw their own close button over the top right corner of
+# the page they host. The whole interface is inset from the top for them, the
+# same safe-area inset a panel with a hidden rim uses, so nothing sits under
+# that button on any page.
+_CORNER_BUTTON_KINDS = ("kiosk_satellite",)
+_CORNER_BUTTON_INSET = 58
+
+
+def timer_bar_context() -> dict | None:
+    """The on-screen timer bar for a kitchen display: its color, or None when
+    this device shows timers on a key pad instead. Never raises."""
+    try:
+        from .services import stemma
+        if any(d.get("kind") == "neokey" for d in stemma.configured_devices()):
+            return None
+        r, g, b = stemma.timer_color()
+        return {"color": f"#{r:02X}{g:02X}{b:02X}"}
+    except Exception:
+        return {"color": "#FF0000"}
+
+
+def screen_context(request: Request) -> dict:
+    """For a tablet or wall screen's own sign-in: which screen it is, and the
+    display values for that tablet. The scale, rotation and margins in
+    Settings describe the panel attached to this install, never a tablet that
+    opens its pages, so a screen gets neutral ones (plus the corner inset
+    above). Runs after theme_context and overrides its display keys. Never
+    raises."""
+    try:
+        session = request.session
+        if session.get("role") != "screen" or not session.get("screen_id"):
+            return {"screen_session": None, "timer_bar": timer_bar_context()}
+        from .services import screens
+        sid = str(session.get("screen_id"))
+        known = screens.get(sid) or {}
+        kind = str(known.get("kind") or "")
+        return {
+            "screen_session": {"id": sid, "kind": kind,
+                               "app": session.get("screen_app") is True},
+            # A tablet has no key pad of its own, whatever this install has.
+            "timer_bar": {"color": (timer_bar_context() or {"color": "#FF0000"})["color"]},
+            "ui_scale_factor": 1.0,
+            "display_rotation": 0,
+            "display_margin_top": _CORNER_BUTTON_INSET if kind in _CORNER_BUTTON_KINDS else 0,
+            "display_margin_right": 0,
+            "display_margin_bottom": 0,
+            "display_margin_left": 0,
+        }
+    except Exception:
+        return {"screen_session": None, "timer_bar": None}
+
+
 def theme_context(request: Request) -> dict:
     """Context processor: expose the current UI theme to every render.
 
@@ -264,7 +316,7 @@ def theme_context(request: Request) -> dict:
 # context_processors run per request, so ingress_path/theme reflect live state
 templates = Jinja2Templates(
     directory="app/templates",
-    context_processors=[template_globals, theme_context],
+    context_processors=[template_globals, theme_context, screen_context],
 )
 # Jinja's default is to stat every template file on every render to see
 # whether it changed, and base.html pulls in a couple of dozen partials, so

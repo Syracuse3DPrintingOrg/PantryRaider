@@ -22,6 +22,27 @@ tablets:
   cross it off, tap a step to mark where you are, and tap the timer button
   under a step to start that step's timer.
 
+### The whole of Pantry Raider on a tablet
+
+A connected tablet can also switch into the whole Pantry Raider interface,
+starting at the start page: inventory, scanning, shopping, recipes, the meal
+plan, everything a household member sees. Settings stay out of reach, since a
+wall tablet is touched by anyone who walks past.
+
+Say "open Pantry Raider" to a voice device that has that screen, or use the
+button your kiosk app offers. It leaves by itself after five minutes on the
+start page with nobody touching it; on any other page it stays until you
+close it or say "close Pantry Raider". A finished timer still takes over the
+screen with **Dismiss** while it is open.
+
+While the whole interface is open, a running timer shows as a bar across
+the top of every page: it drains as the time runs down and flashes when the
+timer is done. The same bar appears on any kitchen display that has no key
+pad.
+
+A timers page that opened because a timer was set closes itself ten seconds
+after the last timer is done or dismissed.
+
 Timers are shared by your whole kitchen, so a timer started by voice, on a
 Bandit, or from the Timers page shows on every screen, and dismissing it on
 one screen dismisses it everywhere.
@@ -76,7 +97,7 @@ Everything is plain JSON over HTTP with the key in an `X-API-Key` header.
 | `GET /api/screens` | The list of screens. A screen key sees only its own |
 | `POST /api/screens/register` | `{"screen_id", "label", "kind", "width", "height"}`. The id is yours to choose, 1 to 40 of `a-z 0-9 - _`, and must stay the same for that tablet |
 | `GET /api/screens/poll?screen=<id>&since=<n>&wait=25` | Events for one screen. The request is held until one arrives. Ask first with `since=999999999` to read `last_id` without old events |
-| `POST /api/screens/session` | `{"screen", "page"}` returns a one-use address, good for a minute, that signs the screen's web view in and opens the page (`home`, `recipe` or `timers`). A missing, used or expired ticket answers 401 with the header `X-PR-Screen: reconnect` and a page with no form; ask for a new ticket |
+| `POST /api/screens/session` | `{"screen", "page"}` returns a one-use address, good for a minute, that signs the screen's web view in and opens the page (`home`, `recipe`, `timers`, or `app` for the whole interface). A missing, used or expired ticket answers 401 with the header `X-PR-Screen: reconnect` and a page with no form; ask for a new ticket |
 | `POST /api/screens/show-recipe` | `{"query", "screen"}` finds a recipe by what was said, makes it the current recipe and moves that screen to it. The reply has `result` (`shown`, `ambiguous` or `not_found`) and a `speech` line to say aloud |
 | `POST /events/navigate`, `/events/notify`, `/events/camera-popup`, `/events/camera-detect`, `/events/confirm` | Each takes an optional `"screen"` to reach one screen. `navigate` also takes `"page"` in place of a path |
 | `POST /events/close` | `{"screen"}` puts a screen back where it rests: a tablet app drops the page, a kitchen display goes home |

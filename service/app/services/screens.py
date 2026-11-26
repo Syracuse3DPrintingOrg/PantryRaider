@@ -41,9 +41,14 @@ SERVER_ID = "server"
 SCREEN_CAP = "screen1"
 ID_RE = re.compile(r"^[a-z0-9_-]{1,40}$")
 # Pages a caller can name without knowing a screen's own addresses.
-PAGES = ("home", "recipe", "timers")
-_KIOSK_PATHS = {"home": "ui/", "recipe": "ui/current-recipe", "timers": "ui/timers"}
-_FOREIGN_PATHS = {"home": "screen/", "recipe": "screen/recipe", "timers": "screen/timers"}
+# "app" is the whole interface, starting at the start page: what a kitchen
+# display always shows, and what a tablet switches into on request.
+PAGES = ("home", "recipe", "timers", "app")
+APP_PATH = "ui/start?kiosk=1"
+_KIOSK_PATHS = {"home": "ui/", "recipe": "ui/current-recipe", "timers": "ui/timers",
+                "app": "ui/start"}
+_FOREIGN_PATHS = {"home": "screen/", "recipe": "screen/recipe", "timers": "screen/timers",
+                  "app": APP_PATH}
 
 MAX_SCREENS = 64
 ONLINE_SECONDS = 90.0
@@ -63,8 +68,8 @@ _queues: dict[str, list[dict]] = {}
 _next_event = 1
 # Monotonic time of each screen's last poll (the heartbeat).
 _seen: dict[str, float] = {}
-# sha256(ticket) -> (screen id, monotonic expiry)
-_tickets: dict[str, tuple[str, float]] = {}
+# sha256(ticket) -> (screen id, monotonic expiry, opens the whole interface)
+_tickets: dict[str, tuple[str, float, bool]] = {}
 
 
 def _state_file() -> Path:
@@ -439,29 +444,31 @@ def _hash(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
-def mint_ticket(screen_id: str) -> str:
+def mint_ticket(screen_id: str, app: bool = False) -> str:
     """A one-use ticket that opens a page session for this screen for the
-    next minute. The key itself never goes in an address."""
+    next minute. The key itself never goes in an address. ``app`` makes it a
+    session for the whole interface, not only the screen pages."""
     token = secrets.token_urlsafe(32)
     now = time.monotonic()
     with _lock:
-        for k in [k for k, (_s, exp) in _tickets.items() if exp < now]:
+        for k in [k for k, v in _tickets.items() if v[1] < now]:
             del _tickets[k]
         if len(_tickets) >= 256:
             _tickets.clear()
-        _tickets[_hash(token)] = (str(screen_id), now + TICKET_TTL)
+        _tickets[_hash(token)] = (str(screen_id), now + TICKET_TTL, bool(app))
     return token
 
 
-def redeem_ticket(token: str) -> str | None:
-    """The screen id a ticket was made for, once; None for anything else."""
+def redeem_ticket(token: str) -> tuple[str, bool] | None:
+    """(screen id, whole interface) for a ticket, once; None for anything
+    else."""
     if not token:
         return None
     with _lock:
         hit = _tickets.pop(_hash(str(token)), None)
     if hit is None or hit[1] < time.monotonic():
         return None
-    return hit[0]
+    return hit[0], hit[2]
 
 
 def reset() -> None:

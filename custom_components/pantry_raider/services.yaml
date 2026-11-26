@@ -170,6 +170,7 @@ show_page:
       selector:
         select:
           options:
+            - app
             - home
             - recipe
             - timers

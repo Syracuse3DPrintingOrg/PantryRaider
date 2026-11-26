@@ -23,7 +23,8 @@ _PROMPT = (
     "Pantry Raider holds this home's recipes and kitchen timers. To show a "
     "recipe, call pantry_raider__ShowRecipe with the dish name as heard; do "
     "not recite a recipe from memory when one is asked for. If it answers "
-    "with several recipes, ask which one."
+    "with several recipes, ask which one. To open or close Pantry Raider on "
+    "the kitchen screen, call pantry_raider__ShowPage."
 )
 
 

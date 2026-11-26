@@ -131,8 +131,8 @@ async def session_ticket(body: SessionIn, request: Request):
     page = body.page.strip().lower() or "home"
     path = screens.page_path("foreign", page)
     if not path:
-        return _refuse(400, "page is one of home, recipe or timers.")
-    ticket = screens.mint_ticket(sid)
+        return _refuse(400, "page is one of home, recipe, timers or app.")
+    ticket = screens.mint_ticket(sid, app=page == "app")
     return JSONResponse(
         {"ok": True, "url": f"/screen/open?ticket={ticket}&next={path}",
          "expires_in": int(screens.TICKET_TTL)},
@@ -235,15 +235,21 @@ async def open_screen(request: Request, ticket: str = "", next: str = ""):
     the page. A bad, used or expired ticket gets a page that says the screen
     needs to reconnect (401, header X-PR-Screen: reconnect), never a password
     form: a wall tablet has nobody to type one."""
-    target = next if next in ("screen/", "screen/recipe", "screen/timers") else "screen/"
-    sid = screens.redeem_ticket(ticket)
+    target = next if next in ("screen/", "screen/recipe", "screen/timers",
+                              screens.APP_PATH) else "screen/"
+    sid, whole = screens.redeem_ticket(ticket) or (None, False)
     owner = screens.owner_of(sid) if sid else None
+    if target == screens.APP_PATH and not whole:
+        target = "screen/"
     if sid and owner:
         request.session.clear()
         request.session["authed"] = True
         request.session["role"] = "screen"
         request.session["screen_id"] = sid
         request.session["screen_owner"] = owner
+        # The whole interface, as a household member sees it (no Settings),
+        # only when the ticket was asked for with page "app".
+        request.session["screen_app"] = bool(whole)
         from ..services import sessions
         sessions.new_id(request.session)
         from ..ingress import ingress_redirect

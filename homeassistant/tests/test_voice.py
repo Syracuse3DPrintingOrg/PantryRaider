@@ -297,3 +297,14 @@ async def test_more_ways_to_ask_for_a_recipe(hass, install):
     for said in ("show me my lasagna recipe from pantry raider",
                  "show me a lasagna recipe", "lasagna recipe from pantry raider"):
         assert "Lasagna" in await _say(hass, said), said
+
+
+async def test_open_and_close_pantry_raider_by_voice(hass, install, aioclient_mock):
+    aioclient_mock.post(f"{BASE}/events/navigate", json={"ok": True, "screen": {"id": "ks-kitchen"}})
+    await _setup(hass, _voice())
+    assert await _say(hass, "open pantry raider") == "Opening Pantry Raider."
+    sent = [c for c in aioclient_mock.mock_calls if str(c[1]).endswith("/events/navigate")][-1]
+    assert sent[2] == {"page": "app", "screen": "ks-kitchen"}
+    assert await _say(hass, "close pantry raider") == "Closed."
+    out = await _call(hass, "show_page", {"page": "app", "satellite": SAT})
+    assert out["ok"]

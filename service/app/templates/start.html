@@ -8,7 +8,8 @@
       data-ui-scale="{{ ui_scale_factor | default(1.0) }}"
       data-display-rotation="{{ display_rotation | default(0) }}"
       data-rotation-mode="{{ 'compositor' if is_pi else 'css' }}"
-      data-is-pi="{{ '1' if is_pi else '0' }}"
+      data-is-pi="{{ '1' if is_pi else '0' }}"{% if screen_session %}
+      data-screen-id="{{ screen_session.id }}"{% endif %}
       data-display-margin-top="{{ display_margin_top | default(0) }}"
       data-display-margin-right="{{ display_margin_right | default(0) }}"
       data-display-margin-bottom="{{ display_margin_bottom | default(0) }}"
@@ -577,6 +578,15 @@
      walk-up-and-watch diagnostic (FoodAssistant-99vy) is pointless if the
      icon only exists on the base.html pages. Same gate, same cache-buster. #}
   <script src="static/js/presence-indicator.js?v={{ app_version }}" defer></script>
+  {% endif %}
+  {% if timer_bar %}{# Timer status bar for a kitchen display with no key pad
+     (static/js/timer-bar.js decides whether this browser is such a display). #}
+  <div id="timer-bar-config" data-color="{{ timer_bar.color }}" hidden></div>
+  <script src="static/js/timer-bar.js?v={{ app_version }}"></script>
+  {% endif %}
+  {% if screen_session and screen_session.app %}{# A tablet in "Pantry Raider mode": leaves the
+     start page by itself after five quiet minutes, and shows a finished timer. #}
+  <script src="static/js/screen-app.js?v={{ app_version }}"></script>
   {% endif %}
 </body>
 </html>

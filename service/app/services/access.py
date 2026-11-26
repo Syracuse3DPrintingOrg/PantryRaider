@@ -825,7 +825,7 @@ def parse_caps(headers) -> frozenset:
 @dataclass(frozen=True)
 class Principal:
     kind: str                       # session|key|agent|kiosk|legacy_loopback|anonymous
-    scope: str | None               # admin|viewer|kiosk|legacy|satellite|ha|ha_rest|display|screen|deck|reader|None
+    scope: str | None               # admin|viewer|kiosk|legacy|satellite|ha|ha_rest|display|screen|screen_app|deck|reader|None
     credential_id: str | None = None
     client: str = ""
     caps: frozenset = field(default_factory=frozenset)
@@ -982,6 +982,7 @@ def _timer_routes(m: str, p: str) -> bool:
 _SCREEN_ROUTES = frozenset({
     ("GET", "/api/screens"), ("POST", "/api/screens/register"),
     ("GET", "/api/screens/poll"), ("POST", "/api/screens/session"),
+    ("POST", "/events/close"),
     ("GET", "/current-recipe"), ("GET", "/current-recipe/all"),
     ("GET", "/current-recipe/timer-suggestions"),
     ("POST", "/current-recipe/timers/start"),
@@ -1002,7 +1003,9 @@ def allows_raw(scope, method, path, *, kiosk_is_admin) -> bool:
     fam = route_family(m, p)
     if scope == "admin":
         return True
-    if scope in ("viewer", "satellite"):
+    if scope in ("viewer", "satellite", "screen_app"):
+        # screen_app: a tablet's web view switched into the whole interface.
+        # It sees what a household member sees and, like one, no Settings.
         return fam != "admin" and p not in VIEWER_EXCLUDED
     if scope == "legacy":
         return fam != "admin"
@@ -1297,6 +1300,10 @@ def decide(p: Principal, method, path, family, snap: AccessSnapshot, *,
             and p.kind in ("key", "agent")):
         return _serve("legacy_use", "key_admin_loopback" if family == "admin" else "")
     admin_like = family == "admin" or str(path or "") in VIEWER_EXCLUDED
+    if p.scope == "screen_app" and admin_like:
+        if m == "GET" and path == "/setup":
+            return Decision("redirect_home", 303, target="/ui/start?kiosk=1")
+        return _refuse(403, VIEWER_MSG)
     if p.scope == "viewer" and admin_like:
         if m == "GET" and path == "/setup":
             return Decision("redirect_home", 303, target="/ui/")
