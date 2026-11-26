@@ -94,7 +94,10 @@
 
   function serverNow() { return Date.now() / 1000 + skew; }
   function remaining(t) { return Math.max(0, t.deadline_epoch - serverNow()); }
-  function isRinging(t) { return remaining(t) <= 0; }
+  // A timer the server says is done rings at once, whatever this tablet's
+  // clock says: a page reopened while one is ringing takes over straight
+  // away (a kiosk app closes and reopens it around every voice turn).
+  function isRinging(t) { return t.expired === true || t.state === 'ringing' || remaining(t) <= 0; }
   function clockLeft(sec) {
     sec = Math.ceil(sec);
     var h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
@@ -325,11 +328,20 @@
     return String(Math.round(q * 100) / 100);
   }
 
+  // A timer's length for a button: "30 sec", "1 min 30 sec", "10 min",
+  // "1 hr 30 min". Seconds show under ten minutes, where they matter.
   function spoken(sec) {
-    var h = Math.floor(sec / 3600), m = Math.round((sec % 3600) / 60);
-    if (h && m) return h + ' hr ' + m + ' min';
-    if (h) return h + ' hr';
-    return m ? m + ' min' : Math.round(sec) + ' sec';
+    sec = Math.max(0, Math.round(sec));
+    if (sec < 60) return sec + ' sec';
+    var h = Math.floor(sec / 3600), m, s;
+    if (h) {
+      m = Math.round((sec - h * 3600) / 60);
+      if (m === 60) { h += 1; m = 0; }
+      return h + ' hr' + (m ? ' ' + m + ' min' : '');
+    }
+    if (sec >= 600) return Math.round(sec / 60) + ' min';
+    m = Math.floor(sec / 60); s = sec % 60;
+    return m + ' min' + (s ? ' ' + s + ' sec' : '');
   }
 
   // --- timers the recipe suggests ---------------------------------------------

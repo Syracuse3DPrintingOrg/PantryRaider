@@ -42,6 +42,10 @@ def plan(extra_env: dict | None = None) -> dict:
     }
     for k in _INHERITED:
         env.pop(k, None)
+    # The machine running the tests is not the one being installed on: its
+    # own desktop session must not count as a display.
+    for k in ("DISPLAY", "WAYLAND_DISPLAY"):
+        env.pop(k, None)
     env["DONE_MARKER"] = NO_MARKER
     env["CHANNEL_FILE"] = NO_CHANNEL_FILE
     if extra_env:
@@ -86,6 +90,10 @@ def test_display_present_defaults_kiosk_on():
 
 
 def test_no_display_defaults_kiosk_off():
+    if Path("/dev/dri/card0").exists():
+        # The installer counts a graphics device as a display, and a test
+        # cannot hide this machine's own (some CI runners have one).
+        pytest.skip("this machine has a graphics device")
     p = plan({"FORCE_PI": "1"})
     assert p["kiosk"] == "false"
 

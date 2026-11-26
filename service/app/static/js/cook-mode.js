@@ -60,11 +60,20 @@
     try { xhr.send(payload ? JSON.stringify(payload) : null); } catch (e) { finish(null, 0); }
   }
 
+  // A timer's length for a button: "30 sec", "1 min 30 sec", "10 min",
+  // "1 hr 30 min". Seconds show under ten minutes, where they matter.
   function spoken(sec) {
-    var h = Math.floor(sec / 3600), m = Math.round((sec % 3600) / 60);
-    if (h && m) return h + ' hr ' + m + ' min';
-    if (h) return h + ' hr';
-    return m ? m + ' min' : Math.round(sec) + ' sec';
+    sec = Math.max(0, Math.round(sec));
+    if (sec < 60) return sec + ' sec';
+    var h = Math.floor(sec / 3600), m, s;
+    if (h) {
+      m = Math.round((sec - h * 3600) / 60);
+      if (m === 60) { h += 1; m = 0; }
+      return h + ' hr' + (m ? ' ' + m + ' min' : '');
+    }
+    if (sec >= 600) return Math.round(sec / 60) + ' min';
+    m = Math.floor(sec / 60); s = sec % 60;
+    return m + ' min' + (s ? ' ' + s + ' sec' : '');
   }
   function clockLeft(sec) {
     sec = Math.max(0, Math.ceil(sec));
@@ -213,13 +222,15 @@
 
     // --- timer buttons: a start button that becomes its countdown -------------
     function serverNow() { return Date.now() / 1000 + skew; }
+    // Done when the server says so, or when its deadline has passed here.
+    function rings(t) { return t.expired === true || t.state === 'ringing' || t.deadline_epoch - serverNow() <= 0; }
     function keyOf(s) { return String(s.label).toLowerCase() + '|' + Math.round(s.seconds); }
     function timerFor(s) {
       var want = keyOf(s), ringing = null;
       for (var i = 0; i < timers.length; i++) {
         var t = timers[i];
         if (String(t.label).toLowerCase() + '|' + Math.round(t.total_seconds) !== want) continue;
-        if (t.deadline_epoch - serverNow() > 0) return t;
+        if (!rings(t)) return t;
         ringing = t;
       }
       return ringing;
@@ -227,7 +238,7 @@
     function paintButton(b) {
       var s = b.s, t = timerFor(s), state = 'idle';
       var main = '▶ Start ' + spoken(s.seconds) + ' · ' + s.label, sub = '';
-      if (t && t.deadline_epoch - serverNow() <= 0) {
+      if (t && rings(t)) {
         state = 'ringing'; main = s.label + ' · Done'; sub = 'Time is up. Tap to stop the alarm';
         finished[keyOf(s)] = true;
       } else if (t) {
@@ -244,7 +255,7 @@
     }
     function start(s) {
       var t = timerFor(s);
-      if (t && t.deadline_epoch - serverNow() <= 0) {
+      if (t && rings(t)) {
         request('POST', 'timers/' + t.id + '/dismiss', {}, function () { loadTimers(); });
         return;
       }
@@ -271,7 +282,7 @@
       for (var k = 0; k < boxes.length; k++) {
         box = boxes[k];
         var sig = '';
-        for (i = 0; i < list.length; i++) sig += list[i].id + (list[i].deadline_epoch - serverNow() <= 0 ? 'r' : 'c') + '|';
+        for (i = 0; i < list.length; i++) sig += list[i].id + (rings(list[i]) ? 'r' : 'c') + '|';
         if (box.getAttribute('data-sig') !== sig) {
           box.setAttribute('data-sig', sig);
           clear(box);
@@ -290,9 +301,9 @@
         for (i = 0; i < lefts.length; i++) {
           for (var j = 0; j < list.length; j++) {
             if (String(list[j].id) !== lefts[i].getAttribute('data-id')) continue;
-            var r = list[j].deadline_epoch - serverNow();
-            lefts[i].textContent = r <= 0 ? 'Done' : clockLeft(r);
-            lefts[i].parentNode.className = 'cm-run' + (r <= 0 ? ' ringing' : '');
+            var r = list[j].deadline_epoch - serverNow(), done = rings(list[j]);
+            lefts[i].textContent = done ? 'Done' : clockLeft(r);
+            lefts[i].parentNode.className = 'cm-run' + (done ? ' ringing' : '');
           }
         }
       }

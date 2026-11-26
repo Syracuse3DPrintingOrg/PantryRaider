@@ -101,7 +101,9 @@
   function draw() {
     var running = [], done = [], i;
     for (i = 0; i < timers.length; i++) {
-      if (left(timers[i]) > 0) running.push(timers[i]); else done.push(timers[i]);
+      // Done when the server says so (a page opened while one rings), or
+      // when its deadline has passed on this clock.
+      if (timers[i].expired !== true && left(timers[i]) > 0) running.push(timers[i]); else done.push(timers[i]);
     }
     if (!running.length && !done.length) {
       if (bar && bar.parentNode) bar.parentNode.removeChild(bar);

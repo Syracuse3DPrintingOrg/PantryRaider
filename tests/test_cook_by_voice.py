@@ -717,3 +717,64 @@ def test_the_recipe_in_cook_mode_stays_there_when_asked_for_again(client):
     # A page the screen reported long ago does not count.
     screens._pages["ks-view"] = (screens._pages["ks-view"][0] - 3600, "cook")
     assert show(query="best-ever key lime pie")["page"] == "recipe"
+
+
+# --- timer lengths written for people -------------------------------------------
+
+LENGTHS = {30: "30 sec", 45: "45 sec", 60: "1 min", 90: "1 min 30 sec", 125: "2 min 5 sec",
+           599: "9 min 59 sec", 600: "10 min", 630: "11 min", 3600: "1 hr",
+           5400: "1 hr 30 min", 7200: "2 hr"}
+
+
+def _js_function(src: str, name: str) -> str:
+    """The source of ``function name(...) {...}`` in a script."""
+    i = src.index("function " + name + "(")
+    depth = 0
+    for j in range(src.index("{", i), len(src)):
+        if src[j] == "{":
+            depth += 1
+        elif src[j] == "}":
+            depth -= 1
+            if depth == 0:
+                return src[i:j + 1]
+    raise AssertionError(name)
+
+
+@pytest.mark.parametrize("path,name", [("app/static/js/cook-mode.js", "spoken"),
+                                       ("app/static/js/screen/screen.js", "spoken"),
+                                       ("app/static/js/pages/current-recipe.js", "fmtLength")])
+def test_timer_buttons_say_seconds_under_a_minute(path, name):
+    """Lasagna's "Boil for 30 seconds" is a 30 second timer, and its button
+    says so: "Start 30 sec · Boil", never "1 min"."""
+    import json
+    import shutil
+    import subprocess
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is not available")
+    src = _js_function((SERVICE / path).read_text(), name)
+    script = src + "\nconsole.log(JSON.stringify(" + json.dumps(list(LENGTHS)) + ".map(" + name + ")));"
+    out = subprocess.run([node, "-e", script], capture_output=True, text=True, check=True).stdout
+    assert json.loads(out) == list(LENGTHS.values())
+
+
+def test_spoken_lengths_keep_their_seconds():
+    assert screen_recipes.spoken(30) == "30 seconds"
+    assert screen_recipes.spoken(90) == "1 minute and 30 seconds"
+    assert screen_recipes.spoken(600) == "10 minutes"
+    assert screen_recipes.spoken(5400) == "1 hour and 30 minutes"
+
+
+def test_a_page_opened_while_a_timer_rings_takes_over_at_once():
+    """A kiosk app closes the page around every voice turn and opens it
+    again: a timer the server already calls done rings straight away,
+    whatever the tablet's clock says."""
+    screen = (SERVICE / "app/static/js/screen/screen.js").read_text()
+    assert "function isRinging(t) { return t.expired === true || t.state === 'ringing'" in screen
+    cook = (SERVICE / "app/static/js/cook-mode.js").read_text()
+    assert "function rings(t) { return t.expired === true || t.state === 'ringing'" in cook
+    assert "deadline_epoch - serverNow() <= 0" not in cook.replace(
+        "function rings(t) { return t.expired === true || t.state === 'ringing' || "
+        "t.deadline_epoch - serverNow() <= 0; }", "")
+    app = (SERVICE / "app/static/js/screen-app.js").read_text()
+    assert "timers[i].expired" in app and "'timers/events?wait=' + wait" in app

@@ -316,11 +316,20 @@ const crFinished = new Set();
 
 function suggestionKey(s) { return String(s.label).toLowerCase() + '|' + Math.round(s.seconds); }
 
+// A timer's length for a button: "30 sec", "1 min 30 sec", "10 min",
+// "1 hr 30 min". Seconds show under ten minutes, where they matter.
 function fmtLength(secs) {
-  const h = Math.floor(secs / 3600), m = Math.round((secs % 3600) / 60);
-  if (h && m) return `${h} hr ${m} min`;
-  if (h) return `${h} hr`;
-  return m ? `${m} min` : `${Math.round(secs)} sec`;
+  secs = Math.max(0, Math.round(secs));
+  if (secs < 60) return `${secs} sec`;
+  let h = Math.floor(secs / 3600);
+  if (h) {
+    let m = Math.round((secs - h * 3600) / 60);
+    if (m === 60) { h += 1; m = 0; }
+    return m ? `${h} hr ${m} min` : `${h} hr`;
+  }
+  if (secs >= 600) return `${Math.round(secs / 60)} min`;
+  const m = Math.floor(secs / 60), s = secs % 60;
+  return s ? `${m} min ${s} sec` : `${m} min`;
 }
 
 // The timer a suggestion started: same name and length, as the server

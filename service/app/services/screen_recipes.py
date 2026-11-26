@@ -338,14 +338,15 @@ def ingredient_line(ing: dict) -> str:
 
 
 def spoken(seconds) -> str:
-    """45 -> "45 seconds", 5400 -> "1 hour and 30 minutes"."""
+    """45 -> "45 seconds", 90 -> "1 minute and 30 seconds", 5400 -> "1 hour
+    and 30 minutes". Seconds are said under ten minutes, where they matter."""
     try:
         total = max(0, int(round(float(seconds))))
     except (TypeError, ValueError):
         total = 0
     h, rest = divmod(total, 3600)
     m, s = divmod(rest, 60)
-    if h or m:
+    if h or m >= 10:
         m += 1 if s >= 30 else 0
         s = 0
         if m == 60:
