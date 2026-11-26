@@ -332,7 +332,10 @@ def test_scoped_keys_reach_only_their_routes(client, monkeypatch):
     _password(monkeypatch)
     _rec, ha = credentials.mint("ha", "HA", "manual")
     assert client.get("/ha/state", headers={"X-API-Key": ha}).status_code == 200
-    r = client.get("/timers", headers={"X-API-Key": ha})
+    # Home Assistant runs timers and shows recipes, but has no business in
+    # the inventory.
+    assert client.get("/timers", headers={"X-API-Key": ha}).status_code == 200
+    r = client.get("/current-recipe", headers={"X-API-Key": ha})
     assert r.status_code == 403 and r.json()["detail"] == access.SCOPE_MSG
     r = client.post("/setup/save", json={}, headers={"X-API-Key": ha})
     assert r.status_code == 403 and r.json()["detail"] == access.ADMIN_KEY_MSG

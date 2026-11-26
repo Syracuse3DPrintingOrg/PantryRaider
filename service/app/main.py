@@ -21,7 +21,10 @@ from .services import setup_code as setup_code_svc
 from .routers import analyze, defaults, inventory, expiring, ui, setup, pending, mealie, admin, qr, tunnel, grocy, satellite, proxy, devices, current_recipe, events, action_items, nutrition, audit, affiliate, printing, cook_wizard, recipes, gadgets, pairing, ha, cub, kiosk_status, receipt
 from .routers import credentials as credentials_router
 from .routers import kiosk_launch
+from .routers import auth_oidc
 from .routers import security as security_router
+from .routers import screens as screens_router
+from .services import screens as screens_svc
 from .routers import setup_code as setup_code_router
 
 log = logging.getLogger("foodassistant.access")
@@ -111,6 +114,10 @@ async def lifespan(app: FastAPI):
             pass
         # Keep mirroring while the server-side config drifts.
         app.state.sync_task = asyncio.create_task(_periodic_satellite_sync())
+        # Pull the events the main server holds for this Bandit's screen (a
+        # recipe or timer someone asked to see here).
+        from .services import screen_pull
+        app.state.screen_pull_task = asyncio.create_task(screen_pull.run())
     # Keep this device current while the global auto_update flag is on
     # (FoodAssistant-k2kk). Every mode runs the loop; each pass decides whether
     # this install can update itself (a Pi appliance, or a server whose host
@@ -204,7 +211,7 @@ async def lifespan(app: FastAPI):
     except Exception:
         pass
     yield
-    for attr in ("sync_task", "auto_update_task", "usb_backup_task",
+    for attr in ("sync_task", "screen_pull_task", "auto_update_task", "usb_backup_task",
                  "instance_guard_task", "pi_health_task", "first_run_task",
                  "gadgets_ha_task", "gadgets_esp_task", "reolink_poll_task",
                  "gadget_alarms_task", "community_expiry_task",
@@ -732,6 +739,9 @@ _ALWAYS_PUBLIC = {
     # needs both reachable pre-auth). Both expose only static, public assets.
     "/manifest.webmanifest", "/sw.js",
     "/apple-touch-icon.png", "/apple-touch-icon-precomposed.png", "/favicon.ico",
+    # Sign in with your identity provider: leaving for it and coming back
+    # both happen before there is a session (routers/auth_oidc.py).
+    "/auth/oidc/start", "/auth/oidc/callback",
     # A satellite asking to pair has no API key yet, by definition. The handler
     # enforces its own gates (LAN-only client address, the
     # local_device_pairing_enabled toggle); approving stays auth-required.
@@ -1205,6 +1215,14 @@ def _resolve_principal(request: Request, origin: str, snap, path: str) -> access
                 return access.Principal("kiosk", "kiosk", None, client, caps, origin)
         elif role == "viewer":
             return access.Principal("session", "viewer", None, client, caps, origin)
+        elif role == "screen":
+            # A tablet's web view, signed in with its screen's one-use ticket.
+            # It lasts only as long as the key that registered the screen.
+            owner = session.get("screen_owner")
+            rec = credentials.get(owner) if owner else None
+            if (rec and rec.get("status") != "revoked" and rec.get("scope") == "screen"
+                    and screens_svc.owner_of(session.get("screen_id")) == owner):
+                return access.Principal("session", "screen", owner, client, caps, origin)
         else:
             return access.Principal("session", "admin", None, client, caps, origin)
     if origin == "plain_loopback" and snap.legacy_trust_active:
@@ -1716,6 +1734,7 @@ app.include_router(inventory.router)
 app.include_router(expiring.router)
 app.include_router(tunnel.router)
 app.include_router(ui.router)
+app.include_router(auth_oidc.router)
 app.include_router(qr.router)
 app.include_router(satellite.router)
 app.include_router(proxy.router)
@@ -1741,6 +1760,8 @@ app.include_router(credentials_router.router)
 app.include_router(kiosk_launch.router)
 app.include_router(setup_code_router.router)
 app.include_router(security_router.router)
+app.include_router(screens_router.router)
+app.include_router(screens_router.pages)
 
 
 @app.get("/")

@@ -41,8 +41,8 @@ from .state_lock import state_write_lock
 log = logging.getLogger("foodassistant.credentials")
 
 FILENAME = "credentials.json"
-MINTABLE_SCOPES = ("admin", "satellite", "ha", "ha_rest", "display")
-NARROW_SCOPES = ("satellite", "ha", "ha_rest", "display")
+MINTABLE_SCOPES = ("admin", "satellite", "ha", "ha_rest", "display", "screen")
+NARROW_SCOPES = ("satellite", "ha", "ha_rest", "display", "screen")
 LEGACY_SCOPES = ("legacy",) + NARROW_SCOPES
 ADMIN_TTL_DAYS = 90
 USE_FLUSH_SECONDS = 60.0

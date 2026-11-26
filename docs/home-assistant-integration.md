@@ -212,6 +212,92 @@ route lives in Pantry Raider under Settings, Home Assistant, in the "Advanced
 setup (manual rest_command + automation)" section, with this device's address
 already filled in. With the integration installed you never need it.
 
+## Recipes and timers by voice
+
+Ask a voice assistant for a recipe or a timer and it shows on the screen you
+chose: a Bandit, the main kitchen display, or a tablet set up as a
+[screen](screens.md).
+
+- "Show me the lasagna recipe" finds Lasagna in your library and opens it on
+  the screen. If two recipes fit about as well, you are asked which one.
+- "Close the recipe" puts the screen back.
+- "Set a 10 minute pasta timer", "how long is left on the pasta timer",
+  "cancel the pasta timer" and "stop the timer" run timers in Pantry Raider,
+  where every screen shows them. When one finishes, the voice device that set
+  it says so every 20 seconds, for up to 10 minutes, until you dismiss it by
+  voice or by touching **Dismiss** on any screen.
+
+### Set it up
+
+Open the integration's **Configure** dialog. It has three parts.
+
+**A voice device.** Pick a voice device, then choose:
+
+| Choice | What it does |
+|---|---|
+| Timers set on this device | **Home Assistant** leaves timers as they are today. **Pantry Raider** runs them in Pantry Raider, shows them on every screen and rings this device when they finish |
+| Allow recipe requests from this device | Turn off for a device that should not change the kitchen screen |
+| Screen | Which screen shows what this device is asked for. Tablets appear in the list once their app has connected to Pantry Raider |
+
+A voice device you have not set up keeps its timers in Home Assistant, can
+ask for recipes, and moves no screen.
+
+**Voice.** Which spoken requests Pantry Raider answers:
+
+- **Recipe requests** are on to begin with.
+- **Timer requests** are off to begin with. Turn them on only if nothing else
+  in your home answers "set a timer". If you already have an automation for
+  timer sentences, leave this off and have that automation call the services
+  below; two listeners for the same sentence collide.
+- **Ring the voice device** when its timer finishes. Turn it off if your own
+  automation does the ringing.
+
+**Connection** holds the update interval and the link back to Home
+Assistant, as before.
+
+An assistant that uses an AI model can reach the same actions when speech to
+text misses a sentence: the recipe action is offered to it whenever recipe
+requests are on, and the timer actions whenever timer requests are on.
+
+### Services
+
+Each returns data, including a `speech` line to say aloud. Pass the voice
+device that heard the request as `satellite` and its choices (screen, timers,
+recipes) are applied for you.
+
+| Service | Fields | Returns |
+|---|---|---|
+| `pantry_raider.show_recipe` | `query`, `screen`, `satellite` | `result` (`shown`, `ambiguous`, `not_found`), `recipe`, `candidates`, `speech` |
+| `pantry_raider.start_timer` | `duration` (seconds, or words such as "10 minutes"), `name`, `screen`, `satellite` | `timer`, `speech` |
+| `pantry_raider.cancel_timer` | `name` or `timer_id`, `all`, `satellite` | `cancelled`, `speech` |
+| `pantry_raider.dismiss_timer` | `timer_id`, or `all` for every finished timer; `satellite` | `dismissed`, `speech` |
+| `pantry_raider.timer_status` | `name`, `satellite` | `timers`, `speech` |
+| `pantry_raider.show_page` | `page` (`home`, `recipe`, `timers`, `close`), `screen`, `satellite` | `speech` |
+| `pantry_raider.get_routing` | `satellite` | `timers` (`home_assistant` or `pantry_raider`), `recipes`, `screen`, `screen_label` |
+
+An automation that already answers timer sentences can ask
+`pantry_raider.get_routing` where a device's timers go and call
+`pantry_raider.start_timer` when the answer is `pantry_raider`:
+
+```yaml
+- action: pantry_raider.get_routing
+  data:
+    satellite: "{{ trigger.satellite_id }}"
+  response_variable: route
+- if: "{{ route.timers == 'pantry_raider' }}"
+  then:
+    - action: pantry_raider.start_timer
+      data:
+        duration: "{{ trigger.slots.duration }}"
+        satellite: "{{ trigger.satellite_id }}"
+      response_variable: timer
+    - set_conversation_response: "{{ timer.speech }}"
+```
+
+Every timer change also fires a `pantry_raider_timer` event with `type`
+(`started`, `extended`, `finished`, `cancelled`, `dismissed`) and the
+`timer`, for automations of your own.
+
 ## Cameras and Stream Deck connect on their own
 
 Pantry Raider needs a link back to Home Assistant for Stream Deck and

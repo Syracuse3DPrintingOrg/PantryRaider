@@ -38,6 +38,23 @@ from .const import (
     OPT_CONNECT_DONE,
 )
 from .helpers import discovery_moves_entry, http_url, pairing_result
+from .voice_helpers import (
+    OPT_RECIPE_SENTENCES,
+    OPT_RING,
+    OPT_TIMER_SENTENCES,
+    OPT_VOICE,
+    SAT_RECIPES,
+    SAT_SCREEN,
+    SAT_TIMERS,
+    TIMERS_HOME_ASSISTANT,
+    TIMERS_PANTRY_RAIDER,
+    routing_for,
+    voice_options,
+    with_satellite,
+)
+
+# The "no screen" choice in the per-device form (a select cannot hold "").
+_NO_SCREEN = "none"
 
 try:
     # Home Assistant 2025.8 and later reload the entry when the options flow
@@ -439,9 +456,134 @@ class PantryRaiderConfigFlow(ConfigFlow, domain=DOMAIN):
 
 
 class PantryRaiderOptionsFlow(_OptionsBase):
-    """Let the user tune the poll interval and the connect-back behavior."""
+    """Connection settings, voice, and each voice device's choices."""
+
+    _satellite: str = ""
 
     async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        return self.async_show_menu(
+            step_id="init", menu_options=["connection", "voice", "satellite"]
+        )
+
+    async def async_step_voice(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Which spoken requests Pantry Raider answers, and ringing."""
+        current = voice_options(self.config_entry.options)
+        if user_input is not None:
+            options = dict(self.config_entry.options)
+            current.update(
+                {
+                    OPT_RECIPE_SENTENCES: bool(user_input[OPT_RECIPE_SENTENCES]),
+                    OPT_TIMER_SENTENCES: bool(user_input[OPT_TIMER_SENTENCES]),
+                    OPT_RING: bool(user_input[OPT_RING]),
+                }
+            )
+            options[OPT_VOICE] = current
+            return self.async_create_entry(title="", data=options)
+        schema = vol.Schema(
+            {
+                vol.Required(
+                    OPT_RECIPE_SENTENCES, default=current[OPT_RECIPE_SENTENCES]
+                ): bool,
+                vol.Required(
+                    OPT_TIMER_SENTENCES, default=current[OPT_TIMER_SENTENCES]
+                ): bool,
+                vol.Required(OPT_RING, default=current[OPT_RING]): bool,
+            }
+        )
+        return self.async_show_form(step_id="voice", data_schema=schema)
+
+    async def async_step_satellite(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Pick the voice device to set up."""
+        from homeassistant.helpers import selector
+
+        if user_input is not None:
+            self._satellite = user_input["satellite"]
+            return await self.async_step_satellite_edit()
+        schema = vol.Schema(
+            {
+                vol.Required("satellite"): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="assist_satellite")
+                )
+            }
+        )
+        return self.async_show_form(step_id="satellite", data_schema=schema)
+
+    async def async_step_satellite_edit(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """One voice device: where its timers go, recipes, and its screen."""
+        from homeassistant.helpers import selector
+
+        satellite = self._satellite
+        if user_input is not None:
+            return self.async_create_entry(
+                title="",
+                data=with_satellite(
+                    self.config_entry.options,
+                    satellite,
+                    user_input[SAT_TIMERS],
+                    user_input[SAT_RECIPES],
+                    "" if user_input[SAT_SCREEN] == _NO_SCREEN else user_input[SAT_SCREEN],
+                ),
+            )
+        route = routing_for(self.config_entry.options, satellite)
+        # The screens the install knows about. One that cannot be reached
+        # right now still offers the saved choice, so opening this form never
+        # loses it.
+        choices = [selector.SelectOptionDict(value=_NO_SCREEN, label="No screen")]
+        try:
+            client = self.config_entry.runtime_data.main.client
+            for s in await client.async_screens():
+                if s.get("targetable") is False:
+                    continue
+                choices.append(
+                    selector.SelectOptionDict(
+                        value=str(s.get("id")), label=str(s.get("label") or s.get("id"))
+                    )
+                )
+        except Exception:  # noqa: BLE001
+            pass
+        if route[SAT_SCREEN] and route[SAT_SCREEN] not in [c["value"] for c in choices]:
+            choices.append(
+                selector.SelectOptionDict(value=route[SAT_SCREEN], label=route[SAT_SCREEN])
+            )
+        schema = vol.Schema(
+            {
+                vol.Required(SAT_TIMERS, default=route[SAT_TIMERS]): selector.SelectSelector(
+                    selector.SelectSelectorConfig(
+                        options=[
+                            selector.SelectOptionDict(
+                                value=TIMERS_HOME_ASSISTANT, label="Home Assistant"
+                            ),
+                            selector.SelectOptionDict(
+                                value=TIMERS_PANTRY_RAIDER, label="Pantry Raider"
+                            ),
+                        ],
+                    )
+                ),
+                vol.Required(SAT_RECIPES, default=route[SAT_RECIPES]): bool,
+                vol.Required(
+                    SAT_SCREEN, default=route[SAT_SCREEN] or _NO_SCREEN
+                ): selector.SelectSelector(
+                    selector.SelectSelectorConfig(
+                        options=choices, mode=selector.SelectSelectorMode.DROPDOWN
+                    )
+                ),
+            }
+        )
+        return self.async_show_form(
+            step_id="satellite_edit",
+            data_schema=schema,
+            description_placeholders={"satellite": satellite},
+        )
+
+    async def async_step_connection(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         if user_input is not None:
@@ -471,4 +613,4 @@ class PantryRaiderOptionsFlow(_OptionsBase):
                 vol.Required(CONF_CONNECT_BACK, default=connect_back): bool,
             }
         )
-        return self.async_show_form(step_id="init", data_schema=schema)
+        return self.async_show_form(step_id="connection", data_schema=schema)

@@ -60,9 +60,9 @@ def test_pairing_kind_labels_match_the_security_pane():
     src = HARDWARE_JS.read_text()
     block = src[src.index("const _PAIRING_KINDS"):src.index("];", src.index("const _PAIRING_KINDS"))]
     pairs = dict(re.findall(r"\['([a-z_]+)', '([^']+)'\]", block))
-    for kind in ("satellite", "ha", "ha_rest", "display"):
+    for kind in ("satellite", "ha", "ha_rest", "display", "screen"):
         assert pairs[kind] == access.SCOPE_LABELS[kind], kind
-    assert set(pairs) == {"satellite", "ha", "ha_rest", "display"}
+    assert set(pairs) == {"satellite", "ha", "ha_rest", "display", "screen"}
 
 
 def test_pairing_relay_says_this_is_a_screen(client, monkeypatch):

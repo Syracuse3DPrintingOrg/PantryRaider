@@ -274,6 +274,20 @@ async def async_setup_entry(
     # Domain-level services, registered once no matter how many entries exist.
     _async_register_services(hass)
 
+    # Recipes and timers by voice (primary installs only): the services, the
+    # intents and sentences this entry's options turn on, and the watcher
+    # that rings a voice satellite for a finished timer. A failure here never
+    # breaks setup.
+    try:
+        from . import voice
+
+        voice.async_register_services(hass)
+        if is_server_mode((coordinator.data or {}).get("mode")):
+            voice.async_register_voice(hass, entry)
+            voice.async_start_timer_watch(hass, entry)
+    except Exception:  # noqa: BLE001
+        _LOGGER.warning("Pantry Raider voice features did not start", exc_info=True)
+
     # Repairs and the Home Assistant token handover (primary installs only).
     # Each step only warns on failure and never breaks setup.
     await _async_handover(hass, entry)
@@ -298,6 +312,12 @@ async def async_unload_entry(
         hass.services.async_remove(DOMAIN, SERVICE_CAMERA_POPUP)
         hass.services.async_remove(DOMAIN, SERVICE_CAMERA_DETECT)
         hass.services.async_remove(DOMAIN, SERVICE_PROBE_ALERT)
+        try:
+            from . import voice
+
+            voice.async_remove_services(hass)
+        except Exception:  # noqa: BLE001
+            pass
     return ok
 
 

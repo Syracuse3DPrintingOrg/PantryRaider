@@ -16,7 +16,7 @@ from . import durable as _durable
 
 # Single source of truth for the app version (shown in the UI, used by the
 # update checker, and reported by FastAPI). Bump on each tagged release.
-APP_VERSION = "0.21.156"
+APP_VERSION = "0.21.159"
 
 # Single source of truth for the product's display name. The internal runtime
 # identifiers (systemd units, install paths, the foodassistant_streamdeck
@@ -2040,6 +2040,20 @@ class Settings(BaseSettings):
     # name it belongs to (services/passkeys.py). Public keys are not secret, but
     # the list decides who may sign in, so it travels like the other secrets.
     local_passkeys: list = setting([], secret=True)
+    # Sign in with your own identity provider over OpenID Connect
+    # (services/oidc.py). Off until the issuer, client id and secret are set
+    # and the admin links their account, which saves its subject (sub), the
+    # one account that may sign in this way, and the address it was linked
+    # on. oidc_only hides and refuses the other ways in for people, leaving
+    # the device password from home as the way back in.
+    oidc_issuer: str = ""
+    oidc_client_id: str = ""
+    oidc_client_secret: str = setting("", secret=True)
+    oidc_name: str = ""
+    oidc_subject: str = setting("", secret=True)
+    oidc_account: str = ""
+    oidc_host: str = ""
+    oidc_only: bool = False
     api_key: str = setting("", form=True, secret=True)
     # Additional keys; each satellite can use its own.
     extra_api_keys: list[str] = setting([], form=True, secret=True)

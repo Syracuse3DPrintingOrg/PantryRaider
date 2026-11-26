@@ -446,7 +446,7 @@ def test_pull_caps_without_a_deck_claims_the_proxy(monkeypatch):
     monkeypatch.setattr(settings, "has_streamdeck", False)
     monkeypatch.setattr(settings, "gadget_ha_enabled", False)
     monkeypatch.setattr(settings, "gadgets_enabled", False)
-    assert _caps() == ["relay1", "deckproxy1"]
+    assert _caps() == ["relay1", "screen1", "deckproxy1"]
 
 
 def test_pull_caps_keep_the_token_for_probe_target_alerts(monkeypatch):
@@ -458,17 +458,17 @@ def test_pull_caps_keep_the_token_for_probe_target_alerts(monkeypatch):
     monkeypatch.setattr(settings, "gadget_devices", [
         {"id": "AA:BB:CC:DD:EE:FF", "name": "Roast", "protocol": "inkbird",
          "targets": {"1": {"temp_c": 57.0, "direction": "above"}}}])
-    assert _caps() == ["relay1"]
+    assert _caps() == ["relay1", "screen1"]
     # A thermometer with no targets sends no alerts.
     monkeypatch.setattr(settings, "gadget_devices", [
         {"id": "AA:BB:CC:DD:EE:FF", "name": "Roast", "protocol": "inkbird",
          "targets": {}}])
-    assert _caps() == ["relay1", "deckproxy1"]
+    assert _caps() == ["relay1", "screen1", "deckproxy1"]
     # Thermometers switched off send nothing either.
     monkeypatch.setattr(settings, "gadgets_enabled", False)
     monkeypatch.setattr(settings, "gadget_devices", [
         {"id": "AA:BB:CC:DD:EE:FF", "targets": {"1": {"temp_c": 57.0}}}])
-    assert _caps() == ["relay1", "deckproxy1"]
+    assert _caps() == ["relay1", "screen1", "deckproxy1"]
 
 
 def test_pull_caps_follow_the_deck_push_form(monkeypatch):
@@ -477,11 +477,11 @@ def test_pull_caps_follow_the_deck_push_form(monkeypatch):
     monkeypatch.setattr(settings, "gadget_ha_enabled", False)
     monkeypatch.setattr(settings, "gadgets_enabled", False)
     monkeypatch.setattr(deck_config, "last_push_form", lambda: "proxy")
-    assert _caps() == ["relay1", "deckproxy1"]
+    assert _caps() == ["relay1", "screen1", "deckproxy1"]
     monkeypatch.setattr(deck_config, "last_push_form", lambda: "legacy")
-    assert _caps() == ["relay1"]
+    assert _caps() == ["relay1", "screen1"]
     monkeypatch.setattr(deck_config, "last_push_form", lambda: None)
-    assert _caps() == ["relay1"]
+    assert _caps() == ["relay1", "screen1"]
 
 
 def test_pull_caps_keep_the_token_for_local_thermometers(monkeypatch):
@@ -490,13 +490,13 @@ def test_pull_caps_keep_the_token_for_local_thermometers(monkeypatch):
     monkeypatch.setattr(settings, "gadgets_enabled", False)
     monkeypatch.setattr(settings, "gadget_ha_entities", ["sensor.fridge_temp"])
     monkeypatch.setattr(settings, "gadget_ha_hygrometers", [])
-    assert _caps() == ["relay1"]
+    assert _caps() == ["relay1", "screen1"]
     # Switched on but nothing configured: nothing reads Home Assistant here.
     monkeypatch.setattr(settings, "gadget_ha_entities", [])
-    assert _caps() == ["relay1", "deckproxy1"]
+    assert _caps() == ["relay1", "screen1", "deckproxy1"]
     monkeypatch.setattr(settings, "gadget_ha_hygrometers",
                         [{"temperature": "sensor.cellar_temp"}])
-    assert _caps() == ["relay1"]
+    assert _caps() == ["relay1", "screen1"]
 
 
 def test_pull_caps_fall_back_to_relay_only_on_any_error(monkeypatch):
@@ -507,7 +507,7 @@ def test_pull_caps_fall_back_to_relay_only_on_any_error(monkeypatch):
     monkeypatch.setattr(settings, "has_streamdeck", True)
     monkeypatch.setattr(settings, "gadget_ha_enabled", False)
     monkeypatch.setattr(deck_config, "last_push_form", _boom)
-    assert _caps() == ["relay1"]
+    assert _caps() == ["relay1", "screen1"]
 
 
 def test_pull_caps_fall_back_when_a_module_cannot_load(monkeypatch):
@@ -516,7 +516,7 @@ def test_pull_caps_fall_back_when_a_module_cannot_load(monkeypatch):
     monkeypatch.setattr(settings, "gadget_ha_enabled", False)
     monkeypatch.delattr(services_pkg, "deck_config")
     monkeypatch.setitem(sys.modules, "app.services.deck_config", None)
-    assert _caps() == ["relay1"]
+    assert _caps() == ["relay1", "screen1"]
 
 
 def test_pull_sends_the_caps_and_trust(satellite_mode, monkeypatch):

@@ -43,7 +43,7 @@ TTL_SECONDS = 300
 # the admin's screen with prompts, and a forgotten request expires on its own.
 MAX_PENDING = 3
 # What a paired device's key may do (the key scopes in services/access.py).
-KINDS = ("satellite", "ha", "display", "ha_rest")
+KINDS = ("satellite", "ha", "display", "ha_rest", "screen")
 # An approved key stays readable by the device's poll until the device first
 # uses it, or this long after the poll that first returned it.
 DELIVERY_SECONDS = 120
@@ -164,6 +164,8 @@ def suggest_kind(hostname: str) -> str:
         return "ha"
     if "cub" in name:
         return "display"
+    if any(w in name for w in ("kiosk", "tablet", "screen", "fully")):
+        return "screen"
     return "satellite"
 
 

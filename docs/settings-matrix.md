@@ -574,6 +574,14 @@ password, TOTP secret, and API keys are never synced.
 | `local_totp_recovery` | Secret | Editable | Editable | Device-local |
 | `local_passkeys` | Secret | Editable | Editable | Device-local |
 | `local_totp_scope` | | Editable | Editable | Device-local |
+| `oidc_issuer` | | Editable | Editable | Device-local |
+| `oidc_client_id` | | Editable | Editable | Device-local |
+| `oidc_client_secret` | Secret | Editable | Editable | Device-local |
+| `oidc_name` | | Editable | Editable | Device-local |
+| `oidc_subject` | Secret | Not shown (set by linking) | Not shown (set by linking) | Device-local |
+| `oidc_account` | | Not shown (set by linking) | Not shown (set by linking) | Device-local |
+| `oidc_host` | | Not shown (set by linking) | Not shown (set by linking) | Device-local |
+| `oidc_only` | Toggle | Editable | Editable | Device-local |
 | `signin_news_checked` | | Not shown (automatic) | Not shown (automatic) | Not shown (automatic) |
 | `signin_news_until` | | Not shown (automatic) | Not shown (automatic) | Not shown (automatic) |
 | `api_key` | Secret | Editable | Editable | Device-local |
@@ -665,6 +673,17 @@ from outside the home network (`outside`). Choosing `outside` needs a current
 code or the password. `signin_news_checked` and `signin_news_until` are set
 once by the app to show existing users a short note about the sign-in
 changes for 30 days; they are never edited by hand.
+
+The `oidc_*` settings sign you in with your own identity provider over OpenID
+Connect (Settings, Security, Identity provider). `oidc_issuer`,
+`oidc_client_id` and `oidc_client_secret` describe the client you created at
+the provider, and `oidc_name` is the name on the sign-in button. Linking your
+account saves its subject (`oidc_subject`, the one account that may sign in
+this way), a name to show for it (`oidc_account`), and the web address it was
+linked on (`oidc_host`), where the button appears. Changing the issuer or the
+client id unlinks the account. `oidc_only` hides and refuses the other ways
+to sign in; the device password still works from home. None of these are
+synced to a satellite.
 
 `proxy_path_policy` decides what the main server does when a satellite asks it
 to pass along a Grocy or Mealie request that no Pantry Raider release makes.

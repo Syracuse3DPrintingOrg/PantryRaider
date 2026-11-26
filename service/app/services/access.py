@@ -298,6 +298,7 @@ SCOPE_LABELS = {
     "ha": "The Home Assistant integration",
     "ha_rest": "Home Assistant sensors, buttons and ESPHome panels",
     "display": "A Bandit Cub or other small display",
+    "screen": "A tablet or wall screen that shows recipes and timers",
 }
 FAMILY_LABELS = {
     "ha": "Home Assistant",
@@ -824,7 +825,7 @@ def parse_caps(headers) -> frozenset:
 @dataclass(frozen=True)
 class Principal:
     kind: str                       # session|key|agent|kiosk|legacy_loopback|anonymous
-    scope: str | None               # admin|viewer|kiosk|legacy|satellite|ha|ha_rest|display|deck|reader|None
+    scope: str | None               # admin|viewer|kiosk|legacy|satellite|ha|ha_rest|display|screen|deck|reader|None
     credential_id: str | None = None
     client: str = ""
     caps: frozenset = field(default_factory=frozenset)
@@ -855,7 +856,8 @@ def _under(path: str, prefix: str) -> bool:
 
 
 _PUBLIC_EXACT = frozenset({"/health", "/ui/login", "/", "/manifest.webmanifest", "/sw.js",
-                           "/apple-touch-icon.png", "/apple-touch-icon-precomposed.png", "/favicon.ico"})
+                           "/apple-touch-icon.png", "/apple-touch-icon-precomposed.png", "/favicon.ico",
+                           "/auth/oidc/start", "/auth/oidc/callback"})
 _ADMIN_TREES = ("/setup", "/admin", "/tunnel")
 _ADMIN_EXACT_ANY = frozenset({"/api/pairing/approve", "/api/pairing/deny",
                               "/api/pairing/pending", "/docs", "/redoc",
@@ -866,7 +868,8 @@ _HA_FAMILY = {("GET", "/ha/state"), ("POST", "/ha/settings"), ("POST", "/ha/disp
               ("POST", "/ha/connect"), ("POST", "/ha/disconnect"),
               ("POST", "/ha/revoke-key")}
 _EVENTS_FAMILY = {("POST", "/events/notify"), ("POST", "/events/camera-popup"),
-                  ("POST", "/events/camera-detect"), ("POST", "/events/navigate")}
+                  ("POST", "/events/camera-detect"), ("POST", "/events/navigate"),
+                  ("POST", "/events/close")}
 _READER_FAMILY = {("GET", "/gadgets/config"), ("GET", "/gadgets/outputs"),
                   ("POST", "/gadgets/readings")}
 _DISPLAY_FAMILY = {("GET", "/cub/summary"), ("POST", "/cub/ble-adv")}
@@ -902,6 +905,9 @@ def route_family(method, path) -> str:
         return "public"
     if m in ("GET", "POST") and p == "/ui/setup-code":
         return "public"
+    if m == "GET" and p == "/screen/open":
+        # Redeems a one-use ticket; without a good one it is only a redirect.
+        return "public"
     if any(_under(p, t) for t in _ADMIN_TREES):
         return "admin"
     if _under(p, "/api/credentials"):
@@ -911,6 +917,9 @@ def route_family(method, path) -> str:
     if p in _ADMIN_EXACT_ANY:
         return "admin"
     if m in ("POST", "DELETE") and _under(p, "/api/devices"):
+        return "admin"
+    if m == "DELETE" and _under(p, "/api/screens"):
+        # Forgetting a screen: the owner in Settings, or the screen's own key.
         return "admin"
     if m == "GET" and p == "/ui/camera/preview":
         return "admin"
@@ -935,6 +944,8 @@ def route_family(method, path) -> str:
 _SEG = r"[^/]+"
 _TIMER_ID_RE = re.compile(rf"^/timers/{_SEG}$")
 _TIMER_EXTEND_RE = re.compile(rf"^/timers/{_SEG}/extend$")
+_TIMER_DISMISS_RE = re.compile(rf"^/timers/{_SEG}/dismiss$")
+_SCREEN_ID_RE = re.compile(rf"^/api/screens/{_SEG}$")
 
 _HA_REST_POSTS = frozenset({"/pending/scan", "/pending/scanner-mode",
                             "/pending/scanner-mode/cycle", "/timers",
@@ -950,7 +961,38 @@ _READER_ROUTES = frozenset({
 
 def _timer_writes(m: str, p: str) -> bool:
     return ((m == "DELETE" and (_TIMER_ID_RE.match(p) is not None))
-            or (m == "POST" and _TIMER_EXTEND_RE.match(p) is not None))
+            or (m == "POST" and (_TIMER_EXTEND_RE.match(p) is not None
+                                 or _TIMER_DISMISS_RE.match(p) is not None
+                                 or p == "/timers/dismiss")))
+
+
+def _timer_routes(m: str, p: str) -> bool:
+    """Reading the timer list and its events, starting a timer, and changing
+    or dismissing one."""
+    if m == "GET" and _under(p, "/timers"):
+        return True
+    if m == "POST" and p == "/timers":
+        return True
+    return _timer_writes(m, p)
+
+
+# What a screen key may do, beyond the timers: sign up, pull its own events,
+# ask for its sign-in ticket, read the recipe being cooked and start one of
+# its step timers. Which screen it may touch is checked in routers/screens.py.
+_SCREEN_ROUTES = frozenset({
+    ("GET", "/api/screens"), ("POST", "/api/screens/register"),
+    ("GET", "/api/screens/poll"), ("POST", "/api/screens/session"),
+    ("GET", "/current-recipe"), ("GET", "/current-recipe/all"),
+    ("GET", "/current-recipe/timer-suggestions"),
+    ("POST", "/current-recipe/timers/start"),
+    ("GET", "/screen"), ("GET", "/screen/"), ("GET", "/screen/timers"),
+    ("GET", "/screen/recipe"),
+})
+# What Home Assistant's own key may do with screens.
+_HA_SCREEN_ROUTES = frozenset({
+    ("GET", "/api/screens"), ("POST", "/api/screens/session"),
+    ("POST", "/api/screens/show-recipe"),
+})
 
 
 def allows_raw(scope, method, path, *, kiosk_is_admin) -> bool:
@@ -971,7 +1013,19 @@ def allows_raw(scope, method, path, *, kiosk_is_admin) -> bool:
             return True
         return fam != "admin" and p not in VIEWER_EXCLUDED
     if scope == "ha":
-        return fam in ("ha", "events")
+        if fam in ("ha", "events") or (m, p) in _HA_SCREEN_ROUTES:
+            return True
+        if m == "DELETE" and p == "/timers":
+            return True
+        return _timer_routes(m, p)
+    if scope == "screen":
+        if (m, p) in _SCREEN_ROUTES:
+            return True
+        if m == "DELETE" and _SCREEN_ID_RE.match(p) is not None:
+            return True
+        if m == "GET" and p.startswith("/recipes/images/"):
+            return True
+        return _timer_routes(m, p)
     if scope == "ha_rest":
         if fam == "events":
             return True
@@ -979,7 +1033,7 @@ def allows_raw(scope, method, path, *, kiosk_is_admin) -> bool:
             return True
         if m == "GET" and fam == "kitchen":
             return True
-        if m == "POST" and p in _HA_REST_POSTS:
+        if m == "POST" and (p in _HA_REST_POSTS or p == "/api/screens/show-recipe"):
             return True
         if m == "DELETE" and p == "/timers":
             return True
@@ -1228,7 +1282,7 @@ def decide(p: Principal, method, path, family, snap: AccessSnapshot, *,
         notes = ["relaunch"]
         if origin in ("lan_direct", "plain_loopback"):
             notes.append("keyless")
-        if str(path or "").startswith("/ui"):
+        if str(path or "").startswith("/ui") or _under(str(path or ""), "/screen"):
             return Decision("redirect_login", 303, notes=tuple(notes), target="/ui/login")
         return _refuse(401, "Unauthorized", "", *notes)
     if allows(p, m, path, snap):

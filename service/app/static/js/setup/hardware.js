@@ -651,6 +651,7 @@ const _PAIRING_KINDS = [
   ['satellite', 'A second screen (satellite)'],
   ['ha', 'The Home Assistant integration'],
   ['ha_rest', 'Home Assistant sensors, buttons and ESPHome panels'],
+  ['screen', 'A tablet or wall screen that shows recipes and timers'],
   ['display', 'A Bandit Cub or other small display'],
 ];
 // The kind picked for each pending request, kept across the 5-second refresh.

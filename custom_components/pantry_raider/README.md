@@ -135,6 +135,17 @@ Two services cover the camera events, each targeting a Pantry Raider device
   on" checkboxes in Pantry Raider decide whether the camera actually pops up,
   so one automation can send every detection type it sees.
 
+## Recipes and timers by voice
+
+"Show me the lasagna recipe" and "set a 10 minute pasta timer" put the recipe
+or the timer on the screen you chose for that voice device. Open **Configure**
+on the integration to pick, for each voice device, where its timers go, whether
+it may ask for recipes, and which screen it uses. Seven services
+(`show_recipe`, `start_timer`, `cancel_timer`, `dismiss_timer`, `timer_status`,
+`show_page`, `get_routing`) return data with a line to say aloud, so your own
+automations can call them. The full guide is in the
+[documentation](https://docs.pantryraider.app/home-assistant-integration/).
+
 ## Probe alerts
 
 When a thermometer probe reaches its target, Pantry Raider calls the

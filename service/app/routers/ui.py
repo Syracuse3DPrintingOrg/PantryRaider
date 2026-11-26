@@ -238,6 +238,38 @@ def _passkeys_here(request) -> bool:
     return bool(host) and bool(passkeys.for_site(settings, host))
 
 
+_OIDC_ONLY_MSG = ("This kitchen signs people in through {name}. From home, the device "
+                  "password still works if {name} cannot be reached.")
+
+
+def _oidc_context(request) -> dict:
+    """What the sign-in page offers for the identity provider: its button on
+    the address the account was linked on, a pointer there elsewhere, and
+    whether the other ways in are hidden (only the device password from
+    home stays, for when the provider is down)."""
+    from ..services import oidc
+    from .auth_oidc import request_host
+    if not oidc.linked(settings):
+        return {"oidc_button": False, "oidc_elsewhere": "", "oidc_only": False,
+                "oidc_name": "", "oidc_recovery": False}
+    here = oidc.host_matches(settings, request_host(request))
+    only = oidc.only(settings)
+    return {"oidc_button": here, "oidc_elsewhere": "" if here else settings.oidc_host,
+            "oidc_only": only, "oidc_name": oidc.display_name(settings),
+            "oidc_recovery": only and not _is_internet_request(request)}
+
+
+def _oidc_only() -> bool:
+    from ..services import oidc
+    return oidc.only(settings)
+
+
+def _oidc_only_refusal(request):
+    from ..services import oidc
+    return _render_login(request, status_code=403, error=_OIDC_ONLY_MSG.format(
+        name=oidc.display_name(settings)))
+
+
 def _render_login(request, *, step="password", status_code=200, **ctx):
     base = {
         "request": request, "step": step, "error": None, "setup_done": False,
@@ -248,7 +280,12 @@ def _render_login(request, *, step="password", status_code=200, **ctx):
         "settings_locked": _settings_locked_note(),
         "passkeys_here": _passkeys_here(request),
         "signin_news": _signin_news(),
+        **_oidc_context(request),
     }
+    if base["oidc_only"]:
+        # The other ways in are refused on the server too (login()).
+        base.update(cloud_linked=False, google_unlock=False, passkeys_here=False,
+                    signin_news=False)
     base.update(ctx)
     return templates.TemplateResponse(request, "login.html", base,
                                       status_code=status_code)
@@ -545,6 +582,8 @@ async def login_page(request: Request, google: str = "", code: str = "",
     # leaves for the cloud's sign-in, ?code=... is the cloud's return with the
     # single-use unlock code, and ?error=no-account is its friendly refusal
     # when the Google address has no Forager account.
+    if (google == "start" or code) and _oidc_only():
+        return _oidc_only_refusal(request)
     if google == "start":
         return _google_unlock_start(request)
     if code:
@@ -582,6 +621,15 @@ async def login(request: Request, mode: str = Form(""), password: str = Form(Non
             request, step=step, status_code=429,
             error=f"Too many attempts. Wait about {max(1, wait // 60)} minute(s) "
                   "and try again.")
+
+    # With the identity provider as the one way in, only the device password
+    # from home (and its code step) is left, for when the provider is down.
+    if _oidc_only() and (mode in ("passkey_begin", "passkey_finish", "forager")
+                         or (not on_code_step and mode != "cancel"
+                             and _is_internet_request(request))):
+        if mode in ("passkey_begin", "passkey_finish"):
+            return JSONResponse({"ok": False, "available": False}, status_code=403)
+        return _oidc_only_refusal(request)
 
     # Passkey sign-in (FoodAssistant-kc2cy). Both legs answer JSON for
     # static/js/pages/login-passkey.js. A passkey checks the person and the

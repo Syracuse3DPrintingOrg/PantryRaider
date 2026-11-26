@@ -166,6 +166,106 @@ class PantryRaiderClient:
         except (aiohttp.ClientError, ValueError) as err:
             raise PantryRaiderConnectionError(f"bad json: {err}") from err
 
+    async def async_call(
+        self,
+        method: str,
+        path: str,
+        payload: dict[str, Any] | None = None,
+        params: dict[str, Any] | None = None,
+        timeout: float = _REQUEST_TIMEOUT,
+        ok_statuses: tuple[int, ...] = (200,),
+    ) -> dict[str, Any]:
+        """One JSON call to the install, for the screen, recipe and timer
+        routes. ``ok_statuses`` lists the answers that carry a JSON body worth
+        returning (the app says "not found" or "still running" with a body and
+        a 4xx). A 404 outside that list means an older install."""
+
+        url = f"{self._base_url}{path}"
+        try:
+            async with asyncio.timeout(timeout):
+                resp = await self._session.request(
+                    method, url, headers=self._headers(), json=payload, params=params
+                )
+        except (aiohttp.ClientError, TimeoutError) as err:
+            raise PantryRaiderConnectionError(str(err)) from err
+        if resp.status in (401, 403):
+            raise PantryRaiderAuthError(f"auth rejected ({resp.status})")
+        if resp.status not in ok_statuses:
+            if resp.status == 404:
+                raise PantryRaiderNotSupported(f"{path} not supported")
+            raise PantryRaiderConnectionError(f"unexpected status {resp.status}")
+        try:
+            body = await resp.json()
+        except (aiohttp.ClientError, ValueError) as err:
+            raise PantryRaiderConnectionError(f"bad json: {err}") from err
+        return body if isinstance(body, dict) else {}
+
+    async def async_screens(self) -> list[dict[str, Any]]:
+        """Every screen the install can show something on (GET /api/screens)."""
+        body = await self.async_call("GET", "/api/screens")
+        return [s for s in body.get("screens") or [] if isinstance(s, dict)]
+
+    async def async_show_recipe(
+        self, query: str = "", screen: str = "", slug: str = ""
+    ) -> dict[str, Any]:
+        """Find a recipe by what was said and show it (POST
+        /api/screens/show-recipe). The reply carries ``result`` and a
+        ``speech`` line; a screen that does not exist comes back as ok False."""
+        payload: dict[str, Any] = {"query": query, "screen": screen}
+        if slug:
+            payload["slug"] = slug
+        return await self.async_call(
+            "POST", "/api/screens/show-recipe", payload, ok_statuses=(200, 400, 404, 409)
+        )
+
+    async def async_timers(self) -> list[dict[str, Any]]:
+        body = await self.async_call("GET", "/timers")
+        return [t for t in body.get("timers") or [] if isinstance(t, dict)]
+
+    async def async_start_timer(
+        self, label: str, seconds: int, origin: str = "", screen: str = ""
+    ) -> dict[str, Any]:
+        return await self.async_call(
+            "POST",
+            "/timers",
+            {"label": label, "seconds": seconds, "origin": origin, "screen": screen},
+        )
+
+    async def async_delete_timer(self, timer_id: int) -> bool:
+        """Remove one timer, running or finished. False when it was gone."""
+        body = await self.async_call(
+            "DELETE", f"/timers/{int(timer_id)}", ok_statuses=(200, 404)
+        )
+        return bool(body.get("ok"))
+
+    async def async_dismiss_timers(self, origin: str = "") -> int:
+        """Dismiss every finished timer, or only those one origin set."""
+        body = await self.async_call("POST", "/timers/dismiss", {"origin": origin})
+        return int(body.get("dismissed") or 0)
+
+    async def async_timer_events(self, since: int, wait: int = 0) -> dict[str, Any]:
+        """What happened to timers since ``since`` (GET /timers/events). With
+        ``wait`` the install holds the request until something happens."""
+        return await self.async_call(
+            "GET",
+            "/timers/events",
+            params={"since": since, "wait": wait},
+            timeout=wait + _REQUEST_TIMEOUT,
+        )
+
+    async def async_show_page(self, page: str, screen: str) -> dict[str, Any]:
+        """Move one screen to a named page, or close what it was sent."""
+        if page == "close":
+            return await self.async_call(
+                "POST", "/events/close", {"screen": screen}, ok_statuses=(200, 400, 404)
+            )
+        return await self.async_call(
+            "POST",
+            "/events/navigate",
+            {"page": page, "screen": screen},
+            ok_statuses=(200, 400, 404),
+        )
+
     async def async_notify(
         self,
         message: str,

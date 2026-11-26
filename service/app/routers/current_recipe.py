@@ -107,6 +107,14 @@ class ScaleIn(BaseModel):
 class TimerIn(BaseModel):
     label: str = ""
     seconds: float
+    # Who set it (a screen id or a Home Assistant satellite), and a screen
+    # that should jump to its timers. Both optional.
+    origin: str = ""
+    screen: str = ""
+
+
+class DismissIn(BaseModel):
+    origin: str = ""
 
 
 class ExtendIn(BaseModel):
@@ -430,14 +438,62 @@ async def get_timers(request: Request):
 
 @timers_router.post("")
 async def post_timer(request: Request, payload: TimerIn = Body(...)):
-    """Create and start a timer for `seconds`."""
+    """Create and start a timer for `seconds`. ``origin`` records who set it
+    (a screen id, a Home Assistant satellite), and ``screen`` names a screen
+    that should jump to its timers."""
     if _upstream():
         return await _forward(request, "/timers")
     try:
-        timer = timers.create_timer(payload.label, payload.seconds)
+        timer = timers.create_timer(payload.label, payload.seconds, payload.origin)
     except ValueError as exc:
         return JSONResponse({"detail": str(exc)}, status_code=400)
-    return {"timer": timer}
+    out = {"timer": timer}
+    if payload.screen.strip():
+        from ..services import screens
+        out["screen"] = await run_in_threadpool(
+            lambda: screens.send_navigate(payload.screen.strip(), page="timers"))
+    return out
+
+
+@timers_router.get("/events")
+async def timer_events(request: Request, since: int = 0, wait: float = 0):
+    """What happened to timers since ``since`` (started, extended, finished,
+    cancelled, dismissed), with the list as it stands. With ``wait`` the
+    request is held until something happens, so whoever rings for a finished
+    timer hears about it within a moment of the deadline."""
+    if _upstream():
+        # A Bandit keeps no timers: answer with the main server's, unheld, so
+        # a forward never ties up the short-lived client.
+        return await upstream.forward(_fwd_client, request, f"{_upstream()}/timers/events",
+                                      params={"since": since})
+    if wait and wait > 0:
+        return await timers.wait_for_events(since, timeout=min(float(wait), 30.0),
+                                            is_gone=request.is_disconnected)
+    return timers.poll_events(since)
+
+
+@timers_router.post("/dismiss")
+async def dismiss_ringing_timers(request: Request, payload: DismissIn = Body(default=None)):
+    """Dismiss every finished timer (or only those one origin set)."""
+    if _upstream():
+        return await _forward(request, "/timers/dismiss")
+    origin = payload.origin.strip() if payload and payload.origin else None
+    return {"ok": True, "dismissed": timers.dismiss_ringing(origin or None)}
+
+
+@timers_router.post("/{timer_id}/dismiss")
+async def dismiss_timer(timer_id: int, request: Request):
+    """Dismiss one finished timer. A timer that is still counting is left
+    alone (409): cancel it with DELETE instead."""
+    if _upstream():
+        return await _forward(request, f"/timers/{timer_id}/dismiss")
+    result = timers.dismiss_timer(timer_id)
+    if result == "missing":
+        return JSONResponse({"ok": False, "detail": "Timer not found"}, status_code=404)
+    if result == "running":
+        return JSONResponse({"ok": False, "detail": "That timer is still running"},
+                            status_code=409)
+    return {"ok": True}
 
 
 @timers_router.get("/{timer_id}")

@@ -48,6 +48,9 @@ PINNED = {
             'sec-sat-keys',
             # Added after the pin: the Passkeys row (FoodAssistant-kc2cy).
             'passkey-name', 'passkey-credential',
+            # Added after the pin: the Identity provider row (OpenID Connect).
+            'oidc-issuer', 'oidc-client-id', 'oidc-client-secret', 'oidc-name',
+            'oidc-credential', 'oidc-only',
             # Added after the pin: kiosk auto-return-to-home (FoodAssistant-6e5m),
             # on the Screen pane in every mode (Pi and non-Pi kiosks alike).
             'kiosk_auto_home_enabled', 'kiosk_auto_home_seconds',
@@ -311,6 +314,9 @@ PINNED = {
             'sec-sat-keys',
             # Added after the pin: the Passkeys row (FoodAssistant-kc2cy).
             'passkey-name', 'passkey-credential',
+            # Added after the pin: the Identity provider row (OpenID Connect).
+            'oidc-issuer', 'oidc-client-id', 'oidc-client-secret', 'oidc-name',
+            'oidc-credential', 'oidc-only',
             # Added after the pin: kiosk auto-return-to-home (FoodAssistant-6e5m).
             'kiosk_auto_home_enabled', 'kiosk_auto_home_seconds',
             # Added after the pin: the two-pane split view (FoodAssistant-dqpq).
@@ -591,6 +597,9 @@ PINNED = {
         "ids": [
             # Added after the pin: the Passkeys row (FoodAssistant-kc2cy).
             'passkey-name', 'passkey-credential',
+            # Added after the pin: the Identity provider row (OpenID Connect).
+            'oidc-issuer', 'oidc-client-id', 'oidc-client-secret', 'oidc-name',
+            'oidc-credential', 'oidc-only',
             # Added after the pin: the 0.21 Security pane (keys, home network
             # access, screens and satellites), saved through /setup/security.
             'cred-name', 'cred-scope', 'sec-lan-cidrs', 'sec-home-host-names',

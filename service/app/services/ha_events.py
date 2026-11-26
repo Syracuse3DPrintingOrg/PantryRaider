@@ -45,6 +45,11 @@ _SYNC_INTERVAL = 5.0
 # from a thread, so a slow disk never holds up the other requests or the
 # kiosk's long poll (services/state_writer.py). Memory holds the event first.
 _writer = StateWriter("ha-events")
+# Monotonic time the kitchen display itself last polled (a poll that says
+# display=1). The screen list reads it to say whether this install's own
+# display is there to be shown anything.
+_display_seen: float | None = None
+DISPLAY_ONLINE_SECONDS = 90.0
 
 
 def _state_file() -> Path:
@@ -202,6 +207,24 @@ def add_camera(name: str = "", src: str = "", seconds: int = 0) -> int:
     })
 
 
+def add_for_display(event: dict) -> int:
+    """Queue an event for this install's own kitchen display only.
+
+    An event sent to one named screen must not move a phone or a laptop that
+    happens to have the app open, so it is marked and only a poll from the
+    display itself (display=1) is given it. ``event`` is one of the shapes the
+    other add_* helpers build (type plus its fields)."""
+    clean = {k: v for k, v in dict(event).items() if k not in ("id", "ts")}
+    clean["display"] = True
+    return _add(clean)
+
+
+def display_online() -> bool:
+    """Whether this install's kitchen display polled for events lately."""
+    seen = _display_seen
+    return seen is not None and time.monotonic() - seen <= DISPLAY_ONLINE_SECONDS
+
+
 def add_navigate(path: str, always: bool = False) -> int:
     """Queue a kiosk page-change event. ``path`` is an app-relative path (e.g.
     "ui/cook"), so a Home Assistant automation can drive which page the display
@@ -215,14 +238,16 @@ def add_navigate(path: str, always: bool = False) -> int:
                  "always": bool(always)})
 
 
-def poll(after_id: int = 0) -> dict:
-    """Events newer than ``after_id``, plus the current last id.
+def poll(after_id: int = 0, display: bool = False) -> dict:
+    """Events newer than ``after_id``, plus the current last id. Events queued
+    for the kitchen display alone are left out unless ``display`` is true.
 
     A fresh client should first read ``last_id`` (with after_id huge, or via the
     returned value) so it only sees events that arrive after it connects, rather
     than replaying the recent ring on load. Polling never writes the state file
     (the TTL/size prune is applied in memory and re-applied on the next add).
     """
+    global _display_seen
     now = time.time()
     with _lock:
         _load_locked()
@@ -232,12 +257,16 @@ def poll(after_id: int = 0) -> dict:
             after = int(after_id)
         except (TypeError, ValueError):
             after = 0
-        fresh = [dict(e) for e in _events if e["id"] > after]
+        if display:
+            _display_seen = time.monotonic()
+        fresh = [dict(e) for e in _events
+                 if e["id"] > after and (display or not e.get("display"))]
     return {"events": fresh, "last_id": last}
 
 
 async def wait_for_events(after_id: int = 0, timeout: float = 25.0,
-                          interval: float = 0.05, is_gone=None) -> dict:
+                          interval: float = 0.05, is_gone=None,
+                          display: bool = False) -> dict:
     """Long-poll: resolve the instant an event newer than ``after_id`` exists,
     or after ``timeout`` seconds with an empty batch.
 
@@ -257,7 +286,7 @@ async def wait_for_events(after_id: int = 0, timeout: float = 25.0,
     step = max(0.02, float(interval))
     next_check = 0.0
     while True:
-        result = poll(after_id)
+        result = poll(after_id, display=True) if display else poll(after_id)
         now = time.monotonic()
         if result["events"] or now >= deadline:
             return result
@@ -293,9 +322,10 @@ def last_id() -> int:
 
 def reset() -> None:
     """Clear all events and drop the state file (used by tests)."""
-    global _events, _next_id, _mtime, _last_sync
+    global _events, _next_id, _mtime, _last_sync, _display_seen
     _writer.wait_idle()
     with _lock:
+        _display_seen = None
         _events = []
         _next_id = 1
         _mtime = None

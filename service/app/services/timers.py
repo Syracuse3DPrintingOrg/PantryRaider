@@ -54,11 +54,27 @@ class _Timer:
     # Absolute wall-clock deadline: the shared countdown clock (see docstring).
     deadline_epoch: float
     created_epoch: float
+    # Who set it: a screen id, a Home Assistant satellite, or nothing. Whoever
+    # rings for a finished timer reads this to ring where it was asked for.
+    origin: str = ""
+    # True once the "finished" event has gone out, so it goes out once.
+    rang: bool = False
 
 
 _lock = threading.Lock()
 _timers: dict[int, _Timer] = {}
 _next_id = 0
+# What happened to timers lately (started, extended, finished, cancelled,
+# dismissed), for callers that ring or draw for them: Home Assistant, a
+# screen's own timer bar. Kept in memory only. After a restart the ids start
+# over, which a reader sees as a last_id below the one it holds and answers by
+# reading the list again.
+_MAX_EVENTS = 100
+_events: list[dict] = []
+_next_event = 1
+# Called with each event after it is recorded, outside the lock.
+_listeners: list = []
+ORIGIN_MAX = 64
 # mtime of the state file our in-memory view corresponds to (None = never seen).
 _mtime: int | None = None
 # A timer change made inside a request is written from a thread, so a slow
@@ -96,6 +112,8 @@ def _load_locked() -> None:
                 total_seconds=float(raw.get("total_seconds", 0)),
                 deadline_epoch=float(raw.get("deadline_epoch", 0)),
                 created_epoch=float(raw.get("created_epoch", 0)),
+                origin=str(raw.get("origin", "") or "")[:ORIGIN_MAX],
+                rang=bool(raw.get("rang", False)),
             )
             if not all(math.isfinite(v) for v in
                        (t.total_seconds, t.deadline_epoch, t.created_epoch)):
@@ -119,7 +137,8 @@ def _save_locked() -> None:
             "next": _next_id,
             "timers": [
                 {"id": t.id, "label": t.label, "total_seconds": t.total_seconds,
-                 "deadline_epoch": t.deadline_epoch, "created_epoch": t.created_epoch}
+                 "deadline_epoch": t.deadline_epoch, "created_epoch": t.created_epoch,
+                 "origin": t.origin, "rang": t.rang}
                 for t in sorted(_timers.values(), key=lambda t: t.id)
             ],
         }
@@ -181,6 +200,9 @@ def _serialize(t: _Timer, now_epoch: float | None = None) -> dict:
         "remaining_seconds": round(remaining, 3),
         "running": not expired,
         "expired": expired,
+        # A finished timer rings until someone dismisses it.
+        "state": "ringing" if expired else "running",
+        "origin": t.origin,
         # Absolute deadline (wall clock) so other machines can agree on remaining.
         "deadline_epoch": t.deadline_epoch,
         "created_epoch": t.created_epoch,
@@ -204,9 +226,73 @@ def _duration(seconds) -> float:
     return value
 
 
-def create_timer(label: str, seconds: float) -> dict:
+def add_listener(fn) -> None:
+    """Call ``fn(event)`` after every timer event (started, extended, finished,
+    cancelled, dismissed). Runs outside the lock; an error in one is ignored."""
+    if fn not in _listeners:
+        _listeners.append(fn)
+
+
+def _record_locked(kind: str, timer: dict, now_epoch: float) -> dict:
+    global _next_event
+    event = {"id": _next_event, "ts": now_epoch, "type": kind, "timer": timer}
+    _next_event += 1
+    _events.append(event)
+    del _events[:-_MAX_EVENTS]
+    return event
+
+
+def _tell(events) -> None:
+    for event in events:
+        for fn in list(_listeners):
+            try:
+                fn(event)
+            except Exception:
+                pass
+
+
+def _finish_due_locked(now_epoch: float) -> list[dict]:
+    """Record "finished" for each timer whose time is up and has not been
+    announced yet. Caller holds both locks and saves when this returns any."""
+    out = []
+    for t in sorted(_timers.values(), key=lambda t: t.deadline_epoch):
+        if not t.rang and t.deadline_epoch <= now_epoch:
+            t.rang = True
+            out.append(_record_locked("finished", _serialize(t, now_epoch), now_epoch))
+    return out
+
+
+def finish_due() -> int:
+    """Announce every timer that has just run out. Cheap when none has: one
+    pass over the list in memory, and the file is only written on a change."""
+    now_epoch = time.time()
+    with _lock:
+        _load_locked()
+        if not any(not t.rang and t.deadline_epoch <= now_epoch for t in _timers.values()):
+            return 0
+    with _lock, state_write_lock(_state_file()):
+        _load_locked()
+        done = _finish_due_locked(now_epoch)
+        if done:
+            _save_locked()
+    _tell(done)
+    return len(done)
+
+
+def next_deadline() -> float | None:
+    """When the next running timer ends (epoch seconds), or None."""
+    now_epoch = time.time()
+    with _lock:
+        _load_locked()
+        ends = [t.deadline_epoch for t in _timers.values()
+                if not t.rang and t.deadline_epoch > now_epoch]
+    return min(ends) if ends else None
+
+
+def create_timer(label: str, seconds: float, origin: str = "") -> dict:
     """Create and start a timer counting down `seconds` from now. Raises
-    ValueError on a non-positive or unparseable duration."""
+    ValueError on a non-positive or unparseable duration. ``origin`` names
+    who set it (a screen id, a Home Assistant satellite)."""
     total = _duration(seconds)
 
     global _next_id
@@ -221,10 +307,14 @@ def create_timer(label: str, seconds: float) -> dict:
             total_seconds=total,
             deadline_epoch=now_epoch + total,
             created_epoch=now_epoch,
+            origin=str(origin or "").strip()[:ORIGIN_MAX],
         )
         _timers[timer.id] = timer
         _save_locked()
-        return _serialize(timer, now_epoch)
+        out = _serialize(timer, now_epoch)
+        event = _record_locked("started", out, now_epoch)
+    _tell([event])
+    return out
 
 
 def list_timers() -> list[dict]:
@@ -270,25 +360,133 @@ def extend_timer(timer_id: int, seconds: float) -> dict | None:
         t.deadline_epoch += extra
         t.total_seconds += extra
         _save_locked()
-        return _serialize(t, now_epoch)
+        out = _serialize(t, now_epoch)
+        event = _record_locked("extended", out, now_epoch)
+    _tell([event])
+    return out
+
+
+def _removed_kind(t: _Timer, now_epoch: float) -> str:
+    """Taking away a timer that is still counting is a cancel; taking away one
+    that has finished is a dismiss."""
+    return "dismissed" if t.deadline_epoch <= now_epoch else "cancelled"
 
 
 def cancel_timer(timer_id: int) -> bool:
-    """Remove a timer. Returns True if it existed, False otherwise."""
+    """Remove a timer, running or finished. Returns True if it existed."""
+    now_epoch = time.time()
     with _lock, state_write_lock(_state_file()):
         _load_locked()
-        if _timers.pop(timer_id, None) is None:
+        t = _timers.pop(timer_id, None)
+        if t is None:
             return False
         _save_locked()
-        return True
+        event = _record_locked(_removed_kind(t, now_epoch), _serialize(t, now_epoch),
+                               now_epoch)
+    _tell([event])
+    return True
+
+
+def dismiss_timer(timer_id: int) -> str:
+    """Dismiss a finished timer. Returns "ok", "running" when it has not
+    finished yet (nothing changes), or "missing"."""
+    now_epoch = time.time()
+    with _lock, state_write_lock(_state_file()):
+        _load_locked()
+        t = _timers.get(timer_id)
+        if t is None:
+            return "missing"
+        if t.deadline_epoch > now_epoch:
+            return "running"
+        del _timers[timer_id]
+        _save_locked()
+        event = _record_locked("dismissed", _serialize(t, now_epoch), now_epoch)
+    _tell([event])
+    return "ok"
+
+
+def dismiss_ringing(origin: str | None = None) -> int:
+    """Dismiss every finished timer, or only those one origin set. Returns
+    how many went."""
+    now_epoch = time.time()
+    events = []
+    with _lock, state_write_lock(_state_file()):
+        _load_locked()
+        for tid, t in sorted(_timers.items()):
+            if t.deadline_epoch > now_epoch:
+                continue
+            if origin is not None and t.origin != origin:
+                continue
+            del _timers[tid]
+            events.append(_record_locked("dismissed", _serialize(t, now_epoch), now_epoch))
+        if events:
+            _save_locked()
+    _tell(events)
+    return len(events)
 
 
 def clear_all() -> int:
     """Drop every timer at once (the Timers page Clear all button, and test
     cleanup). Returns how many timers were removed."""
+    now_epoch = time.time()
+    events = []
     with _lock, state_write_lock(_state_file()):
         _load_locked()
-        count = len(_timers)
+        for _tid, t in sorted(_timers.items()):
+            events.append(_record_locked(_removed_kind(t, now_epoch),
+                                         _serialize(t, now_epoch), now_epoch))
         _timers.clear()
         _save_locked()
-        return count
+    _tell(events)
+    return len(events)
+
+
+def poll_events(after_id: int = 0) -> dict:
+    """Timer events newer than ``after_id``, the current last id, and the
+    list as it stands. A last_id below the caller's own means the app
+    restarted: read the list and carry on from the new id."""
+    finish_due()
+    try:
+        after = int(after_id)
+    except (TypeError, ValueError):
+        after = 0
+    with _lock:
+        last = _next_event - 1
+        fresh = [dict(e) for e in _events if e["id"] > after]
+    return {"events": fresh, "last_id": last, "timers": list_timers()}
+
+
+def events_behind(result: dict, after_id) -> bool:
+    """True when the caller's cursor is ahead of this process (a restart)."""
+    try:
+        after = int(after_id)
+    except (TypeError, ValueError):
+        return False
+    return after < 999999999 and result["last_id"] < after
+
+
+async def wait_for_events(after_id: int = 0, timeout: float = 25.0, is_gone=None) -> dict:
+    """Long poll for timer events: answers the moment one is recorded, when a
+    running timer reaches its end, or after ``timeout`` seconds with none."""
+    import asyncio
+    deadline = time.monotonic() + max(0.0, float(timeout))
+    next_gone = 0.0
+    while True:
+        result = poll_events(after_id)
+        now = time.monotonic()
+        if result["events"] or events_behind(result, after_id) or now >= deadline:
+            return result
+        if is_gone is not None and now >= next_gone:
+            next_gone = now + 0.5
+            try:
+                if await is_gone():
+                    return result
+            except Exception:
+                is_gone = None
+        # Sleep to the next thing that can happen: a timer running out, or a
+        # short tick to notice one started, cancelled or dismissed elsewhere.
+        step = 0.1
+        due = next_deadline()
+        if due is not None:
+            step = min(step, max(0.02, due - time.time()))
+        await asyncio.sleep(max(0.02, min(step, deadline - now)))

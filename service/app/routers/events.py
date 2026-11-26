@@ -44,26 +44,46 @@ class NotifyPayload(BaseModel):
     title: str = ""
     level: str = "info"          # info | success | warning | error
     timeout: int = 0             # seconds on screen; 0 = the client default
+    screen: str = ""             # one screen's id; empty = every screen here
 
 
 class CameraPopupPayload(BaseModel):
     camera: str = ""             # camera name; empty = the first configured camera
     seconds: int = 0             # 0 = the configured default
+    screen: str = ""
 
 
 class CameraDetectPayload(BaseModel):
     camera: str = ""             # camera name; empty = the first configured camera
     detection_type: str = ""     # person | vehicle | animal | visitor
     seconds: int = 0             # 0 = the configured default
+    screen: str = ""
 
 
 class NavigatePayload(BaseModel):
     path: str = ""               # app-relative path, e.g. "ui/cook"
+    page: str = ""               # or a page by name: home, recipe, timers
+    screen: str = ""
 
 
 class ConfirmPayload(BaseModel):
     message: str = ""
     title: str = ""
+    screen: str = ""
+
+
+_NO_SCREEN = "There is no screen with that id, or it cannot be sent to yet."
+
+
+async def _to_screen(screen_id: str, event: dict, **extra):
+    """Send one event to one screen instead of the shared ring. The reply
+    names the screen, or is a 404 when there is none to send to."""
+    from fastapi.concurrency import run_in_threadpool
+    from ..services import screens
+    sent = await run_in_threadpool(screens.send, screen_id.strip(), event)
+    if sent is None:
+        return JSONResponse(status_code=404, content={"ok": False, "error": _NO_SCREEN})
+    return {"ok": True, "screen": sent, **extra}
 
 
 def _camera_index(name: str) -> int:
@@ -105,6 +125,11 @@ async def notify(payload: NotifyPayload):
     """Queue a notification toast for the display."""
     if not payload.message.strip() and not payload.title.strip():
         return {"ok": False, "error": "message or title is required"}
+    if payload.screen.strip():
+        lvl = payload.level if payload.level in ("info", "success", "warning", "error") else "info"
+        return await _to_screen(payload.screen, {
+            "type": "notification", "message": payload.message, "title": payload.title,
+            "level": lvl, "timeout": max(0, int(payload.timeout or 0))})
     eid = ha_events.add_notification(
         payload.message, title=payload.title, level=payload.level, timeout=payload.timeout
     )
@@ -118,6 +143,9 @@ async def camera_popup(payload: CameraPopupPayload):
     if not src:
         return {"ok": False, "error": "No matching camera is configured."}
     seconds = payload.seconds or int(settings.ha_camera_popup_seconds or 20)
+    if payload.screen.strip():
+        return await _to_screen(payload.screen, {
+            "type": "camera", "name": name, "src": src, "seconds": seconds}, camera=name)
     eid = ha_events.add_camera(name=name, src=src, seconds=seconds)
     return {"ok": True, "id": eid, "camera": name}
 
@@ -144,6 +172,10 @@ async def camera_detect_event(payload: CameraDetectPayload):
         return {"ok": True, "popped": False}
     name, src = _camera_src(payload.camera)
     seconds = payload.seconds or int(settings.ha_camera_popup_seconds or 20)
+    if payload.screen.strip():
+        return await _to_screen(payload.screen, {
+            "type": "camera", "name": name, "src": src, "seconds": seconds},
+            popped=True, camera=name)
     eid = ha_events.add_camera(name=name, src=src, seconds=seconds)
     return {"ok": True, "popped": True, "id": eid, "camera": name}
 
@@ -156,6 +188,11 @@ async def navigate(payload: NavigatePayload):
     (``url_safety.NAV_PAGES``), or a page's plain name such as "expiring": an
     API path or a missing page would leave the screen on a bare reply with no
     app script to move it along, so those get a 400 (FoodAssistant-ye112)."""
+    if payload.screen.strip():
+        return await _navigate_screen(payload)
+    if payload.page.strip() and not payload.path.strip():
+        from ..services import screens
+        payload.path = screens.page_path("server", payload.page)
     if not safe_nav_path(payload.path):
         return JSONResponse(status_code=400, content={
             "ok": False, "error": "a valid same-origin path is required (e.g. ui/cook)"})
@@ -170,6 +207,52 @@ async def navigate(payload: NavigatePayload):
     return {"ok": True, "id": eid, "path": path}
 
 
+async def _navigate_screen(payload: NavigatePayload):
+    """Move one named screen. A page name is turned into that screen's own
+    address for it; a path is checked the same way an untargeted one is."""
+    from fastapi.concurrency import run_in_threadpool
+    from ..services import screens
+    sid = payload.screen.strip()
+    page = payload.page.strip().lower()
+    if page:
+        if page not in screens.PAGES:
+            return JSONResponse(status_code=400, content={
+                "ok": False, "error": "page is one of home, recipe or timers."})
+        sent = await run_in_threadpool(lambda: screens.send_navigate(sid, page=page))
+        path = ""
+    else:
+        path = nav_page_path(payload.path) if safe_nav_path(payload.path) else ""
+        if not path:
+            return JSONResponse(status_code=400, content={
+                "ok": False, "error": "not a page in the app; send a page name "
+                                      "(home, recipe, timers) or a page path such as ui/cook"})
+        sent = await run_in_threadpool(lambda: screens.send_navigate(sid, path=path))
+    if sent is None:
+        return JSONResponse(status_code=404, content={"ok": False, "error": _NO_SCREEN})
+    return {"ok": True, "screen": sent, "path": path, "page": page}
+
+
+class ClosePayload(BaseModel):
+    screen: str = ""
+
+
+@router.post("/close")
+async def close(payload: ClosePayload):
+    """Put one screen back where it was before it was sent a recipe or a
+    timer ("close the recipe"). A tablet app drops the Pantry Raider page and
+    shows its own dashboard again; a kitchen display goes to its home page."""
+    from fastapi.concurrency import run_in_threadpool
+    from ..services import screens
+    sid = payload.screen.strip()
+    if not sid:
+        return JSONResponse(status_code=400, content={
+            "ok": False, "error": "Say which screen to close."})
+    sent = await run_in_threadpool(screens.send_close, sid)
+    if sent is None:
+        return JSONResponse(status_code=404, content={"ok": False, "error": _NO_SCREEN})
+    return {"ok": True, "screen": sent}
+
+
 @router.post("/confirm")
 async def confirm(payload: ConfirmPayload):
     """Queue a deck-action confirmation for the display (FoodAssistant-rdlo).
@@ -181,6 +264,10 @@ async def confirm(payload: ConfirmPayload):
     Home Assistant traffic."""
     if not payload.message.strip() and not payload.title.strip():
         return {"ok": False, "error": "message or title is required"}
+    if payload.screen.strip():
+        return await _to_screen(payload.screen, {
+            "type": "confirm", "message": payload.message, "title": payload.title,
+            "level": "success", "timeout": 5})
     eid = ha_events.add_confirmation(payload.message, title=payload.title)
     return {"ok": True, "id": eid}
 
@@ -211,7 +298,7 @@ async def warning_test():
 
 
 @router.get("/poll")
-async def poll(request: Request, since: int = 0, wait: float = 0):
+async def poll(request: Request, since: int = 0, wait: float = 0, display: int = 0):
     """New events since ``since``, plus the current last id.
 
     With ``wait`` > 0 this long-polls: the request is held (up to ``wait``
@@ -220,8 +307,9 @@ async def poll(request: Request, since: int = 0, wait: float = 0):
     old immediate answer is returned, for callers that just want a snapshot."""
     if wait and wait > 0:
         return await ha_events.wait_for_events(since, timeout=min(float(wait), 30.0),
-                                               is_gone=request.is_disconnected)
-    return ha_events.poll(since)
+                                               is_gone=request.is_disconnected,
+                                               display=bool(display))
+    return ha_events.poll(since, display=bool(display))
 
 
 @router.get("/count")

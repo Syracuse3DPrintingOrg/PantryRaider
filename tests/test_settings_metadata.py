@@ -66,7 +66,7 @@ OLD_SAVEABLE = {
     "label_show_logo", "label_width_in", "lan_cidrs", "lan_scan_cidr",
     "legacy_key_auto_retire", "legacy_mirror", "llm_expiry_enabled",
     "local_device_pairing_enabled", "local_totp_enabled",
-    "local_totp_recovery", "local_passkeys", "local_totp_scope", "signin_news_checked", "signin_news_until", "local_totp_secret", "mealie_admin_password",
+    "local_totp_recovery", "local_passkeys", "local_totp_scope", "signin_news_checked", "signin_news_until", "oidc_issuer", "oidc_client_id", "oidc_client_secret", "oidc_name", "oidc_subject", "oidc_account", "oidc_host", "oidc_only", "local_totp_secret", "mealie_admin_password",
     "mealie_api_key", "mealie_base_url", "mealie_connected",
     "mealie_public_url", "nav_blocked_notified", "nav_hidden", "nav_order",
     "nav_parents", "nav_visibility", "neokey_rest_color", "neokey_timer_color",
@@ -371,7 +371,7 @@ ADDED_TO_SETUP_PAYLOAD = {
     'inventory_rows_per_best_by': ('bool', True),
 }
 # The pre-setup Forager browser marker is a session-binding value.
-ADDED_SECRETS = {"cloud_link_session", "local_passkeys"}
+ADDED_SECRETS = {"cloud_link_session", "local_passkeys", "oidc_client_secret", "oidc_subject"}
 
 # The "blank keeps the stored value" fields of /setup/save, as they were kept
 # by hand in routers/setup.py.

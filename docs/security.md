@@ -28,6 +28,21 @@ guess. For what happens to your data specifically, see the
   open over HTTPS by its web address (Forager remote access, or your own
   domain); browsers do not offer them over plain http or by IP address.
   Removing a passkey signs out every other browser.
+- If you run your own sign-in service (Pocket ID, Authentik, Keycloak, or any
+  OpenID Connect provider), Settings, Security, Identity provider can sign you
+  in with it. Create a client there with the callback address the setting
+  shows, enter the issuer, client id and client secret, then link your account
+  (your password first). Only the account you linked can sign in this way,
+  matched by the provider's account id, never by email, and only on the web
+  address you linked it on. The kitchen checks the provider's signed answer
+  itself and uses PKCE, so a sign-in caught partway cannot be finished
+  elsewhere. Your provider decides how you prove who you are, and no code is
+  asked for afterwards, so choose one that asks for a passkey or a second
+  factor. Changing the issuer or client id unlinks the account. "Make it the
+  only way to sign in" hides and refuses the password, passkeys and Forager
+  on the sign-in page; the device password still works from home, so a
+  provider that is down cannot lock you out. Keys, satellites, Home Assistant
+  and the kitchen screen are not affected.
 - Programs on the device itself sign in like everything else. The kitchen
   screen gets a one-time sign-in ticket each time it starts, and the Stream
   Deck and the sensor reader each have a key of their own. Until 0.21 anything

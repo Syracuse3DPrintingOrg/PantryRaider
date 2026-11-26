@@ -116,10 +116,15 @@ def test_legacy_keys_keep_everything_else(method, path):
 
 SCOPE_TABLE = [
     # method, path, satellite, viewer, ha, ha_rest, display
-    ("GET", "/timers", True, True, False, True, False),
-    ("POST", "/timers", True, True, False, True, False),
-    ("DELETE", "/timers/abc", True, True, False, True, True),
-    ("POST", "/timers/abc/extend", True, True, False, True, True),
+    ("GET", "/timers", True, True, True, True, False),
+    ("POST", "/timers", True, True, True, True, False),
+    ("DELETE", "/timers/abc", True, True, True, True, True),
+    ("POST", "/timers/abc/extend", True, True, True, True, True),
+    ("POST", "/timers/abc/dismiss", True, True, True, True, True),
+    ("GET", "/timers/events", True, True, True, True, False),
+    ("POST", "/api/screens/show-recipe", True, True, True, True, False),
+    ("POST", "/api/screens/register", True, True, False, False, False),
+    ("DELETE", "/api/screens/abc", False, False, False, False, False),
     ("POST", "/pending/scan", True, True, False, True, False),
     ("POST", "/inventory/consume", True, True, False, False, False),
     ("GET", "/ha/state", True, True, True, True, False),

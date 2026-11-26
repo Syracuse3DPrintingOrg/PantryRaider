@@ -33,7 +33,7 @@
   // events are on or off.
   function shouldShow(ev) {
     return !!ev && (enabled || ev.type === 'confirm' || ev.type === 'warning'
-      || (ev.type === 'navigate' && ev.always));
+      || ev.display || (ev.type === 'navigate' && ev.always));
   }
 
   // Events drive physical-control feedback: a NeoKey press jumps the kiosk to
@@ -44,6 +44,12 @@
   // A held request is cheap (an mtime-gated read of the in-memory ring), so this
   // stays light on a small Pi. Re-holds almost immediately on a good answer,
   // backs off when the server blips, and pauses while the tab is hidden.
+  // An event sent to one named screen is only handed to the kitchen display
+  // itself, so this page says when it is that display (kiosk mode, which on a
+  // Pi only the attached panel can latch).
+  var isDisplay = false;
+  try { isDisplay = localStorage.getItem('kioskMode') === 'true'; } catch (e) { }
+  var DISPLAY_Q = isDisplay ? '&display=1' : '';
   var WAIT_S = 25;             // how long the server holds an otherwise-idle poll
   var IDLE_MS = 50;            // tiny gap before re-holding, so a request is ~always open
   var BACKOFF_MAX_MS = 15000;
@@ -247,7 +253,7 @@
       opts.signal = mine.signal;
       held = mine;
     }
-    fetch('events/poll?wait=' + WAIT_S + '&since=' + lastId, opts)
+    fetch('events/poll?wait=' + WAIT_S + '&since=' + lastId + DISPLAY_Q, opts)
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (d) {
         if (d) { curDelay = IDLE_MS; applyEvents(d); }

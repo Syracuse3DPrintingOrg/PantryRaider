@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <base href="{{ ingress_path }}/">
+  <title>{{ app_name }}</title>
+  <meta name="theme-color" content="#14161a">
+  <link rel="icon" type="image/png" sizes="32x32" href="static/icons/favicon-32.png">
+  <link rel="stylesheet" href="static/css/screen.css?v={{ app_version }}">
+</head>
+{# The pages a tablet or wall screen shows: timers and the recipe being
+   cooked. Kept to plain markup, one small stylesheet and one script that old
+   tablet browsers can run, so it opens fast on slow hardware. #}
+<body data-page="{{ page }}" data-screen="{{ screen_id }}">
+  <div class="sc-top{% if corner_clear %} sc-corner-clear{% endif %}">
+    <a class="sc-tab{% if page == 'home' %} on{% endif %}" href="screen/">Home</a>
+    <a class="sc-tab{% if page == 'timers' %} on{% endif %}" href="screen/timers">Timers</a>
+    <a class="sc-tab{% if page == 'recipe' %} on{% endif %}" href="screen/recipe">Recipe</a>
+    <span class="sc-clock" id="sc-clock"></span>
+  </div>
+
+  <div class="sc-strip" id="sc-strip" hidden></div>
+
+  <div class="sc-main" id="sc-main">
+    {% if page == 'home' %}
+    <div class="sc-home">
+      <div class="sc-bigclock" id="sc-bigclock"></div>
+      <div class="sc-date" id="sc-date"></div>
+      <a class="sc-card" id="sc-home-recipe" href="screen/recipe" hidden>
+        <span class="sc-card-kicker">Cooking now</span>
+        <span class="sc-card-title" id="sc-home-recipe-title"></span>
+      </a>
+      <div id="sc-home-timers"></div>
+    </div>
+    {% elif page == 'timers' %}
+    <div class="sc-timers" id="sc-timers"></div>
+    <div class="sc-empty" id="sc-timers-empty" hidden>No timers are running.</div>
+    <div class="sc-quick">
+      <span class="sc-quick-label">Start a timer</span>
+      <button class="sc-btn" data-start="60">1 min</button>
+      <button class="sc-btn" data-start="300">5 min</button>
+      <button class="sc-btn" data-start="600">10 min</button>
+      <button class="sc-btn" data-start="900">15 min</button>
+      <button class="sc-btn" data-start="1800">30 min</button>
+    </div>
+    {% else %}
+    <div class="sc-empty" id="sc-recipe-empty" hidden>No recipe is open. Ask for one, or pick one in Pantry Raider.</div>
+    <div class="sc-recipe" id="sc-recipe" hidden>
+      <h1 class="sc-title" id="sc-recipe-title"></h1>
+      <div class="sc-meta" id="sc-recipe-meta"></div>
+      <div class="sc-cols">
+        <div class="sc-col sc-ingredients">
+          <h2>Ingredients</h2>
+          <ul id="sc-ingredients"></ul>
+        </div>
+        <div class="sc-col sc-steps">
+          <h2>Steps</h2>
+          <ol id="sc-steps"></ol>
+          <div class="sc-notes" id="sc-notes" hidden></div>
+        </div>
+      </div>
+    </div>
+    {% endif %}
+  </div>
+
+  <div class="sc-ring" id="sc-ring" hidden>
+    <div class="sc-ring-box">
+      <div class="sc-ring-kicker">Time is up</div>
+      <div class="sc-ring-names" id="sc-ring-names"></div>
+      <button class="sc-btn sc-btn-big" id="sc-ring-dismiss">Dismiss</button>
+    </div>
+  </div>
+
+  <div class="sc-toasts" id="sc-toasts"></div>
+  <div class="sc-offline" id="sc-offline" hidden>Reconnecting to Pantry Raider.</div>
+
+  <script src="static/js/screen/screen.js?v={{ app_version }}"></script>
+</body>
+</html>

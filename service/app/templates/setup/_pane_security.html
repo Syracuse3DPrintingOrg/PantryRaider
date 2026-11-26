@@ -151,6 +151,47 @@
               <div id="passkeys-not-here" class="small text-secondary d-none"></div>
               <div id="passkeys-result" class="mt-2"></div>
             {% endcall %}
+            {% call srow('Identity provider',
+                         'Sign in with an account you already have.',
+                         'If you run your own sign-in service (Pocket ID, Authentik, Keycloak, or any OpenID Connect provider), this kitchen can sign you in with it. Create a client there with the callback address shown here, enter its details, then link your account. Your provider decides how you prove who you are, so choose one that asks for a passkey or a second factor.') %}
+              <div id="oidc-status" class="small text-secondary mb-2">Loading…</div>
+              <div id="oidc-config" style="max-width: 420px;">
+                <label class="form-label small mb-1" for="oidc-issuer">Issuer address</label>
+                <input type="url" class="form-control form-control-sm mb-2" id="oidc-issuer"
+                       placeholder="https://id.example.com" autocomplete="off">
+                <label class="form-label small mb-1" for="oidc-client-id">Client id</label>
+                <input type="text" class="form-control form-control-sm mb-2" id="oidc-client-id" autocomplete="off">
+                <label class="form-label small mb-1" for="oidc-client-secret">Client secret</label>
+                <input type="password" class="form-control form-control-sm mb-2" id="oidc-client-secret"
+                       autocomplete="new-password">
+                <label class="form-label small mb-1" for="oidc-name">Name on the sign-in button</label>
+                <input type="text" class="form-control form-control-sm mb-2" id="oidc-name" maxlength="40"
+                       placeholder="For example, Pocket ID" autocomplete="off">
+                <div class="small text-secondary mb-2">Callback address to register with your provider:
+                  <code id="oidc-callback" class="user-select-all"></code></div>
+                <div class="set-row-actions">
+                  <button class="btn btn-outline-info btn-sm" type="button" data-on-click="saveOidc()">Save</button>
+                  <button class="btn btn-outline-secondary btn-sm d-none" type="button" id="oidc-clear-btn" data-on-click="clearOidc()">Turn off</button>
+                </div>
+              </div>
+              <div id="oidc-link" class="mt-3 d-none" style="max-width: 320px;">
+                <label class="form-label small mb-1" for="oidc-credential">Your password</label>
+                <input type="password" class="form-control form-control-sm mb-2" id="oidc-credential"
+                       autocomplete="current-password" placeholder="Password or a current code">
+                <button class="btn btn-outline-info btn-sm" type="button" data-on-click="linkOidc()">
+                  <i class="bi bi-person-badge me-1"></i>Link your account
+                </button>
+              </div>
+              <div id="oidc-linked" class="mt-3 d-none">
+                <div class="form-check form-switch small mb-1">
+                  <input class="form-check-input" type="checkbox" id="oidc-only" data-on-change="setOidcOnly()">
+                  <label class="form-check-label" for="oidc-only">Make it the only way to sign in</label>
+                </div>
+                <div class="small text-secondary mb-2">Hides the password, passkeys and Forager on the sign-in page. From home, the device password still works, in case your provider is down. Keys, satellites and Home Assistant are not affected.</div>
+                <button class="btn btn-link btn-sm text-danger p-0" type="button" data-on-click="unlinkOidc()">Unlink your account</button>
+              </div>
+              <div id="oidc-result" class="mt-2"></div>
+            {% endcall %}
             {% call srow('Signed-in browsers',
                          'Where you are signed in.',
                          'Every phone, tablet and computer signed in to this kitchen, and when each was last used. Sign out one you no longer use, or all of them except this one. Changing a password or two-factor signs out every other browser too.') %}
@@ -187,6 +228,7 @@
               <select class="form-select form-select-sm mb-2" id="cred-scope">
                 <option value="ha">The Home Assistant integration</option>
                 <option value="ha_rest">Home Assistant sensors, buttons and ESPHome panels</option>
+                <option value="screen">A tablet or wall screen that shows recipes and timers</option>
                 <option value="display">A Bandit Cub or other small display</option>
                 <option value="satellite">A second screen (satellite)</option>
                 {% if s.auth_password %}<option value="admin">Everything, including Settings</option>{% endif %}

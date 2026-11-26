@@ -350,7 +350,9 @@ def _pull_caps() -> str:
     the local token), and no Bluetooth probe targets (their alerts go to Home
     Assistant with the local token too). Anything uncertain leaves deckproxy1
     off, which keeps the token coming."""
-    caps = [upstream.RELAY_CAP]
+    # screen1: this build pulls the events the server holds for its screen
+    # (services/screen_pull.py), so the server may send it some.
+    caps = [upstream.RELAY_CAP, "screen1"]
     try:
         from . import deck_config
         deck_ok = (not settings.has_streamdeck) or deck_config.last_push_form() == "proxy"

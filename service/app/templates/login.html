@@ -185,6 +185,7 @@
         <button type="button" class="btn btn-sm btn-outline-info" id="signin-news-close">Got it</button>
       </div>
       {% endif %}
+      {% macro password_form() %}
       <form method="post" action="ui/login" id="login-form">
         <input type="hidden" name="mode" value="local">
         {# A fixed user name, so password managers save and fill this
@@ -205,6 +206,34 @@
           <i class="bi bi-unlock me-1"></i>Sign In
         </button>
       </form>
+      {% endmacro %}
+      {% if oidc_only %}
+      {% if oidc_button %}
+      <a class="btn {{ 'btn-primary' if oidc_only else 'btn-outline-primary' }} w-100 mt-2" href="auth/oidc/start">
+        <i class="bi bi-person-badge me-1"></i>Sign in with {{ oidc_name }}
+      </a>
+      {% elif oidc_elsewhere %}
+      <p class="small text-secondary mt-2 mb-0">To sign in with {{ oidc_name }}, open
+        <a href="https://{{ oidc_elsewhere }}/ui/login">{{ oidc_elsewhere }}</a>.</p>
+      {% endif %}
+      {% if oidc_recovery %}
+      <details class="mt-3" {% if error %}open{% endif %}>
+        <summary class="small text-secondary">Can't reach {{ oidc_name }}?</summary>
+        <p class="text-secondary small mt-2 mb-2">From home, the device password still works.</p>
+        {{ password_form() }}
+      </details>
+      {% endif %}
+      {% else %}
+      {{ password_form() }}
+      {% if oidc_button %}
+      <a class="btn {{ 'btn-primary' if oidc_only else 'btn-outline-primary' }} w-100 mt-2" href="auth/oidc/start">
+        <i class="bi bi-person-badge me-1"></i>Sign in with {{ oidc_name }}
+      </a>
+      {% elif oidc_elsewhere %}
+      <p class="small text-secondary mt-2 mb-0">To sign in with {{ oidc_name }}, open
+        <a href="https://{{ oidc_elsewhere }}/ui/login">{{ oidc_elsewhere }}</a>.</p>
+      {% endif %}
+      {% endif %}
       {% if passkeys_here %}
       <div id="passkey-signin" class="d-none mt-2">
         <button type="button" class="btn btn-outline-primary w-100" id="passkey-signin-btn">

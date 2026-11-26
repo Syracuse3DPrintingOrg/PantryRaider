@@ -4,13 +4,18 @@
   "codeowners": [
     "@Syracuse3DPrintingOrg"
   ],
+  "after_dependencies": [
+    "assist_satellite",
+    "conversation",
+    "intent"
+  ],
   "config_flow": true,
   "documentation": "https://docs.pantryraider.app/home-assistant-integration/",
   "integration_type": "hub",
   "iot_class": "local_polling",
   "issue_tracker": "https://github.com/Syracuse3DPrintingOrg/PantryRaider/issues",
   "requirements": [],
-  "version": "0.21.156",
+  "version": "0.21.159",
   "zeroconf": [
     "_pantry-raider._tcp.local."
   ]

@@ -85,3 +85,107 @@ probe_alert:
     fires the pantry_raider_probe_alert event with the alert's details (device,
     probe, temperatures and a ready-made message), so automations can react.
     Any fields are passed to the event unchanged.
+
+show_recipe:
+  fields:
+    query:
+      required: true
+      example: lasagna
+      selector:
+        text:
+    screen:
+      selector:
+        text:
+    satellite:
+      selector:
+        entity:
+          domain: assist_satellite
+
+start_timer:
+  fields:
+    duration:
+      required: true
+      example: 10 minutes
+      selector:
+        text:
+    name:
+      example: pasta
+      selector:
+        text:
+    screen:
+      selector:
+        text:
+    satellite:
+      selector:
+        entity:
+          domain: assist_satellite
+
+cancel_timer:
+  fields:
+    name:
+      selector:
+        text:
+    timer_id:
+      selector:
+        number:
+          min: 1
+          mode: box
+    all:
+      selector:
+        boolean:
+    satellite:
+      selector:
+        entity:
+          domain: assist_satellite
+
+dismiss_timer:
+  fields:
+    timer_id:
+      selector:
+        number:
+          min: 1
+          mode: box
+    all:
+      selector:
+        boolean:
+    satellite:
+      selector:
+        entity:
+          domain: assist_satellite
+
+timer_status:
+  fields:
+    name:
+      selector:
+        text:
+    satellite:
+      selector:
+        entity:
+          domain: assist_satellite
+
+show_page:
+  fields:
+    page:
+      required: true
+      selector:
+        select:
+          options:
+            - home
+            - recipe
+            - timers
+            - close
+    screen:
+      selector:
+        text:
+    satellite:
+      selector:
+        entity:
+          domain: assist_satellite
+
+get_routing:
+  fields:
+    satellite:
+      required: true
+      selector:
+        entity:
+          domain: assist_satellite

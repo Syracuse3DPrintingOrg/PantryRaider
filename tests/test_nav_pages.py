@@ -21,7 +21,11 @@ from app.services.url_safety import NAV_PAGES, nav_page_path  # noqa: E402
 # HTML pages that are deliberately not navigation targets: the sign-in and PIN
 # screens and the first-run wait page are reached by redirect, and the touch
 # calibration page is a setup tool, not somewhere to send the screen.
-NOT_NAV_TARGETS = {"ui/login", "ui/pin", "ui/getting-ready", "setup/calibrate/touch/page"}
+NOT_NAV_TARGETS = {"ui/login", "ui/pin", "ui/getting-ready", "setup/calibrate/touch/page",
+                   # The pages a tablet or wall screen shows. Such a screen is
+                   # sent there by page name (services/screens.page_path); a
+                   # kitchen display has its own recipe and timer pages.
+                   "screen/", "screen/recipe", "screen/timers"}
 
 
 def _html_get_routes() -> set[str]:

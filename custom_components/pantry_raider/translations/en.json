@@ -45,10 +45,47 @@
     "step": {
       "init": {
         "title": "Pantry Raider options",
+        "menu_options": {
+          "connection": "Connection",
+          "voice": "Voice",
+          "satellite": "A voice device"
+        }
+      },
+      "connection": {
+        "title": "Connection",
         "description": "How often Home Assistant checks Pantry Raider for updates, and whether Pantry Raider is given a link back to Home Assistant for cameras, Stream Deck keys and thermometers. Turning the link off removes only the tokens this integration created.",
         "data": {
           "scan_interval": "Update interval (seconds)",
           "connect_back": "Let Pantry Raider connect back to Home Assistant"
+        }
+      },
+      "voice": {
+        "title": "Voice",
+        "description": "Which spoken requests Pantry Raider answers. Leave timer sentences off if something else in your home already answers \"set a timer\": two listeners for the same sentence collide. The services work either way, so your own automations can call them.",
+        "data": {
+          "recipe_sentences": "Answer recipe requests (\"show me the lasagna recipe\")",
+          "timer_sentences": "Answer timer requests (\"set a 10 minute pasta timer\")",
+          "ring": "Ring the voice device that set a timer when it finishes"
+        }
+      },
+      "satellite": {
+        "title": "A voice device",
+        "description": "Pick the voice device to set up.",
+        "data": {
+          "satellite": "Voice device"
+        }
+      },
+      "satellite_edit": {
+        "title": "Voice device",
+        "description": "Choices for {satellite}.",
+        "data": {
+          "timers": "Timers set on this device",
+          "recipes": "Allow recipe requests from this device",
+          "screen": "Screen that shows what this device is asked for"
+        },
+        "data_description": {
+          "timers": "Pantry Raider timers show on every Pantry Raider screen and ring this device when they finish.",
+          "screen": "Screens come from your Pantry Raider. A tablet appears here once its app has connected."
         }
       }
     }
@@ -97,6 +134,128 @@
     "probe_alert": {
       "name": "Probe alert",
       "description": "Pantry Raider calls this when a thermometer probe reaches its target. It fires the pantry_raider_probe_alert event with the alert's details, so automations can react."
+    },
+    "show_recipe": {
+      "name": "Show a recipe",
+      "description": "Find a recipe by what was said and show it on a screen. Returns what happened and a line to say aloud.",
+      "fields": {
+        "query": {
+          "name": "Recipe",
+          "description": "What was asked for, such as lasagna."
+        },
+        "screen": {
+          "name": "Screen",
+          "description": "The id of the screen to show this on. Leave empty to use the screen chosen for the voice device."
+        },
+        "satellite": {
+          "name": "Voice device",
+          "description": "The assist_satellite entity that heard the request. Its own choices (screen, timers, recipes) are applied."
+        }
+      }
+    },
+    "start_timer": {
+      "name": "Start a timer",
+      "description": "Start a timer in Pantry Raider. It shows on every Pantry Raider screen.",
+      "fields": {
+        "duration": {
+          "name": "Length",
+          "description": "Seconds, or words such as 10 minutes or an hour and a half."
+        },
+        "name": {
+          "name": "Name",
+          "description": "What the timer is for, such as pasta."
+        },
+        "screen": {
+          "name": "Screen",
+          "description": "The id of the screen to show this on. Leave empty to use the screen chosen for the voice device."
+        },
+        "satellite": {
+          "name": "Voice device",
+          "description": "The assist_satellite entity that heard the request. Its own choices (screen, timers, recipes) are applied."
+        }
+      }
+    },
+    "cancel_timer": {
+      "name": "Cancel a timer",
+      "description": "Cancel a timer by name or id, the only one running, or all of them.",
+      "fields": {
+        "name": {
+          "name": "Name",
+          "description": "The timer's name."
+        },
+        "timer_id": {
+          "name": "Timer id",
+          "description": "The timer's id in Pantry Raider."
+        },
+        "all": {
+          "name": "All timers",
+          "description": "Cancel every timer."
+        },
+        "satellite": {
+          "name": "Voice device",
+          "description": "The assist_satellite entity that heard the request. Its own choices (screen, timers, recipes) are applied."
+        }
+      }
+    },
+    "dismiss_timer": {
+      "name": "Dismiss a finished timer",
+      "description": "Stop the ringing: dismiss one finished timer, or every finished timer.",
+      "fields": {
+        "timer_id": {
+          "name": "Timer id",
+          "description": "Leave empty to dismiss every finished timer."
+        },
+        "all": {
+          "name": "All finished timers",
+          "description": "Dismiss every finished timer."
+        },
+        "satellite": {
+          "name": "Voice device",
+          "description": "The assist_satellite entity that heard the request. Its own choices (screen, timers, recipes) are applied."
+        }
+      }
+    },
+    "timer_status": {
+      "name": "Timer status",
+      "description": "How much time is left on the timers, with a line to say aloud.",
+      "fields": {
+        "name": {
+          "name": "Name",
+          "description": "One timer's name. Leave empty for all of them."
+        },
+        "satellite": {
+          "name": "Voice device",
+          "description": "The assist_satellite entity that heard the request. Its own choices (screen, timers, recipes) are applied."
+        }
+      }
+    },
+    "show_page": {
+      "name": "Show a page",
+      "description": "Move one screen to a Pantry Raider page, or close what it was showing.",
+      "fields": {
+        "page": {
+          "name": "Page",
+          "description": "home, recipe, timers or close."
+        },
+        "screen": {
+          "name": "Screen",
+          "description": "The id of the screen to show this on. Leave empty to use the screen chosen for the voice device."
+        },
+        "satellite": {
+          "name": "Voice device",
+          "description": "The assist_satellite entity that heard the request. Its own choices (screen, timers, recipes) are applied."
+        }
+      }
+    },
+    "get_routing": {
+      "name": "Voice device choices",
+      "description": "What one voice device is set to: where its timers go, whether recipes are allowed, and which screen it uses.",
+      "fields": {
+        "satellite": {
+          "name": "Voice device",
+          "description": "The assist_satellite entity that heard the request. Its own choices (screen, timers, recipes) are applied."
+        }
+      }
     }
   },
   "issues": {
