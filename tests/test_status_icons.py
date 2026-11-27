@@ -3,8 +3,9 @@
 Which items show for given Home Assistant states and thermometer readings,
 how a saved item is cleaned, the /status-icons route (cached, never fails,
 the main server's answer on a Bandit), the settings round trip, the entity
-picker, the access rules, the Home Assistant read allowlist, and that the
-display pages carry the script only while the feature is on.
+picker, the access rules, the Home Assistant read allowlist, that the
+display pages carry the script only while the feature is on, and that open
+cook mode takes the icons into its own bar.
 """
 from __future__ import annotations
 
@@ -390,6 +391,38 @@ def test_status_entities_are_readable(monkeypatch):
     found = ha_allowlist.status_entities(settings)
     assert found == {"binary_sensor.fridge_door", "sensor.sous_vide_power"}
     assert found <= ha_allowlist.readable_entities(settings, [])
+
+
+def test_the_script_stays_plain_es5():
+    """It runs on every tablet page, cook mode included, in old web views."""
+    import re
+    js = (_SERVICE / "app/static/js/status-icons.js").read_text()
+    js = re.sub(r"/\*.*?\*/", "", js, flags=re.S)
+    js = re.sub(r"^\s*//.*$", "", js, flags=re.M)
+    for modern in ("=>", "`", "?.", "const ", "let ", "fetch(", "async ", "...", "setInterval("):
+        assert modern not in js, f"status-icons.js must stay plain ES5: found {modern!r}"
+
+
+def test_open_cook_mode_takes_the_icons_into_its_bar():
+    """FoodAssistant-s243h: cook mode covers the page and its bar, with Exit
+    in the corner the icons used to sit in. While it is open they go into
+    cook mode's own bar, and back when it closes, which On the Line
+    announces. tests/browser/test_status_icons_cook_mode.py checks the
+    layout on the measured tablet panels."""
+    js = (_SERVICE / "app/static/js/status-icons.js").read_text()
+    assert "querySelectorAll('.cm-top')" in js and "'.cm-exit'" in js and "'.cm-title'" in js
+    assert "document.getElementById('sc-cook')" in js
+    assert "addEventListener('pr-cook-mode'" in js
+    cook = (_SERVICE / "app/static/js/cook-mode.js").read_text()
+    for part in ("el('div', 'cm-top')", "el('div', 'cm-title'", "el('button', 'cm-btn cm-exit'"):
+        assert part in cook, part
+    page = (_SERVICE / "app/static/js/pages/current-recipe.js").read_text()
+    assert "window.dispatchEvent(new Event('pr-cook-mode'))" in page
+    for fn in ("function openCookMode()", "function closeCookMode()"):
+        start = page.index(fn)
+        assert "cookModeMoved();" in page[start:page.index("\n}\n", start)], fn
+    css = (_SERVICE / "app/static/css/cook-mode.css").read_text()
+    assert ".cm .si-ic {" in css
 
 
 def test_pages_carry_the_script_only_while_on(client, monkeypatch):

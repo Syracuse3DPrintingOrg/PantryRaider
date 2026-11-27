@@ -124,6 +124,8 @@
     // --- the frame, built once ------------------------------------------------
     clear(root);
     root.className = (root.className ? root.className + ' ' : '') + 'cm';
+    // The status icons (static/js/status-icons.js) join this bar while cook
+    // mode is open: before Exit, or before the title when set to the left.
     var top = el('div', 'cm-top');
     var title = el('div', 'cm-title', '');
     var where = el('div', 'cm-where', '');

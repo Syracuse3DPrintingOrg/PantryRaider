@@ -9,7 +9,7 @@ what it is, for example "Fridge door: open" or "Sous vide: 812 W".
 The icons show on every kitchen display (a Pantry Raider screen in kiosk mode,
 a Bandit Remote) and on tablets and wall panels connected as
 [screens](screens.md). An ordinary browser on a phone or laptop does not show
-them.
+them. While cook mode is open they sit in its top bar, beside Exit.
 
 ## Turn them on
 

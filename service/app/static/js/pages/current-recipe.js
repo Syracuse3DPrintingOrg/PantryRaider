@@ -632,14 +632,21 @@ function openCookMode() {
   } else {
     crCook.refresh();
   }
+  cookModeMoved();
 }
 function closeCookMode() {
   document.getElementById('cr-cook').setAttribute('hidden', '');
   document.body.classList.remove('cr-cooking');
+  cookModeMoved();
   if (new URLSearchParams(location.search).has('cook')) {
     history.replaceState(null, '', location.pathname);
   }
   loadCurrentRecipe();
+}
+// The status icons (static/js/status-icons.js) sit in cook mode's bar while
+// it is open and in the page's own bar after, so they move at once.
+function cookModeMoved() {
+  try { window.dispatchEvent(new Event('pr-cook-mode')); } catch (e) { /* they move on their next poll */ }
 }
 
 loadCurrentRecipe();

@@ -13,7 +13,9 @@
  * sc-status-icons), or just below it when it has no room. A page with no bar
  * (the start page) gets them at the very top, below the timer bar and the
  * corner a kiosk app keeps for its close button (both reserve the top
- * through --kiosk-inset-top). The colors are the theme's own.
+ * through --kiosk-inset-top). Cook mode (static/js/cook-mode.js) covers the
+ * page with a bar of its own, so while it is open they sit in that bar,
+ * beside its Exit. The colors are the theme's own.
  *
  * Plain ES5 with XMLHttpRequest: old tablet web views run it.
  */
@@ -23,9 +25,12 @@
   var cfg = document.getElementById('status-icons-config');
   if (!cfg) return;
   var inline = document.getElementById('sc-status-icons');
+  // A tablet's own pages (templates/screen.html) always show them. Its cook
+  // page has no bar of its own, only cook mode's (#sc-cook).
+  var screenPage = !!(inline || document.getElementById('sc-cook'));
   var kiosk = false;
   try { kiosk = localStorage.getItem('kioskMode') === 'true'; } catch (e) { }
-  if (!kiosk && !inline && !html.getAttribute('data-screen-id')) return;
+  if (!kiosk && !screenPage && !html.getAttribute('data-screen-id')) return;
 
   var POLL_MS = 5000;
   var POSITION = cfg.getAttribute('data-position') === 'top_left' ? 'top_left' : 'top_right';
@@ -49,14 +54,18 @@
     generic: '<circle cx="12" cy="12" r="5"/>'
   };
 
-  var ACCENT = inline ? '#F2006E' : 'var(--bs-primary, #F2006E)';
-  var SURFACE = inline ? '#1c1f25' : 'var(--bs-body-bg, #14161a)';
+  var ACCENT = screenPage ? '#F2006E' : 'var(--bs-primary, #F2006E)';
+  var SURFACE = screenPage ? '#1c1f25' : 'var(--bs-body-bg, #14161a)';
   var side = POSITION === 'top_left' ? 'left' : 'right';
+  var pack = side === 'left' ? 'flex-start' : 'flex-end';
   var style = document.createElement('style');
   style.textContent =
     '.si-row{display:-webkit-flex;display:flex;-webkit-align-items:center;align-items:center;' +
     'pointer-events:none;font-family:inherit}' +
     '.si-row.si-fixed{position:fixed;z-index:2030}' +
+    '.si-row.si-under{position:absolute;max-width:calc(100% - 24px);-webkit-flex-wrap:wrap;flex-wrap:wrap;' +
+    '-webkit-justify-content:' + pack + ';justify-content:' + pack + '}' +
+    '.si-row.si-under .si-ic{margin-bottom:6px}' +
     '.si-row.si-bar{margin:0 8px;-webkit-flex-shrink:0;flex-shrink:0}' +
     '.si-ic{position:relative;width:' + SIZE + 'px;height:' + SIZE + 'px;margin:0 3px;border-radius:50%;' +
     'box-sizing:border-box;pointer-events:auto;cursor:pointer;opacity:.78;' +
@@ -101,7 +110,8 @@
   // tablet page's own bar) takes the icons into the bar, beside its own
   // buttons, so they never cover one. When the bar is hidden or has no room,
   // the row floats just below it; with no bar at all it floats at the top,
-  // below the timer bar and a kiosk app's corner (--kiosk-inset-top).
+  // below the timer bar and a kiosk app's corner (--kiosk-inset-top). Open
+  // cook mode comes first: its bar is the one on screen.
   var nav = document.querySelector('nav.navbar.fixed-top');
   var navBox = nav ? nav.querySelector('.container-fluid') : null;
   var topBar = inline ? inline.parentNode : nav;
@@ -126,12 +136,50 @@
     }
   }
 
-  function fits(box) {
+  // Whether the row is inside the bar, and so is the page's own button after
+  // it (its Exit): a row with too little room pushes Exit out of the bar.
+  function fits(box, exit) {
     var r = row.getBoundingClientRect(), b = box.getBoundingClientRect();
     var cs = window.getComputedStyle(box);
     var leftEdge = b.left + (parseFloat(cs.paddingLeft) || 0);
     var rightEdge = b.right - (parseFloat(cs.paddingRight) || 0);
-    return r.width > 0 && r.left >= leftEdge - 1 && r.right <= rightEdge + 1;
+    if (!(r.width > 0 && r.left >= leftEdge - 1 && r.right <= rightEdge + 1)) return false;
+    if (!exit || !exit.offsetWidth) return true;
+    // Exit sits at the bar's edge, so it only has to stay inside the bar. (A
+    // kiosk's zoom scales the box but not the padding read here.)
+    var e = exit.getBoundingClientRect();
+    return e.left >= b.left - 1 && e.right <= b.right + 1;
+  }
+
+  // Cook mode's bar while it is open. Cook mode covers the page, its top bar
+  // too, and has its own: the recipe's name, then Exit at the right end.
+  function cookBar() {
+    var bars = document.querySelectorAll('.cm-top');
+    for (var i = 0; i < bars.length; i++) {
+      if (visible(bars[i])) return bars[i];
+    }
+    return null;
+  }
+
+  function intoCookBar(bar) {
+    var before = bar.querySelector(side === 'left' ? '.cm-title' : '.cm-exit');
+    if (row.parentNode !== bar || row.nextSibling !== before) bar.insertBefore(row, before);
+  }
+
+  // No room in cook mode's bar: just below it, inside cook mode, where its
+  // ingredients sheet still covers the row like the rest of the page.
+  function underCookBar(bar) {
+    var root = bar.parentNode;
+    if (row.parentNode !== root) root.appendChild(row);
+    row.className = 'si-row si-under';
+    row.style.top = (bar.offsetTop + bar.offsetHeight + 6) + 'px';
+    row.style[side] = '12px';
+  }
+
+  function barRow() {
+    row.className = 'si-row si-bar';
+    row.style.top = '';
+    row.style[side] = '';
   }
 
   function floatAt(topPx, useInset) {
@@ -151,13 +199,18 @@
 
   function place() {
     if (!row) return;
+    var cook = cookBar();
+    if (cook) {
+      barRow();
+      intoCookBar(cook);
+      if (!fits(cook, cook.querySelector('.cm-exit'))) underCookBar(cook);
+      return;
+    }
     var barBox = inline ? topBar : navBox;
     if (topBar && barBox && visible(topBar)) {
-      row.className = 'si-row si-bar';
-      row.style.top = '';
-      row.style[side] = '';
+      barRow();
       intoBar();
-      if (fits(barBox)) return;
+      if (fits(barBox, inline ? document.getElementById('sc-exit') : null)) return;
       // No room in the bar: float just below it instead.
       floatAt(topBar.offsetTop + topBar.offsetHeight + 6, false);
       return;
@@ -173,6 +226,12 @@
     row.setAttribute('aria-live', 'polite');
     document.body.appendChild(row);
     return row;
+  }
+
+  // A new icon's entrance plays once. Every poll puts the icons back in
+  // order and may move the row, and each move would play it again.
+  function settle(node) {
+    setTimeout(function () { node.className = 'si-ic'; }, 600);
   }
 
   function draw(items) {
@@ -200,6 +259,7 @@
             showTip(node, node.getAttribute('aria-label') || '');
           };
         })(el));
+        settle(el);
         shown[item.id] = el;
       }
       el.setAttribute('title', label(item));
@@ -256,4 +316,6 @@
   else document.addEventListener('DOMContentLoaded', begin);
   document.addEventListener('visibilitychange', function () { if (!document.hidden) poll(); });
   window.addEventListener('resize', function () { place(); });
+  // Cook mode opened or closed over the page (static/js/pages/current-recipe.js).
+  window.addEventListener('pr-cook-mode', function () { place(); });
 })();

@@ -36,6 +36,10 @@
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cm-where { display: none; }
 .cm-exit { height: 48px; min-width: 96px; }
+/* The status icons (static/js/status-icons.js) sit in this bar beside Exit
+   while cook mode is open, in cook mode's colors whatever the theme. */
+.cm .si-ic { color: #F2006E; background: rgba(28, 31, 37, .45); border-color: rgba(242, 0, 110, .45); }
+.cm .si-tip { color: #fff; background: #1c1f25; border-color: #F2006E; }
 
 /* The running timers on a narrow screen: chips that wrap onto a second line
    (and scroll past two) rather than run off the edge under Exit. */
